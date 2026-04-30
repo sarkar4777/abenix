@@ -17,7 +17,7 @@ jobs:
           python-version: "3.12"
       - run: pip install pip-tools
       - run: pip-compile requirements.txt -o requirements.lock --generate-hashes --allow-unsafe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: requirements-lock
           path: requirements.lock
