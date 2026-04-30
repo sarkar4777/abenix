@@ -74,7 +74,7 @@ stripe>=9.0.0
 
 # ── YAML & Config ────────────────────────────────────────
 pyyaml>=6.0.0
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 
 # ── Observability & Monitoring ───────────────────────────
 structlog>=24.1.0
