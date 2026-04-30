@@ -51,7 +51,7 @@ aiokafka>=0.10.0
 
 # ── Document Processing ──────────────────────────────────
 PyPDF2>=3.0.0
-python-docx>=1.0.0
+python-docx>=1.2.0
 openpyxl>=3.1.0
 
 # ── Data Processing (enterprise tools) ───────────────────
