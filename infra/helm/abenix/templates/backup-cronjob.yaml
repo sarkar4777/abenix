@@ -1,0 +1,190 @@
+{{- if .Values.backup.enabled | default false }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "abenix.fullname" . }}-pg-backup
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | default "0 2 * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "abenix.name" . }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pg-backup
+              image: {{ .Values.backup.image | default "postgres:16-alpine" }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                  DAY_OF_WEEK=$(date +%u)
+                  BACKUP_FILE="abenix-pg-${TIMESTAMP}.sql.gz"
+
+                  echo "[backup] Starting PostgreSQL backup at $(date)"
+
+                  # Run pg_dump and compress
+                  PGPASSWORD="${POSTGRES_PASSWORD}" pg_dump \
+                    -h {{ .Release.Name }}-postgresql \
+                    -U postgres \
+                    -d {{ .Values.databaseName | default "abenix" }} \
+                    --no-owner \
+                    --no-privileges \
+                    --format=custom \
+                    --compress=9 \
+                    -f /backup/${BACKUP_FILE}
+
+                  echo "[backup] Dump complete: ${BACKUP_FILE} ($(du -h /backup/${BACKUP_FILE} | cut -f1))"
+
+                  # Upload to object storage if configured
+                  {{- if eq (.Values.objectStorage.type | default "local") "s3" }}
+                  # Daily backup
+                  aws s3 cp /backup/${BACKUP_FILE} s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/daily/${BACKUP_FILE}
+
+                  # Weekly backup (on Sundays)
+                  if [ "${DAY_OF_WEEK}" = "7" ]; then
+                    aws s3 cp /backup/${BACKUP_FILE} s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/weekly/${BACKUP_FILE}
+                  fi
+
+                  # Prune daily backups older than 7 days
+                  aws s3 ls s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/daily/ | \
+                    awk '{print $4}' | sort | head -n -7 | while read OLD_FILE; do
+                    [ -n "${OLD_FILE}" ] && aws s3 rm "s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/daily/${OLD_FILE}"
+                  done
+
+                  # Prune weekly backups older than 4 weeks
+                  aws s3 ls s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/weekly/ | \
+                    awk '{print $4}' | sort | head -n -4 | while read OLD_FILE; do
+                    [ -n "${OLD_FILE}" ] && aws s3 rm "s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/weekly/${OLD_FILE}"
+                  done
+                  {{- else }}
+                  # Local backup — rotate in PVC
+                  # Keep 7 daily
+                  ls -1t /backup/abenix-pg-*.sql.gz 2>/dev/null | tail -n +8 | xargs rm -f 2>/dev/null || true
+
+                  # Copy Sunday backups to weekly dir
+                  if [ "${DAY_OF_WEEK}" = "7" ]; then
+                    mkdir -p /backup/weekly
+                    cp /backup/${BACKUP_FILE} /backup/weekly/${BACKUP_FILE}
+                    # Keep 4 weekly
+                    ls -1t /backup/weekly/abenix-pg-*.sql.gz 2>/dev/null | tail -n +5 | xargs rm -f 2>/dev/null || true
+                  fi
+                  {{- end }}
+
+                  echo "[backup] Backup and rotation complete at $(date)"
+              env:
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: abenix-secrets
+                      key: postgres-password
+                {{- if eq (.Values.objectStorage.type | default "local") "s3" }}
+                - name: AWS_DEFAULT_REGION
+                  value: {{ .Values.objectStorage.region | default "us-east-1" | quote }}
+                {{- end }}
+              volumeMounts:
+                - name: backup-data
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: backup-data
+              {{- if .Values.backup.persistentVolume.enabled | default false }}
+              persistentVolumeClaim:
+                claimName: {{ include "abenix.fullname" . }}-backup
+              {{- else }}
+              emptyDir:
+                sizeLimit: 5Gi
+              {{- end }}
+---
+{{- if .Values.backup.neo4j.enabled | default false }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "abenix.fullname" . }}-neo4j-backup
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.neo4j.schedule | default "0 3 * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "abenix.name" . }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: neo4j-backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: neo4j-backup
+              image: {{ .Values.neo4j.image.repository }}:{{ .Values.neo4j.image.tag }}
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                  BACKUP_FILE="abenix-neo4j-${TIMESTAMP}.dump"
+
+                  echo "[backup] Starting Neo4j backup at $(date)"
+
+                  neo4j-admin database dump \
+                    --to-path=/backup \
+                    {{ .Values.neo4j.database | default "neo4j" }}
+
+                  mv /backup/{{ .Values.neo4j.database | default "neo4j" }}.dump /backup/${BACKUP_FILE}
+                  gzip /backup/${BACKUP_FILE}
+
+                  echo "[backup] Neo4j dump complete: ${BACKUP_FILE}.gz ($(du -h /backup/${BACKUP_FILE}.gz | cut -f1))"
+
+                  # Rotate: keep 7 daily
+                  ls -1t /backup/abenix-neo4j-*.dump.gz 2>/dev/null | tail -n +8 | xargs rm -f 2>/dev/null || true
+
+                  echo "[backup] Neo4j backup complete at $(date)"
+              volumeMounts:
+                - name: backup-data
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 1Gi
+          volumes:
+            - name: backup-data
+              {{- if .Values.backup.persistentVolume.enabled | default false }}
+              persistentVolumeClaim:
+                claimName: {{ include "abenix.fullname" . }}-backup
+              {{- else }}
+              emptyDir:
+                sizeLimit: 5Gi
+              {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,72 @@
+name: Dynamic Pricing Engine
+slug: dynamic-pricing-engine
+description: >-
+  Real-time dynamic pricing agent for e-commerce and retail. Consumes demand
+  signals from event streams, analyzes competitor pricing, models price
+  elasticity using time-series analysis, and computes optimal prices using
+  Monte Carlo simulation. Supports A/B testing with configurable price bands
+  and margin constraints.
+agent_type: oob
+version: "1.0.0"
+category: analytics
+icon: DollarSign
+status: active
+example_prompts:
+  - "Optimize pricing for our top 20 products based on last week's demand signals and current competitor prices on Amazon"
+  - "Run a price elasticity analysis on SKU-4892 — it's currently at $49.99 and we need to know the revenue-maximizing price point"
+  - "Set up an A/B test for the wireless earbuds category: 80% traffic at the optimized price vs 20% at the current $79 price"
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.3
+  tools:
+    - redis_stream_consumer
+    - redis_stream_publisher
+    - time_series_analyzer
+    - risk_analyzer
+    - web_search
+    - code_executor
+    - calculator
+    - database_query
+    - database_writer
+    - memory_store
+    - memory_recall
+    - http_client
+system_prompt: >-
+  You are a dynamic pricing optimization agent. You compute optimal prices
+  based on real-time demand, competition, and profitability constraints.
+
+  WORKFLOW:
+  1. DEMAND SIGNALS: Read from Redis Stream "orders:completed" and "cart:events"
+     using redis_stream_consumer to understand real-time demand patterns.
+
+  2. COMPETITOR ANALYSIS: Use web_search and http_client to:
+     - Scrape competitor prices for target products
+     - Track price history in memory_store
+     - Identify price gaps and opportunities
+
+  3. ELASTICITY MODELING: Use time_series_analyzer + code_executor:
+     - Compute price-demand correlation from historical data
+     - Estimate price elasticity coefficient
+     - Identify price sensitivity bands
+
+  4. OPTIMIZATION: Use code_executor with numpy to:
+     - Model revenue = price × demand(price) for price range
+     - Apply constraints: min_margin ≥ 15%, max_price ≤ 2x cost
+     - Run Monte Carlo (1000 iterations) via risk_analyzer for confidence
+     - Select optimal price maximizing expected revenue
+
+  5. A/B TESTING: For each product:
+     - 80% traffic: optimized price
+     - 20% traffic: control price
+     - Track conversion rates per variant
+
+  6. PUBLISH: Write optimal prices to Redis Stream "prices:updates"
+     using redis_stream_publisher for downstream systems.
+
+  7. PERSIST: Write to af_pricing_decisions:
+     - product_id, old_price, new_price, demand_signal, competitor_avg,
+       elasticity, confidence, expected_revenue_change, timestamp
+
+  Output: Pricing recommendation with confidence interval, expected
+  revenue impact, and competitive positioning analysis.

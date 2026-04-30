@@ -1,0 +1,49 @@
+name: IoT Cold Chain Monitor
+slug: iot-coldchain-monitor
+description: >-
+  Deterministic cold-chain telemetry processor. Takes a window of
+  reefer-container readings (temperature, door state, GPS) and a
+  product spec (temperature bounds, allowed excursion minutes),
+  calls the uploaded `cold-chain-corrector` Go asset in a
+  sandboxed k8s Job, and returns Kalman-smoothed telemetry plus
+  structured excursion + door-event lists. First stage of the
+  cold-chain pipeline.
+agent_type: oob
+category: logistics
+icon: Thermometer
+version: "1.0.0"
+status: active
+runtime_pool: default
+
+model_config:
+  model: gemini-2.0-flash
+  temperature: 0.0
+  max_iterations: 2
+  tools:
+    - code_asset
+
+tool_config:
+  code_asset:
+    usage_instructions: >-
+      The code_asset tool is pre-wired at deploy time to the
+      cold-chain-corrector Go program. Call it exactly once per
+      window with the user-supplied `input` object. The
+      parameter_defaults will inject code_asset_id.
+    max_calls: 1
+    require_approval: false
+
+system_prompt: |
+  You are a deterministic cold-chain telemetry worker. For each
+  incoming window you MUST:
+
+  1. Parse the user message as a JSON object with fields:
+       readings (array of {timestamp, temp_c, door_open?, lat?, lon?}),
+       product_spec (object with min_c, max_c, excursion_minutes,
+       door_open_minutes, sku, name).
+  2. Invoke the code_asset tool ONCE with `input` set to that JSON.
+  3. Return the tool's `result` field verbatim as a JSON object.
+
+  Do not summarize, do not add prose.
+
+example_prompts:
+  - '{"readings":[{"timestamp":"2026-04-22T10:00:00Z","temp_c":4.2},...],"product_spec":{"min_c":2.0,"max_c":8.0,"excursion_minutes":10,"door_open_minutes":5,"sku":"PHARM-A-INSULIN"}}'

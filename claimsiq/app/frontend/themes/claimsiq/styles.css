@@ -1,0 +1,79 @@
+/*
+ * ClaimsIQ — paper-white + indigo + amber theme.
+ *
+ * Vaadin Lumo tokens are overridden here so the sexy custom palette
+ * that Palette.java uses in Java code carries through to every stock
+ * Vaadin component (buttons, grids, notifications, upload widget).
+ * Keep the token names exact — Lumo reads them lazily at first paint.
+ */
+
+html {
+  /* ── Page chrome ── */
+  --lumo-base-color:          #F5F3EE;  /* warm paper */
+  --lumo-tint-5pct:            rgba(15, 23, 42, 0.04);
+  --lumo-tint-10pct:           rgba(15, 23, 42, 0.08);
+  --lumo-shade-5pct:           rgba(15, 23, 42, 0.05);
+  --lumo-shade-10pct:          rgba(15, 23, 42, 0.10);
+  --lumo-shade-20pct:          rgba(15, 23, 42, 0.16);
+  --lumo-shade-30pct:          rgba(15, 23, 42, 0.24);
+
+  /* ── Text ── */
+  --lumo-header-text-color:    #0F172A;
+  --lumo-body-text-color:      #475569;
+  --lumo-secondary-text-color: #64748B;
+  --lumo-tertiary-text-color:  #94A3B8;
+  --lumo-disabled-text-color:  #CBD5E1;
+
+  /* ── Primary (indigo 700) ── */
+  --lumo-primary-color:           #4338CA;
+  --lumo-primary-color-50pct:     rgba(67, 56, 202, 0.5);
+  --lumo-primary-color-10pct:     rgba(67, 56, 202, 0.1);
+  --lumo-primary-text-color:      #4338CA;
+  --lumo-primary-contrast-color:  #FFFFFF;
+
+  /* ── Accents ── */
+  --lumo-error-color:       #B91C1C;
+  --lumo-error-color-50pct: rgba(185, 28, 28, 0.5);
+  --lumo-error-color-10pct: rgba(185, 28, 28, 0.1);
+  --lumo-success-color:       #047857;
+  --lumo-success-color-50pct: rgba(4, 120, 87, 0.5);
+  --lumo-success-color-10pct: rgba(4, 120, 87, 0.1);
+
+  /* ── Typography ── */
+  --lumo-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* ── Shapes ── */
+  --lumo-border-radius-s:  6px;
+  --lumo-border-radius-m: 10px;
+  --lumo-border-radius-l: 14px;
+
+  /* ── Shadows — subtle paper depth, no harsh drop ── */
+  --lumo-box-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --lumo-box-shadow-s:  0 2px 4px rgba(15, 23, 42, 0.06);
+  --lumo-box-shadow-m:  0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+body {
+  background: var(--lumo-base-color);
+  color: var(--lumo-body-text-color);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* Tighter grid rows — the claims queue looks denser and more pro. */
+vaadin-grid::part(row) {
+  background: var(--lumo-base-color);
+}
+
+/* Primary button styled like the indigo CTA in MainLayout/DashboardView. */
+vaadin-button[theme~="primary"] {
+  background: var(--lumo-primary-color);
+  color: var(--lumo-primary-contrast-color);
+  box-shadow: 0 4px 14px rgba(67, 56, 202, 0.25);
+}
+
+/* Upload drop zone — paper-neutral instead of Lumo's gray. */
+vaadin-upload[nodrop] {
+  border: 1px dashed rgba(67, 56, 202, 0.35);
+  background: rgba(67, 56, 202, 0.04);
+  border-radius: var(--lumo-border-radius-m);
+}

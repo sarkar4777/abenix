@@ -1,0 +1,17 @@
+{{- if .Values.mlModels.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models-storage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: ml-models
+    app.kubernetes.io/part-of: abenix
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: {{ .Values.mlModels.storageClass | default "" | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.mlModels.storageSize | default "5Gi" }}
+{{- end }}

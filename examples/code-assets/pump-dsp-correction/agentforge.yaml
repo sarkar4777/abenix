@@ -1,0 +1,66 @@
+name: pump-dsp-correction
+description: >-
+  Vibration-signal DSP for rotating machinery. Takes a window of raw
+  accelerometer samples, removes drift, de-noises, then computes the
+  classic bearing / imbalance / misalignment / cavitation health
+  indicators used by every real predictive-maintenance suite.
+
+input_schema:
+  type: object
+  required: [samples, sample_rate_hz, sensor_id]
+  properties:
+    samples:
+      type: array
+      items: { type: number }
+      description: "Raw accelerometer samples in g (or any consistent unit)."
+      minItems: 32
+    sample_rate_hz:
+      type: integer
+      description: "Sampling rate in Hz. Typical industrial: 2000–25000."
+    sensor_id:
+      type: string
+      description: "Stable id of the sensor emitting the window."
+    shaft_rpm:
+      type: number
+      description: "Optional shaft RPM — if supplied, per-fault scores use it."
+
+output_schema:
+  type: object
+  required: [rms, peak, crest_factor, kurtosis, dominant_freqs, fault_scores]
+  properties:
+    rms:
+      type: number
+      description: "Root-mean-square amplitude — overall vibration energy."
+    peak:
+      type: number
+      description: "Peak absolute amplitude in the window."
+    crest_factor:
+      type: number
+      description: "peak / rms. Crest > 5 suggests impulsive faults (bearing)."
+    kurtosis:
+      type: number
+      description: "Higher kurtosis → more impulsive content."
+    dominant_freqs:
+      type: array
+      items:
+        type: object
+        properties:
+          hz: { type: number }
+          amplitude: { type: number }
+      description: "Top-5 bins from the FFT, sorted by amplitude desc."
+    fault_scores:
+      type: object
+      properties:
+        bearing:      { type: number, description: "0..1 — high-freq + kurtosis" }
+        imbalance:    { type: number, description: "0..1 — 1x RPM amplitude" }
+        misalignment: { type: number, description: "0..1 — 2x RPM amplitude" }
+        cavitation:   { type: number, description: "0..1 — broadband high-freq" }
+    iso_10816_zone:
+      type: string
+      description: "A/B/C/D per ISO 10816-3 severity (if shaft_rpm + RMS provided)."
+
+example_input:
+  samples: [0.01, 0.03, 0.02, 0.04, 0.03, 0.05, 0.04, 0.06, 0.05, 0.07, 0.06, 0.08, 0.07, 0.09, 0.08, 0.10, 0.09, 0.11, 0.10, 0.12, 0.11, 0.13, 0.12, 0.14, 0.13, 0.15, 0.14, 0.16, 0.15, 0.17, 0.16, 0.18]
+  sample_rate_hz: 2000
+  sensor_id: "PUMP-A-01"
+  shaft_rpm: 1800

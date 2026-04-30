@@ -1,0 +1,158 @@
+# Lightweight Prometheus for Abenix — single-replica, scrapes the
+# api + agent-runtime /metrics endpoints we instrumented in
+# apps/api/app/core/telemetry.py and apps/agent-runtime/server.py.
+#
+# This is intentionally a thin manifest set rather than the full
+# kube-prometheus-stack megachart (which ships alertmanager + node-
+# exporter + kube-state-metrics + ~20 CRDs). Operators who want the
+# full stack can swap this for `helm install ... kube-prometheus-stack`
+# — the Abenix metric names are stable so dashboards transfer.
+#
+# Storage is an emptyDir on purpose. For long-term retention point
+# `--storage.tsdb.path` at a real PVC and bump the retention flag.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: abenix-prometheus
+  namespace: abenix
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: abenix-prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: abenix-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: abenix-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: abenix-prometheus
+    namespace: abenix
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: abenix-prometheus-config
+  namespace: abenix
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: abenix
+
+    # Self-scrape so Prometheus can monitor itself.
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ['localhost:9090']
+
+      # Abenix API — exposes /api/metrics on its main port. Single
+      # static target (the cluster service) so we get aggregate counters
+      # across whatever replica count is currently up.
+      - job_name: abenix-api
+        metrics_path: /api/metrics
+        static_configs:
+          - targets: ['abenix-api.abenix.svc.cluster.local:8000']
+            labels:
+              app: abenix-api
+
+      # Agent-runtime (incl. Wave-2 per-pool Deployments) —
+      # exposes /metrics on port 8001. The regex matches the legacy
+      # single-runtime service AND every per-pool service
+      # (abenix-agent-runtime-default, -chat, -heavy-reasoning, ...)
+      # so metrics flow regardless of which scaling posture is active.
+      - job_name: abenix-agent-runtime
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [abenix]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: abenix-agent-runtime(-.*)?
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: http
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_service_name]
+            regex: abenix-agent-runtime-(.*)
+            target_label: pool
+            replacement: $1
+          - target_label: app
+            replacement: abenix-agent-runtime
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: abenix-prometheus
+  namespace: abenix
+  labels:
+    app: abenix-prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: abenix-prometheus
+  template:
+    metadata:
+      labels:
+        app: abenix-prometheus
+    spec:
+      serviceAccountName: abenix-prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=15d
+            - --web.console.libraries=/usr/share/prometheus/console_libraries
+            - --web.console.templates=/usr/share/prometheus/consoles
+            - --web.enable-lifecycle
+          ports:
+            - containerPort: 9090
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: 500m, memory: 1Gi}
+      volumes:
+        - name: config
+          configMap:
+            name: abenix-prometheus-config
+        - name: storage
+          emptyDir:
+            sizeLimit: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: abenix-prometheus
+  namespace: abenix
+spec:
+  selector:
+    app: abenix-prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+      name: http

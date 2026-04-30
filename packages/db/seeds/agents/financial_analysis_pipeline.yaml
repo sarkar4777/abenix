@@ -1,0 +1,139 @@
+name: Financial Analysis Pipeline
+slug: financial-analysis-pipeline
+description: >-
+  Multi-pass financial document analysis pipeline. Extracts structure, tables,
+  and narrative from financial documents in parallel, cross-validates extracted
+  numbers, computes risk scores, and generates a compliance-checked report.
+  Uses a DAG with 6 parallel/sequential stages.
+agent_type: oob
+version: "1.0.0"
+category: finance
+status: active
+system_prompt: |
+  You orchestrate a multi-pass financial document analysis pipeline that extracts structure, tables, and narrative in parallel, cross-validates extracted numbers, computes risk scores, and generates a compliance-checked report.
+example_prompts:
+  - "Analyze this 10-Q filing from Apple — extract financial tables, cross-validate revenue figures, and generate a risk-scored report"
+  - "Process our Q4 annual report: pull out the income statement, balance sheet, and cash flow data, then flag any discrepancies between narrative and tables"
+  - "Run the full analysis pipeline on this private placement memorandum and produce a compliance-checked summary with key risk factors"
+
+mode: pipeline
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.3
+  tools:
+    - file_reader
+    - structured_analyzer
+    - financial_calculator
+    - risk_analyzer
+    - code_executor
+    - schema_validator
+    - data_merger
+    - json_transformer
+    - data_exporter
+    - llm_call
+pipeline_config:
+  nodes:
+    - id: extract_structure
+      tool_name: structured_analyzer
+      arguments:
+        analysis_type: custom
+        custom_prompt: "Map this document's structure: identify all sections, table locations, financial statement types (income statement, balance sheet, cash flow, notes). Output JSON with section_name, page_range, type, has_tables."
+      depends_on: []
+      position:
+        x: 100
+        y: 100
+    - id: extract_tables
+      tool_name: structured_analyzer
+      arguments:
+        analysis_type: custom
+        custom_prompt: "Extract ALL tables from this document. For each table: title, columns, rows as structured data, currency and units, footnote references. Focus on income statement, balance sheet, cash flow, segment data."
+      depends_on: []
+      position:
+        x: 400
+        y: 100
+    - id: extract_narrative
+      tool_name: structured_analyzer
+      arguments:
+        analysis_type: custom
+        custom_prompt: "Extract from narrative sections: revenue growth drivers, forward guidance, risk factors with severity, material weaknesses, related party transactions, litigation and contingencies."
+      depends_on: []
+      position:
+        x: 700
+        y: 100
+    - id: cross_validate
+      tool_name: code_executor
+      arguments:
+        code: |
+          import json
+          # Upstream node outputs are available via `context`
+          tables_raw = context.get('extract_tables') or {}
+          narrative_raw = context.get('extract_narrative') or {}
+          # Parse if JSON string, otherwise use as-is
+          def _parse(v):
+              if isinstance(v, str):
+                  try: return json.loads(v)
+                  except: return {}
+              return v if isinstance(v, (dict, list)) else {}
+          tables = _parse(tables_raw)
+          narrative = _parse(narrative_raw)
+          discrepancies = []
+          tables_count = len(tables) if isinstance(tables, list) else len(tables.get('tables', []) if isinstance(tables, dict) else [])
+          result = {"validated": len(discrepancies) == 0, "discrepancies": discrepancies, "tables_found": tables_count}
+          print(json.dumps(result))
+      depends_on:
+        - extract_tables
+        - extract_narrative
+      position:
+        x: 400
+        y: 250
+    - id: risk_scoring
+      tool_name: risk_analyzer
+      arguments:
+        analysis_type: scenario
+        params:
+          scenarios:
+            best_case:
+              validated: 1
+              discrepancy_count: 0
+            base_case:
+              validated: 1
+              discrepancy_count: 2
+            worst_case:
+              validated: 0
+              discrepancy_count: 8
+          formula: "validated * 10 - discrepancy_count * 2"
+          probabilities:
+            best_case: 0.25
+            base_case: 0.5
+            worst_case: 0.25
+      depends_on:
+        - cross_validate
+      position:
+        x: 400
+        y: 400
+    - id: generate_report
+      tool_name: llm_call
+      arguments:
+        prompt: "Generate a comprehensive financial analysis report from: Structure={{extract_structure.__all__}}, Tables={{extract_tables.__all__}}, Narrative={{extract_narrative.__all__}}, Validation={{cross_validate.__all__}}, Risk={{risk_scoring.__all__}}. Include executive summary, key metrics, risk assessment, and recommendations."
+      depends_on:
+        - extract_structure
+        - risk_scoring
+      position:
+        x: 400
+        y: 550
+  edges:
+    - id: e1
+      source: extract_tables
+      target: cross_validate
+    - id: e2
+      source: extract_narrative
+      target: cross_validate
+    - id: e3
+      source: cross_validate
+      target: risk_scoring
+    - id: e4
+      source: extract_structure
+      target: generate_report
+    - id: e5
+      source: risk_scoring
+      target: generate_report

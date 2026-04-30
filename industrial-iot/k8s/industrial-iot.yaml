@@ -1,0 +1,113 @@
+# Industrial IoT — Kubernetes manifests (standalone application).
+#
+# Deploys Industrial-IoT API (port 8003) and Web (port 3003) into the
+# same namespace as Abenix so the API can reach abenix-api via
+# cluster DNS.
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: industrial-iot-secrets
+  namespace: abenix
+type: Opaque
+stringData:
+  INDUSTRIALIOT_ABENIX_API_KEY: "REPLACE_AT_DEPLOY_TIME"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: industrial-iot-config
+  namespace: abenix
+data:
+  ABENIX_API_URL: "http://abenix-api:8000"
+  INDUSTRIALIOT_ACTING_SUBJECT_TYPE: "industrial-iot"
+  PORT: "8003"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: industrial-iot-api
+  namespace: abenix
+  labels: { app: industrial-iot-api }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: industrial-iot-api } }
+  template:
+    metadata: { labels: { app: industrial-iot-api } }
+    spec:
+      containers:
+        - name: api
+          image: localhost:5000/abenix/industrial-iot-api:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8003, name: http }]
+          envFrom:
+            - secretRef:   { name: industrial-iot-secrets }
+            - configMapRef: { name: industrial-iot-config }
+          livenessProbe:
+            httpGet: { path: /health, port: 8003 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet: { path: /health, port: 8003 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests: { cpu: "200m", memory: "384Mi" }
+            limits:   { cpu: "1000m", memory: "1Gi" }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: industrial-iot-api
+  namespace: abenix
+spec:
+  type: ClusterIP
+  selector: { app: industrial-iot-api }
+  ports: [{ name: http, port: 8003, targetPort: 8003 }]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: industrial-iot-web
+  namespace: abenix
+  labels: { app: industrial-iot-web }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: industrial-iot-web } }
+  template:
+    metadata: { labels: { app: industrial-iot-web } }
+    spec:
+      containers:
+        - name: web
+          image: localhost:5000/abenix/industrial-iot-web:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 3003, name: http }]
+          env:
+            - name: INDUSTRIALIOT_API_INTERNAL_URL
+              value: "http://industrial-iot-api:8003"
+            - name: NODE_ENV
+              value: "production"
+          livenessProbe:  { httpGet: { path: /, port: 3003 }, initialDelaySeconds: 30, periodSeconds: 30 }
+          readinessProbe: { httpGet: { path: /, port: 3003 }, initialDelaySeconds: 10, periodSeconds: 10 }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: industrial-iot-web
+  namespace: abenix
+spec:
+  type: NodePort
+  selector: { app: industrial-iot-web }
+  ports: [{ name: http, port: 3003, targetPort: 3003, nodePort: 30303 }]

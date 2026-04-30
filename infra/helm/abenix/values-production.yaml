@@ -1,0 +1,307 @@
+# values-production.yaml — Cloud Kubernetes production (35K users)
+# Usage: helm install abenix . -f values-production.yaml --set secrets.postgresPassword=... ...
+
+environment: production
+logLevel: info
+runtimeMode: remote  # API delegates to runtime pods — scale independently
+frontendUrl: "https://app.abenix.io"
+
+# -- Web (Next.js) — HA with HPA -------------------------------------------
+web:
+  replicaCount: 4
+  image:
+    repository: ghcr.io/abenix/web
+    tag: latest
+    pullPolicy: Always
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# -- API (FastAPI) — HA with HPA -------------------------------------------
+api:
+  replicaCount: 5
+  image:
+    repository: ghcr.io/abenix/api
+    tag: latest
+    pullPolicy: Always
+  health:
+    path: /api/health
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 65
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+# -- Agent Runtime — HA with HPA -------------------------------------------
+agent-runtime:
+  replicaCount: 5
+  image:
+    repository: ghcr.io/abenix/agent-runtime
+    tag: latest
+    pullPolicy: Always
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+# -- Worker (Celery — documents + agents) — HA with HPA --------------------
+worker:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/abenix/worker
+    tag: latest
+    pullPolicy: Always
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 75
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+# -- Cognify Worker (separate Celery for cognify queue) ----------------------
+cognifyWorker:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: ghcr.io/abenix/worker
+    tag: latest
+    pullPolicy: Always
+  queue: cognify
+  concurrency: 4
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+# -- Neo4j — single node with backup (3-node core requires enterprise) ------
+neo4j:
+  image:
+    repository: neo4j
+    tag: "5.20.0"
+    pullPolicy: Always
+  database: neo4j
+  auth:
+    username: neo4j
+    existingSecret: abenix-secrets
+    existingSecretPasswordKey: neo4j-password
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: managed-premium
+  jvm:
+    heap:
+      initial: 1g
+      max: 2g
+    pagecache: 1g
+
+# -- PostgreSQL (Bitnami) — replication with PgPool -------------------------
+postgresql:
+  architecture: replication
+  auth:
+    existingSecret: abenix-secrets
+    secretKeys:
+      adminPasswordKey: postgres-password
+  primary:
+    resources:
+      requests:
+        cpu: "1"
+        memory: 2Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+    persistence:
+      size: 100Gi
+      storageClass: managed-premium
+    extendedConfiguration: |
+      max_connections = 300
+      shared_buffers = 2GB
+      effective_cache_size = 6GB
+      work_mem = 16MB
+      maintenance_work_mem = 512MB
+      wal_buffers = 64MB
+      checkpoint_completion_target = 0.9
+      random_page_cost = 1.1
+  readReplicas:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    persistence:
+      size: 100Gi
+      storageClass: managed-premium
+  pgpool:
+    enabled: true
+    replicaCount: 2
+    maxPool: 40
+    numInitChildren: 200
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+# -- Redis (Bitnami) — standalone with persistence -------------------------
+redis:
+  architecture: standalone
+  auth:
+    existingSecret: abenix-secrets
+    existingSecretPasswordKey: redis-password
+  master:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 8Gi
+    persistence:
+      size: 20Gi
+      storageClass: managed-premium
+    configuration: |
+      maxmemory 6gb
+      maxmemory-policy allkeys-lru
+      save 900 1
+      save 300 10
+      save 60 10000
+      appendonly yes
+      appendfsync everysec
+
+# -- Secrets (must be provided via --set or external secret manager) ---------
+secrets:
+  databaseUrl: ""
+  redisUrl: ""
+  redisPassword: ""
+  postgresPassword: ""
+  jwtSecret: ""
+  stripeSecretKey: ""
+  anthropicApiKey: ""
+  neo4jPassword: ""
+  openaiApiKey: ""
+  pineconeApiKey: ""
+  googleApiKey: ""
+
+# -- Object storage — S3 for production ------------------------------------
+objectStorage:
+  type: s3
+  uploadDir: "s3://abenix-uploads/data"
+  bucket: abenix-uploads
+  region: us-east-1
+  container: ""
+
+pinecone:
+  indexName: abenix-prod
+
+databaseName: abenix
+
+# -- Ingress — TLS with cert-manager ---------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  host: app.abenix.io
+  tls:
+    enabled: true
+    secretName: abenix-tls
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+
+# -- Network policies — enabled for production -----------------------------
+networkPolicy:
+  enabled: true
+
+# -- Backup — enabled for production ---------------------------------------
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  image: postgres:16-alpine
+  s3Bucket: abenix-backups
+  persistentVolume:
+    enabled: false
+  neo4j:
+    enabled: true
+    schedule: "0 3 * * *"
+
+# -- Monitoring — enabled for production -----------------------------------
+monitoring:
+  enabled: true
+  scrapeInterval: 30s
+  scrapeTimeout: 10s
+  additionalLabels:
+    release: prometheus
+  prometheusRules:
+    enabled: true
+
+# Observability
+otelEnabled: true
+otelExporter: otlp

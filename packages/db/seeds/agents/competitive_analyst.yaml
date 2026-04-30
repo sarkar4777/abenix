@@ -1,0 +1,195 @@
+name: Competitive Analysis Agent
+slug: competitive-analyst
+description: >-
+  Analyzes competitive landscape by researching multiple topics in parallel,
+  merging results, and generating comparative analysis reports with actionable
+  insights. Ideal for market research, product positioning, and strategic
+  planning.
+agent_type: oob
+category: research
+icon: Swords
+version: "1.0.0"
+status: active
+mode: pipeline
+system_prompt: >-
+  You are a competitive analysis specialist. Your job is to research, compare,
+  and synthesize information about competing products, companies, or strategies,
+  then deliver structured comparative reports with clear, actionable insights.
+
+  When given two or more topics to compare (companies, products, technologies,
+  markets), you execute a systematic research pipeline. First, you research each
+  topic independently and in parallel to gather the most current information
+  available. Then you merge the research into a unified comparison dataset.
+  Next, you analyze the merged data to identify patterns, strengths, weaknesses,
+  opportunities, and threats. Finally, you export a polished report.
+
+  Research phase: For each topic, gather key facts including market position,
+  recent news, product features, pricing, customer sentiment, funding or
+  financials, leadership, partnerships, and technology stack. Prioritize
+  recent and authoritative sources. Note the date and source of each data
+  point so the user can verify claims.
+
+  Comparison phase: Structure findings into a head-to-head comparison matrix.
+  Use consistent dimensions across all topics: feature completeness, pricing
+  model, market share, growth trajectory, customer satisfaction, innovation
+  velocity, and ecosystem strength. Normalize qualitative assessments into a
+  consistent scale (e.g., strong / moderate / weak) so comparisons are fair.
+
+  Analysis phase: Go beyond listing facts. Identify competitive advantages and
+  moats. Spot emerging threats and market shifts. Assess where each competitor
+  is investing (hiring patterns, product launches, patent filings). Evaluate
+  switching costs, network effects, and lock-in dynamics. Provide a SWOT
+  analysis for each entity relative to the others.
+
+  Recommendations: Conclude with specific, prioritized recommendations. What
+  should the user do based on this competitive landscape? Where are the gaps
+  that represent opportunity? What defensive moves are warranted? Tie every
+  recommendation to evidence from the research.
+
+  Output format: Deliver a structured report with an executive summary (3-5
+  bullet points), detailed comparison table, per-competitor profiles, SWOT
+  matrices, and a prioritized recommendation list. Use markdown formatting
+  for readability.
+
+example_prompts:
+  - "Compare Snowflake vs Databricks for enterprise data warehousing — pricing, features, ecosystem, and market position"
+  - "Run a competitive analysis of Figma vs Sketch vs Adobe XD for our product design team's 2026 tool evaluation"
+  - "Analyze the competitive landscape between Stripe, Adyen, and Square for payment processing in the European market"
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.4
+  tools:
+    - web_search
+    - data_merger
+    - text_analyzer
+    - data_exporter
+    - llm_call
+
+pipeline_config:
+  nodes:
+    - id: step_search_a
+      tool_name: web_search
+      label: "Research Topic A"
+      arguments:
+        query: "{{context.topic_a}} competitive analysis market position features pricing 2025"
+      depends_on: []
+      condition: null
+      input_mappings: {}
+      position:
+        x: 100
+        y: 100
+
+    - id: step_search_b
+      tool_name: web_search
+      label: "Research Topic B"
+      arguments:
+        query: "{{context.topic_b}} competitive analysis market position features pricing 2025"
+      depends_on: []
+      condition: null
+      input_mappings: {}
+      position:
+        x: 100
+        y: 350
+
+    - id: step_merge
+      tool_name: data_merger
+      label: "Merge Research Results"
+      arguments:
+        merge_strategy: nested
+      depends_on:
+        - step_search_a
+        - step_search_b
+      condition: null
+      input_mappings:
+        source_a:
+          source_node: step_search_a
+          source_field: __all__
+        source_b:
+          source_node: step_search_b
+          source_field: __all__
+      position:
+        x: 400
+        y: 225
+
+    - id: step_analyze
+      tool_name: llm_call
+      label: "Analyze Comparison"
+      arguments:
+        prompt: |
+          Compare and analyze these two research results. Produce a competitive analysis report with:
+          1. Executive Summary
+          2. Comparison Matrix (side-by-side strengths/weaknesses)
+          3. SWOT Analysis
+          4. Strategic Recommendations
+
+          Data: {{step_merge.__all__}}
+        model: claude-sonnet-4-5-20250929
+        temperature: 0.3
+        max_tokens: 2000
+      depends_on:
+        - step_merge
+      condition: null
+      position:
+        x: 700
+        y: 225
+
+    - id: step_export
+      tool_name: data_exporter
+      label: "Export Final Report"
+      arguments:
+        destination: file
+        format: markdown
+        filename: "competitive_analysis.md"
+      depends_on:
+        - step_analyze
+      condition: null
+      input_mappings:
+        data:
+          source_node: step_analyze
+          source_field: __all__
+      position:
+        x: 1000
+        y: 225
+
+  edges:
+    - id: edge_search_a_to_merge
+      source: step_search_a
+      target: step_merge
+      sourceField: __all__
+      label: "Research A results"
+    - id: edge_search_b_to_merge
+      source: step_search_b
+      target: step_merge
+      sourceField: __all__
+      label: "Research B results"
+    - id: edge_merge_to_analyze
+      source: step_merge
+      target: step_analyze
+      sourceField: __all__
+      label: "Merged comparison"
+    - id: edge_analyze_to_export
+      source: step_analyze
+      target: step_export
+      sourceField: __all__
+      label: "Analysis output"
+
+  viewport:
+    x: 0
+    y: 0
+    zoom: 0.85
+
+mcp_extensions:
+  allow_user_mcp: true
+  max_mcp_servers: 5
+  suggested_mcp_servers:
+    - registry_id: crunchbase-mcp
+      reason: Access company data, funding rounds, and market intelligence
+    - registry_id: google-sheets-mcp
+      reason: Export comparison matrices to collaborative spreadsheets
+    - registry_id: notion-mcp
+      reason: Publish competitive analysis reports to team workspaces
+  allowed_tool_annotations:
+    - readOnlyHint
+    - idempotentHint
+    - openWorldHint

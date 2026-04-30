@@ -1,0 +1,129 @@
+# ResolveAI — Policy & Case ontology.
+#
+# Load via the Abenix Ontology editor at
+#   /knowledge/projects/<resolveai-project-id>/ontology
+# or via the API:
+#   POST /api/knowledge-projects/{project_id}/ontology-schemas
+#
+# Every ResolveAI run primes its extractor with this schema so Cognify
+# types documents (policy PDFs, historical resolved cases, SOPs)
+# against a stable set of entities — which in turn makes hybrid search
+# actually find the right clause rather than "anything about refunds".
+
+name: resolveai-v1
+description: >-
+  Entities + relationships for AI customer-service platforms —
+  resolution-centric: who (Customer), what (Order, SKU, Product),
+  why (Ticket, Intent, Case), bounded by (Policy, SLA, Jurisdiction,
+  ApprovalThreshold), enacted by (ResolutionAction, FieldAgent, Carrier).
+
+entity_types:
+  - name: Customer
+    description: Person or account identifier opening tickets.
+    synonyms: [account, user, client]
+  - name: Order
+    description: Purchase / transaction a ticket is most often about.
+    synonyms: [purchase, invoice]
+  - name: SKU
+    description: Sellable unit variant with fulfillment + pricing rules.
+    synonyms: [variant, product_variant]
+  - name: Product
+    description: Catalog-level concept covering many SKUs.
+    synonyms: [item]
+  - name: ShipmentEvent
+    description: Carrier-level event (out-for-delivery, exception, damaged).
+    synonyms: [tracking_event]
+  - name: Ticket
+    description: A raw inbound message before classification.
+    synonyms: [inquiry, contact]
+  - name: Case
+    description: A classified, active investigation on top of a Ticket.
+  - name: TicketCategory
+    description: Intent-aligned category (refund, exchange, shipping, billing…).
+    synonyms: [intent_class]
+  - name: Intent
+    description: Fine-grained purpose within a category.
+  - name: Policy
+    description: Enforceable rule document (return policy, ToS, SLA).
+    synonyms: [rule, clause]
+  - name: PolicyClause
+    description: Atomic clause within a Policy with its own obligations.
+  - name: SLA
+    description: Time-bound service commitment — first-response, resolution.
+  - name: Jurisdiction
+    description: Geographic scope where a Policy or SLA applies.
+    synonyms: [region, country]
+  - name: ResolutionAction
+    description: Concrete action — refund, credit, replace, apologise, escalate.
+    synonyms: [remedy]
+  - name: RefundPolicy
+    description: Specific refund rule (amount, window, form of payment).
+  - name: Carrier
+    description: Shipping or fulfillment partner (UPS, DHL, local).
+  - name: Escalation
+    description: A handoff event (auto→human, tier-1→manager, to-legal).
+  - name: FieldAgent
+    description: Human operator — CSM, tier-1 lead, manager, legal.
+  - name: ApprovalThreshold
+    description: Dollar or severity ceiling attached to a ResolutionAction.
+  - name: CSATScore
+    description: Post-resolution customer satisfaction reading (1-5 or CSAT %).
+    synonyms: [nps, satisfaction]
+
+relationship_types:
+  - name: PLACED
+    description: Customer PLACED Order.
+    source_types: [Customer]
+    target_types: [Order]
+  - name: CONTAINS
+    description: Order CONTAINS SKU.
+    source_types: [Order]
+    target_types: [SKU]
+  - name: VARIANT_OF
+    description: SKU VARIANT_OF Product.
+    source_types: [SKU]
+    target_types: [Product]
+  - name: ABOUT
+    description: Ticket ABOUT Order (or Product).
+    source_types: [Ticket]
+    target_types: [Order, Product, SKU]
+  - name: CATEGORY
+    description: Ticket CATEGORY TicketCategory (intent-aligned class).
+    source_types: [Ticket]
+    target_types: [TicketCategory]
+  - name: RESOLVED_BY
+    description: Case RESOLVED_BY ResolutionAction.
+    source_types: [Case]
+    target_types: [ResolutionAction]
+  - name: REQUIRES
+    description: ResolutionAction REQUIRES ApprovalThreshold to execute.
+    source_types: [ResolutionAction]
+    target_types: [ApprovalThreshold]
+  - name: GOVERNED_BY
+    description: SKU or Case GOVERNED_BY Policy.
+    source_types: [SKU, Case]
+    target_types: [Policy, PolicyClause]
+  - name: APPLIES_IN
+    description: Policy APPLIES_IN Jurisdiction.
+    source_types: [Policy, SLA]
+    target_types: [Jurisdiction]
+  - name: BREACHED
+    description: Case BREACHED SLA (SLA-breach event).
+    source_types: [Case]
+    target_types: [SLA]
+  - name: ESCALATED_TO
+    description: Case ESCALATED_TO FieldAgent via Escalation.
+    source_types: [Case, Escalation]
+    target_types: [FieldAgent]
+  - name: SIMILAR_TO
+    description: Case SIMILAR_TO Case — added by the Trend Miner, weighted.
+    source_types: [Case]
+    target_types: [Case]
+  - name: CARRIED_BY
+    description: ShipmentEvent CARRIED_BY Carrier.
+    source_types: [ShipmentEvent]
+    target_types: [Carrier]
+  - name: MEASURED_BY
+    description: Case MEASURED_BY CSATScore (post-resolution feedback).
+    source_types: [Case]
+    target_types: [CSATScore]

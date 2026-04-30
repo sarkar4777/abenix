@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-slo
+  namespace: {{ .Release.Namespace }}
+data:
+  slos.json: |
+    {
+      "service": "abenix",
+      "slos": [
+        {"name": "api_availability", "target": 99.9, "window": "30d", "metric": "up{job='abenix-api'}"},
+        {"name": "api_latency_p95", "target_ms": 500, "window": "30d", "metric": "histogram_quantile(0.95, rate(abenix_http_request_duration_seconds_bucket[5m]))"},
+        {"name": "execution_latency_p95", "target_ms": 30000, "window": "30d"},
+        {"name": "sse_connection_success", "target": 99.0, "window": "30d"}
+      ]
+    }

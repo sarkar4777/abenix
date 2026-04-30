@@ -1,0 +1,107 @@
+name: "ResolveAI — SLA Sweep"
+slug: resolveai-sla-sweep
+description: >-
+  Pipeline B. Sweeps open cases, re-scores them against their SLA, and
+  for any breaching case calls the Resolution Planner for a rescue plan.
+  A human_approval gate blocks auto-execution; on approval the pipeline
+  escalates to Slack via the tenant webhook.
+
+  The pipeline itself does not schedule — an Abenix trigger fires
+  it on cron (e.g. every 5 minutes). This YAML just encodes the
+  resolution graph.
+agent_type: oob
+category: customer-service
+icon: AlarmClock
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  SLA Sweep pipeline for ResolveAI.
+  Loads open cases from the local Postgres store, re-scores each
+  against its SLA tier using the `sla-scorer` code_asset, and for
+  breaching cases produces a rescue plan + Slack escalation.
+  Each node's JSON output is visible to downstream nodes via
+  `{{node.field}}` refs.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.1
+  max_iterations: 16
+  max_tokens: 6144
+  tools:
+    - database_query
+    - code_asset
+    - agent_step
+    - human_approval
+    - http_client
+  pipeline_config:
+    nodes:
+      - id: load_open_cases
+        type: tool
+        tool: database_query
+        input:
+          sql: >-
+            SELECT id, customer_id, tier, intent, sku, jurisdiction,
+                   opened_at, last_agent_reply_at, sla_tier, sla_target_minutes
+            FROM cases
+            WHERE status = 'open'
+              AND opened_at > now() - interval '14 days'
+          limit: 500
+
+      - id: rescore_sla
+        type: tool
+        tool: code_asset
+        input:
+          asset_slug: sla-scorer
+          args:
+            cases: "{{load_open_cases.rows}}"
+            now:   "{{input.now_iso}}"
+        context:
+          breach_threshold_minutes: 0
+
+      - id: plan_rescue
+        type: agent
+        agent_slug: resolveai-resolution-planner
+        input: >-
+          Breaching cases needing rescue: {{rescore_sla.breaching}}
+          Produce one action plan per case, keyed by case_id.
+        context:
+          amount_limits:
+            auto_usd: 25
+            t1_usd:   250
+            mgr_usd:  5000
+          mode: "rescue"
+        required_if: "{{len(rescore_sla.breaching) > 0}}"
+
+      - id: approval_gate
+        type: tool
+        tool: human_approval
+        input:
+          actions:       "{{plan_rescue.actions}}"
+          minimum_tier:  "t1_lead"
+          reason:        "SLA breach rescue plan"
+        required_if: "{{len(rescore_sla.breaching) > 0}}"
+
+      - id: slack_escalate
+        type: tool
+        tool: http_client
+        input:
+          method: POST
+          url:    "{{tenant.slack_webhook_url}}"
+          json:
+            text: >-
+              SLA breach sweep: {{len(rescore_sla.breaching)}} cases
+              approaching/over tier target. Approved rescue plans
+              attached.
+            attachments: "{{plan_rescue.actions}}"
+        required_if: "{{len(rescore_sla.breaching) > 0 and approval_gate.approved}}"
+
+      - id: final_report
+        type: structured
+        output:
+          swept_count:      "{{len(load_open_cases.rows)}}"
+          breaching_count:  "{{len(rescore_sla.breaching)}}"
+          approved:         "{{approval_gate.approved}}"
+          slack_posted:     "{{slack_escalate.status == 200}}"
+          rescue_actions:   "{{plan_rescue.actions}}"

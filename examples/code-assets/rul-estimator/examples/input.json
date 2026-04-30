@@ -1,0 +1,11 @@
+{
+  "readings": [
+    {"timestamp": "2026-04-15T12:00:00Z", "health_score": 0.92},
+    {"timestamp": "2026-04-16T12:00:00Z", "health_score": 0.88},
+    {"timestamp": "2026-04-17T12:00:00Z", "health_score": 0.83},
+    {"timestamp": "2026-04-18T12:00:00Z", "health_score": 0.76},
+    {"timestamp": "2026-04-19T12:00:00Z", "health_score": 0.68},
+    {"timestamp": "2026-04-20T12:00:00Z", "health_score": 0.59}
+  ],
+  "failure_threshold": 0.35
+}

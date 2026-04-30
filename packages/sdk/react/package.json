@@ -1,0 +1,20 @@
+{
+  "name": "@abenix/react",
+  "version": "1.0.0",
+  "description": "Abenix React SDK — embeddable agent chat component",
+  "main": "dist/AgentChat.js",
+  "types": "dist/AgentChat.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0"
+  }
+}

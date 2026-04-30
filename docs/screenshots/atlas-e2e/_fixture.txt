@@ -1,0 +1,13 @@
+Procurement Process Overview
+
+A Buyer raises a PurchaseRequest for goods or services.
+A Manager approves or rejects each PurchaseRequest based on policy.
+When approved, the system issues a PurchaseOrder to the chosen Supplier.
+The Supplier delivers Goods and submits an Invoice.
+The Buyer reconciles the Invoice against the PurchaseOrder before Payment is released.
+
+Key business rules:
+- Every PurchaseOrder must reference exactly one PurchaseRequest.
+- A Supplier can fulfil many PurchaseOrders.
+- Each Invoice belongs to one PurchaseOrder.
+- Payments require a reconciled Invoice.

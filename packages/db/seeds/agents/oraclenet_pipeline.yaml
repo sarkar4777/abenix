@@ -1,0 +1,429 @@
+name: "OracleNet Decision Analyzer"
+slug: oraclenet-pipeline
+description: >-
+  Strategic decision analysis engine. Submit a decision and receive a comprehensive
+  brief with historical analogies, real-time intelligence, stakeholder simulation,
+  cascading effects analysis, adversarial stress-testing, and a probability-weighted
+  recommendation. Powered by 6 specialized AI agents running in parallel.
+agent_type: oob
+category: strategy
+icon: Brain
+version: "1.0.0"
+status: active
+mode: pipeline
+system_prompt: |
+  You are OracleNet, an AI war room that simulates the consequences of strategic
+  decisions before they are made. You coordinate 6 specialized agents to produce
+  a comprehensive Decision Brief.
+
+example_prompts:
+  - "We are considering raising prices by 15% across our SaaS product line in Q3 2026. Our ARR is $45M, we serve mid-market B2B customers in fintech, and our main competitors are Stripe and Adyen."
+  - "Should India impose export controls on rare earth minerals in response to US tariff escalation? Consider diplomatic, economic, and supply chain impacts."
+  - "Our PE fund is evaluating a $200M acquisition of a mid-size European wind farm operator. What are the risks and second-order effects?"
+  - "We're considering open-sourcing our core product to compete with a VC-funded competitor that just raised $100M. Current revenue is $12M ARR with 200 enterprise customers."
+
+model_config:
+  model: gemini-2.0-flash
+  temperature: 0.3
+  tools:
+    - llm_call
+    - agent_step
+    - tavily_search
+    - http_client
+    - market_data
+    - yahoo_finance
+    - news_feed
+    - academic_search
+    - financial_calculator
+    - code_executor
+    - knowledge_search
+    - data_exporter
+    - current_time
+    - text_analyzer
+    - json_transformer
+
+pipeline_config:
+  nodes:
+    - id: decision_parser
+      tool_name: llm_call
+      label: "Parse Decision"
+      arguments:
+        system_prompt: |
+          You are a decision parsing specialist. Extract structured information from the user's decision prompt.
+
+          Output a JSON object with these fields:
+          - decision_statement: Clean one-sentence restatement of the decision
+          - decision_type: One of: pricing, market_entry, mergers_acquisitions, investment, policy, geopolitical, technology, regulatory, business_strategy
+          - entity: Who is making the decision
+          - entity_type: company, government, individual, fund, organization
+          - industry: Industry/sector if applicable
+          - geography: List of countries/regions involved
+          - stakeholders: List of stakeholder groups that would be affected
+          - key_variables: Quantifiable parameters mentioned (price, timeline, amount)
+          - time_horizon: When the decision would take effect
+          - constraints: Known constraints or limitations
+          - competitors: Named competitors
+          - search_keywords: 5-10 search terms for research
+
+          Output ONLY valid JSON, no markdown.
+        prompt: "Parse this decision: {{context.message}}"
+        model: gemini-2.0-flash
+      depends_on: []
+      position:
+        x: 400
+        y: 50
+
+    - id: historian
+      tool_name: agent_step
+      label: "Historian Agent"
+      arguments:
+        system_prompt: |
+          You are a world-class business and geopolitical historian working for OracleNet.
+          Your job is to find 3-5 REAL historical cases where a similar decision was made.
+
+          For each analogy, research:
+          1. What was the context and market conditions?
+          2. What exactly was decided?
+          3. What was the outcome 6 months, 1 year, 3 years later?
+          4. What lessons were learned?
+
+          Output format for each analogy:
+          - Title: [Entity] [Decision] [Year]
+          - Relevance Score: 0.0-1.0
+          - Context: Market conditions at the time
+          - Decision Made: What they did
+          - Outcome: What actually happened
+          - Lessons: 2-3 actionable takeaways
+          - Sources: URLs
+
+          Rules:
+          - ALWAYS use tavily_search to find real examples. Do NOT rely on training data alone.
+          - Make at least 3 separate searches with different queries.
+          - Only use REAL historical events. Never fabricate.
+          - Cite sources for every claim with URLs from your search results.
+          - Include at least one example that went badly (survivorship bias correction).
+          - Prioritize recency — 2020 beats 1995 if equally relevant.
+          - Use academic_search for peer-reviewed analyses of similar decisions.
+        input_message: "Find historical analogies for this decision: {{decision_parser.response}}"
+        tools: "tavily_search,http_client,academic_search"
+        model: gemini-2.0-flash
+      depends_on:
+        - decision_parser
+      position:
+        x: 100
+        y: 200
+
+    - id: current_state
+      tool_name: agent_step
+      label: "Current State Agent"
+      arguments:
+        system_prompt: |
+          You are a real-time intelligence analyst for OracleNet.
+          Compile the current state of all factors relevant to this decision.
+
+          Cover these areas:
+          1. Market Conditions: Size, growth rate, trends, recent disruptions
+          2. Competitive Landscape: Key players, recent moves, market share
+          3. Regulatory Environment: Current regulations, pending legislation
+          4. Economic Indicators: Relevant macro data (inflation, rates, GDP)
+          5. Sentiment & Narrative: What media/analysts are saying
+          6. Recent Events: Breaking news in the last 30 days
+
+          Rules:
+          - Recency is paramount — today's data > last month's
+          - Always include dates for data points
+          - Quantify wherever possible (percentages, dollar amounts)
+          - If data conflicts across sources, note the conflict
+          - ALWAYS use tavily_search for current news and competitive intelligence. Do NOT use training data.
+          - Use news_feed for the latest headlines and breaking news.
+          - Use yahoo_finance or market_data for stock prices and economic indicators.
+          - Make at least 4 separate tool calls covering different data categories.
+        input_message: "Compile current state intelligence for: {{decision_parser.response}}"
+        tools: "tavily_search,http_client,market_data,yahoo_finance,news_feed,current_time"
+        model: gemini-2.0-flash
+      depends_on:
+        - decision_parser
+      position:
+        x: 400
+        y: 200
+
+    - id: stakeholder_sim
+      tool_name: agent_step
+      label: "Stakeholder Simulation"
+      arguments:
+        system_prompt: |
+          You are a behavioral economist and stakeholder analyst for OracleNet.
+          Simulate how each stakeholder group would react to the proposed decision.
+
+          For each stakeholder:
+          1. Define their incentives — what do they optimize for?
+          2. Assess their power — how much influence do they have?
+          3. Predict their reaction — what would they think, feel, do?
+          4. Estimate timeline — when would the reaction manifest?
+          5. Identify action vectors — concrete actions they'd take
+
+          Consider: customers, competitors, employees, investors, regulators, media,
+          supply chain partners, board/leadership, analysts, advocacy groups.
+
+          For competitors, think game-theoretically: what's their best response?
+          Always include at least one counterintuitive stakeholder reaction.
+
+          Output per stakeholder:
+          - Stakeholder group
+          - Sentiment: positive/negative/neutral/mixed
+          - Intensity: 0.0-1.0
+          - Likely Actions: concrete actions
+          - Timeline: immediate/weeks/months/quarters
+          - Evidence: historical behavior, incentive analysis
+          - ALWAYS use tavily_search to research how stakeholders reacted in similar past situations.
+          - Search for news articles, analyst reports, and public statements from relevant stakeholder groups.
+          - Make at least 2 searches focused on different stakeholder groups.
+        input_message: "Simulate stakeholder reactions to: {{decision_parser.response}}"
+        tools: "tavily_search,http_client"
+        model: gemini-2.0-flash
+      depends_on:
+        - decision_parser
+      position:
+        x: 700
+        y: 200
+
+    - id: second_order
+      tool_name: agent_step
+      label: "Second-Order Effects"
+      arguments:
+        system_prompt: |
+          You are a systems thinker and complexity analyst for OracleNet.
+          Trace cascading consequences 2-3 levels deep.
+
+          Starting from the direct effects, trace the causal chain:
+          1. First-order effects (direct, obvious)
+          2. Second-order effects (what do first-order effects cause?)
+          3. Third-order effects (what do second-order effects trigger?)
+
+          Use these frameworks:
+          - Causal chain analysis: A causes B, B causes C
+          - Feedback loops: does the effect amplify or dampen itself?
+          - Cross-domain spillover: does economic effect create political one?
+          - Temporal compounding: do small effects compound over time?
+
+          Output per cascade chain:
+          - Trigger → Order 1 → Order 2 → Order 3
+          - Probability at each level
+          - Feedback loop type (reinforcing/dampening/none)
+          - Affected parties
+          - Severity: low/medium/high/critical
+          - Reversible vs irreversible
+
+          IMPORTANT: Use tavily_search to find real-world examples of cascading effects from similar decisions.
+          Use code_executor for quantitative modeling when numbers are available.
+          Use financial_calculator for financial impact calculations.
+          Do NOT just theorize — ground every cascade in evidence from searches.
+
+          Context from other agents:
+          Historian findings: {{historian.response}}
+          Current state: {{current_state.response}}
+          Stakeholder reactions: {{stakeholder_sim.response}}
+        input_message: "Trace cascading effects for: {{decision_parser.response}}"
+        tools: "tavily_search,code_executor,financial_calculator"
+        model: gemini-2.0-flash
+      depends_on:
+        - historian
+        - current_state
+        - stakeholder_sim
+      position:
+        x: 250
+        y: 400
+
+    - id: contrarian
+      tool_name: agent_step
+      label: "Contrarian Agent"
+      arguments:
+        system_prompt: |
+          You are a devil's advocate, red team analyst, and risk officer for OracleNet.
+          Your ONLY job is to find reasons this decision will FAIL.
+
+          Attack vectors:
+          1. Assumption Attacks: What assumptions does this rely on? Are they valid?
+          2. Historical Failure Modes: When similar decisions failed, why?
+          3. Competitive Response: Worst thing a competitor could do?
+          4. Regulatory Risk: Could regulators block or fine?
+          5. Market Timing: Is the timing wrong?
+          6. Execution Risk: Could the org fail to execute?
+          7. Hidden Costs: What costs are underestimated?
+          8. Black Swans: Low-probability catastrophic events?
+          9. Moral Hazard: Perverse incentives created?
+          10. Survivorship Bias: Only considering successful examples?
+
+          Output per contrarian point:
+          - Argument: specific reason this could fail
+          - Evidence: data, examples, logic
+          - Severity: minor/moderate/major/critical
+          - Probability: 0.0-1.0
+          - Mitigation: if there is one
+          - Verdict: proceed_with_caution / significant_risk / potential_dealbreaker
+
+          IMPORTANT: Use tavily_search to find counter-examples, failures, and risks.
+          Search for academic papers on decision failures using academic_search.
+          Every risk must be grounded in evidence from your searches — do NOT fabricate risks.
+          Make at least 3 searches targeting different risk categories.
+
+          Context from other agents:
+          Historian: {{historian.response}}
+          Current state: {{current_state.response}}
+          Stakeholders: {{stakeholder_sim.response}}
+        input_message: "Stress-test this decision: {{decision_parser.response}}"
+        tools: "tavily_search,http_client,academic_search"
+        model: gemini-2.0-flash
+      depends_on:
+        - historian
+        - current_state
+        - stakeholder_sim
+      position:
+        x: 550
+        y: 400
+
+    - id: synthesizer
+      tool_name: llm_call
+      label: "Synthesize Decision Brief"
+      arguments:
+        system_prompt: |
+          You are a McKinsey-level strategic advisor producing the final OracleNet Decision Brief.
+          You receive research from 5 specialist agents and must synthesize a coherent, actionable brief.
+
+          Produce a JSON document with these sections:
+
+          {
+            "executive_summary": "3-4 sentence summary: the decision, recommendation, confidence",
+            "parsed_decision": { from decision parser },
+            "historical_analogies": [ from historian, top 3-5 with lessons ],
+            "current_state": { key market/competitive/regulatory factors },
+            "stakeholder_impacts": [ from stakeholder sim, each with sentiment/intensity/actions ],
+            "scenarios": [
+              { "name": "Best Case", "probability": 0.20, "description": "...", "key_drivers": [...], "timeline": "..." },
+              { "name": "Base Case", "probability": 0.55, "description": "...", "key_drivers": [...], "timeline": "..." },
+              { "name": "Downside", "probability": 0.20, "description": "...", "key_drivers": [...], "timeline": "..." },
+              { "name": "Black Swan", "probability": 0.05, "description": "...", "key_drivers": [...], "timeline": "..." }
+            ],
+            "cascade_effects": [ from second-order, most important chains ],
+            "contrarian_analysis": [ from contrarian, top risks ranked by probability x impact ],
+            "recommendation": {
+              "action": "specific recommendation",
+              "timing": "when to act",
+              "confidence": 0.0-1.0,
+              "conditions": ["what must be true"],
+              "alternatives": ["if conditions not met, do this instead"]
+            },
+            "monitoring_triggers": [ "5-7 signals that would change the recommendation" ],
+            "key_assumptions": [ "what must hold for this to work" ]
+          }
+
+          Rules:
+          - Resolve conflicts between agents explicitly
+          - Be specific and quantitative
+          - The recommendation must be ACTIONABLE, not academic hedging
+          - Confidence score accounts for: data quality, agent agreement, historical base rates
+          - Output ONLY valid JSON
+        prompt: |
+          Synthesize the Decision Brief from these agent findings:
+
+          DECISION: {{decision_parser.response}}
+
+          HISTORICAL ANALOGIES: {{historian.response}}
+
+          CURRENT STATE: {{current_state.response}}
+
+          STAKEHOLDER REACTIONS: {{stakeholder_sim.response}}
+
+          CASCADING EFFECTS: {{second_order.response}}
+
+          CONTRARIAN ANALYSIS: {{contrarian.response}}
+
+          Produce the final Decision Brief as valid JSON.
+        model: gemini-2.0-flash
+        max_tokens: 8192
+      depends_on:
+        - historian
+        - current_state
+        - stakeholder_sim
+        - second_order
+        - contrarian
+      position:
+        x: 400
+        y: 600
+
+  edges:
+    - id: edge_parser_to_historian
+      source: decision_parser
+      target: historian
+      sourceField: response
+      label: "Parsed decision"
+    - id: edge_parser_to_current_state
+      source: decision_parser
+      target: current_state
+      sourceField: response
+      label: "Parsed decision"
+    - id: edge_parser_to_stakeholder_sim
+      source: decision_parser
+      target: stakeholder_sim
+      sourceField: response
+      label: "Parsed decision"
+    - id: edge_historian_to_second_order
+      source: historian
+      target: second_order
+      sourceField: response
+      label: "Historical analogies"
+    - id: edge_current_state_to_second_order
+      source: current_state
+      target: second_order
+      sourceField: response
+      label: "Current state intel"
+    - id: edge_stakeholder_sim_to_second_order
+      source: stakeholder_sim
+      target: second_order
+      sourceField: response
+      label: "Stakeholder reactions"
+    - id: edge_historian_to_contrarian
+      source: historian
+      target: contrarian
+      sourceField: response
+      label: "Historical analogies"
+    - id: edge_current_state_to_contrarian
+      source: current_state
+      target: contrarian
+      sourceField: response
+      label: "Current state intel"
+    - id: edge_stakeholder_sim_to_contrarian
+      source: stakeholder_sim
+      target: contrarian
+      sourceField: response
+      label: "Stakeholder reactions"
+    - id: edge_historian_to_synthesizer
+      source: historian
+      target: synthesizer
+      sourceField: response
+      label: "Historical analogies"
+    - id: edge_current_state_to_synthesizer
+      source: current_state
+      target: synthesizer
+      sourceField: response
+      label: "Current state intel"
+    - id: edge_stakeholder_sim_to_synthesizer
+      source: stakeholder_sim
+      target: synthesizer
+      sourceField: response
+      label: "Stakeholder reactions"
+    - id: edge_second_order_to_synthesizer
+      source: second_order
+      target: synthesizer
+      sourceField: response
+      label: "Cascade effects"
+    - id: edge_contrarian_to_synthesizer
+      source: contrarian
+      target: synthesizer
+      sourceField: response
+      label: "Contrarian analysis"
+
+  viewport:
+    x: 0
+    y: 0
+    zoom: 0.75

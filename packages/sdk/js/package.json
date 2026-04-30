@@ -1,0 +1,17 @@
+{
+  "name": "@abenix/sdk",
+  "version": "1.0.0",
+  "description": "Abenix JavaScript/TypeScript SDK for executing and monitoring AI agents",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": ["abenix", "ai", "agents", "sdk"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

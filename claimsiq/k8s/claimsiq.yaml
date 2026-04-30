@@ -1,0 +1,122 @@
+# ClaimsIQ — Kubernetes manifests (standalone application)
+#
+# Deploys the ClaimsIQ Spring Boot + Vaadin app (port 3005) into the
+# same namespace as Abenix so it can reuse PostgreSQL and reach
+# Abenix via the cluster DNS. Single-container app: Vaadin serves
+# both the UI and the `/api/claimsiq/*` REST endpoints from one JVM.
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: claimsiq-secrets
+  namespace: abenix
+type: Opaque
+stringData:
+  # Server-side SDK key with can_delegate scope. The deploy scripts
+  # write the real value at deploy time (see scripts/deploy.sh and
+  # deploy-azure.sh) — do NOT commit a real key here.
+  CLAIMSIQ_ABENIX_API_KEY: "REPLACE_AT_DEPLOY_TIME"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: claimsiq-config
+  namespace: abenix
+data:
+  ABENIX_API_URL: "http://abenix-api:8000"
+  # ClaimsIQ's Spring config resolves DATABASE_URL (JDBC form) via
+  # application.yml. asyncpg syntax isn't valid here — this is
+  # Hibernate/JPA, which expects `jdbc:postgresql://…`.
+  DATABASE_URL: "jdbc:postgresql://abenix-postgresql:5432/abenix"
+  # application.yml reads DB_USER / DB_PASS (not the JPA default names)
+  # — keep the ConfigMap keys aligned.
+  DB_USER: "postgres"
+  DB_PASS: "localpass"
+  PORT: "3005"
+  CLAIMSIQ_PIPELINE_SLUG: "claimsiq-adjudicate"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claimsiq
+  namespace: abenix
+  labels:
+    app: claimsiq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: claimsiq
+  template:
+    metadata:
+      labels:
+        app: claimsiq
+    spec:
+      containers:
+        - name: app
+          image: localhost:5000/abenix/claimsiq:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3005
+              name: http
+          envFrom:
+            - secretRef:
+                name: claimsiq-secrets
+            - configMapRef:
+                name: claimsiq-config
+          # Spring Boot actuator ships a /actuator/health endpoint by
+          # default when spring-boot-starter-actuator is on the
+          # classpath (it is — see app/build.gradle.kts). Vaadin
+          # ignores /actuator/** so the probe doesn't bounce through
+          # the UI layer.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 3005
+            # JVM + Vaadin frontend cold start can take 30-40s on a
+            # fresh pod — liveness after readiness is the usual
+            # pattern but we also want initialDelaySeconds generous
+            # enough that the probe doesn't kill a slow boot.
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 3005
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "768Mi"
+            limits:
+              # 1.5 GiB keeps room for the Vaadin push broker +
+              # Jackson + SSE reader threads + the JPA L1 cache.
+              cpu: "1500m"
+              memory: "1.5Gi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: claimsiq
+  namespace: abenix
+spec:
+  # NodePort so minikube/AKS can expose it directly for the Use Cases
+  # dropdown. Matches the example_app-web / sauditourism-web pattern
+  # (30301, 30302 already taken — ClaimsIQ gets 30305 to line up with
+  # its 3005 port for easy mental mapping).
+  type: NodePort
+  selector:
+    app: claimsiq
+  ports:
+    - name: http
+      port: 3005
+      targetPort: 3005
+      nodePort: 30305
