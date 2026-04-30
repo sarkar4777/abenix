@@ -20,9 +20,9 @@
     "stop": "bash scripts/dev-local.sh --stop"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
-    "prettier": "^3.2.0",
-    "turbo": "^2.3.0"
+    "@playwright/test": "^1.59.1",
+    "prettier": "^3.8.3",
+    "turbo": "^2.9.6"
   },
   "engines": {
     "node": ">=20"
