@@ -121,10 +121,13 @@ Pick the path that matches what you want to do:
 ```bash
 git clone https://github.com/your-org/abenix.git
 cd abenix
+cp .env.example .env       # local-dev defaults; fill in LLM keys (Anthropic / OpenAI / Google)
 bash scripts/dev-local.sh
 ```
 
 Open http://localhost:3000 and sign in as `admin@abenix.dev` / `Admin123456`.
+
+The shipped [`.env.example`](.env.example) documents every env var the platform reads — Postgres / Redis / Neo4j / NATS connection strings (with sensible local-dev defaults), CORS origins, LLM provider keys, Stripe (optional), object storage (S3 or Azure Blob), search providers (Tavily / Brave / SerpAPI / Serper), tool-specific keys (FRED, Alpha Vantage, ENTSO-E, EIA, NewsAPI, Mediastack), and the `SMTP_*` block that powers the `email_sender` agent tool. For Kubernetes deploys, set the same keys in [`infra/helm/abenix/values-*.yaml`](infra/helm/abenix/) under `secrets:` and `configMap:`.
 
 ---
 
