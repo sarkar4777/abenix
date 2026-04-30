@@ -47,7 +47,7 @@ apscheduler>=3.10.0
 croniter>=1.4.0
 
 # ── Event Streaming ─────────────────────────────────────
-aiokafka>=0.10.0
+aiokafka>=0.14.0
 
 # ── Document Processing ──────────────────────────────────
 PyPDF2>=3.0.0
