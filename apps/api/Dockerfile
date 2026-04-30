@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS deps
+FROM python:3.14-slim AS deps
 COPY apps/api/pyproject.toml /tmp/api.toml
 COPY packages/db/pyproject.toml /tmp/db.toml
 COPY apps/agent-runtime/requirements.txt /tmp/runtime.txt
@@ -11,7 +11,7 @@ f=open('/tmp/req.txt','w'); \
 [f.write(d+chr(10)) for d in sorted(set(a+b+c))]" && \
     pip install --no-cache-dir -r /tmp/req.txt
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/apps/agent-runtime:/app/packages/db:/app/packages/sdk/python
