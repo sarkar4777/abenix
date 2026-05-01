@@ -1,4 +1,5 @@
 """Webhook configuration CRUD — manage webhook URLs for event delivery."""
+
 from __future__ import annotations
 
 import secrets
@@ -15,6 +16,7 @@ from app.core.responses import error, success
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.user import User
@@ -23,7 +25,14 @@ from models.webhook_delivery import WebhookDelivery
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
-VALID_EVENTS = {"execution.completed", "execution.failed", "execution.started", "agent.published", "agent.updated", "*"}
+VALID_EVENTS = {
+    "execution.completed",
+    "execution.failed",
+    "execution.started",
+    "agent.published",
+    "agent.updated",
+    "*",
+}
 
 
 def _validate_url(url: str) -> str | None:
@@ -52,18 +61,22 @@ async def list_webhooks(
         select(Webhook).where(Webhook.tenant_id == user.tenant_id)
     )
     webhooks = result.scalars().all()
-    return success([
-        {
-            "id": str(wh.id),
-            "url": wh.url,
-            "events": wh.events or [],
-            "is_active": wh.is_active,
-            "failure_count": wh.failure_count,
-            "last_delivery_at": wh.last_delivery_at.isoformat() if wh.last_delivery_at else None,
-            "created_at": wh.created_at.isoformat() if wh.created_at else None,
-        }
-        for wh in webhooks
-    ])
+    return success(
+        [
+            {
+                "id": str(wh.id),
+                "url": wh.url,
+                "events": wh.events or [],
+                "is_active": wh.is_active,
+                "failure_count": wh.failure_count,
+                "last_delivery_at": (
+                    wh.last_delivery_at.isoformat() if wh.last_delivery_at else None
+                ),
+                "created_at": wh.created_at.isoformat() if wh.created_at else None,
+            }
+            for wh in webhooks
+        ]
+    )
 
 
 @router.post("")
@@ -95,13 +108,16 @@ async def create_webhook(
     await db.commit()
     await db.refresh(wh)
 
-    return success({
-        "id": str(wh.id),
-        "url": wh.url,
-        "signing_secret": signing_secret,  # Shown once, like API keys
-        "events": wh.events,
-        "is_active": wh.is_active,
-    }, status_code=201)
+    return success(
+        {
+            "id": str(wh.id),
+            "url": wh.url,
+            "signing_secret": signing_secret,  # Shown once, like API keys
+            "events": wh.events,
+            "is_active": wh.is_active,
+        },
+        status_code=201,
+    )
 
 
 @router.delete("/{webhook_id}")
@@ -165,13 +181,15 @@ async def update_webhook(
     await db.commit()
     await db.refresh(wh)
 
-    return success({
-        "id": str(wh.id),
-        "url": wh.url,
-        "events": wh.events or [],
-        "is_active": wh.is_active,
-        "failure_count": wh.failure_count,
-    })
+    return success(
+        {
+            "id": str(wh.id),
+            "url": wh.url,
+            "events": wh.events or [],
+            "is_active": wh.is_active,
+            "failure_count": wh.failure_count,
+        }
+    )
 
 
 @router.get("/{webhook_id}/deliveries")
@@ -184,6 +202,7 @@ async def list_webhook_deliveries(
 ) -> Any:
     """List delivery history for a webhook endpoint."""
     from sqlalchemy import desc
+
     result = await db.execute(
         select(WebhookDelivery)
         .where(
@@ -195,16 +214,18 @@ async def list_webhook_deliveries(
         .limit(limit)
     )
     deliveries = result.scalars().all()
-    return success([
-        {
-            "id": str(d.id),
-            "event": d.event,
-            "delivered": d.delivered,
-            "response_status_code": d.response_status_code,
-            "attempts": d.attempts,
-            "error_message": d.error_message,
-            "delivery_id": d.delivery_id,
-            "created_at": d.created_at.isoformat() if d.created_at else None,
-        }
-        for d in deliveries
-    ])
+    return success(
+        [
+            {
+                "id": str(d.id),
+                "event": d.event,
+                "delivered": d.delivered,
+                "response_status_code": d.response_status_code,
+                "attempts": d.attempts,
+                "error_message": d.error_message,
+                "delivery_id": d.delivery_id,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in deliveries
+        ]
+    )

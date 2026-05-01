@@ -8,11 +8,14 @@ from httpx import AsyncClient
 
 async def _register(client: AsyncClient) -> str:
     email = f"settings-{uuid.uuid4().hex[:8]}@test.com"
-    resp = await client.post("/api/auth/register", json={
-        "email": email,
-        "password": "securepass123",
-        "full_name": "Settings Tester",
-    })
+    resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": "securepass123",
+            "full_name": "Settings Tester",
+        },
+    )
     return resp.json()["data"]["access_token"]
 
 
@@ -34,9 +37,13 @@ async def test_get_profile(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_update_profile(client: AsyncClient):
     token = await _register(client)
-    resp = await client.put("/api/settings/profile", json={
-        "full_name": "Updated Name",
-    }, headers=_auth(token))
+    resp = await client.put(
+        "/api/settings/profile",
+        json={
+            "full_name": "Updated Name",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code == 200
     assert resp.json()["data"]["full_name"] == "Updated Name"
 
@@ -44,10 +51,14 @@ async def test_update_profile(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_change_password(client: AsyncClient):
     token = await _register(client)
-    resp = await client.post("/api/settings/password", json={
-        "current_password": "securepass123",
-        "new_password": "newpassword456",
-    }, headers=_auth(token))
+    resp = await client.post(
+        "/api/settings/password",
+        json={
+            "current_password": "securepass123",
+            "new_password": "newpassword456",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code == 200
     assert "message" in resp.json()["data"]
 
@@ -55,20 +66,28 @@ async def test_change_password(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_change_password_wrong_current(client: AsyncClient):
     token = await _register(client)
-    resp = await client.post("/api/settings/password", json={
-        "current_password": "wrongpassword",
-        "new_password": "newpassword456",
-    }, headers=_auth(token))
+    resp = await client.post(
+        "/api/settings/password",
+        json={
+            "current_password": "wrongpassword",
+            "new_password": "newpassword456",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_change_password_too_short(client: AsyncClient):
     token = await _register(client)
-    resp = await client.post("/api/settings/password", json={
-        "current_password": "securepass123",
-        "new_password": "short",
-    }, headers=_auth(token))
+    resp = await client.post(
+        "/api/settings/password",
+        json={
+            "current_password": "securepass123",
+            "new_password": "short",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code in (400, 422)
 
 
@@ -84,11 +103,15 @@ async def test_get_notifications(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_update_notifications(client: AsyncClient):
     token = await _register(client)
-    resp = await client.put("/api/settings/notifications", json={
-        "execution_complete": False,
-        "weekly_report": True,
-        "marketing": False,
-    }, headers=_auth(token))
+    resp = await client.put(
+        "/api/settings/notifications",
+        json={
+            "execution_complete": False,
+            "weekly_report": True,
+            "marketing": False,
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["execution_complete"] is False

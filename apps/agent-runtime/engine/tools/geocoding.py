@@ -1,4 +1,5 @@
 """Forward + reverse geocoding via Nominatim (OpenStreetMap)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -22,7 +23,9 @@ class GeocodingTool(BaseTool):
         "type": "object",
         "properties": {
             "operation": {
-                "type": "string", "enum": ["forward", "reverse"], "default": "forward",
+                "type": "string",
+                "enum": ["forward", "reverse"],
+                "default": "forward",
                 "description": "forward = address -> coords, reverse = coords -> address",
             },
             "query": {
@@ -48,11 +51,15 @@ class GeocodingTool(BaseTool):
                 if op == "reverse":
                     parts = [p.strip() for p in query.split(",")]
                     if len(parts) != 2:
-                        return ToolResult(content="reverse requires 'lat,lon'", is_error=True)
+                        return ToolResult(
+                            content="reverse requires 'lat,lon'", is_error=True
+                        )
                     try:
                         lat, lon = float(parts[0]), float(parts[1])
                     except ValueError:
-                        return ToolResult(content="lat/lon must be numbers", is_error=True)
+                        return ToolResult(
+                            content="lat/lon must be numbers", is_error=True
+                        )
                     r = await client.get(
                         f"{_BASE}/reverse",
                         params={"format": "jsonv2", "lat": lat, "lon": lon},
@@ -70,19 +77,28 @@ class GeocodingTool(BaseTool):
                 # forward
                 r = await client.get(
                     f"{_BASE}/search",
-                    params={"format": "jsonv2", "q": query, "limit": limit, "addressdetails": 1},
+                    params={
+                        "format": "jsonv2",
+                        "q": query,
+                        "limit": limit,
+                        "addressdetails": 1,
+                    },
                 )
                 r.raise_for_status()
                 results = r.json() or []
         except httpx.HTTPStatusError as e:
-            return ToolResult(content=f"Nominatim HTTP {e.response.status_code}", is_error=True)
+            return ToolResult(
+                content=f"Nominatim HTTP {e.response.status_code}", is_error=True
+            )
         except Exception as e:
             return ToolResult(content=f"Geocoding failed: {e}", is_error=True)
 
         if not results:
             return ToolResult(content=f"No results for '{query}'.")
 
-        lines = [f"Forward — '{query}' ({len(results)} match{'es' if len(results) != 1 else ''}):"]
+        lines = [
+            f"Forward — '{query}' ({len(results)} match{'es' if len(results) != 1 else ''}):"
+        ]
         compact = []
         for i, r in enumerate(results):
             try:
@@ -90,7 +106,16 @@ class GeocodingTool(BaseTool):
                 lon = float(r.get("lon", 0))
             except (TypeError, ValueError):
                 continue
-            lines.append(f"  {i+1}. ({lat:.5f}, {lon:.5f}) — {r.get('display_name', '')}")
-            compact.append({"lat": lat, "lon": lon, "display_name": r.get("display_name"),
-                             "type": r.get("type"), "class": r.get("class")})
+            lines.append(
+                f"  {i+1}. ({lat:.5f}, {lon:.5f}) — {r.get('display_name', '')}"
+            )
+            compact.append(
+                {
+                    "lat": lat,
+                    "lon": lon,
+                    "display_name": r.get("display_name"),
+                    "type": r.get("type"),
+                    "class": r.get("class"),
+                }
+            )
         return ToolResult(content="\n".join(lines), metadata={"results": compact})

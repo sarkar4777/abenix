@@ -1,10 +1,10 @@
 """Sanctions screening tool — production-grade KYC/AML building block."""
+
 from __future__ import annotations
 
 import csv
 import json
 import logging
-import os
 import re
 import time
 import unicodedata
@@ -118,7 +118,9 @@ async def _download(url: str) -> bytes:
     async with httpx.AsyncClient(
         timeout=_HTTP_TIMEOUT,
         follow_redirects=True,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"},
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"
+        },
     ) as client:
         r = await client.get(url)
         r.raise_for_status()
@@ -164,7 +166,7 @@ def _parse_eu_xml(content: bytes) -> list[dict[str, Any]]:
     except ET.ParseError:
         return entries
     # EU FSD XML uses namespaces. Strip them for brute-force extraction.
-    ns = {"": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
+    {"": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
     for sub in root.iter():
         tag = sub.tag.split("}")[-1]
         if tag != "sanctionEntity":
@@ -210,7 +212,9 @@ def _parse_un_xml(content: bytes) -> list[dict[str, Any]]:
             continue
         is_entity = tag == "ENTITY"
         e: dict[str, Any] = {
-            "id": (block.findtext("DATAID") or block.findtext("REFERENCE_NUMBER") or "").strip(),
+            "id": (
+                block.findtext("DATAID") or block.findtext("REFERENCE_NUMBER") or ""
+            ).strip(),
             "name": "",
             "aliases": [],
             "type": "entity" if is_entity else "individual",
@@ -220,7 +224,10 @@ def _parse_un_xml(content: bytes) -> list[dict[str, Any]]:
         if is_entity:
             e["name"] = (block.findtext("FIRST_NAME") or "").strip()
         else:
-            parts = [block.findtext(f"{k}") or "" for k in ("FIRST_NAME", "SECOND_NAME", "THIRD_NAME", "FOURTH_NAME")]
+            parts = [
+                block.findtext(f"{k}") or ""
+                for k in ("FIRST_NAME", "SECOND_NAME", "THIRD_NAME", "FOURTH_NAME")
+            ]
             e["name"] = " ".join(p for p in parts if p).strip()
         for a in block.iter():
             at = a.tag.split("}")[-1]
@@ -253,7 +260,9 @@ def _parse_uk_csv(content: bytes) -> list[dict[str, Any]]:
         return entries
     by_id: dict[str, dict[str, Any]] = {}
     for row in reader:
-        gid = (row.get("Group ID") or row.get("GroupID") or row.get("GROUP ID") or "").strip()
+        gid = (
+            row.get("Group ID") or row.get("GroupID") or row.get("GROUP ID") or ""
+        ).strip()
         if not gid:
             continue
         name_parts = [
@@ -272,7 +281,11 @@ def _parse_uk_csv(content: bytes) -> list[dict[str, Any]]:
                 "id": gid,
                 "name": full_name,
                 "aliases": [],
-                "type": "individual" if (row.get("Individual") or "").strip().lower() == "individual" else "entity",
+                "type": (
+                    "individual"
+                    if (row.get("Individual") or "").strip().lower() == "individual"
+                    else "entity"
+                ),
                 "programs": [regime] if regime else [],
                 "remarks": (row.get("Other Information") or "").strip()[:300],
             }
@@ -300,20 +313,27 @@ def _parse_canada_csv(content: bytes) -> list[dict[str, Any]]:
         for row in reader:
             name = (
                 row.get("Entity")
-                or row.get("Last Name") and f"{row.get('Given Name', '')} {row['Last Name']}".strip()
+                or row.get("Last Name")
+                and f"{row.get('Given Name', '')} {row['Last Name']}".strip()
                 or row.get("Name")
                 or ""
             ).strip()
             if not name:
                 continue
-            entries.append({
-                "id": row.get("Item") or "",
-                "name": name,
-                "aliases": [a.strip() for a in (row.get("Aliases") or "").split(";") if a.strip()],
-                "type": "entity" if row.get("Entity") else "individual",
-                "programs": [row.get("Schedule") or row.get("Country") or ""],
-                "remarks": "",
-            })
+            entries.append(
+                {
+                    "id": row.get("Item") or "",
+                    "name": name,
+                    "aliases": [
+                        a.strip()
+                        for a in (row.get("Aliases") or "").split(";")
+                        if a.strip()
+                    ],
+                    "type": "entity" if row.get("Entity") else "individual",
+                    "programs": [row.get("Schedule") or row.get("Country") or ""],
+                    "remarks": "",
+                }
+            )
     except Exception as exc:
         logger.debug("Canada parse fell back: %s", exc)
     return entries
@@ -348,7 +368,10 @@ async def _load_list(source_key: str) -> tuple[list[dict[str, Any]], str | None]
         if not parser:
             # Formats we haven't implemented yet (e.g. DFAT xlsx, SECO odd-xml)
             _LIST_CACHE[source_key] = (time.time(), [])
-            return [], f"{source_key} format '{fmt}' parser not implemented — list skipped"
+            return (
+                [],
+                f"{source_key} format '{fmt}' parser not implemented — list skipped",
+            )
         if fmt == "ofac_csv":
             entries = parser(main_bytes, aka_bytes)
         else:
@@ -434,21 +457,29 @@ class SanctionsScreeningTool(BaseTool):
                 "items": {
                     "type": "string",
                     "enum": [
-                        "OFAC_SDN", "OFAC_CONSOLIDATED", "EU_CONSOLIDATED", "UN_SC",
-                        "UK_HMT", "CA_OSFI", "AU_DFAT", "CH_SECO",
+                        "OFAC_SDN",
+                        "OFAC_CONSOLIDATED",
+                        "EU_CONSOLIDATED",
+                        "UN_SC",
+                        "UK_HMT",
+                        "CA_OSFI",
+                        "AU_DFAT",
+                        "CH_SECO",
                     ],
                 },
                 "description": "Subset of lists to check. Omit for ALL.",
             },
             "threshold": {
                 "type": "integer",
-                "minimum": 50, "maximum": 100,
+                "minimum": 50,
+                "maximum": 100,
                 "default": 85,
                 "description": "Minimum fuzzy match score (0-100) to report as a hit. 85 = good KYC default; 70-80 for exploratory sweeps; 92+ for high-precision gating.",
             },
             "max_hits_per_list": {
                 "type": "integer",
-                "minimum": 1, "maximum": 20,
+                "minimum": 1,
+                "maximum": 20,
                 "default": 5,
             },
             "refresh": {
@@ -484,13 +515,16 @@ class SanctionsScreeningTool(BaseTool):
         names_to_check = [name] + [a for a in also_check if a and a.strip()]
 
         import asyncio
+
         per_list: list[dict[str, Any]] = []
         warnings: list[str] = []
         total_hits = 0
 
         # Download all lists in parallel — big speed-up.
         keys = [k for k in lists_filter if k in _SOURCES]
-        loaded = await asyncio.gather(*(_load_list(k) for k in keys), return_exceptions=True)
+        loaded = await asyncio.gather(
+            *(_load_list(k) for k in keys), return_exceptions=True
+        )
 
         for source_key, result in zip(keys, loaded):
             if isinstance(result, Exception):
@@ -502,7 +536,8 @@ class SanctionsScreeningTool(BaseTool):
             filtered = entries
             if entity_type != "any":
                 filtered = [
-                    e for e in entries
+                    e
+                    for e in entries
                     if (e.get("type") or "").lower().startswith(entity_type[:3])
                 ]
             best_per_list: list[dict[str, Any]] = []
@@ -518,13 +553,15 @@ class SanctionsScreeningTool(BaseTool):
                     continue
                 seen.add(key)
                 dedup.append(h)
-            per_list.append({
-                "list": source_key,
-                "authority": _SOURCES[source_key]["authority"],
-                "source_url": _SOURCES[source_key]["human_url"],
-                "entries_indexed": len(filtered),
-                "hits": dedup[:max_hits],
-            })
+            per_list.append(
+                {
+                    "list": source_key,
+                    "authority": _SOURCES[source_key]["authority"],
+                    "source_url": _SOURCES[source_key]["human_url"],
+                    "entries_indexed": len(filtered),
+                    "hits": dedup[:max_hits],
+                }
+            )
             total_hits += len(dedup[:max_hits])
 
         # Overall risk grade
@@ -546,24 +583,27 @@ class SanctionsScreeningTool(BaseTool):
             risk_label = "Clear — no hits above threshold"
 
         return ToolResult(
-            content=json.dumps({
-                "queried_name": name,
-                "also_checked": also_check,
-                "entity_type_filter": entity_type,
-                "threshold": threshold,
-                "lists_checked": [pl["list"] for pl in per_list],
-                "total_hits": total_hits,
-                "max_confidence": max_conf,
-                "risk_grade": risk_grade,  # L/M/H for direct use in KYC forms
-                "risk_label": risk_label,
-                "per_list_results": per_list,
-                "warnings": warnings,
-                "disclaimer": (
-                    "Screening is only as current as the published feeds. "
-                    "For a regulatory-grade decision, re-run close to the "
-                    "transaction date and verify any hit against the "
-                    "source list directly."
-                ),
-            }, indent=2),
+            content=json.dumps(
+                {
+                    "queried_name": name,
+                    "also_checked": also_check,
+                    "entity_type_filter": entity_type,
+                    "threshold": threshold,
+                    "lists_checked": [pl["list"] for pl in per_list],
+                    "total_hits": total_hits,
+                    "max_confidence": max_conf,
+                    "risk_grade": risk_grade,  # L/M/H for direct use in KYC forms
+                    "risk_label": risk_label,
+                    "per_list_results": per_list,
+                    "warnings": warnings,
+                    "disclaimer": (
+                        "Screening is only as current as the published feeds. "
+                        "For a regulatory-grade decision, re-run close to the "
+                        "transaction date and verify any hit against the "
+                        "source list directly."
+                    ),
+                },
+                indent=2,
+            ),
             metadata={"hits": total_hits, "risk_grade": risk_grade},
         )

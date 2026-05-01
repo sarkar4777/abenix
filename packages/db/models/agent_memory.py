@@ -14,9 +14,11 @@ from models.base import Base, TenantMixin, UUIDMixin
 
 
 class MemoryType(str, enum.Enum):
-    FACTUAL = "factual"        # Facts the agent has learned (e.g., "user prefers CSV format")
+    FACTUAL = "factual"  # Facts the agent has learned (e.g., "user prefers CSV format")
     PROCEDURAL = "procedural"  # How-to knowledge (e.g., "to deploy, run X then Y")
-    EPISODIC = "episodic"      # Past event summaries (e.g., "last migration failed at step 3")
+    EPISODIC = (
+        "episodic"  # Past event summaries (e.g., "last migration failed at step 3")
+    )
 
 
 class AgentMemory(UUIDMixin, TenantMixin, Base):
@@ -33,7 +35,8 @@ class AgentMemory(UUIDMixin, TenantMixin, Base):
     key: Mapped[str] = mapped_column(String(500))
     value: Mapped[str] = mapped_column(Text)
     memory_type: Mapped[MemoryType] = mapped_column(
-        Enum(MemoryType, name="memory_type", create_type=False), default=MemoryType.FACTUAL
+        Enum(MemoryType, name="memory_type", create_type=False),
+        default=MemoryType.FACTUAL,
     )
     importance: Mapped[int] = mapped_column(Integer, default=5)  # 1-10 scale
     access_count: Mapped[int] = mapped_column(Integer, default=0)

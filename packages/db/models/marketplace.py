@@ -33,9 +33,7 @@ class Review(UUIDMixin, Base):
 
 class Subscription(UUIDMixin, Base):
     __tablename__ = "subscriptions"
-    __table_args__ = (
-        Index("ix_subscriptions_user_agent", "user_id", "agent_id"),
-    )
+    __table_args__ = (Index("ix_subscriptions_user_agent", "user_id", "agent_id"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), index=True

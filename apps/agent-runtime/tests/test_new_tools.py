@@ -1,8 +1,8 @@
 """Unit tests for the 18 new ecosystem tools."""
+
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 from pathlib import Path
@@ -32,10 +32,22 @@ from engine.tools.world_bank import WorldBankTool
 from engine.tools.zapier_pass_through import ZapierPassThroughTool
 
 ALL_TOOL_CLASSES = [
-    WeatherTool, GeocodingTool, WorldBankTool, CryptoMarketTool, FredEconomicTool,
-    GovDataUSTool, PatentsTrademarksTool, MermaidDiagramTool, SemanticDiffTool,
-    AddressNormalizeTool, TranslationTool, PlotlyChartTool, TwilioSmsTool,
-    BrowserAutomationTool, SandboxedJobTool, CloudCostTool,
+    WeatherTool,
+    GeocodingTool,
+    WorldBankTool,
+    CryptoMarketTool,
+    FredEconomicTool,
+    GovDataUSTool,
+    PatentsTrademarksTool,
+    MermaidDiagramTool,
+    SemanticDiffTool,
+    AddressNormalizeTool,
+    TranslationTool,
+    PlotlyChartTool,
+    TwilioSmsTool,
+    BrowserAutomationTool,
+    SandboxedJobTool,
+    CloudCostTool,
     ZapierPassThroughTool,
 ]
 
@@ -54,21 +66,32 @@ class TestContract:
         assert "properties" in t.input_schema
         # Every required field must be declared in properties
         for req in t.input_schema.get("required", []):
-            assert req in t.input_schema["properties"], (
-                f"{cls.__name__}: required field '{req}' missing from properties"
-            )
+            assert (
+                req in t.input_schema["properties"]
+            ), f"{cls.__name__}: required field '{req}' missing from properties"
 
 
 # ────────────────────────── pure-compute tests ──────────────────────────────
 class TestPureCompute:
     def test_mermaid_flowchart(self):
         t = MermaidDiagramTool()
-        r = asyncio.run(t.execute({
-            "diagram_type": "flowchart",
-            "direction": "LR",
-            "nodes": [{"id": "a", "label": "Start"}, {"id": "b", "label": "Process"}, {"id": "c", "label": "End"}],
-            "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "c", "label": "done"}],
-        }))
+        r = asyncio.run(
+            t.execute(
+                {
+                    "diagram_type": "flowchart",
+                    "direction": "LR",
+                    "nodes": [
+                        {"id": "a", "label": "Start"},
+                        {"id": "b", "label": "Process"},
+                        {"id": "c", "label": "End"},
+                    ],
+                    "edges": [
+                        {"from": "a", "to": "b"},
+                        {"from": "b", "to": "c", "label": "done"},
+                    ],
+                }
+            )
+        )
         assert not r.is_error
         assert "flowchart LR" in r.metadata["source"]
         assert '"Start"' in r.metadata["source"]
@@ -76,22 +99,33 @@ class TestPureCompute:
 
     def test_mermaid_pie(self):
         t = MermaidDiagramTool()
-        r = asyncio.run(t.execute({
-            "diagram_type": "pie",
-            "title": "Portfolio split",
-            "slices": [{"label": "PPA", "value": 5}, {"label": "Gas", "value": 2}],
-        }))
+        r = asyncio.run(
+            t.execute(
+                {
+                    "diagram_type": "pie",
+                    "title": "Portfolio split",
+                    "slices": [
+                        {"label": "PPA", "value": 5},
+                        {"label": "Gas", "value": 2},
+                    ],
+                }
+            )
+        )
         assert not r.is_error
         assert "pie title Portfolio split" in r.metadata["source"]
         assert '"PPA" : 5' in r.metadata["source"]
 
     def test_semantic_diff_text(self):
         t = SemanticDiffTool()
-        r = asyncio.run(t.execute({
-            "mode": "text",
-            "left":  "Payment due in 30 days.\n\nLate fee is 2%.",
-            "right": "Payment due in 45 days.\n\nLate fee is 2%.\n\nArbitration in London.",
-        }))
+        r = asyncio.run(
+            t.execute(
+                {
+                    "mode": "text",
+                    "left": "Payment due in 30 days.\n\nLate fee is 2%.",
+                    "right": "Payment due in 45 days.\n\nLate fee is 2%.\n\nArbitration in London.",
+                }
+            )
+        )
         assert not r.is_error
         m = r.metadata
         # One paragraph changed (30->45 days), one added (arbitration clause)
@@ -102,11 +136,20 @@ class TestPureCompute:
 
     def test_semantic_diff_json(self):
         t = SemanticDiffTool()
-        r = asyncio.run(t.execute({
-            "mode": "json",
-            "left":  {"price": 100, "term_years": 10, "party": "ACME"},
-            "right": {"price": 120, "term_years": 10, "party": "ACME", "jurisdiction": "UK"},
-        }))
+        r = asyncio.run(
+            t.execute(
+                {
+                    "mode": "json",
+                    "left": {"price": 100, "term_years": 10, "party": "ACME"},
+                    "right": {
+                        "price": 120,
+                        "term_years": 10,
+                        "party": "ACME",
+                        "jurisdiction": "UK",
+                    },
+                }
+            )
+        )
         assert not r.is_error
         ops = r.metadata["ops"]
         ops_by_path = {o["path"]: o for o in ops}
@@ -117,7 +160,11 @@ class TestPureCompute:
 
     def test_address_normalize_us(self):
         t = AddressNormalizeTool()
-        r = asyncio.run(t.execute({"address": "1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"}))
+        r = asyncio.run(
+            t.execute(
+                {"address": "1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"}
+            )
+        )
         assert not r.is_error
         m = r.metadata
         assert m["country"] == "US"
@@ -127,7 +174,11 @@ class TestPureCompute:
 
     def test_address_normalize_uk(self):
         t = AddressNormalizeTool()
-        r = asyncio.run(t.execute({"address": "10 Downing Street, London, SW1A 2AA, United Kingdom"}))
+        r = asyncio.run(
+            t.execute(
+                {"address": "10 Downing Street, London, SW1A 2AA, United Kingdom"}
+            )
+        )
         assert not r.is_error
         m = r.metadata
         assert m["country"] == "GB"
@@ -135,11 +186,15 @@ class TestPureCompute:
 
     def test_plotly_line(self):
         t = PlotlyChartTool()
-        r = asyncio.run(t.execute({
-            "chart_type": "line",
-            "title": "Test",
-            "series": [{"name": "s1", "x": [1, 2, 3], "y": [10, 20, 15]}],
-        }))
+        r = asyncio.run(
+            t.execute(
+                {
+                    "chart_type": "line",
+                    "title": "Test",
+                    "series": [{"name": "s1", "x": [1, 2, 3], "y": [10, 20, 15]}],
+                }
+            )
+        )
         assert not r.is_error
         fig = r.metadata["figure"]
         assert fig["data"][0]["type"] == "scatter"
@@ -147,11 +202,18 @@ class TestPureCompute:
 
     def test_plotly_pie(self):
         t = PlotlyChartTool()
-        r = asyncio.run(t.execute({
-            "chart_type": "pie",
-            "slices": [{"label": "A", "value": 30}, {"label": "B", "value": 70}],
-            "donut": True,
-        }))
+        r = asyncio.run(
+            t.execute(
+                {
+                    "chart_type": "pie",
+                    "slices": [
+                        {"label": "A", "value": 30},
+                        {"label": "B", "value": 70},
+                    ],
+                    "donut": True,
+                }
+            )
+        )
         assert not r.is_error
         fig = r.metadata["figure"]
         assert fig["data"][0]["type"] == "pie"
@@ -166,18 +228,26 @@ class TestGracefulSkip:
     def test_translation_skips_without_key(self, monkeypatch):
         monkeypatch.delenv("DEEPL_API_KEY", raising=False)
         monkeypatch.delenv("LIBRETRANSLATE_URL", raising=False)
-        r = asyncio.run(TranslationTool().execute({"text": "hello", "target_lang": "de"}))
+        r = asyncio.run(
+            TranslationTool().execute({"text": "hello", "target_lang": "de"})
+        )
         assert not r.is_error
         assert r.metadata.get("skipped") is True
         assert r.metadata.get("provider") == "none"
 
     def test_twilio_skips_without_creds(self, monkeypatch):
-        for k in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
-                    "TWILIO_FROM_NUMBER", "TWILIO_WHATSAPP_FROM"):
+        for k in (
+            "TWILIO_ACCOUNT_SID",
+            "TWILIO_AUTH_TOKEN",
+            "TWILIO_FROM_NUMBER",
+            "TWILIO_WHATSAPP_FROM",
+        ):
             monkeypatch.delenv(k, raising=False)
-        r = asyncio.run(TwilioSmsTool().execute(
-            {"to": "+447700900123", "body": "hello", "channel": "sms"}
-        ))
+        r = asyncio.run(
+            TwilioSmsTool().execute(
+                {"to": "+447700900123", "body": "hello", "channel": "sms"}
+            )
+        )
         assert not r.is_error
         assert r.metadata.get("skipped") is True
         assert r.metadata.get("queued", {}).get("body") == "hello"
@@ -190,16 +260,25 @@ class TestGracefulSkip:
 
     def test_sandboxed_job_disabled_by_default(self, monkeypatch):
         monkeypatch.delenv("SANDBOXED_JOB_ENABLED", raising=False)
-        r = asyncio.run(SandboxedJobTool().execute({"image": "alpine", "command": "echo hi"}))
+        r = asyncio.run(
+            SandboxedJobTool().execute({"image": "alpine", "command": "echo hi"})
+        )
         assert r.is_error
         assert "SANDBOXED_JOB_ENABLED" in r.metadata.get("reason", "")
 
     def test_sandboxed_job_image_allowlist_enforced(self, monkeypatch):
         monkeypatch.setenv("SANDBOXED_JOB_ENABLED", "true")
-        monkeypatch.setenv("SANDBOXED_JOB_ALLOWED_IMAGES", "alpine:3.20,python:3.12-slim")
-        r = asyncio.run(SandboxedJobTool().execute({
-            "image": "ubuntu:latest", "command": "echo hi",
-        }))
+        monkeypatch.setenv(
+            "SANDBOXED_JOB_ALLOWED_IMAGES", "alpine:3.20,python:3.12-slim"
+        )
+        r = asyncio.run(
+            SandboxedJobTool().execute(
+                {
+                    "image": "ubuntu:latest",
+                    "command": "echo hi",
+                }
+            )
+        )
         assert r.is_error
         assert "not in SANDBOXED_JOB_ALLOWED_IMAGES" in r.content
 
@@ -207,15 +286,25 @@ class TestGracefulSkip:
         monkeypatch.setenv("SANDBOXED_JOB_ENABLED", "true")
         monkeypatch.setenv("SANDBOXED_JOB_ALLOWED_IMAGES", "alpine:3.20")
         monkeypatch.delenv("SANDBOXED_JOB_ALLOW_NETWORK", raising=False)
-        r = asyncio.run(SandboxedJobTool().execute({
-            "image": "alpine:3.20", "command": "echo hi", "network": True,
-        }))
+        r = asyncio.run(
+            SandboxedJobTool().execute(
+                {
+                    "image": "alpine:3.20",
+                    "command": "echo hi",
+                    "network": True,
+                }
+            )
+        )
         assert r.is_error
         assert "SANDBOXED_JOB_ALLOW_NETWORK" in r.content
 
     def test_cloud_cost_all_providers_skipped(self, monkeypatch):
-        for k in ("AWS_ACCESS_KEY_ID", "GCP_BILLING_PROJECT",
-                    "GCP_BILLING_BQ_DATASET", "AZURE_SUBSCRIPTION_ID"):
+        for k in (
+            "AWS_ACCESS_KEY_ID",
+            "GCP_BILLING_PROJECT",
+            "GCP_BILLING_BQ_DATASET",
+            "AZURE_SUBSCRIPTION_ID",
+        ):
             monkeypatch.delenv(k, raising=False)
         r = asyncio.run(CloudCostTool().execute({"operation": "all"}))
         assert not r.is_error
@@ -238,14 +327,18 @@ NETWORK = pytest.mark.skipif(
 class TestPublicAPIs:
     @NETWORK
     def test_weather_berlin(self):
-        r = asyncio.run(WeatherTool().execute({"location": "Berlin", "forecast_days": 2}))
+        r = asyncio.run(
+            WeatherTool().execute({"location": "Berlin", "forecast_days": 2})
+        )
         assert not r.is_error, r.content
         assert "Berlin" in r.content
         assert "Forecast" in r.content or r.metadata.get("daily")
 
     @NETWORK
     def test_weather_coords(self):
-        r = asyncio.run(WeatherTool().execute({"location": "52.52,13.405", "forecast_days": 0}))
+        r = asyncio.run(
+            WeatherTool().execute({"location": "52.52,13.405", "forecast_days": 0})
+        )
         assert not r.is_error
         assert r.metadata.get("current")
 
@@ -261,18 +354,26 @@ class TestPublicAPIs:
 
     @NETWORK
     def test_world_bank_gdp(self):
-        r = asyncio.run(WorldBankTool().execute({
-            "country_code": "USA", "indicator": "gdp_usd",
-            "start_year": 2018, "end_year": 2022,
-        }))
+        r = asyncio.run(
+            WorldBankTool().execute(
+                {
+                    "country_code": "USA",
+                    "indicator": "gdp_usd",
+                    "start_year": 2018,
+                    "end_year": 2022,
+                }
+            )
+        )
         assert not r.is_error, r.content
         assert any("GDP" in r.content for _ in [0]) or r.metadata.get("values")
 
     @NETWORK
     def test_crypto_price(self):
-        r = asyncio.run(CryptoMarketTool().execute({
-            "operation": "price", "coin_id": "bitcoin", "vs_currency": "usd"
-        }))
+        r = asyncio.run(
+            CryptoMarketTool().execute(
+                {"operation": "price", "coin_id": "bitcoin", "vs_currency": "usd"}
+            )
+        )
         # CoinGecko rate-limits; treat 429 as soft-ok but not a code failure
         if r.is_error and "429" in r.content:
             pytest.skip("CoinGecko rate limit hit")
@@ -291,10 +392,19 @@ class TestPublicAPIs:
 
     @NETWORK
     def test_gov_data_us_lookup(self):
-        r = asyncio.run(GovDataUSTool().execute({
-            "operation": "lookup_company", "query": "MSFT", "limit": 3,
-        }))
+        r = asyncio.run(
+            GovDataUSTool().execute(
+                {
+                    "operation": "lookup_company",
+                    "query": "MSFT",
+                    "limit": 3,
+                }
+            )
+        )
         if r.is_error:
             pytest.skip(f"SEC EDGAR unavailable: {r.content[:100]}")
-        assert "MICROSOFT" in (r.metadata.get("company", {}).get("title", "") or r.content).upper()
+        assert (
+            "MICROSOFT"
+            in (r.metadata.get("company", {}).get("title", "") or r.content).upper()
+        )
         assert r.metadata.get("filings")

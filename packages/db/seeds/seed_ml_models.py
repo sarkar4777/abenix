@@ -1,4 +1,5 @@
 """Seed the sample ML models shipped in aimodels/ as MLModel rows."""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,11 +16,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from models.ml_model import (
-    MLModel, MLModelDeployment, MLModelFramework, MLModelStatus,
-    DeploymentType, DeploymentStatus,
+    MLModel,
+    MLModelDeployment,
+    MLModelFramework,
+    MLModelStatus,
+    DeploymentType,
+    DeploymentStatus,
 )
 from models.tenant import Tenant
-
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -130,12 +134,16 @@ async def _ensure_for_tenant(
 async def seed_ml_models() -> None:
     samples = _discover_samples()
     if not samples:
-        print("No sample ML models found in aimodels/ — run aimodels/build_samples.py first.")
+        print(
+            "No sample ML models found in aimodels/ — run aimodels/build_samples.py first."
+        )
         return
     print(f"Found {len(samples)} sample models in aimodels/")
 
     engine = create_async_engine(DATABASE_URL, echo=False)
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async with session_factory() as db:
         tenants = (await db.execute(select(Tenant))).scalars().all()

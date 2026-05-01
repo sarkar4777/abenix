@@ -1,4 +1,5 @@
 """Platform-level settings — a small, admin-only key/value table."""
+
 from __future__ import annotations
 
 import uuid

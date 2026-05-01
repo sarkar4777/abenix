@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -67,7 +66,9 @@ async def test_invoke_with_tool_call():
                 output_tokens=5,
                 cost=0.0001,
                 latency_ms=100,
-                tool_calls=[{"id": "tc1", "name": "echo", "arguments": {"text": "hello"}}],
+                tool_calls=[
+                    {"id": "tc1", "name": "echo", "arguments": {"text": "hello"}}
+                ],
             )
         return LLMResponse(
             content="Tool said: hello",
@@ -185,14 +186,18 @@ async def test_stream_simple():
         async def gen():
             yield StreamEvent(event="token", data="Hi ")
             yield StreamEvent(event="token", data="there!")
-            yield StreamEvent(event="done", data={
-                "model": "claude-sonnet-4-5-20250929",
-                "input_tokens": 10,
-                "output_tokens": 5,
-                "cost": 0.001,
-                "latency_ms": 100,
-                "tool_calls": [],
-            })
+            yield StreamEvent(
+                event="done",
+                data={
+                    "model": "claude-sonnet-4-5-20250929",
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "cost": 0.001,
+                    "latency_ms": 100,
+                    "tool_calls": [],
+                },
+            )
+
         return gen()
 
     router = LLMRouter()

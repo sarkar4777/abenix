@@ -1,4 +1,5 @@
 """Content-moderation API — OpenAI-backed, tenant-scoped."""
+
 from __future__ import annotations
 
 import logging
@@ -10,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update as sa_update, delete as sa_delete, desc
+from sqlalchemy import select, update as sa_update, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
@@ -52,8 +53,11 @@ def _policy_dict(p: ModerationPolicy) -> dict[str, Any]:
         "thresholds": p.thresholds or {},
         "default_threshold": float(p.default_threshold),
         "category_actions": p.category_actions or {},
-        "default_action": p.default_action.value
-            if isinstance(p.default_action, ModerationAction) else str(p.default_action),
+        "default_action": (
+            p.default_action.value
+            if isinstance(p.default_action, ModerationAction)
+            else str(p.default_action)
+        ),
         "custom_patterns": p.custom_patterns or [],
         "redaction_mask": p.redaction_mask,
         "created_at": p.created_at.isoformat() if p.created_at else None,
@@ -70,7 +74,11 @@ def _event_dict(e: ModerationEvent) -> dict[str, Any]:
         "user_id": str(e.user_id) if e.user_id else None,
         "execution_id": str(e.execution_id) if e.execution_id else None,
         "source": e.source,
-        "outcome": e.outcome.value if isinstance(e.outcome, ModerationEventOutcome) else str(e.outcome),
+        "outcome": (
+            e.outcome.value
+            if isinstance(e.outcome, ModerationEventOutcome)
+            else str(e.outcome)
+        ),
         "content_sha256": e.content_sha256,
         "content_preview": e.content_preview,
         "provider_response": pr,
@@ -83,7 +91,9 @@ def _event_dict(e: ModerationEvent) -> dict[str, Any]:
     }
 
 
-async def _active_policy(db: AsyncSession, tenant_id: uuid.UUID) -> ModerationPolicy | None:
+async def _active_policy(
+    db: AsyncSession, tenant_id: uuid.UUID
+) -> ModerationPolicy | None:
     q = (
         select(ModerationPolicy)
         .where(ModerationPolicy.tenant_id == tenant_id)
@@ -119,15 +129,20 @@ async def vet(
     category_actions = dict((policy.category_actions if policy else {}) or {})
     category_actions.update(overrides.get("category_actions") or {})
     default_action = overrides.get("default_action") or (
-        (policy.default_action.value if policy and isinstance(policy.default_action, ModerationAction)
-         else policy.default_action) if policy else "block"
+        (
+            policy.default_action.value
+            if policy and isinstance(policy.default_action, ModerationAction)
+            else policy.default_action
+        )
+        if policy
+        else "block"
     )
     custom_patterns = list((policy.custom_patterns if policy else []) or [])
     custom_patterns.extend(overrides.get("custom_patterns") or [])
     provider_model = overrides.get("provider_model") or (
         policy.provider_model if policy else "omni-moderation-latest"
     )
-    redaction_mask = (policy.redaction_mask if policy else "█████")
+    redaction_mask = policy.redaction_mask if policy else "█████"
 
     if strict:
         default_threshold = min(default_threshold, 0.3)
@@ -154,9 +169,11 @@ async def vet(
         user_id=user.id,
         execution_id=None,
         source="api_vet",
-        outcome=ModerationEventOutcome(decision.outcome) if decision.outcome in
-                [o.value for o in ModerationEventOutcome]
-                else ModerationEventOutcome.ERROR,
+        outcome=(
+            ModerationEventOutcome(decision.outcome)
+            if decision.outcome in [o.value for o in ModerationEventOutcome]
+            else ModerationEventOutcome.ERROR
+        ),
         content_sha256=content_hash(content),
         content_preview=content[:500],
         provider_response=persisted_provider_response,
@@ -168,10 +185,15 @@ async def vet(
 
     if decision.outcome in ("blocked", "flagged", "redacted"):
         await log_action(
-            db, user.tenant_id, user.id,
+            db,
+            user.tenant_id,
+            user.id,
             action=f"moderation_{decision.outcome}",
-            details={"source": "api_vet", "categories": decision.triggered_categories,
-                     "reason": decision.reason},
+            details={
+                "source": "api_vet",
+                "categories": decision.triggered_categories,
+                "reason": decision.reason,
+            },
             request=request,
             resource_type="moderation_event",
             resource_id=str(event.id),
@@ -267,7 +289,9 @@ async def create_policy(
     db.add(p)
     await db.flush()
     await log_action(
-        db, user.tenant_id, user.id,
+        db,
+        user.tenant_id,
+        user.id,
         action="moderation_policy_created",
         details={"policy_id": str(p.id), "name": p.name, "is_active": p.is_active},
         request=request,
@@ -330,9 +354,19 @@ async def update_policy(
         )
 
     fields = [
-        "name", "description", "is_active", "pre_llm", "post_llm", "on_tool_output",
-        "provider", "provider_model", "thresholds", "default_threshold",
-        "category_actions", "custom_patterns", "redaction_mask",
+        "name",
+        "description",
+        "is_active",
+        "pre_llm",
+        "post_llm",
+        "on_tool_output",
+        "provider",
+        "provider_model",
+        "thresholds",
+        "default_threshold",
+        "category_actions",
+        "custom_patterns",
+        "redaction_mask",
     ]
     for k in fields:
         if k in body:
@@ -345,7 +379,9 @@ async def update_policy(
     p.updated_at = datetime.now(timezone.utc)
     await db.flush()
     await log_action(
-        db, user.tenant_id, user.id,
+        db,
+        user.tenant_id,
+        user.id,
         action="moderation_policy_updated",
         details={"policy_id": str(p.id), "fields": list(body.keys())},
         request=request,
@@ -378,7 +414,9 @@ async def delete_policy(
         return error("not found", 404)
     await db.delete(p)
     await log_action(
-        db, user.tenant_id, user.id,
+        db,
+        user.tenant_id,
+        user.id,
         action="moderation_policy_deleted",
         details={"policy_id": str(pid)},
         request=request,
@@ -397,10 +435,7 @@ async def list_events(
     source: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
 ) -> JSONResponse:
-    q = (
-        select(ModerationEvent)
-        .where(ModerationEvent.tenant_id == user.tenant_id)
-    )
+    q = select(ModerationEvent).where(ModerationEvent.tenant_id == user.tenant_id)
     if outcome:
         try:
             q = q.where(ModerationEvent.outcome == ModerationEventOutcome(outcome))

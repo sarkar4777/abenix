@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -32,6 +31,7 @@ async def metrics():
             status_code=503,
         )
     from fastapi.responses import Response
+
     return Response(
         content=generate_latest(),
         media_type=CONTENT_TYPE_LATEST,
@@ -57,7 +57,9 @@ async def execute(request: Request):
         }
         kb_ids = body.get("kb_ids")
 
-        tool_registry = build_tool_registry(tool_names, kb_ids=kb_ids, **registry_kwargs)
+        tool_registry = build_tool_registry(
+            tool_names, kb_ids=kb_ids, **registry_kwargs
+        )
         llm = LLMRouter()
 
         executor = AgentExecutor(
@@ -71,15 +73,17 @@ async def execute(request: Request):
 
         result = await executor.invoke(body.get("message", ""))
 
-        return JSONResponse({
-            "output": result.output,
-            "input_tokens": result.input_tokens,
-            "output_tokens": result.output_tokens,
-            "cost": result.cost,
-            "duration_ms": result.duration_ms,
-            "tool_calls": result.tool_calls,
-            "model": result.model,
-        })
+        return JSONResponse(
+            {
+                "output": result.output,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "cost": result.cost,
+                "duration_ms": result.duration_ms,
+                "tool_calls": result.tool_calls,
+                "model": result.model,
+            }
+        )
 
     except Exception as e:
         logger.error("Execution failed: %s", e)
@@ -106,7 +110,9 @@ async def execute_stream(request: Request):
             }
             kb_ids = body.get("kb_ids")
 
-            tool_registry = build_tool_registry(tool_names, kb_ids=kb_ids, **registry_kwargs)
+            tool_registry = build_tool_registry(
+                tool_names, kb_ids=kb_ids, **registry_kwargs
+            )
             llm = LLMRouter()
 
             executor = AgentExecutor(
@@ -129,5 +135,6 @@ async def execute_stream(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("PORT", "8001"))
     uvicorn.run("server:app", host="0.0.0.0", port=port, workers=2)

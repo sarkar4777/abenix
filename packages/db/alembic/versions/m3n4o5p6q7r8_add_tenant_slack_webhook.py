@@ -1,4 +1,5 @@
 """Add tenants.slack_webhook_url + agent_shares.permission column."""
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -30,13 +31,51 @@ def upgrade() -> None:
     if not insp.has_table("agent_shares"):
         op.create_table(
             "agent_shares",
-            sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-            sa.Column("tenant_id", sa.dialects.postgresql.UUID(as_uuid=True), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True),
-            sa.Column("agent_id", sa.dialects.postgresql.UUID(as_uuid=True), sa.ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True),
-            sa.Column("user_id", sa.dialects.postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
-            sa.Column("created_by", sa.dialects.postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column(
+                "id",
+                sa.dialects.postgresql.UUID(as_uuid=True),
+                primary_key=True,
+                server_default=sa.text("gen_random_uuid()"),
+            ),
+            sa.Column(
+                "tenant_id",
+                sa.dialects.postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("tenants.id", ondelete="CASCADE"),
+                nullable=False,
+                index=True,
+            ),
+            sa.Column(
+                "agent_id",
+                sa.dialects.postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("agents.id", ondelete="CASCADE"),
+                nullable=False,
+                index=True,
+            ),
+            sa.Column(
+                "user_id",
+                sa.dialects.postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+                index=True,
+            ),
+            sa.Column(
+                "created_by",
+                sa.dialects.postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("users.id"),
+                nullable=True,
+            ),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
         )
     op.execute(
         "ALTER TABLE agent_shares "

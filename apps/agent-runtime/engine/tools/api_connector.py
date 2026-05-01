@@ -31,9 +31,15 @@ class ApiConnectorTool(BaseTool):
             "service": {
                 "type": "string",
                 "enum": [
-                    "slack", "airtable_read", "airtable_write",
-                    "notion_query", "notion_create", "jira_create",
-                    "jira_search", "google_sheets_read", "google_sheets_append",
+                    "slack",
+                    "airtable_read",
+                    "airtable_write",
+                    "notion_query",
+                    "notion_create",
+                    "jira_create",
+                    "jira_search",
+                    "google_sheets_read",
+                    "google_sheets_append",
                 ],
                 "description": "Service and action to execute",
             },
@@ -92,6 +98,7 @@ class ApiConnectorTool(BaseTool):
             }
 
         import aiohttp
+
         payload = {"text": message}
         if channel.startswith("#"):
             payload["channel"] = channel
@@ -119,12 +126,19 @@ class ApiConnectorTool(BaseTool):
                 "message": "Airtable API key not configured",
                 "would_read": f"{base_id}/{table_name}",
                 "sample_data": [
-                    {"id": "rec1", "fields": {"Name": "Sample Record 1", "Status": "Active"}},
-                    {"id": "rec2", "fields": {"Name": "Sample Record 2", "Status": "Pending"}},
+                    {
+                        "id": "rec1",
+                        "fields": {"Name": "Sample Record 1", "Status": "Active"},
+                    },
+                    {
+                        "id": "rec2",
+                        "fields": {"Name": "Sample Record 2", "Status": "Pending"},
+                    },
                 ],
             }
 
         import aiohttp
+
         url = f"https://api.airtable.com/v0/{base_id}/{table_name}"
         headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
         query_params: dict[str, Any] = {"maxRecords": max_records}
@@ -138,7 +152,9 @@ class ApiConnectorTool(BaseTool):
                 return {
                     "status": "success",
                     "record_count": len(records),
-                    "records": [{"id": r["id"], "fields": r["fields"]} for r in records],
+                    "records": [
+                        {"id": r["id"], "fields": r["fields"]} for r in records
+                    ],
                 }
 
     async def _airtable_write(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -158,6 +174,7 @@ class ApiConnectorTool(BaseTool):
             }
 
         import aiohttp
+
         url = f"https://api.airtable.com/v0/{base_id}/{table_name}"
         headers = {
             "Authorization": f"Bearer {AIRTABLE_API_KEY}",
@@ -185,11 +202,17 @@ class ApiConnectorTool(BaseTool):
                 "message": "Notion API key not configured",
                 "would_query": database_id,
                 "sample_data": [
-                    {"id": "page1", "properties": {"Name": {"title": [{"text": {"content": "Sample Page"}}]}}},
+                    {
+                        "id": "page1",
+                        "properties": {
+                            "Name": {"title": [{"text": {"content": "Sample Page"}}]}
+                        },
+                    },
                 ],
             }
 
         import aiohttp
+
         url = f"https://api.notion.com/v1/databases/{database_id}/query"
         headers = {
             "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -222,6 +245,7 @@ class ApiConnectorTool(BaseTool):
             }
 
         import aiohttp
+
         url = "https://api.notion.com/v1/pages"
         headers = {
             "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -233,7 +257,10 @@ class ApiConnectorTool(BaseTool):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as resp:
                 data = await resp.json()
-                return {"status": "success" if resp.status == 200 else "error", "page_id": data.get("id")}
+                return {
+                    "status": "success" if resp.status == 200 else "error",
+                    "page_id": data.get("id"),
+                }
 
     async def _jira_create(self, params: dict[str, Any]) -> dict[str, Any]:
         project = params.get("project", "")
@@ -257,6 +284,7 @@ class ApiConnectorTool(BaseTool):
 
         import aiohttp
         import base64
+
         url = f"{JIRA_URL}/rest/api/3/issue"
         auth = base64.b64encode(f"{JIRA_EMAIL}:{JIRA_TOKEN}".encode()).decode()
         headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
@@ -264,9 +292,16 @@ class ApiConnectorTool(BaseTool):
             "fields": {
                 "project": {"key": project},
                 "summary": summary,
-                "description": {"type": "doc", "version": 1, "content": [
-                    {"type": "paragraph", "content": [{"type": "text", "text": description}]}
-                ]},
+                "description": {
+                    "type": "doc",
+                    "version": 1,
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [{"type": "text", "text": description}],
+                        }
+                    ],
+                },
                 "issuetype": {"name": issue_type},
             }
         }
@@ -297,12 +332,15 @@ class ApiConnectorTool(BaseTool):
 
         import aiohttp
         import base64
+
         url = f"{JIRA_URL}/rest/api/3/search"
         auth = base64.b64encode(f"{JIRA_EMAIL}:{JIRA_TOKEN}".encode()).decode()
         headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json={"jql": jql, "maxResults": 50}) as resp:
+            async with session.post(
+                url, headers=headers, json={"jql": jql, "maxResults": 50}
+            ) as resp:
                 data = await resp.json()
                 issues = data.get("issues", [])
                 return {
@@ -313,7 +351,9 @@ class ApiConnectorTool(BaseTool):
                             "key": i["key"],
                             "summary": i["fields"].get("summary"),
                             "status": i["fields"].get("status", {}).get("name"),
-                            "assignee": (i["fields"].get("assignee") or {}).get("displayName"),
+                            "assignee": (i["fields"].get("assignee") or {}).get(
+                                "displayName"
+                            ),
                         }
                         for i in issues
                     ],
@@ -334,7 +374,10 @@ class ApiConnectorTool(BaseTool):
                 "sample_data": [["Header1", "Header2"], ["Value1", "Value2"]],
             }
 
-        return {"status": "not_implemented", "message": "Google Sheets integration requires OAuth setup"}
+        return {
+            "status": "not_implemented",
+            "message": "Google Sheets integration requires OAuth setup",
+        }
 
     async def _sheets_append(self, params: dict[str, Any]) -> dict[str, Any]:
         spreadsheet_id = params.get("spreadsheet_id", "")
@@ -352,4 +395,7 @@ class ApiConnectorTool(BaseTool):
                 "to": f"{spreadsheet_id} / {sheet_range}",
             }
 
-        return {"status": "not_implemented", "message": "Google Sheets integration requires OAuth setup"}
+        return {
+            "status": "not_implemented",
+            "message": "Google Sheets integration requires OAuth setup",
+        }

@@ -18,6 +18,7 @@ RUNTIME_TIMEOUT = int(os.environ.get("RUNTIME_TIMEOUT", "300"))
 @dataclass
 class ExecutionConfig:
     """Everything needed to execute an agent."""
+
     message: str
     system_prompt: str
     model: str = "claude-sonnet-4-5-20250929"
@@ -36,6 +37,7 @@ class ExecutionConfig:
 @dataclass
 class ExecutionResult:
     """Result from agent execution."""
+
     output: str
     input_tokens: int = 0
     output_tokens: int = 0
@@ -91,6 +93,7 @@ async def _execute_embedded(config: ExecutionConfig) -> ExecutionResult:
         mcp_clients = []
         if config.mcp_connections:
             from engine.tool_resolver import resolve_tools
+
             tool_registry, mcp_clients, _ = await resolve_tools(
                 config.tool_names, config.mcp_connections
             )
@@ -133,7 +136,9 @@ async def _execute_embedded(config: ExecutionConfig) -> ExecutionResult:
         return ExecutionResult(output="", error=str(e))
 
 
-async def _stream_embedded(config: ExecutionConfig) -> AsyncGenerator[dict[str, Any], None]:
+async def _stream_embedded(
+    config: ExecutionConfig,
+) -> AsyncGenerator[dict[str, Any], None]:
     """Stream agent execution inline in the current process."""
     try:
         from engine.agent_executor import AgentExecutor, build_tool_registry
@@ -151,6 +156,7 @@ async def _stream_embedded(config: ExecutionConfig) -> AsyncGenerator[dict[str, 
         mcp_clients = []
         if config.mcp_connections:
             from engine.tool_resolver import resolve_tools
+
             tool_registry, mcp_clients, _ = await resolve_tools(
                 config.tool_names, config.mcp_connections
             )
@@ -205,7 +211,10 @@ async def _execute_remote(config: ExecutionConfig) -> ExecutionResult:
         async with httpx.AsyncClient(timeout=RUNTIME_TIMEOUT) as client:
             resp = await client.post(f"{RUNTIME_URL}/execute", json=payload)
             if resp.status_code != 200:
-                return ExecutionResult(output="", error=f"Runtime returned {resp.status_code}: {resp.text[:500]}")
+                return ExecutionResult(
+                    output="",
+                    error=f"Runtime returned {resp.status_code}: {resp.text[:500]}",
+                )
             data = resp.json()
             return ExecutionResult(
                 output=data.get("output", ""),
@@ -217,12 +226,17 @@ async def _execute_remote(config: ExecutionConfig) -> ExecutionResult:
                 model=data.get("model", ""),
             )
     except httpx.ConnectError:
-        return ExecutionResult(output="", error=f"Cannot reach runtime at {RUNTIME_URL}. Is the runtime pod running?")
+        return ExecutionResult(
+            output="",
+            error=f"Cannot reach runtime at {RUNTIME_URL}. Is the runtime pod running?",
+        )
     except Exception as e:
         return ExecutionResult(output="", error=f"Runtime call failed: {e}")
 
 
-async def _stream_remote(config: ExecutionConfig) -> AsyncGenerator[dict[str, Any], None]:
+async def _stream_remote(
+    config: ExecutionConfig,
+) -> AsyncGenerator[dict[str, Any], None]:
     """Stream agent execution from the runtime pod via SSE."""
     import httpx
 
@@ -242,9 +256,14 @@ async def _stream_remote(config: ExecutionConfig) -> AsyncGenerator[dict[str, An
 
     try:
         async with httpx.AsyncClient(timeout=RUNTIME_TIMEOUT) as client:
-            async with client.stream("POST", f"{RUNTIME_URL}/execute/stream", json=payload) as resp:
+            async with client.stream(
+                "POST", f"{RUNTIME_URL}/execute/stream", json=payload
+            ) as resp:
                 if resp.status_code != 200:
-                    yield {"event": "error", "data": {"message": f"Runtime returned {resp.status_code}"}}
+                    yield {
+                        "event": "error",
+                        "data": {"message": f"Runtime returned {resp.status_code}"},
+                    }
                     return
 
                 buffer = ""
@@ -271,6 +290,9 @@ async def _stream_remote(config: ExecutionConfig) -> AsyncGenerator[dict[str, An
                                 pass
 
     except httpx.ConnectError:
-        yield {"event": "error", "data": {"message": f"Cannot reach runtime at {RUNTIME_URL}"}}
+        yield {
+            "event": "error",
+            "data": {"message": f"Cannot reach runtime at {RUNTIME_URL}"},
+        }
     except Exception as e:
         yield {"event": "error", "data": {"message": f"Runtime stream failed: {e}"}}

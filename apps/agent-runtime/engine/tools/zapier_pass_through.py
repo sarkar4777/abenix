@@ -14,6 +14,7 @@ their Zap.
 Auth env:
   ZAPIER_NLA_KEY   — bearer token from https://nla.zapier.com/credentials/
 """
+
 from __future__ import annotations
 
 import os
@@ -71,7 +72,9 @@ class ZapierPassThroughTool(BaseTool):
 
         if op == "fire_webhook":
             url = (arguments.get("webhook_url") or "").strip()
-            if not url.startswith(("https://hooks.zapier.com/", "https://hooks.zap.app/")):
+            if not url.startswith(
+                ("https://hooks.zapier.com/", "https://hooks.zap.app/")
+            ):
                 return ToolResult(
                     content="webhook_url must be a hooks.zapier.com / hooks.zap.app URL",
                     is_error=True,
@@ -87,7 +90,10 @@ class ZapierPassThroughTool(BaseTool):
                     metadata={"status": r.status_code, "url": url},
                 )
             except httpx.HTTPStatusError as e:
-                return ToolResult(content=f"Webhook HTTP {e.response.status_code}: {e.response.text[:200]}", is_error=True)
+                return ToolResult(
+                    content=f"Webhook HTTP {e.response.status_code}: {e.response.text[:200]}",
+                    is_error=True,
+                )
             except Exception as e:
                 return ToolResult(content=f"Webhook error: {e}", is_error=True)
 
@@ -118,12 +124,17 @@ class ZapierPassThroughTool(BaseTool):
                         desc = a.get("description") or a.get("name") or ""
                         lines.append(f"  {aid}  —  {desc}")
                         compact.append({"id": aid, "description": desc})
-                    return ToolResult(content="\n".join(lines), metadata={"actions": compact})
+                    return ToolResult(
+                        content="\n".join(lines), metadata={"actions": compact}
+                    )
 
                 if op == "run_action":
                     aid = (arguments.get("action_id") or "").strip()
                     if not aid:
-                        return ToolResult(content="action_id is required for run_action", is_error=True)
+                        return ToolResult(
+                            content="action_id is required for run_action",
+                            is_error=True,
+                        )
                     body: dict[str, Any] = {
                         "instructions": (arguments.get("instructions") or "")[:2000],
                     }
@@ -144,6 +155,9 @@ class ZapierPassThroughTool(BaseTool):
 
                 return ToolResult(content=f"Unknown operation: {op}", is_error=True)
         except httpx.HTTPStatusError as e:
-            return ToolResult(content=f"Zapier HTTP {e.response.status_code}: {e.response.text[:300]}", is_error=True)
+            return ToolResult(
+                content=f"Zapier HTTP {e.response.status_code}: {e.response.text[:300]}",
+                is_error=True,
+            )
         except Exception as e:
             return ToolResult(content=f"Zapier error: {e}", is_error=True)

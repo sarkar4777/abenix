@@ -2,6 +2,7 @@
 
 Ensures pipeline outputs match expected format before sending to external systems.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,20 +54,28 @@ class SchemaValidatorTool(BaseTool):
         elif operation == "coerce":
             return self._coerce(data, schema)
         else:
-            return ToolResult(content=f"Error: Unknown operation: {operation}", is_error=True)
+            return ToolResult(
+                content=f"Error: Unknown operation: {operation}", is_error=True
+            )
 
     def _validate(self, data: Any, schema: dict | None) -> ToolResult:
         if not schema:
-            return ToolResult(content="Error: schema required for validate operation", is_error=True)
+            return ToolResult(
+                content="Error: schema required for validate operation", is_error=True
+            )
 
         errors = []
         self._check_schema(data, schema, "", errors)
 
-        return ToolResult(content=json.dumps({
-            "valid": len(errors) == 0,
-            "error_count": len(errors),
-            "errors": errors[:20],  # Cap at 20 errors
-        }))
+        return ToolResult(
+            content=json.dumps(
+                {
+                    "valid": len(errors) == 0,
+                    "error_count": len(errors),
+                    "errors": errors[:20],  # Cap at 20 errors
+                }
+            )
+        )
 
     def _check_schema(self, data: Any, schema: dict, path: str, errors: list) -> None:
         """Recursive schema validation (simplified JSON Schema subset)."""
@@ -78,7 +87,9 @@ class SchemaValidatorTool(BaseTool):
 
             for req in required:
                 if req not in data:
-                    errors.append({"path": f"{path}.{req}", "error": "required field missing"})
+                    errors.append(
+                        {"path": f"{path}.{req}", "error": "required field missing"}
+                    )
 
             for key, prop_schema in props.items():
                 if key in data:
@@ -90,18 +101,30 @@ class SchemaValidatorTool(BaseTool):
                 self._check_schema(item, items_schema, f"{path}[{i}]", errors)
 
         elif expected_type == "string" and not isinstance(data, str):
-            errors.append({"path": path, "error": f"expected string, got {type(data).__name__}", "value": str(data)[:50]})
+            errors.append(
+                {
+                    "path": path,
+                    "error": f"expected string, got {type(data).__name__}",
+                    "value": str(data)[:50],
+                }
+            )
 
         elif expected_type == "number" and not isinstance(data, (int, float)):
-            errors.append({"path": path, "error": f"expected number, got {type(data).__name__}"})
+            errors.append(
+                {"path": path, "error": f"expected number, got {type(data).__name__}"}
+            )
 
         elif expected_type == "boolean" and not isinstance(data, bool):
-            errors.append({"path": path, "error": f"expected boolean, got {type(data).__name__}"})
+            errors.append(
+                {"path": path, "error": f"expected boolean, got {type(data).__name__}"}
+            )
 
     def _generate_schema(self, data: Any) -> ToolResult:
         """Infer JSON Schema from sample data."""
         schema = self._infer_type(data)
-        return ToolResult(content=json.dumps({"status": "success", "schema": schema}, indent=2))
+        return ToolResult(
+            content=json.dumps({"status": "success", "schema": schema}, indent=2)
+        )
 
     def _infer_type(self, value: Any, depth: int = 0) -> dict:
         if depth > 10:
@@ -135,10 +158,14 @@ class SchemaValidatorTool(BaseTool):
     def _coerce(self, data: Any, schema: dict | None) -> ToolResult:
         """Attempt to fix data to match schema (type casting, defaults)."""
         if not schema:
-            return ToolResult(content="Error: schema required for coerce", is_error=True)
+            return ToolResult(
+                content="Error: schema required for coerce", is_error=True
+            )
 
         coerced = self._coerce_value(data, schema)
-        return ToolResult(content=json.dumps({"status": "success", "coerced": coerced}, default=str))
+        return ToolResult(
+            content=json.dumps({"status": "success", "coerced": coerced}, default=str)
+        )
 
     def _coerce_value(self, value: Any, schema: dict) -> Any:
         expected = schema.get("type")

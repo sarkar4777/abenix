@@ -1,11 +1,11 @@
 """Politically Exposed Persons (PEP) screening — KYC / AML building block."""
+
 from __future__ import annotations
 
 import json
 import logging
 import os
 import re
-import time
 import unicodedata
 from difflib import SequenceMatcher
 from typing import Any
@@ -49,11 +49,16 @@ _OPENSANCTIONS_API = "https://api.opensanctions.org/match/peps"
 
 
 async def _query_opensanctions(
-    name: str, jurisdiction: str | None, api_key: str | None,
+    name: str,
+    jurisdiction: str | None,
+    api_key: str | None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Match against the OpenSanctions PEP collection."""
     if not api_key:
-        return [], "OpenSanctions skipped — set OPENSANCTIONS_API_KEY to enable (free developer tier at opensanctions.org/api)"
+        return (
+            [],
+            "OpenSanctions skipped — set OPENSANCTIONS_API_KEY to enable (free developer tier at opensanctions.org/api)",
+        )
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)",
         "Authorization": f"ApiKey {api_key}",
@@ -90,18 +95,24 @@ async def _query_opensanctions(
         dob = props.get("birthDate") or []
         topics = props.get("topics") or []
         pep_class = _derive_class_from_opensanctions(topics, positions)
-        matches.append({
-            "name": (props.get("name") or [m.get("caption") or name])[0],
-            "confidence": int((m.get("score") or 0) * 100),
-            "pep_class": pep_class,
-            "positions": positions[:5],
-            "countries": countries[:3],
-            "date_of_birth": dob[0] if dob else None,
-            "opensanctions_id": m.get("id"),
-            "opensanctions_url": f"https://www.opensanctions.org/entities/{m.get('id')}/" if m.get("id") else None,
-            "topics": topics[:6],
-            "source": "OpenSanctions",
-        })
+        matches.append(
+            {
+                "name": (props.get("name") or [m.get("caption") or name])[0],
+                "confidence": int((m.get("score") or 0) * 100),
+                "pep_class": pep_class,
+                "positions": positions[:5],
+                "countries": countries[:3],
+                "date_of_birth": dob[0] if dob else None,
+                "opensanctions_id": m.get("id"),
+                "opensanctions_url": (
+                    f"https://www.opensanctions.org/entities/{m.get('id')}/"
+                    if m.get("id")
+                    else None
+                ),
+                "topics": topics[:6],
+                "source": "OpenSanctions",
+            }
+        )
     return matches, None
 
 
@@ -116,7 +127,10 @@ def _derive_class_from_opensanctions(topics: list[str], positions: list[str]) ->
         if "role.pep.former" in topics:
             return "Former PEP"
         # Heuristic — positions mentioning international bodies
-        if any(("UN " in p) or ("IMF" in p) or ("World Bank" in p) or ("IAEA" in p) for p in positions):
+        if any(
+            ("UN " in p) or ("IMF" in p) or ("World Bank" in p) or ("IAEA" in p)
+            for p in positions
+        ):
             return "International Organisation PEP"
         return "Domestic/Foreign PEP"
     if "role.rca" in topics:
@@ -138,11 +152,17 @@ async def _query_wikidata(name: str) -> tuple[list[dict[str, Any]], str | None]:
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, headers=headers) as client:
             # Stage 1: search for person entities matching the name.
-            s = await client.get(_WIKIDATA_API, params={
-                "action": "wbsearchentities",
-                "search": name,
-                "language": "en", "type": "item", "format": "json", "limit": "10",
-            })
+            s = await client.get(
+                _WIKIDATA_API,
+                params={
+                    "action": "wbsearchentities",
+                    "search": name,
+                    "language": "en",
+                    "type": "item",
+                    "format": "json",
+                    "limit": "10",
+                },
+            )
             if s.status_code >= 400:
                 return [], f"Wikidata search HTTP {s.status_code}"
             search_hits = s.json().get("search", [])
@@ -178,7 +198,7 @@ async def _query_wikidata(name: str) -> tuple[list[dict[str, Any]], str | None]:
         logger.debug("Wikidata query failed: %s", exc)
         return [], f"Wikidata unreachable: {exc.__class__.__name__}"
 
-    for row in (data.get("results", {}).get("bindings", []) or []):
+    for row in data.get("results", {}).get("bindings", []) or []:
         qid_url = row.get("person", {}).get("value", "")
         qid = qid_url.rsplit("/", 1)[-1]
         # pull person label from search results (we already have it)
@@ -222,7 +242,12 @@ _GOV_ROSTERS: dict[str, dict[str, Any]] = {
         "url": "https://members-api.parliament.uk/api/Members/Search?skip=0&take=650&House=1",
         "json_path": ("items", "value", "nameDisplayAs"),
         "authority": "UK Parliament",
-        "position_field_path": ("items", "value", "latestHouseMembership", "membershipFrom"),
+        "position_field_path": (
+            "items",
+            "value",
+            "latestHouseMembership",
+            "membershipFrom",
+        ),
     },
     "US": {
         "name": "US Congress members",
@@ -234,7 +259,9 @@ _GOV_ROSTERS: dict[str, dict[str, Any]] = {
 }
 
 
-async def _query_gov_roster(jurisdiction: str, name: str) -> tuple[list[dict[str, Any]], str | None]:
+async def _query_gov_roster(
+    jurisdiction: str, name: str
+) -> tuple[list[dict[str, Any]], str | None]:
     meta = _GOV_ROSTERS.get((jurisdiction or "").upper())
     if not meta:
         return [], None
@@ -247,13 +274,19 @@ async def _query_gov_roster(jurisdiction: str, name: str) -> tuple[list[dict[str
         url = url.format(key=api_key)
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"})
+            r = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"
+                },
+            )
             r.raise_for_status()
             data = r.json()
     except Exception as exc:
         return [], f"{meta['name']} unreachable: {exc.__class__.__name__}"
 
     matches: list[dict[str, Any]] = []
+
     # Brute recursive scan for name-like strings — tolerant of schema drift.
     def _scan(obj: Any, path: list[str]):
         if isinstance(obj, dict):
@@ -265,14 +298,16 @@ async def _query_gov_roster(jurisdiction: str, name: str) -> tuple[list[dict[str
         elif isinstance(obj, str) and len(obj) < 200 and " " in obj:
             score = _fuzzy(name, obj)
             if score >= 85:
-                matches.append({
-                    "name": obj,
-                    "confidence": score,
-                    "pep_class": "Domestic/Foreign PEP",
-                    "positions": [meta["name"]],
-                    "countries": [jurisdiction.upper()],
-                    "source": meta["authority"],
-                })
+                matches.append(
+                    {
+                        "name": obj,
+                        "confidence": score,
+                        "pep_class": "Domestic/Foreign PEP",
+                        "positions": [meta["name"]],
+                        "countries": [jurisdiction.upper()],
+                        "source": meta["authority"],
+                    }
+                )
 
     _scan(data, [])
     # Dedupe
@@ -330,17 +365,22 @@ class PEPScreeningTool(BaseTool):
             "former_pep_lookback_months": {
                 "type": "integer",
                 "default": 18,
-                "minimum": 0, "maximum": 120,
+                "minimum": 0,
+                "maximum": 120,
                 "description": "How far back to still flag someone as Former PEP after leaving office. 18 months is FATF's common guidance; EU requires 'at least 12 months'. Set 0 to drop former PEPs entirely.",
             },
             "sources": {
                 "type": "array",
-                "items": {"type": "string", "enum": ["opensanctions", "wikidata", "government_roster"]},
+                "items": {
+                    "type": "string",
+                    "enum": ["opensanctions", "wikidata", "government_roster"],
+                },
                 "description": "Which sources to query. Omit for ALL.",
             },
             "threshold": {
                 "type": "integer",
-                "minimum": 50, "maximum": 100,
+                "minimum": 50,
+                "maximum": 100,
                 "default": 85,
             },
         },
@@ -353,7 +393,11 @@ class PEPScreeningTool(BaseTool):
             return ToolResult(content="Error: 'name' is required.", is_error=True)
 
         jurisdiction = (arguments.get("jurisdiction") or "").strip().upper() or None
-        sources = arguments.get("sources") or ["opensanctions", "wikidata", "government_roster"]
+        sources = arguments.get("sources") or [
+            "opensanctions",
+            "wikidata",
+            "government_roster",
+        ]
         threshold = int(arguments.get("threshold", 85))
         aliases = arguments.get("also_check_aliases") or []
         _lookback = int(arguments.get("former_pep_lookback_months", 18))
@@ -398,9 +442,14 @@ class PEPScreeningTool(BaseTool):
 
         # Top-level PEP class resolution — worst/strongest signal wins
         class_priority = {
-            "Domestic/Foreign PEP": 5, "Foreign PEP": 5, "Domestic PEP": 4,
-            "International Organisation PEP": 4, "Family PEP": 3,
-            "Close Associate PEP": 3, "Former PEP": 2, "Potential PEP": 1,
+            "Domestic/Foreign PEP": 5,
+            "Foreign PEP": 5,
+            "Domestic PEP": 4,
+            "International Organisation PEP": 4,
+            "Family PEP": 3,
+            "Close Associate PEP": 3,
+            "Former PEP": 2,
+            "Potential PEP": 1,
             "Not PEP": 0,
         }
         resolved_class = "Not PEP"
@@ -412,7 +461,12 @@ class PEPScreeningTool(BaseTool):
                 resolved_priority = p
                 resolved_class = c
 
-        if resolved_class in ("Domestic/Foreign PEP", "Foreign PEP", "Domestic PEP", "International Organisation PEP"):
+        if resolved_class in (
+            "Domestic/Foreign PEP",
+            "Foreign PEP",
+            "Domestic PEP",
+            "International Organisation PEP",
+        ):
             risk_grade = "H"
         elif resolved_class in ("Family PEP", "Close Associate PEP"):
             risk_grade = "M"
@@ -424,20 +478,23 @@ class PEPScreeningTool(BaseTool):
             risk_grade = "L"
 
         return ToolResult(
-            content=json.dumps({
-                "queried_name": name,
-                "jurisdiction": jurisdiction,
-                "resolved_pep_class": resolved_class,
-                "risk_grade": risk_grade,
-                "max_confidence": max_conf,
-                "total_hits": len(final_hits),
-                "hits": final_hits,
-                "warnings": warnings,
-                "disclaimer": (
-                    "PEP status is time-sensitive. A negative hit today does "
-                    "not guarantee future status; re-screen on risk-review "
-                    "cadence (typically quarterly for high-risk clients)."
-                ),
-            }, indent=2),
+            content=json.dumps(
+                {
+                    "queried_name": name,
+                    "jurisdiction": jurisdiction,
+                    "resolved_pep_class": resolved_class,
+                    "risk_grade": risk_grade,
+                    "max_confidence": max_conf,
+                    "total_hits": len(final_hits),
+                    "hits": final_hits,
+                    "warnings": warnings,
+                    "disclaimer": (
+                        "PEP status is time-sensitive. A negative hit today does "
+                        "not guarantee future status; re-screen on risk-review "
+                        "cadence (typically quarterly for high-risk clients)."
+                    ),
+                },
+                indent=2,
+            ),
             metadata={"pep_class": resolved_class, "risk_grade": risk_grade},
         )

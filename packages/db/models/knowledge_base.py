@@ -24,6 +24,7 @@ class DocumentStatus(str, enum.Enum):
 
 class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A KnowledgeBase row IS a Collection in v2 terminology."""
+
     __tablename__ = "knowledge_collections"
     __table_args__ = (
         Index("ix_kb_tenant_created", "tenant_id", "created_at"),
@@ -36,12 +37,14 @@ class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # during the migration window; backfilled by the Phase 1 migration
     # to a "Default" project per tenant.
     project_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("knowledge_projects.id"),
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_projects.id"),
         nullable=True,
     )
     default_visibility: Mapped[CollectionVisibility] = mapped_column(
         Enum(
-            CollectionVisibility, name="collection_visibility",
+            CollectionVisibility,
+            name="collection_visibility",
             values_callable=lambda e: [m.value for m in e],
         ),
         default=CollectionVisibility.PROJECT,
@@ -57,7 +60,9 @@ class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # created_by lets ResourceShare/permission helpers treat KBs the
     # same way they treat agents/ml_models. Nullable for legacy rows.
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True,
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True,
     )
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text, default="")
@@ -70,7 +75,8 @@ class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # Defaults to pinecone for legacy rows; new collections default to
     # pgvector via the API layer (Phase 5 will let users pick).
     vector_backend: Mapped[str] = mapped_column(
-        String(20), default="pinecone",
+        String(20),
+        default="pinecone",
     )
     status: Mapped[KBStatus] = mapped_column(
         Enum(KBStatus, name="kb_status"), default=KBStatus.PROCESSING
@@ -89,9 +95,7 @@ class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
 class Document(UUIDMixin, Base):
     __tablename__ = "documents"
-    __table_args__ = (
-        Index("ix_documents_kb_status", "kb_id", "status"),
-    )
+    __table_args__ = (Index("ix_documents_kb_status", "kb_id", "status"),)
 
     kb_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("knowledge_collections.id"), index=True

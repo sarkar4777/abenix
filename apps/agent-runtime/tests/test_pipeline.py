@@ -11,7 +11,6 @@ from engine.pipeline import (
     NodeCondition,
     PipelineExecutor,
     PipelineNode,
-    PipelineResult,
     _extract_field,
     _topological_sort,
     parse_pipeline_nodes,
@@ -19,11 +18,12 @@ from engine.pipeline import (
 )
 from engine.tools.base import BaseTool, ToolRegistry, ToolResult
 
-
 # ── Test helpers ──────────────────────────────────────────────────
+
 
 class EchoTool(BaseTool):
     """Returns its arguments as JSON output."""
+
     name = "echo"
     description = "Echo arguments"
     input_schema = {"type": "object", "properties": {}}
@@ -34,6 +34,7 @@ class EchoTool(BaseTool):
 
 class FailTool(BaseTool):
     """Always returns an error."""
+
     name = "fail"
     description = "Always fails"
     input_schema = {"type": "object", "properties": {}}
@@ -44,6 +45,7 @@ class FailTool(BaseTool):
 
 class SlowTool(BaseTool):
     """Takes some time to execute."""
+
     name = "slow"
     description = "Slow tool"
     input_schema = {"type": "object", "properties": {}}
@@ -55,6 +57,7 @@ class SlowTool(BaseTool):
 
 class MathTool(BaseTool):
     """Performs simple arithmetic from arguments."""
+
     name = "math_op"
     description = "Math operations"
     input_schema = {"type": "object", "properties": {}}
@@ -78,6 +81,7 @@ class MathTool(BaseTool):
 
 class ConditionalOutputTool(BaseTool):
     """Returns different output based on a 'mode' argument."""
+
     name = "conditional_output"
     description = "Returns output based on mode"
     input_schema = {"type": "object", "properties": {}}
@@ -103,6 +107,7 @@ def _build_registry(*tools: BaseTool) -> ToolRegistry:
 
 
 # ── Unit tests for helpers ────────────────────────────────────────
+
 
 class TestExtractField:
     def test_simple_key(self):
@@ -174,11 +179,15 @@ class TestTopologicalSort:
 
 class TestNodeCondition:
     def test_eq_true(self):
-        cond = NodeCondition(source_node="n1", field="outlook", operator="eq", value="bullish")
+        cond = NodeCondition(
+            source_node="n1", field="outlook", operator="eq", value="bullish"
+        )
         assert cond.evaluate({"n1": {"outlook": "bullish"}}) is True
 
     def test_eq_false(self):
-        cond = NodeCondition(source_node="n1", field="outlook", operator="eq", value="bullish")
+        cond = NodeCondition(
+            source_node="n1", field="outlook", operator="eq", value="bullish"
+        )
         assert cond.evaluate({"n1": {"outlook": "bearish"}}) is False
 
     def test_neq(self):
@@ -195,7 +204,9 @@ class TestNodeCondition:
         assert cond.evaluate({"n1": {"price": 42.5}}) is True
 
     def test_contains(self):
-        cond = NodeCondition(source_node="n1", field="text", operator="contains", value="error")
+        cond = NodeCondition(
+            source_node="n1", field="text", operator="contains", value="error"
+        )
         assert cond.evaluate({"n1": {"text": "no error found"}}) is True
         assert cond.evaluate({"n1": {"text": "all good"}}) is False
 
@@ -204,11 +215,14 @@ class TestNodeCondition:
         assert cond.evaluate({"other": {"x": 1}}) is False
 
     def test_nested_field(self):
-        cond = NodeCondition(source_node="n1", field="data.metrics.score", operator="gte", value=80)
+        cond = NodeCondition(
+            source_node="n1", field="data.metrics.score", operator="gte", value=80
+        )
         assert cond.evaluate({"n1": {"data": {"metrics": {"score": 90}}}}) is True
 
 
 # ── Pipeline executor integration tests ───────────────────────────
+
 
 class TestPipelineExecutorBasic:
     @pytest.mark.asyncio
@@ -229,10 +243,13 @@ class TestPipelineExecutorBasic:
         nodes = [
             PipelineNode(id="n1", tool_name="echo", arguments={"value": 10}),
             PipelineNode(
-                id="n2", tool_name="math_op",
+                id="n2",
+                tool_name="math_op",
                 arguments={"operation": "add", "b": 5},
                 depends_on=["n1"],
-                input_mappings={"a": InputMapping(source_node="n1", source_field="value")},
+                input_mappings={
+                    "a": InputMapping(source_node="n1", source_field="value")
+                },
             ),
         ]
         executor = PipelineExecutor(reg)
@@ -262,7 +279,11 @@ class TestPipelineExecutorBasic:
     async def test_unknown_tool(self):
         reg = _build_registry(EchoTool())
         nodes = [PipelineNode(id="n1", tool_name="nonexistent")]
-        result = await executor.execute(nodes) if (executor := PipelineExecutor(reg)) else None
+        result = (
+            await executor.execute(nodes)
+            if (executor := PipelineExecutor(reg))
+            else None
+        )
         result = await PipelineExecutor(reg).execute(nodes)
 
         assert result.node_results["n1"].status == "failed"
@@ -282,12 +303,17 @@ class TestPipelineExecutorBasic:
         reg = _build_registry(MathTool())
         nodes = [
             PipelineNode(
-                id="n1", tool_name="math_op",
+                id="n1",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "b": 3},
-                input_mappings={"a": InputMapping(source_node="ctx", source_field="base_value")},
+                input_mappings={
+                    "a": InputMapping(source_node="ctx", source_field="base_value")
+                },
             ),
         ]
-        result = await PipelineExecutor(reg).execute(nodes, context={"ctx": {"base_value": 7}})
+        result = await PipelineExecutor(reg).execute(
+            nodes, context={"ctx": {"base_value": 7}}
+        )
 
         assert result.status == "completed"
         assert result.node_results["n1"].output["result"] == 21.0
@@ -300,29 +326,37 @@ class TestPipelineConditionalBranching:
         reg = _build_registry(ConditionalOutputTool(), MathTool())
         nodes = [
             PipelineNode(
-                id="evaluate", tool_name="conditional_output",
+                id="evaluate",
+                tool_name="conditional_output",
                 arguments={"mode": "high", "value": 100},
             ),
             PipelineNode(
-                id="bullish_path", tool_name="math_op",
+                id="bullish_path",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "a": 100, "b": 1.5},
                 depends_on=["evaluate"],
                 condition=NodeCondition(
-                    source_node="evaluate", field="outlook",
-                    operator="eq", value="bullish",
+                    source_node="evaluate",
+                    field="outlook",
+                    operator="eq",
+                    value="bullish",
                 ),
             ),
             PipelineNode(
-                id="bearish_path", tool_name="math_op",
+                id="bearish_path",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "a": 100, "b": 0.5},
                 depends_on=["evaluate"],
                 condition=NodeCondition(
-                    source_node="evaluate", field="outlook",
-                    operator="eq", value="bearish",
+                    source_node="evaluate",
+                    field="outlook",
+                    operator="eq",
+                    value="bearish",
                 ),
             ),
             PipelineNode(
-                id="final", tool_name="echo",
+                id="final",
+                tool_name="echo",
                 depends_on=["bullish_path", "bearish_path"],
                 arguments={"summary": "done"},
             ),
@@ -343,29 +377,37 @@ class TestPipelineConditionalBranching:
         reg = _build_registry(ConditionalOutputTool(), MathTool(), EchoTool())
         nodes = [
             PipelineNode(
-                id="evaluate", tool_name="conditional_output",
+                id="evaluate",
+                tool_name="conditional_output",
                 arguments={"mode": "low", "value": 100},
             ),
             PipelineNode(
-                id="bullish_path", tool_name="math_op",
+                id="bullish_path",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "a": 100, "b": 1.5},
                 depends_on=["evaluate"],
                 condition=NodeCondition(
-                    source_node="evaluate", field="outlook",
-                    operator="eq", value="bullish",
+                    source_node="evaluate",
+                    field="outlook",
+                    operator="eq",
+                    value="bullish",
                 ),
             ),
             PipelineNode(
-                id="bearish_path", tool_name="math_op",
+                id="bearish_path",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "a": 100, "b": 0.5},
                 depends_on=["evaluate"],
                 condition=NodeCondition(
-                    source_node="evaluate", field="outlook",
-                    operator="eq", value="bearish",
+                    source_node="evaluate",
+                    field="outlook",
+                    operator="eq",
+                    value="bearish",
                 ),
             ),
             PipelineNode(
-                id="final", tool_name="echo",
+                id="final",
+                tool_name="echo",
                 depends_on=["bullish_path", "bearish_path"],
                 arguments={"summary": "done"},
             ),
@@ -382,25 +424,32 @@ class TestPipelineConditionalBranching:
         reg = _build_registry(EchoTool(), MathTool())
         nodes = [
             PipelineNode(
-                id="source", tool_name="echo",
+                id="source",
+                tool_name="echo",
                 arguments={"score": 85},
             ),
             PipelineNode(
-                id="high_branch", tool_name="echo",
+                id="high_branch",
+                tool_name="echo",
                 arguments={"action": "execute_high"},
                 depends_on=["source"],
                 condition=NodeCondition(
-                    source_node="source", field="score",
-                    operator="gt", value=70,
+                    source_node="source",
+                    field="score",
+                    operator="gt",
+                    value=70,
                 ),
             ),
             PipelineNode(
-                id="low_branch", tool_name="echo",
+                id="low_branch",
+                tool_name="echo",
                 arguments={"action": "execute_low"},
                 depends_on=["source"],
                 condition=NodeCondition(
-                    source_node="source", field="score",
-                    operator="lte", value=70,
+                    source_node="source",
+                    field="score",
+                    operator="lte",
+                    value=70,
                 ),
             ),
         ]
@@ -415,26 +464,36 @@ class TestPipelineConditionalBranching:
         reg = _build_registry(ConditionalOutputTool(), EchoTool())
         nodes = [
             PipelineNode(
-                id="eval1", tool_name="conditional_output",
+                id="eval1",
+                tool_name="conditional_output",
                 arguments={"mode": "high"},
             ),
             PipelineNode(
-                id="branch_a", tool_name="echo",
+                id="branch_a",
+                tool_name="echo",
                 arguments={"level": "a"},
                 depends_on=["eval1"],
-                condition=NodeCondition(source_node="eval1", field="outlook", operator="eq", value="bullish"),
+                condition=NodeCondition(
+                    source_node="eval1", field="outlook", operator="eq", value="bullish"
+                ),
             ),
             PipelineNode(
-                id="sub_branch_a1", tool_name="echo",
+                id="sub_branch_a1",
+                tool_name="echo",
                 arguments={"level": "a1"},
                 depends_on=["branch_a"],
-                condition=NodeCondition(source_node="eval1", field="score", operator="gt", value=80),
+                condition=NodeCondition(
+                    source_node="eval1", field="score", operator="gt", value=80
+                ),
             ),
             PipelineNode(
-                id="sub_branch_a2", tool_name="echo",
+                id="sub_branch_a2",
+                tool_name="echo",
                 arguments={"level": "a2"},
                 depends_on=["branch_a"],
-                condition=NodeCondition(source_node="eval1", field="score", operator="lte", value=80),
+                condition=NodeCondition(
+                    source_node="eval1", field="score", operator="lte", value=80
+                ),
             ),
         ]
         result = await PipelineExecutor(reg).execute(nodes)
@@ -451,20 +510,27 @@ class TestPipelineDataFlow:
         reg = _build_registry(MathTool())
         nodes = [
             PipelineNode(
-                id="n1", tool_name="math_op",
+                id="n1",
+                tool_name="math_op",
                 arguments={"operation": "add", "a": 10, "b": 5},
             ),
             PipelineNode(
-                id="n2", tool_name="math_op",
+                id="n2",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "b": 3},
                 depends_on=["n1"],
-                input_mappings={"a": InputMapping(source_node="n1", source_field="result")},
+                input_mappings={
+                    "a": InputMapping(source_node="n1", source_field="result")
+                },
             ),
             PipelineNode(
-                id="n3", tool_name="math_op",
+                id="n3",
+                tool_name="math_op",
                 arguments={"operation": "subtract", "b": 10},
                 depends_on=["n2"],
-                input_mappings={"a": InputMapping(source_node="n2", source_field="result")},
+                input_mappings={
+                    "a": InputMapping(source_node="n2", source_field="result")
+                },
             ),
         ]
         result = await PipelineExecutor(reg).execute(nodes)
@@ -482,7 +548,8 @@ class TestPipelineDataFlow:
             PipelineNode(id="left", tool_name="echo", arguments={"value": 10}),
             PipelineNode(id="right", tool_name="echo", arguments={"value": 20}),
             PipelineNode(
-                id="combine", tool_name="math_op",
+                id="combine",
+                tool_name="math_op",
                 arguments={"operation": "add"},
                 depends_on=["left", "right"],
                 input_mappings={
@@ -502,9 +569,12 @@ class TestPipelineDataFlow:
         nodes = [
             PipelineNode(id="n1", tool_name="echo", arguments={"x": 1, "y": 2}),
             PipelineNode(
-                id="n2", tool_name="echo",
+                id="n2",
+                tool_name="echo",
                 depends_on=["n1"],
-                input_mappings={"data": InputMapping(source_node="n1", source_field="__all__")},
+                input_mappings={
+                    "data": InputMapping(source_node="n1", source_field="__all__")
+                },
             ),
         ]
         result = await PipelineExecutor(reg).execute(nodes)
@@ -539,7 +609,7 @@ class TestPipelineErrorHandling:
         result = await executor.execute(nodes)
 
         # At least the second node should fail due to timeout
-        has_timeout = any(
+        any(
             nr.error and "timeout" in nr.error.lower()
             for nr in result.node_results.values()
             if nr.error
@@ -565,7 +635,9 @@ class TestPipelineErrorHandling:
         reg = _build_registry(EchoTool(), FailTool())
         nodes = [
             PipelineNode(id="root", tool_name="echo", arguments={"x": 1}),
-            PipelineNode(id="good", tool_name="echo", arguments={"y": 2}, depends_on=["root"]),
+            PipelineNode(
+                id="good", tool_name="echo", arguments={"y": 2}, depends_on=["root"]
+            ),
             PipelineNode(id="bad", tool_name="fail", depends_on=["root"]),
         ]
         result = await PipelineExecutor(reg).execute(nodes)
@@ -584,39 +656,65 @@ class TestPipelineComplexFlow:
         nodes = [
             PipelineNode(id="source", tool_name="echo", arguments={"base": 50}),
             PipelineNode(
-                id="left", tool_name="math_op",
+                id="left",
+                tool_name="math_op",
                 arguments={"operation": "add", "b": 10},
                 depends_on=["source"],
-                input_mappings={"a": InputMapping(source_node="source", source_field="base")},
+                input_mappings={
+                    "a": InputMapping(source_node="source", source_field="base")
+                },
             ),
             PipelineNode(
-                id="right", tool_name="math_op",
+                id="right",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "b": 2},
                 depends_on=["source"],
-                input_mappings={"a": InputMapping(source_node="source", source_field="base")},
+                input_mappings={
+                    "a": InputMapping(source_node="source", source_field="base")
+                },
             ),
             PipelineNode(
-                id="evaluate", tool_name="conditional_output",
+                id="evaluate",
+                tool_name="conditional_output",
                 arguments={"mode": "high"},
                 depends_on=["left", "right"],
-                input_mappings={"value": InputMapping(source_node="right", source_field="result")},
+                input_mappings={
+                    "value": InputMapping(source_node="right", source_field="result")
+                },
             ),
             PipelineNode(
-                id="high_action", tool_name="math_op",
+                id="high_action",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "b": 1.5},
                 depends_on=["evaluate"],
-                condition=NodeCondition(source_node="evaluate", field="outlook", operator="eq", value="bullish"),
-                input_mappings={"a": InputMapping(source_node="left", source_field="result")},
+                condition=NodeCondition(
+                    source_node="evaluate",
+                    field="outlook",
+                    operator="eq",
+                    value="bullish",
+                ),
+                input_mappings={
+                    "a": InputMapping(source_node="left", source_field="result")
+                },
             ),
             PipelineNode(
-                id="low_action", tool_name="math_op",
+                id="low_action",
+                tool_name="math_op",
                 arguments={"operation": "multiply", "b": 0.5},
                 depends_on=["evaluate"],
-                condition=NodeCondition(source_node="evaluate", field="outlook", operator="eq", value="bearish"),
-                input_mappings={"a": InputMapping(source_node="left", source_field="result")},
+                condition=NodeCondition(
+                    source_node="evaluate",
+                    field="outlook",
+                    operator="eq",
+                    value="bearish",
+                ),
+                input_mappings={
+                    "a": InputMapping(source_node="left", source_field="result")
+                },
             ),
             PipelineNode(
-                id="final", tool_name="echo",
+                id="final",
+                tool_name="echo",
                 arguments={"pipeline": "complete"},
                 depends_on=["high_action", "low_action"],
             ),
@@ -637,8 +735,12 @@ class TestPipelineComplexFlow:
         # Final ran
         assert "final" in result.execution_path
         # Execution path is correct order
-        assert result.execution_path.index("source") < result.execution_path.index("left")
-        assert result.execution_path.index("evaluate") < result.execution_path.index("high_action")
+        assert result.execution_path.index("source") < result.execution_path.index(
+            "left"
+        )
+        assert result.execution_path.index("evaluate") < result.execution_path.index(
+            "high_action"
+        )
 
     @pytest.mark.asyncio
     async def test_six_step_pipeline_with_data_flow(self):
@@ -657,13 +759,19 @@ class TestPipelineComplexFlow:
                 tool_name="math_op",
                 arguments={"operation": "multiply", "b": 8760},
                 depends_on=["extract"],
-                input_mappings={"a": InputMapping(source_node="extract", source_field="capacity_mw")},
+                input_mappings={
+                    "a": InputMapping(source_node="extract", source_field="capacity_mw")
+                },
             ),
             # Step 3: Market data (parallel with step 2)
             PipelineNode(
                 id="market",
                 tool_name="echo",
-                arguments={"electricity_price": 45.2, "gas_price": 3.85, "volatility": 0.23},
+                arguments={
+                    "electricity_price": 45.2,
+                    "gas_price": 3.85,
+                    "volatility": 0.23,
+                },
             ),
             # Step 4: Evaluate conditions
             PipelineNode(
@@ -671,7 +779,11 @@ class TestPipelineComplexFlow:
                 tool_name="conditional_output",
                 arguments={"mode": "high"},  # market price > ppa → bullish
                 depends_on=["parse", "market"],
-                input_mappings={"value": InputMapping(source_node="market", source_field="electricity_price")},
+                input_mappings={
+                    "value": InputMapping(
+                        source_node="market", source_field="electricity_price"
+                    )
+                },
             ),
             # Step 5a: Bullish PnL
             PipelineNode(
@@ -679,8 +791,15 @@ class TestPipelineComplexFlow:
                 tool_name="math_op",
                 arguments={"operation": "multiply", "b": 25},
                 depends_on=["evaluate", "parse"],
-                condition=NodeCondition(source_node="evaluate", field="outlook", operator="eq", value="bullish"),
-                input_mappings={"a": InputMapping(source_node="parse", source_field="result")},
+                condition=NodeCondition(
+                    source_node="evaluate",
+                    field="outlook",
+                    operator="eq",
+                    value="bullish",
+                ),
+                input_mappings={
+                    "a": InputMapping(source_node="parse", source_field="result")
+                },
             ),
             # Step 5b: Bearish risk
             PipelineNode(
@@ -688,8 +807,15 @@ class TestPipelineComplexFlow:
                 tool_name="math_op",
                 arguments={"operation": "multiply", "b": 0.1},
                 depends_on=["evaluate", "parse"],
-                condition=NodeCondition(source_node="evaluate", field="outlook", operator="eq", value="bearish"),
-                input_mappings={"a": InputMapping(source_node="parse", source_field="result")},
+                condition=NodeCondition(
+                    source_node="evaluate",
+                    field="outlook",
+                    operator="eq",
+                    value="bearish",
+                ),
+                input_mappings={
+                    "a": InputMapping(source_node="parse", source_field="result")
+                },
             ),
             # Step 6: Final valuation
             PipelineNode(

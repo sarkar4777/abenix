@@ -10,9 +10,9 @@ from zoneinfo import ZoneInfo
 from engine.tools.base import BaseTool, ToolResult
 
 US_HOLIDAYS_FIXED = [
-    (1, 1),    # New Year's Day
-    (6, 19),   # Juneteenth
-    (7, 4),    # Independence Day
+    (1, 1),  # New Year's Day
+    (6, 19),  # Juneteenth
+    (7, 4),  # Independence Day
     (11, 11),  # Veterans Day
     (12, 25),  # Christmas
 ]
@@ -31,9 +31,9 @@ def _us_holidays(year: int) -> set[date]:
     for m, d in US_HOLIDAYS_FIXED:
         holidays.add(date(year, m, d))
 
-    holidays.add(_nth_weekday(year, 1, 0, 3))   # MLK Day
-    holidays.add(_nth_weekday(year, 2, 0, 3))   # Presidents Day
-    holidays.add(_nth_weekday(year, 9, 0, 1))   # Labor Day
+    holidays.add(_nth_weekday(year, 1, 0, 3))  # MLK Day
+    holidays.add(_nth_weekday(year, 2, 0, 3))  # Presidents Day
+    holidays.add(_nth_weekday(year, 9, 0, 1))  # Labor Day
     holidays.add(_nth_weekday(year, 10, 0, 2))  # Columbus Day
     holidays.add(_nth_weekday(year, 11, 3, 4))  # Thanksgiving
 
@@ -77,9 +77,14 @@ class DateCalculatorTool(BaseTool):
             "operation": {
                 "type": "string",
                 "enum": [
-                    "add", "subtract", "difference", "business_days",
-                    "business_days_between", "contract_milestones",
-                    "days_until", "format",
+                    "add",
+                    "subtract",
+                    "difference",
+                    "business_days",
+                    "business_days_between",
+                    "contract_milestones",
+                    "days_until",
+                    "format",
                 ],
                 "description": "Date operation to perform",
             },
@@ -191,6 +196,7 @@ class DateCalculatorTool(BaseTool):
         new_month = (d.month + months - 1) % 12 + 1
 
         import calendar
+
         max_day = calendar.monthrange(new_year, new_month)[1]
         new_day = min(d.day, max_day)
 
@@ -276,7 +282,9 @@ class DateCalculatorTool(BaseTool):
         end = self._add_to_date(start, 0, 0, years)
         midpoint = self._add_to_date(start, 0, 0, years // 2)
 
-        milestones.append({"event": "Contract Start (Execution)", "date": start.isoformat()})
+        milestones.append(
+            {"event": "Contract Start (Execution)", "date": start.isoformat()}
+        )
 
         for q in range(1, 5):
             qdate = self._add_to_date(start, 0, 3 * q, 0)
@@ -287,12 +295,19 @@ class DateCalculatorTool(BaseTool):
             anniversary = self._add_to_date(start, 0, 0, y)
             annual_dates.append(anniversary)
             if y <= 5 or y == years or y % 5 == 0:
-                milestones.append({"event": f"Year {y} Anniversary", "date": anniversary.isoformat()})
+                milestones.append(
+                    {"event": f"Year {y} Anniversary", "date": anniversary.isoformat()}
+                )
 
         milestones.append({"event": "Contract Midpoint", "date": midpoint.isoformat()})
 
         renewal_notice = self._add_to_date(end, 0, -6, 0)
-        milestones.append({"event": "Renewal Notice Deadline (6 months before)", "date": renewal_notice.isoformat()})
+        milestones.append(
+            {
+                "event": "Renewal Notice Deadline (6 months before)",
+                "date": renewal_notice.isoformat(),
+            }
+        )
         milestones.append({"event": "Contract End", "date": end.isoformat()})
 
         today = date.today()
@@ -307,7 +322,9 @@ class DateCalculatorTool(BaseTool):
             "total_days": total,
             "elapsed_days": max(0, elapsed),
             "remaining_days": max(0, remaining),
-            "pct_complete": round(max(0, min(100, elapsed / total * 100)), 1) if total > 0 else 0,
+            "pct_complete": (
+                round(max(0, min(100, elapsed / total * 100)), 1) if total > 0 else 0
+            ),
             "milestones": sorted(milestones, key=lambda m: m["date"]),
         }
 
@@ -323,7 +340,9 @@ class DateCalculatorTool(BaseTool):
             "weeks_remaining": round(diff / 7, 1),
             "is_past": diff < 0,
             "is_business_day": _is_business_day(target),
-            "business_days_remaining": self._count_bdays(today, target) if diff > 0 else 0,
+            "business_days_remaining": (
+                self._count_bdays(today, target) if diff > 0 else 0
+            ),
         }
 
     def _count_bdays(self, start: date, end: date) -> int:
@@ -344,7 +363,7 @@ class DateCalculatorTool(BaseTool):
         except (KeyError, ValueError):
             tz = ZoneInfo("UTC")
 
-        dt = datetime(d.year, d.month, d.day, tzinfo=tz)
+        datetime(d.year, d.month, d.day, tzinfo=tz)
 
         return {
             "iso": d.isoformat(),
@@ -355,7 +374,8 @@ class DateCalculatorTool(BaseTool):
             "day_of_year": d.timetuple().tm_yday,
             "week_number": d.isocalendar()[1],
             "quarter": (d.month - 1) // 3 + 1,
-            "is_leap_year": d.year % 4 == 0 and (d.year % 100 != 0 or d.year % 400 == 0),
+            "is_leap_year": d.year % 4 == 0
+            and (d.year % 100 != 0 or d.year % 400 == 0),
             "is_business_day": _is_business_day(d),
             "timezone": tz_name,
         }

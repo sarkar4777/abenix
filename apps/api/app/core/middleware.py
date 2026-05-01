@@ -10,25 +10,31 @@ from app.core.security import verify_token
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_UPLOAD_BODY_BYTES = 50 * 1024 * 1024  # 50 MB
 
-AUTH_PATHS = frozenset({
-    "/api/auth/login",
-    "/api/auth/register",
-    "/api/auth/refresh",
-})
+AUTH_PATHS = frozenset(
+    {
+        "/api/auth/login",
+        "/api/auth/register",
+        "/api/auth/refresh",
+    }
+)
 
-RATE_LIMIT_SKIP = frozenset({
-    "/api/health",
-    "/api/health/ready",
-    "/api/metrics",
-    "/",
-    "/docs",
-    "/redoc",
-    "/openapi.json",
-})
+RATE_LIMIT_SKIP = frozenset(
+    {
+        "/api/health",
+        "/api/health/ready",
+        "/api/metrics",
+        "/",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    }
+)
 
 
 class TenantMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         request.state.tenant_id = None
 
         # Try API key first
@@ -73,7 +79,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         path = request.url.path
 
         if path in RATE_LIMIT_SKIP:
@@ -94,11 +102,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 class BodySizeLimitMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         content_length = request.headers.get("content-length")
         if content_length:
             length = int(content_length)
-            is_upload = "upload" in request.url.path or "multipart" in request.headers.get("content-type", "")
+            is_upload = (
+                "upload" in request.url.path
+                or "multipart" in request.headers.get("content-type", "")
+            )
             limit = MAX_UPLOAD_BODY_BYTES if is_upload else MAX_REQUEST_BODY_BYTES
             if length > limit:
                 return JSONResponse(
@@ -106,7 +119,9 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
                     content={
                         "data": None,
                         "error": {
-                            "message": "Request body too large. Max {} MB.".format(limit // (1024 * 1024)),
+                            "message": "Request body too large. Max {} MB.".format(
+                                limit // (1024 * 1024)
+                            ),
                             "code": 413,
                         },
                     },

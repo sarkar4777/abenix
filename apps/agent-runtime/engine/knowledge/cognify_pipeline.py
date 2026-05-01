@@ -7,8 +7,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine.knowledge.entity_extractor import extract_from_document, DocumentExtractionResult
-from engine.knowledge.entity_resolver import resolve_entities, ResolutionResult
+from engine.knowledge.entity_extractor import (
+    extract_from_document,
+    DocumentExtractionResult,
+)
+from engine.knowledge.entity_resolver import resolve_entities
 from engine.knowledge.graph_writer import write_entities, write_relationships
 from engine.knowledge.neo4j_client import ensure_schema, is_neo4j_available
 
@@ -21,6 +24,7 @@ def _flush_progress(db_url: str, job_id: str, result: "CognifyResult") -> None:
         return
     try:
         from sqlalchemy import create_engine, text as _t
+
         eng = create_engine(db_url)
         with eng.begin() as conn:
             conn.execute(
@@ -53,6 +57,7 @@ def _flush_progress(db_url: str, job_id: str, result: "CognifyResult") -> None:
 @dataclass
 class CognifyResult:
     """Result of a full cognify run."""
+
     kb_id: str
     job_id: str
     status: str = "complete"
@@ -81,9 +86,12 @@ class CognifyResult:
 
 def _provider_key(model: str) -> str:
     m = (model or "").lower()
-    if m.startswith("claude"): return "anthropic"
-    if m.startswith("gpt") or m.startswith("o1") or m.startswith("chatgpt"): return "openai"
-    if m.startswith("gemini"): return "google"
+    if m.startswith("claude"):
+        return "anthropic"
+    if m.startswith("gpt") or m.startswith("o1") or m.startswith("chatgpt"):
+        return "openai"
+    if m.startswith("gemini"):
+        return "google"
     return "other"
 
 
@@ -131,7 +139,11 @@ async def run_cognify(
 
     await ensure_schema()
 
-    logger.info("Cognify [%s] Phase 1: Extracting entities from %d documents", job_id[:8], len(documents))
+    logger.info(
+        "Cognify [%s] Phase 1: Extracting entities from %d documents",
+        job_id[:8],
+        len(documents),
+    )
     all_extraction_results: list[DocumentExtractionResult] = []
 
     for doc in documents:
@@ -170,7 +182,9 @@ async def run_cognify(
             result.other_cost += doc_result.total_cost
         # Running counts so the UI banner can show something ticking.
         result.entities_extracted = sum(len(r.entities) for r in all_extraction_results)
-        result.relationships_extracted = sum(len(r.relationships) for r in all_extraction_results)
+        result.relationships_extracted = sum(
+            len(r.relationships) for r in all_extraction_results
+        )
         _flush_progress(db_url, job_id, result)
 
     # Aggregate raw entities and relationships
@@ -184,13 +198,19 @@ async def run_cognify(
     result.relationships_extracted = len(all_raw_relationships)
 
     if not all_raw_entities:
-        logger.warning("Cognify [%s] No entities extracted from %d documents", job_id[:8], len(documents))
+        logger.warning(
+            "Cognify [%s] No entities extracted from %d documents",
+            job_id[:8],
+            len(documents),
+        )
         result.duration_seconds = time.monotonic() - start
         return result
 
     logger.info(
         "Cognify [%s] Phase 2: Resolving %d entities, %d relationships",
-        job_id[:8], len(all_raw_entities), len(all_raw_relationships),
+        job_id[:8],
+        len(all_raw_entities),
+        len(all_raw_relationships),
     )
 
     # Fetch existing entities from the KB for cross-document dedup
@@ -210,7 +230,9 @@ async def run_cognify(
 
     logger.info(
         "Cognify [%s] Phase 3: Writing %d entities, %d relationships to Neo4j",
-        job_id[:8], len(resolution.entities), len(resolution.relationships),
+        job_id[:8],
+        len(resolution.entities),
+        len(resolution.relationships),
     )
 
     # Write entities to Neo4j
@@ -239,9 +261,16 @@ async def run_cognify(
         result.entities_by_type[t] = result.entities_by_type.get(t, 0) + 1
 
     # Top entities by mention count
-    sorted_entities = sorted(resolution.entities, key=lambda e: e.mention_count, reverse=True)
+    sorted_entities = sorted(
+        resolution.entities, key=lambda e: e.mention_count, reverse=True
+    )
     result.top_entities = [
-        {"name": e.canonical_name, "type": e.entity_type, "mentions": e.mention_count, "description": e.description}
+        {
+            "name": e.canonical_name,
+            "type": e.entity_type,
+            "mentions": e.mention_count,
+            "description": e.description,
+        }
         for e in sorted_entities[:20]
     ]
 
@@ -253,37 +282,52 @@ async def run_cognify(
     result.duration_seconds = time.monotonic() - start
     logger.info(
         "Cognify [%s] Complete: %d entities, %d relationships, %.1fs, $%.4f",
-        job_id[:8], result.entities_after_resolution, result.relationships_written,
-        result.duration_seconds, result.total_cost,
+        job_id[:8],
+        result.entities_after_resolution,
+        result.relationships_written,
+        result.duration_seconds,
+        result.total_cost,
     )
 
     return result
 
 
 async def _no_new_documents_since_last_cognify(
-    kb_id: str, db_url: str, documents: list[dict[str, Any]],
+    kb_id: str,
+    db_url: str,
+    documents: list[dict[str, Any]],
 ) -> bool:
     """True iff every passed document was created at-or-before the"""
     if not db_url or not documents:
         return False
     try:
         from sqlalchemy import create_engine, text
+
         engine = create_engine(db_url)
         with engine.connect() as conn:
-            row = conn.execute(text(
-                "SELECT last_cognified_at FROM knowledge_collections "
-                "WHERE id = CAST(:kb_id AS uuid)"
-            ), {"kb_id": kb_id}).fetchone()
+            row = conn.execute(
+                text(
+                    "SELECT last_cognified_at FROM knowledge_collections "
+                    "WHERE id = CAST(:kb_id AS uuid)"
+                ),
+                {"kb_id": kb_id},
+            ).fetchone()
             if row is None or row[0] is None:
                 return False
             last = row[0]
             doc_ids = [d["id"] for d in documents if d.get("id")]
             if not doc_ids:
                 return False
-            cnt = conn.execute(text(
-                "SELECT COUNT(*) FROM documents "
-                "WHERE id = ANY(:ids) AND created_at > :last"
-            ), {"ids": doc_ids, "last": last}).scalar() or 0
+            cnt = (
+                conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM documents "
+                        "WHERE id = ANY(:ids) AND created_at > :last"
+                    ),
+                    {"ids": doc_ids, "last": last},
+                ).scalar()
+                or 0
+            )
             return cnt == 0
     except Exception:
         return False
@@ -295,18 +339,20 @@ async def _load_active_ontology(kb_id: str, db_url: str) -> dict | None:
         return None
     try:
         from sqlalchemy import create_engine, text
+
         engine = create_engine(db_url)
         with engine.connect() as conn:
-            row = conn.execute(text(
-                """
+            row = conn.execute(
+                text("""
                 SELECT s.entity_types, s.relationship_types
                 FROM knowledge_collections kb
                 JOIN knowledge_projects p ON p.id = kb.project_id
                 JOIN ontology_schemas s ON s.id = p.ontology_schema_id
                 WHERE kb.id = CAST(:kb_id AS uuid)
                 LIMIT 1
-                """
-            ), {"kb_id": kb_id}).fetchone()
+                """),
+                {"kb_id": kb_id},
+            ).fetchone()
             if row is None:
                 return None
             return {
@@ -325,10 +371,13 @@ async def _fetch_existing_entities(kb_id: str, db_url: str) -> list[dict[str, An
 
     try:
         from sqlalchemy import create_engine, text
+
         engine = create_engine(db_url)
         with engine.connect() as conn:
             rows = conn.execute(
-                text("SELECT canonical_name, entity_type, aliases FROM graph_entities WHERE kb_id = :kb_id"),
+                text(
+                    "SELECT canonical_name, entity_type, aliases FROM graph_entities WHERE kb_id = :kb_id"
+                ),
                 {"kb_id": kb_id},
             ).fetchall()
             return [
@@ -357,6 +406,7 @@ async def _update_pg_metadata(
         import json
         import uuid as uuid_mod
         from sqlalchemy import create_engine, text
+
         engine = create_engine(db_url)
 
         with engine.begin() as conn:
@@ -380,12 +430,16 @@ async def _update_pg_metadata(
                             updated_at = now()
                     """),
                     {
-                        "id": str(uuid_mod.uuid4()), "tenant_id": tenant_id, "kb_id": kb_id,
-                        "name": e.canonical_name, "type": e.entity_type,
+                        "id": str(uuid_mod.uuid4()),
+                        "tenant_id": tenant_id,
+                        "kb_id": kb_id,
+                        "name": e.canonical_name,
+                        "type": e.entity_type,
                         "desc": e.description or "",
                         "aliases": json.dumps(e.aliases or []),
                         "doc_ids": json.dumps(e.source_doc_ids or []),
-                        "neo4j_id": neo4j_id, "mentions": e.mention_count,
+                        "neo4j_id": neo4j_id,
+                        "mentions": e.mention_count,
                         "confidence": float(e.confidence),
                     },
                 )
@@ -406,9 +460,12 @@ async def _update_pg_metadata(
                         ON CONFLICT DO NOTHING
                     """),
                     {
-                        "id": str(uuid_mod.uuid4()), "kb_id": kb_id,
-                        "src_name": r.source, "tgt_name": r.target,
-                        "rel_type": r.relationship_type, "desc": r.description or "",
+                        "id": str(uuid_mod.uuid4()),
+                        "kb_id": kb_id,
+                        "src_name": r.source,
+                        "tgt_name": r.target,
+                        "rel_type": r.relationship_type,
+                        "desc": r.description or "",
                         "weight": float(r.weight),
                         "doc_ids": json.dumps(r.source_doc_ids or []),
                     },
@@ -418,7 +475,8 @@ async def _update_pg_metadata(
             if rels_written < len(relationships):
                 logger.warning(
                     "Only %d/%d relationships written to PG (some entities may not have matched)",
-                    rels_written, len(relationships),
+                    rels_written,
+                    len(relationships),
                 )
 
             # Update KB counters

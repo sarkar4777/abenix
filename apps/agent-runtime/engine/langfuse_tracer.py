@@ -10,8 +10,11 @@ _tracer_instance: LangfuseTracer | None = None
 
 
 class LangfuseTracer:
-    def __init__(self, public_key: str, secret_key: str, host: str | None = None) -> None:
+    def __init__(
+        self, public_key: str, secret_key: str, host: str | None = None
+    ) -> None:
         from langfuse import Langfuse
+
         kwargs: dict[str, Any] = {
             "public_key": public_key,
             "secret_key": secret_key,

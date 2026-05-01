@@ -1,4 +1,5 @@
 """Tier 3 LLM critic — coherence check for pipelines and agents."""
+
 from __future__ import annotations
 
 import json
@@ -77,9 +78,18 @@ def _build_user_prompt(kind: str, config: dict[str, Any], purpose: str) -> str:
     # Clip system prompts so we don't blow the context window.
     trimmed = json.loads(json.dumps(config, default=str))
     if isinstance(trimmed, dict):
-        if isinstance(trimmed.get("system_prompt"), str) and len(trimmed["system_prompt"]) > 4000:
-            trimmed["system_prompt"] = trimmed["system_prompt"][:4000] + "...[truncated]"
-        nodes = trimmed.get("pipeline_config", {}).get("nodes") or trimmed.get("nodes") or []
+        if (
+            isinstance(trimmed.get("system_prompt"), str)
+            and len(trimmed["system_prompt"]) > 4000
+        ):
+            trimmed["system_prompt"] = (
+                trimmed["system_prompt"][:4000] + "...[truncated]"
+            )
+        nodes = (
+            trimmed.get("pipeline_config", {}).get("nodes")
+            or trimmed.get("nodes")
+            or []
+        )
         for n in nodes if isinstance(nodes, list) else []:
             args = n.get("arguments", {}) if isinstance(n, dict) else {}
             for k, v in list(args.items()) if isinstance(args, dict) else []:
@@ -101,6 +111,7 @@ async def critique(
 ) -> LLMCriticReport:
     """Run the Tier 3 critic. `kind` is 'pipeline' or 'agent'."""
     import time as _time
+
     report = LLMCriticReport(model=model)
     try:
         client = anthropic.AsyncAnthropic()
@@ -129,7 +140,9 @@ async def critique(
             text += block.text
 
     # Rough cost estimate (claude-sonnet-4-5 pricing).
-    report.cost_usd = (resp.usage.input_tokens * 3.0 + resp.usage.output_tokens * 15.0) / 1_000_000
+    report.cost_usd = (
+        resp.usage.input_tokens * 3.0 + resp.usage.output_tokens * 15.0
+    ) / 1_000_000
 
     # Parse JSON — handle fence fallback.
     raw = text.strip()

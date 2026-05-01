@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
@@ -16,7 +15,6 @@ from engine.pipeline import (
     PipelineNode,
 )
 from engine.tools.base import BaseTool, ToolRegistry, ToolResult
-
 
 # ── Fake deterministic tools (no LLM calls) ──────────────────────────
 
@@ -244,13 +242,19 @@ class TestParallelFanIn:
         reg = _all_tools()
         nodes = [
             PipelineNode(
-                id="a", tool_name="string_producer", arguments={"text": "A"},
+                id="a",
+                tool_name="string_producer",
+                arguments={"text": "A"},
             ),
             PipelineNode(
-                id="b", tool_name="string_producer", arguments={"text": "B"},
+                id="b",
+                tool_name="string_producer",
+                arguments={"text": "B"},
             ),
             PipelineNode(
-                id="c", tool_name="string_producer", arguments={"text": "C"},
+                id="c",
+                tool_name="string_producer",
+                arguments={"text": "C"},
             ),
             PipelineNode(
                 id="merge",
@@ -290,8 +294,10 @@ class TestConditionalBranching:
                 arguments={"took": "high"},
                 depends_on=["decide"],
                 condition=NodeCondition(
-                    source_node="decide", field="metrics.score",
-                    operator="gte", value=80,
+                    source_node="decide",
+                    field="metrics.score",
+                    operator="gte",
+                    value=80,
                 ),
             ),
             PipelineNode(
@@ -300,8 +306,10 @@ class TestConditionalBranching:
                 arguments={"took": "low"},
                 depends_on=["decide"],
                 condition=NodeCondition(
-                    source_node="decide", field="metrics.score",
-                    operator="lt", value=80,
+                    source_node="decide",
+                    field="metrics.score",
+                    operator="lt",
+                    value=80,
                 ),
             ),
         ]
@@ -425,10 +433,7 @@ class TestContextInjection:
         )
 
         assert result.status == "completed"
-        assert (
-            "hello from context"
-            in result.node_results["reader"].output["received"]
-        )
+        assert "hello from context" in result.node_results["reader"].output["received"]
 
 
 class TestTypeCoercion:
@@ -493,7 +498,9 @@ class TestLongChain:
         reg = _all_tools()
         nodes = [
             PipelineNode(
-                id="n1", tool_name="string_producer", arguments={"text": "start"},
+                id="n1",
+                tool_name="string_producer",
+                arguments={"text": "start"},
             ),
             PipelineNode(
                 id="n2",
@@ -537,25 +544,31 @@ class TestMixedPatterns:
         reg = _all_tools()
         nodes = [
             PipelineNode(
-                id="src", tool_name="dict_producer",
+                id="src",
+                tool_name="dict_producer",
                 arguments={"summary": "ok", "score": 99},
             ),
             PipelineNode(
-                id="branch_a", tool_name="string_producer",
+                id="branch_a",
+                tool_name="string_producer",
                 arguments={"text": "A"},
                 depends_on=["src"],
                 condition=NodeCondition(
-                    source_node="src", field="metrics.score",
-                    operator="gte", value=50,
+                    source_node="src",
+                    field="metrics.score",
+                    operator="gte",
+                    value=50,
                 ),
             ),
             PipelineNode(
-                id="branch_b", tool_name="string_producer",
+                id="branch_b",
+                tool_name="string_producer",
                 arguments={"text": "B"},
                 depends_on=["src"],
             ),
             PipelineNode(
-                id="merger", tool_name="echo",
+                id="merger",
+                tool_name="echo",
                 arguments={
                     "from_a": "{{branch_a.text}}",
                     "from_b": "{{branch_b.text}}",
@@ -612,7 +625,8 @@ class TestInputMappingWithContext:
             ),
         ]
         result = await PipelineExecutor(reg).execute(
-            nodes, context={"cfg": {"greeting": "howdy"}},
+            nodes,
+            context={"cfg": {"greeting": "howdy"}},
         )
 
         assert result.status == "completed"

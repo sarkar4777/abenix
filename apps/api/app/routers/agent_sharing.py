@@ -1,11 +1,12 @@
 """Agent Sharing — granular sharing with view/execute/edit permissions."""
+
 from __future__ import annotations
 
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, and_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -14,6 +15,7 @@ from app.core.responses import error, success
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.agent import Agent
@@ -80,21 +82,28 @@ async def share_agent(
                 tenant_id=target_user.tenant_id,
                 user_id=target_user.id,
                 type="agent_shared",
-                title=f"Agent shared with you",
+                title="Agent shared with you",
                 message=f"{user.full_name} shared '{agent.name}' with you ({permission} permission)",
                 link=f"/agents/{agent_id}/chat",
-                metadata={"agent_id": str(agent_id), "permission": permission, "shared_by": user.full_name},
+                metadata={
+                    "agent_id": str(agent_id),
+                    "permission": permission,
+                    "shared_by": user.full_name,
+                },
             )
             await db.commit()
         except Exception:
             pass
 
-    return success({
-        "id": str(share.id),
-        "agent_id": str(agent_id),
-        "shared_with": email,
-        "permission": permission,
-    }, status_code=201)
+    return success(
+        {
+            "id": str(share.id),
+            "agent_id": str(agent_id),
+            "shared_with": email,
+            "permission": permission,
+        },
+        status_code=201,
+    )
 
 
 @router.get("/{agent_id}/shares")
@@ -104,21 +113,23 @@ async def list_shares(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """List all users this agent is shared with."""
-    result = await db.execute(
-        select(AgentShare).where(AgentShare.agent_id == agent_id)
-    )
+    result = await db.execute(select(AgentShare).where(AgentShare.agent_id == agent_id))
     shares = result.scalars().all()
-    return success([
-        {
-            "id": str(s.id),
-            "email": s.shared_with_email,
-            "user_id": str(s.shared_with_user_id) if s.shared_with_user_id else None,
-            "permission": s.permission.value,
-            "shared_by": str(s.shared_by),
-            "created_at": s.created_at.isoformat() if s.created_at else None,
-        }
-        for s in shares
-    ])
+    return success(
+        [
+            {
+                "id": str(s.id),
+                "email": s.shared_with_email,
+                "user_id": (
+                    str(s.shared_with_user_id) if s.shared_with_user_id else None
+                ),
+                "permission": s.permission.value,
+                "shared_by": str(s.shared_by),
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in shares
+        ]
+    )
 
 
 @router.delete("/{agent_id}/shares/{share_id}")
@@ -130,7 +141,9 @@ async def revoke_share(
 ) -> Any:
     """Revoke a user's access to a shared agent."""
     result = await db.execute(
-        select(AgentShare).where(AgentShare.id == share_id, AgentShare.agent_id == agent_id)
+        select(AgentShare).where(
+            AgentShare.id == share_id, AgentShare.agent_id == agent_id
+        )
     )
     share = result.scalar_one_or_none()
     if not share:
@@ -139,7 +152,9 @@ async def revoke_share(
     # Notify the user whose access is being revoked
     if share.shared_with_user_id:
         try:
-            agent_result = await db.execute(select(Agent.name).where(Agent.id == agent_id))
+            agent_result = await db.execute(
+                select(Agent.name).where(Agent.id == agent_id)
+            )
             agent_name = agent_result.scalar() or "Agent"
             await create_notification(
                 db,
@@ -164,21 +179,25 @@ async def shared_with_me(
 ) -> Any:
     """List all agents shared with the current user."""
     result = await db.execute(
-        select(AgentShare, Agent).join(Agent, AgentShare.agent_id == Agent.id).where(
+        select(AgentShare, Agent)
+        .join(Agent, AgentShare.agent_id == Agent.id)
+        .where(
             AgentShare.shared_with_user_id == user.id,
         )
     )
     rows = result.all()
-    return success([
-        {
-            "share_id": str(share.id),
-            "agent_id": str(agent.id),
-            "agent_name": agent.name,
-            "agent_slug": agent.slug,
-            "description": agent.description,
-            "permission": share.permission.value,
-            "shared_by": str(share.shared_by),
-            "category": agent.category,
-        }
-        for share, agent in rows
-    ])
+    return success(
+        [
+            {
+                "share_id": str(share.id),
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "agent_slug": agent.slug,
+                "description": agent.description,
+                "permission": share.permission.value,
+                "shared_by": str(share.shared_by),
+                "category": agent.category,
+            }
+            for share, agent in rows
+        ]
+    )

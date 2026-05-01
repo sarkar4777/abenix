@@ -49,12 +49,14 @@ async def submit_approval(
     """Submit an approval or rejection for a pending gate."""
     r = await _get_redis()
     key = _approval_key(execution_id, gate_id)
-    result = json.dumps({
-        "decision": decision,  # "approved" or "rejected"
-        "reviewer": reviewer,
-        "comment": comment,
-        "decided_at": time.time(),
-    })
+    result = json.dumps(
+        {
+            "decision": decision,  # "approved" or "rejected"
+            "reviewer": reviewer,
+            "comment": comment,
+            "decided_at": time.time(),
+        }
+    )
     await r.set(key, result, ex=7200)  # 2 hour TTL
     return True
 
@@ -132,16 +134,18 @@ class HumanApprovalTool(BaseTool):
         r = await _get_redis()
 
         # Register the pending approval
-        pending_data = json.dumps({
-            "execution_id": self._execution_id,
-            "gate_id": gate_id,
-            "tenant_id": self._tenant_id,
-            "agent_name": self._agent_name,
-            "action": action,
-            "details": details,
-            "risk_level": risk_level,
-            "requested_at": time.time(),
-        })
+        pending_data = json.dumps(
+            {
+                "execution_id": self._execution_id,
+                "gate_id": gate_id,
+                "tenant_id": self._tenant_id,
+                "agent_name": self._agent_name,
+                "action": action,
+                "details": details,
+                "risk_level": risk_level,
+                "requested_at": time.time(),
+            }
+        )
         await r.sadd(_pending_key(self._tenant_id), pending_data)
 
         # Poll for approval
@@ -162,11 +166,14 @@ class HumanApprovalTool(BaseTool):
                     msg = f"Approved by {reviewer}."
                     if comment:
                         msg += f" Comment: {comment}"
-                    return ToolResult(content=msg, metadata={
-                        "gate_id": gate_id,
-                        "decision": "approved",
-                        "reviewer": reviewer,
-                    })
+                    return ToolResult(
+                        content=msg,
+                        metadata={
+                            "gate_id": gate_id,
+                            "decision": "approved",
+                            "reviewer": reviewer,
+                        },
+                    )
                 else:
                     reviewer = decision.get("reviewer", "unknown")
                     comment = decision.get("comment", "No reason given")

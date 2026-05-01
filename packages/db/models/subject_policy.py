@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Index, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Index
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +14,7 @@ from models.base import Base, TimestampMixin, UUIDMixin
 
 class SubjectPolicy(UUIDMixin, TimestampMixin, Base):
     """RBAC policy for an acting subject under a specific API key."""
+
     __tablename__ = "subject_policies"
     __table_args__ = (
         Index("ix_subject_policies_lookup", "api_key_id", "subject_type", "subject_id"),
@@ -31,4 +32,6 @@ class SubjectPolicy(UUIDMixin, TimestampMixin, Base):
     rules: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

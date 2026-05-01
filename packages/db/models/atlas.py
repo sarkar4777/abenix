@@ -1,4 +1,5 @@
 """Atlas — unified ontology + knowledge-base canvas data model."""
+
 from __future__ import annotations
 
 import enum
@@ -45,7 +46,10 @@ class AtlasGraph(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # uploads land in this collection and document nodes can deep-link to
     # the chunks they came from.
     kb_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("knowledge_collections.id"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_collections.id"),
+        nullable=True,
+        index=True,
     )
     # Monotonic per-graph version. Increments on any node/edge mutation
     # so the frontend can detect stale snapshots and bail out gracefully.
@@ -58,13 +62,19 @@ class AtlasGraph(UUIDMixin, TenantMixin, TimestampMixin, Base):
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     nodes: Mapped[list["AtlasNode"]] = relationship(
-        back_populates="graph", cascade="all, delete-orphan", passive_deletes=True,
+        back_populates="graph",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     edges: Mapped[list["AtlasEdge"]] = relationship(
-        back_populates="graph", cascade="all, delete-orphan", passive_deletes=True,
+        back_populates="graph",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     snapshots: Mapped[list["AtlasSnapshot"]] = relationship(
-        back_populates="graph", cascade="all, delete-orphan", passive_deletes=True,
+        back_populates="graph",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
         order_by="AtlasSnapshot.created_at",
     )
 
@@ -77,11 +87,17 @@ class AtlasNode(UUIDMixin, TimestampMixin, Base):
     )
 
     graph_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("atlas_graphs.id", ondelete="CASCADE"), index=True
+        UUID(as_uuid=True),
+        ForeignKey("atlas_graphs.id", ondelete="CASCADE"),
+        index=True,
     )
     label: Mapped[str] = mapped_column(String(255))
     kind: Mapped[AtlasNodeKind] = mapped_column(
-        Enum(AtlasNodeKind, name="atlas_node_kind", values_callable=lambda e: [m.value for m in e]),
+        Enum(
+            AtlasNodeKind,
+            name="atlas_node_kind",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         default=AtlasNodeKind.CONCEPT,
     )
     description: Mapped[str] = mapped_column(Text, default="")
@@ -119,13 +135,17 @@ class AtlasEdge(UUIDMixin, TimestampMixin, Base):
     )
 
     graph_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("atlas_graphs.id", ondelete="CASCADE"), index=True
+        UUID(as_uuid=True),
+        ForeignKey("atlas_graphs.id", ondelete="CASCADE"),
+        index=True,
     )
     from_node_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("atlas_nodes.id", ondelete="CASCADE"),
+        UUID(as_uuid=True),
+        ForeignKey("atlas_nodes.id", ondelete="CASCADE"),
     )
     to_node_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("atlas_nodes.id", ondelete="CASCADE"),
+        UUID(as_uuid=True),
+        ForeignKey("atlas_nodes.id", ondelete="CASCADE"),
     )
     label: Mapped[str] = mapped_column(String(255), default="related_to")
     description: Mapped[str] = mapped_column(Text, default="")
@@ -138,7 +158,9 @@ class AtlasEdge(UUIDMixin, TimestampMixin, Base):
     # cursor proposes pairs (`employs` / `employed_by`) and links them
     # via this column for one-step navigation.
     inverse_edge_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("atlas_edges.id", ondelete="SET NULL"), nullable=True,
+        UUID(as_uuid=True),
+        ForeignKey("atlas_edges.id", ondelete="SET NULL"),
+        nullable=True,
     )
     is_directed: Mapped[bool] = mapped_column(Boolean, default=True)
     properties: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -158,13 +180,17 @@ class AtlasSnapshot(UUIDMixin, TimestampMixin, Base):
     )
 
     graph_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("atlas_graphs.id", ondelete="CASCADE"), index=True
+        UUID(as_uuid=True),
+        ForeignKey("atlas_graphs.id", ondelete="CASCADE"),
+        index=True,
     )
     version: Mapped[int] = mapped_column(Integer)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True,
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True,
     )
     auto: Mapped[bool] = mapped_column(Boolean, default=True)
 

@@ -1,11 +1,12 @@
 """Provider-agnostic meeting adapter interface."""
+
 from __future__ import annotations
 
 import abc
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable, Optional
+from typing import Any, AsyncIterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -13,29 +14,32 @@ logger = logging.getLogger(__name__)
 @dataclass
 class JoinRequest:
     """All the parameters needed to join a meeting across providers."""
-    provider: str              # "livekit" | "teams" | "zoom"
-    room: str                  # provider-native room/meeting id
-    display_name: str          # what participants see
-    token: Optional[str] = None        # livekit-signed token / teams bot token
-    url: Optional[str] = None          # livekit server url / teams join url
+
+    provider: str  # "livekit" | "teams" | "zoom"
+    room: str  # provider-native room/meeting id
+    display_name: str  # what participants see
+    token: Optional[str] = None  # livekit-signed token / teams bot token
+    url: Optional[str] = None  # livekit server url / teams join url
     tenant_id: str = ""
     user_id: str = ""
-    meeting_id: str = ""       # our internal meeting id (foreign key to meetings table)
+    meeting_id: str = ""  # our internal meeting id (foreign key to meetings table)
 
 
 @dataclass
 class AudioFrame:
     """Raw PCM audio from the meeting, ready to feed STT."""
-    pcm: bytes                 # 16-bit LE, mono, 16kHz by convention
+
+    pcm: bytes  # 16-bit LE, mono, 16kHz by convention
     sample_rate: int = 16000
     channels: int = 1
-    participant: str = ""      # participant identity that produced the frame
+    participant: str = ""  # participant identity that produced the frame
     timestamp_ms: int = 0
 
 
 @dataclass
 class ChatMessage:
     """Meeting chat message (data channel on LiveKit, chat API on Teams/Zoom)."""
+
     sender: str
     text: str
     timestamp_ms: int = 0
@@ -93,12 +97,15 @@ def get_adapter(provider: str) -> MeetingAdapter:
     p = (provider or "").strip().lower()
     if p == "livekit":
         from engine.tools._livekit_adapter import LiveKitAdapter
+
         return LiveKitAdapter()
     if p == "teams":
         from engine.tools._teams_adapter import TeamsAdapter
+
         return TeamsAdapter()
     if p == "zoom":
         from engine.tools._zoom_adapter import ZoomAdapter
+
         return ZoomAdapter()
     raise ValueError(
         f"Unknown meeting provider '{provider}'. "

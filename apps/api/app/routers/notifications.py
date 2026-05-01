@@ -132,6 +132,7 @@ async def mark_read(
     notification = result.scalar_one_or_none()
     if not notification:
         from app.core.responses import error
+
         return error("Notification not found", 404)
 
     notification.is_read = True

@@ -1,4 +1,5 @@
 """graph_builder — generic DAG/graph construction tool."""
+
 from __future__ import annotations
 
 import json
@@ -51,7 +52,10 @@ class GraphBuilderTool(BaseTool):
                     "properties": {
                         "from": {"type": "string", "description": "Source node ID."},
                         "to": {"type": "string", "description": "Target node ID."},
-                        "label": {"type": "string", "description": "Edge label (optional)."},
+                        "label": {
+                            "type": "string",
+                            "description": "Edge label (optional).",
+                        },
                     },
                     "required": ["from", "to"],
                 },
@@ -77,12 +81,14 @@ class GraphBuilderTool(BaseTool):
         node_ids = {n["id"] for n in raw_nodes}
         nodes = []
         for n in raw_nodes:
-            nodes.append({
-                "id": n["id"],
-                "label": n.get("label", n["id"]),
-                "type": n.get("type", "default"),
-                "data": n.get("data") or {},
-            })
+            nodes.append(
+                {
+                    "id": n["id"],
+                    "label": n.get("label", n["id"]),
+                    "type": n.get("type", "default"),
+                    "data": n.get("data") or {},
+                }
+            )
 
         edges = []
         warnings = []
@@ -94,11 +100,13 @@ class GraphBuilderTool(BaseTool):
             if tgt not in node_ids:
                 warnings.append(f"edge target '{tgt}' not in nodes — skipped")
                 continue
-            edges.append({
-                "from": src,
-                "to": tgt,
-                "label": e.get("label", ""),
-            })
+            edges.append(
+                {
+                    "from": src,
+                    "to": tgt,
+                    "label": e.get("label", ""),
+                }
+            )
 
         # Detect cycles via Kahn's algorithm
         in_degree: dict[str, int] = defaultdict(int)

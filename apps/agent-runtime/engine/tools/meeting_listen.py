@@ -1,4 +1,5 @@
 """Meeting listen tool — streaming STT via VAD-chunked Whisper."""
+
 from __future__ import annotations
 
 import asyncio
@@ -19,14 +20,26 @@ logger = logging.getLogger(__name__)
 # Phrases treated as direct bot addressing; the agent sees `addressed=true` on
 # the corresponding utterance so it can prioritize a response.
 _ADDRESS_MARKERS = (
-    "hey bot", "hi bot", "ok bot", "bot,", "bot ",
-    "hey assistant", "ok assistant", "assistant,",
-    "hey abenix", "abenix,",
+    "hey bot",
+    "hi bot",
+    "ok bot",
+    "bot,",
+    "bot ",
+    "hey assistant",
+    "ok assistant",
+    "assistant,",
+    "hey abenix",
+    "abenix,",
 )
 
 _KILL_MARKERS = (
-    "bot leave", "bot, leave", "agent leave", "assistant leave",
-    "bot stop", "bot, stop", "remove the bot",
+    "bot leave",
+    "bot, leave",
+    "agent leave",
+    "assistant leave",
+    "bot stop",
+    "bot, stop",
+    "remove the bot",
 )
 
 # Whisper hallucinates these on silent / noisy audio. Drop them entirely
@@ -78,7 +91,10 @@ class MeetingListenTool(BaseTool):
         "properties": {
             "meeting_id": {"type": "string"},
             "duration_seconds": {
-                "type": "integer", "default": 8, "minimum": 3, "maximum": 60,
+                "type": "integer",
+                "default": 8,
+                "minimum": 3,
+                "maximum": 60,
                 "description": (
                     "Maximum listen window. Loop EXITS EARLY the moment an "
                     "addressed utterance (voice or chat) is fully transcribed, "
@@ -92,14 +108,18 @@ class MeetingListenTool(BaseTool):
                 "description": "'none' returns VAD-chunked audio stats only (debug).",
             },
             "min_words_for_entry": {
-                "type": "integer", "default": 1, "minimum": 0,
+                "type": "integer",
+                "default": 1,
+                "minimum": 0,
             },
             "display_name": {
-                "type": "string", "default": "",
+                "type": "string",
+                "default": "",
                 "description": "Bot display name — utterances containing it are flagged addressed=true.",
             },
             "early_exit_on_addressed": {
-                "type": "boolean", "default": True,
+                "type": "boolean",
+                "default": True,
                 "description": (
                     "When true (default), return as soon as an addressed "
                     "utterance closes. Set false to force-wait the full window."
@@ -125,13 +145,16 @@ class MeetingListenTool(BaseTool):
         if await sessmod.is_killed(meeting_id):
             return ToolResult(
                 content="Kill-switch active — exiting.",
-                is_error=True, metadata={"kill_requested": True},
+                is_error=True,
+                metadata={"kill_requested": True},
             )
 
         duration = int(arguments.get("duration_seconds", 8))
         stt_provider = (arguments.get("stt_provider") or "openai").lower()
         min_words = int(arguments.get("min_words_for_entry", 1))
-        display_name = (arguments.get("display_name") or sess.display_name or "").strip().lower()
+        display_name = (
+            (arguments.get("display_name") or sess.display_name or "").strip().lower()
+        )
         early_exit = bool(arguments.get("early_exit_on_addressed", True))
         deadline = time.monotonic() + duration
 
@@ -167,8 +190,21 @@ class MeetingListenTool(BaseTool):
             if not addressed:
                 ends_q = text.strip().endswith("?")
                 starts_q = lowered.split(" ", 1)[0] in (
-                    "what", "where", "when", "who", "why", "how",
-                    "can", "could", "should", "would", "is", "are", "do", "does", "did",
+                    "what",
+                    "where",
+                    "when",
+                    "who",
+                    "why",
+                    "how",
+                    "can",
+                    "could",
+                    "should",
+                    "would",
+                    "is",
+                    "are",
+                    "do",
+                    "does",
+                    "did",
                 )
                 if ends_q or starts_q:
                     addressed = True
@@ -230,6 +266,7 @@ class MeetingListenTool(BaseTool):
                         break
             except Exception as e:
                 logger.debug("chat consumer error: %s", e)
+
         chat_task = asyncio.create_task(consume_chat())
 
         audio_iter = sess.adapter.subscribe_audio()
@@ -249,7 +286,11 @@ class MeetingListenTool(BaseTool):
         producer_task = asyncio.create_task(_audio_producer())
         last_kill_check = 0.0
         try:
-            while time.monotonic() < deadline and not kill_heard and not exit_event.is_set():
+            while (
+                time.monotonic() < deadline
+                and not kill_heard
+                and not exit_event.is_set()
+            ):
                 remaining = deadline - time.monotonic()
                 # Poll Redis kill-switch at most every ~1s — keeps the hot
                 # path light.
@@ -362,12 +403,18 @@ async def _whisper_transcribe(pcm: bytes) -> str:
         buf = io.BytesIO(wav)
         buf.name = "audio.wav"
         resp = await client.audio.transcriptions.create(
-            model="whisper-1", file=buf, response_format="text",
+            model="whisper-1",
+            file=buf,
+            response_format="text",
             # Prompt biases the model toward proper nouns it's otherwise
             # likely to mangle ("Tathagata", "Abenix", "LiveKit").
             prompt="Abenix LiveKit meeting — business discussion.",
         )
-        return (resp or "").strip() if isinstance(resp, str) else getattr(resp, "text", "").strip()
+        return (
+            (resp or "").strip()
+            if isinstance(resp, str)
+            else getattr(resp, "text", "").strip()
+        )
     except Exception as e:
         logger.debug("whisper transcribe failed: %s", e)
         return ""

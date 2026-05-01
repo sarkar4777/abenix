@@ -1,4 +1,5 @@
 """Weather data via Open-Meteo (free, no API key)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -27,7 +28,9 @@ async def _resolve_coords(location: str) -> tuple[float, float, str] | None:
     if not results:
         return None
     top = results[0]
-    label = ", ".join(filter(None, [top.get("name"), top.get("admin1"), top.get("country")]))
+    label = ", ".join(
+        filter(None, [top.get("name"), top.get("admin1"), top.get("country")])
+    )
     return float(top["latitude"]), float(top["longitude"]), label
 
 
@@ -44,11 +47,16 @@ class WeatherTool(BaseTool):
         "properties": {
             "location": {"type": "string", "description": "City name or 'lat,lon'"},
             "forecast_days": {
-                "type": "integer", "default": 3, "minimum": 0, "maximum": 16,
+                "type": "integer",
+                "default": 3,
+                "minimum": 0,
+                "maximum": 16,
                 "description": "Number of forecast days (0 = current only).",
             },
             "units": {
-                "type": "string", "enum": ["metric", "imperial"], "default": "metric",
+                "type": "string",
+                "enum": ["metric", "imperial"],
+                "default": "metric",
                 "description": "metric = Celsius/km/h, imperial = Fahrenheit/mph.",
             },
         },
@@ -67,7 +75,9 @@ class WeatherTool(BaseTool):
         except Exception as e:
             return ToolResult(content=f"Geocoding failed: {e}", is_error=True)
         if not coords:
-            return ToolResult(content=f"No location matched '{location}'", is_error=True)
+            return ToolResult(
+                content=f"No location matched '{location}'", is_error=True
+            )
         lat, lon, label = coords
 
         params: dict[str, Any] = {
@@ -81,7 +91,9 @@ class WeatherTool(BaseTool):
             params["wind_speed_unit"] = "mph"
             params["precipitation_unit"] = "inch"
         if days > 0:
-            params["daily"] = "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max"
+            params["daily"] = (
+                "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max"
+            )
             params["forecast_days"] = days
 
         try:
@@ -90,7 +102,9 @@ class WeatherTool(BaseTool):
                 r.raise_for_status()
                 data = r.json()
         except httpx.HTTPStatusError as e:
-            return ToolResult(content=f"Open-Meteo HTTP {e.response.status_code}", is_error=True)
+            return ToolResult(
+                content=f"Open-Meteo HTTP {e.response.status_code}", is_error=True
+            )
         except Exception as e:
             return ToolResult(content=f"Weather fetch failed: {e}", is_error=True)
 
@@ -122,8 +136,11 @@ class WeatherTool(BaseTool):
         return ToolResult(
             content="\n".join(lines),
             metadata={
-                "lat": lat, "lon": lon, "label": label,
-                "current": cur, "daily": daily,
+                "lat": lat,
+                "lon": lon,
+                "label": label,
+                "current": cur,
+                "daily": daily,
                 "units": units,
             },
         )

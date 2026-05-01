@@ -8,11 +8,14 @@ from httpx import AsyncClient
 
 async def _register(client: AsyncClient) -> str:
     email = f"bill-{uuid.uuid4().hex[:8]}@test.com"
-    resp = await client.post("/api/auth/register", json={
-        "email": email,
-        "password": "securepass123",
-        "full_name": "Billing Tester",
-    })
+    resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": "securepass123",
+            "full_name": "Billing Tester",
+        },
+    )
     return resp.json()["data"]["access_token"]
 
 
@@ -37,11 +40,15 @@ async def test_list_plans(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_checkout_pro_mock(client: AsyncClient):
     token = await _register(client)
-    resp = await client.post("/api/billing/checkout", json={
-        "plan": "pro",
-        "success_url": "http://localhost:3000/success",
-        "cancel_url": "http://localhost:3000/cancel",
-    }, headers=_auth(token))
+    resp = await client.post(
+        "/api/billing/checkout",
+        json={
+            "plan": "pro",
+            "success_url": "http://localhost:3000/success",
+            "cancel_url": "http://localhost:3000/cancel",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert "url" in data
@@ -51,27 +58,39 @@ async def test_checkout_pro_mock(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_checkout_free_rejected(client: AsyncClient):
     token = await _register(client)
-    resp = await client.post("/api/billing/checkout", json={
-        "plan": "free",
-    }, headers=_auth(token))
+    resp = await client.post(
+        "/api/billing/checkout",
+        json={
+            "plan": "free",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_checkout_enterprise_rejected(client: AsyncClient):
     token = await _register(client)
-    resp = await client.post("/api/billing/checkout", json={
-        "plan": "enterprise",
-    }, headers=_auth(token))
+    resp = await client.post(
+        "/api/billing/checkout",
+        json={
+            "plan": "enterprise",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_portal_session(client: AsyncClient):
     token = await _register(client)
-    resp = await client.post("/api/billing/portal", json={
-        "return_url": "http://localhost:3000/settings/billing",
-    }, headers=_auth(token))
+    resp = await client.post(
+        "/api/billing/portal",
+        json={
+            "return_url": "http://localhost:3000/settings/billing",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code in (200, 400)
 
 

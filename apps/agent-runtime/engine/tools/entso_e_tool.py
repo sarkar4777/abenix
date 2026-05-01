@@ -57,7 +57,12 @@ class EntsoETool(BaseTool):
         "properties": {
             "data_type": {
                 "type": "string",
-                "enum": ["day_ahead_price", "generation", "load_forecast", "installed_capacity"],
+                "enum": [
+                    "day_ahead_price",
+                    "generation",
+                    "load_forecast",
+                    "installed_capacity",
+                ],
                 "description": "Type of data to fetch",
             },
             "area": {
@@ -101,7 +106,7 @@ class EntsoETool(BaseTool):
         if not doc_type:
             return ToolResult(
                 content=f"Error: unknown data_type '{data_type}'. "
-                        f"Available: {list(_DOC_TYPES.keys())}",
+                f"Available: {list(_DOC_TYPES.keys())}",
                 is_error=True,
             )
 
@@ -110,7 +115,7 @@ class EntsoETool(BaseTool):
         if len(eic) < 10:
             return ToolResult(
                 content=f"Error: unknown area '{area}'. "
-                        f"Available: {list(_AREA_CODES.keys())}",
+                f"Available: {list(_AREA_CODES.keys())}",
                 is_error=True,
             )
 
@@ -177,7 +182,7 @@ class EntsoETool(BaseTool):
         if not time_series_list:
             return ToolResult(
                 content=f"No TimeSeries data found for {data_type} in {area} "
-                        f"({date_from} to {date_to}). The area or date range may have no data.",
+                f"({date_from} to {date_to}). The area or date range may have no data.",
             )
 
         all_points: list[dict[str, Any]] = []
@@ -196,7 +201,9 @@ class EntsoETool(BaseTool):
                 start_el = period.find(f"{ns}timeInterval/{ns}start")
                 resolution_el = period.find(f"{ns}resolution")
                 start_str = start_el.text if start_el is not None else ""
-                resolution = resolution_el.text if resolution_el is not None else "PT60M"
+                resolution = (
+                    resolution_el.text if resolution_el is not None else "PT60M"
+                )
 
                 # Parse start time
                 try:
@@ -215,7 +222,9 @@ class EntsoETool(BaseTool):
 
                 for point in period.findall(f"{ns}Point"):
                     pos_el = point.find(f"{ns}position")
-                    val_el = point.find(f"{ns}price.amount") or point.find(f"{ns}quantity")
+                    val_el = point.find(f"{ns}price.amount") or point.find(
+                        f"{ns}quantity"
+                    )
                     if pos_el is None or val_el is None:
                         continue
 
@@ -224,14 +233,18 @@ class EntsoETool(BaseTool):
 
                     timestamp = ""
                     if start_dt:
-                        ts_dt = start_dt + timedelta(minutes=res_minutes * (position - 1))
+                        ts_dt = start_dt + timedelta(
+                            minutes=res_minutes * (position - 1)
+                        )
                         timestamp = ts_dt.strftime("%Y-%m-%d %H:%M")
 
-                    all_points.append({
-                        "timestamp": timestamp,
-                        "position": position,
-                        "value": round(value, 2),
-                    })
+                    all_points.append(
+                        {
+                            "timestamp": timestamp,
+                            "position": position,
+                            "value": round(value, 2),
+                        }
+                    )
 
         if not all_points:
             return ToolResult(
@@ -268,7 +281,11 @@ class EntsoETool(BaseTool):
         if len(all_points) <= sample_size * 2:
             sample = all_points
         else:
-            sample = all_points[:sample_size] + [{"timestamp": "...", "value": 0}] + all_points[-sample_size:]
+            sample = (
+                all_points[:sample_size]
+                + [{"timestamp": "...", "value": 0}]
+                + all_points[-sample_size:]
+            )
 
         lines.append("Sample data points:")
         for p in sample:

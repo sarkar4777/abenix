@@ -68,9 +68,7 @@ class TestLLMCallTool:
         assert call_kwargs.kwargs.get("model") == "gpt-4o" or (
             call_kwargs[1].get("model") == "gpt-4o"
             if len(call_kwargs) > 1
-            else call_kwargs[0][3] == "gpt-4o"
-            if len(call_kwargs[0]) > 3
-            else False
+            else call_kwargs[0][3] == "gpt-4o" if len(call_kwargs[0]) > 3 else False
         )
 
     @pytest.mark.asyncio
@@ -83,9 +81,7 @@ class TestLLMCallTool:
         mock_instance = MockRouter.return_value
         mock_instance.complete = AsyncMock(return_value=mock_response)
 
-        await tool.execute(
-            {"prompt": "Hi", "system_prompt": "You are helpful"}
-        )
+        await tool.execute({"prompt": "Hi", "system_prompt": "You are helpful"})
 
         mock_instance.complete.assert_awaited_once()
         _, kwargs = mock_instance.complete.call_args
@@ -130,7 +126,9 @@ class TestLLMCallTool:
         result = await tool.execute({"prompt": ""})
 
         assert result.is_error is True
-        assert "prompt" in result.content.lower() or "required" in result.content.lower()
+        assert (
+            "prompt" in result.content.lower() or "required" in result.content.lower()
+        )
 
     @pytest.mark.asyncio
     @patch("engine.llm_router.LLMRouter")

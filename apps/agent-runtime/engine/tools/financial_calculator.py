@@ -24,9 +24,19 @@ class FinancialCalculatorTool(BaseTool):
             "calculation": {
                 "type": "string",
                 "enum": [
-                    "npv", "irr", "lcoe", "dcf", "amortization", "escalation",
-                    "bond_price", "wacc", "depreciation", "breakeven",
-                    "payback_period", "roi", "cagr",
+                    "npv",
+                    "irr",
+                    "lcoe",
+                    "dcf",
+                    "amortization",
+                    "escalation",
+                    "bond_price",
+                    "wacc",
+                    "depreciation",
+                    "breakeven",
+                    "payback_period",
+                    "roi",
+                    "cagr",
                 ],
                 "description": "Type of financial calculation to perform",
             },
@@ -43,7 +53,9 @@ class FinancialCalculatorTool(BaseTool):
         params = arguments.get("params", {})
 
         if not calc_type:
-            return ToolResult(content="Error: calculation type is required", is_error=True)
+            return ToolResult(
+                content="Error: calculation type is required", is_error=True
+            )
 
         calculators = {
             "npv": self._npv,
@@ -83,16 +95,22 @@ class FinancialCalculatorTool(BaseTool):
         if not cash_flows:
             return {"error": "cash_flows array is required"}
 
-        flows = [-abs(initial_investment)] + cash_flows if initial_investment else cash_flows
+        flows = (
+            [-abs(initial_investment)] + cash_flows
+            if initial_investment
+            else cash_flows
+        )
         pv_flows = []
         for t, cf in enumerate(flows):
             pv = cf / ((1 + rate) ** t)
-            pv_flows.append({
-                "year": t,
-                "cash_flow": round(cf, 2),
-                "discount_factor": round(1 / ((1 + rate) ** t), 6),
-                "present_value": round(pv, 2),
-            })
+            pv_flows.append(
+                {
+                    "year": t,
+                    "cash_flow": round(cf, 2),
+                    "discount_factor": round(1 / ((1 + rate) ** t), 6),
+                    "present_value": round(pv, 2),
+                }
+            )
 
         npv = sum(pf["present_value"] for pf in pv_flows)
         return {
@@ -109,7 +127,11 @@ class FinancialCalculatorTool(BaseTool):
         if not cash_flows:
             return {"error": "cash_flows array is required"}
 
-        flows = [-abs(initial_investment)] + cash_flows if initial_investment else cash_flows
+        flows = (
+            [-abs(initial_investment)] + cash_flows
+            if initial_investment
+            else cash_flows
+        )
 
         low, high = -0.5, 5.0
         for _ in range(200):
@@ -165,13 +187,15 @@ class FinancialCalculatorTool(BaseTool):
             total_energy_pv += energy_pv
 
             if year <= 5 or year == lifetime_years or year % 5 == 0:
-                yearly.append({
-                    "year": year,
-                    "generation_mwh": round(generation, 1),
-                    "opex": round(opex, 2),
-                    "cost_pv": round(cost_pv, 2),
-                    "energy_pv": round(energy_pv, 2),
-                })
+                yearly.append(
+                    {
+                        "year": year,
+                        "generation_mwh": round(generation, 1),
+                        "opex": round(opex, 2),
+                        "cost_pv": round(cost_pv, 2),
+                        "energy_pv": round(energy_pv, 2),
+                    }
+                )
 
         lcoe = total_cost_pv / total_energy_pv if total_energy_pv > 0 else 0
         total_generation = sum(
@@ -207,7 +231,9 @@ class FinancialCalculatorTool(BaseTool):
             pv_fcfs.append({"year": t, "fcf": round(fcf, 2), "pv": round(pv, 2)})
 
         last_fcf = free_cash_flows[-1]
-        terminal_value = (last_fcf * (1 + terminal_growth)) / (discount_rate - terminal_growth)
+        terminal_value = (last_fcf * (1 + terminal_growth)) / (
+            discount_rate - terminal_growth
+        )
         pv_terminal = terminal_value / ((1 + discount_rate) ** len(free_cash_flows))
 
         enterprise_value = sum(pf["pv"] for pf in pv_fcfs) + pv_terminal
@@ -253,13 +279,15 @@ class FinancialCalculatorTool(BaseTool):
             principal_paid = payment - interest
             balance -= principal_paid
             if period <= 12 or period == n or period % (payments_per_year * 5) == 0:
-                schedule.append({
-                    "period": period,
-                    "payment": round(payment, 2),
-                    "principal": round(principal_paid, 2),
-                    "interest": round(interest, 2),
-                    "balance": round(max(0, balance), 2),
-                })
+                schedule.append(
+                    {
+                        "period": period,
+                        "payment": round(payment, 2),
+                        "principal": round(principal_paid, 2),
+                        "interest": round(interest, 2),
+                        "balance": round(max(0, balance), 2),
+                    }
+                )
 
         return {
             "monthly_payment": round(payment, 2),
@@ -301,18 +329,28 @@ class FinancialCalculatorTool(BaseTool):
             total_nominal += price
             total_pv += pv
 
-            schedule.append({
-                "year": y,
-                "price": round(price, 4),
-                "pv_price": round(pv, 4) if discount_rate else None,
-            })
+            schedule.append(
+                {
+                    "year": y,
+                    "price": round(price, 4),
+                    "pv_price": round(pv, 4) if discount_rate else None,
+                }
+            )
 
         return {
             "base_price": base_price,
             "escalation_rate": escalation_rate,
             "price_year_1": round(schedule[0]["price"], 4),
-            "price_year_10": round(schedule[min(9, len(schedule) - 1)]["price"], 4) if len(schedule) >= 10 else None,
-            "price_year_20": round(schedule[min(19, len(schedule) - 1)]["price"], 4) if len(schedule) >= 20 else None,
+            "price_year_10": (
+                round(schedule[min(9, len(schedule) - 1)]["price"], 4)
+                if len(schedule) >= 10
+                else None
+            ),
+            "price_year_20": (
+                round(schedule[min(19, len(schedule) - 1)]["price"], 4)
+                if len(schedule) >= 20
+                else None
+            ),
             "price_final_year": round(schedule[-1]["price"], 4),
             "average_nominal": round(total_nominal / years, 4),
             "average_pv": round(total_pv / years, 4) if discount_rate else None,
@@ -368,7 +406,9 @@ class FinancialCalculatorTool(BaseTool):
 
         weight_equity = equity / total
         weight_debt = debt / total
-        wacc = weight_equity * cost_of_equity + weight_debt * cost_of_debt * (1 - tax_rate)
+        wacc = weight_equity * cost_of_equity + weight_debt * cost_of_debt * (
+            1 - tax_rate
+        )
 
         return {
             "wacc": round(wacc * 100, 2),
@@ -400,12 +440,14 @@ class FinancialCalculatorTool(BaseTool):
             book_value = cost
             for year in range(1, life + 1):
                 book_value -= annual
-                schedule.append({
-                    "year": year,
-                    "depreciation": round(annual, 2),
-                    "accumulated": round(annual * year, 2),
-                    "book_value": round(max(salvage, book_value), 2),
-                })
+                schedule.append(
+                    {
+                        "year": year,
+                        "depreciation": round(annual, 2),
+                        "accumulated": round(annual * year, 2),
+                        "book_value": round(max(salvage, book_value), 2),
+                    }
+                )
         elif method == "declining_balance":
             rate = params.get("rate", 2 / life)
             book_value = cost
@@ -416,32 +458,50 @@ class FinancialCalculatorTool(BaseTool):
                     dep = book_value - salvage
                 book_value -= dep
                 accumulated += dep
-                schedule.append({
-                    "year": year,
-                    "depreciation": round(dep, 2),
-                    "accumulated": round(accumulated, 2),
-                    "book_value": round(book_value, 2),
-                })
+                schedule.append(
+                    {
+                        "year": year,
+                        "depreciation": round(dep, 2),
+                        "accumulated": round(accumulated, 2),
+                        "book_value": round(book_value, 2),
+                    }
+                )
         elif method == "macrs":
             macrs_rates = {
                 5: [0.20, 0.32, 0.192, 0.1152, 0.1152, 0.0576],
                 7: [0.1429, 0.2449, 0.1749, 0.1249, 0.0893, 0.0892, 0.0893, 0.0446],
-                10: [0.10, 0.18, 0.144, 0.1152, 0.0922, 0.0737, 0.0655, 0.0655, 0.0656, 0.0655, 0.0328],
+                10: [
+                    0.10,
+                    0.18,
+                    0.144,
+                    0.1152,
+                    0.0922,
+                    0.0737,
+                    0.0655,
+                    0.0655,
+                    0.0656,
+                    0.0655,
+                    0.0328,
+                ],
             }
             rates = macrs_rates.get(life, macrs_rates[7])
             accumulated = 0
             for year, rate in enumerate(rates, 1):
                 dep = cost * rate
                 accumulated += dep
-                schedule.append({
-                    "year": year,
-                    "rate": round(rate * 100, 2),
-                    "depreciation": round(dep, 2),
-                    "accumulated": round(accumulated, 2),
-                    "book_value": round(cost - accumulated, 2),
-                })
+                schedule.append(
+                    {
+                        "year": year,
+                        "rate": round(rate * 100, 2),
+                        "depreciation": round(dep, 2),
+                        "accumulated": round(accumulated, 2),
+                        "book_value": round(cost - accumulated, 2),
+                    }
+                )
         else:
-            return {"error": f"Unknown method: {method}. Use straight_line, declining_balance, or macrs"}
+            return {
+                "error": f"Unknown method: {method}. Use straight_line, declining_balance, or macrs"
+            }
 
         return {
             "method": method,
@@ -464,19 +524,30 @@ class FinancialCalculatorTool(BaseTool):
 
         breakeven_units = math.ceil(fixed_costs / contribution)
         breakeven_revenue = breakeven_units * price_per_unit
-        target_units = math.ceil((fixed_costs + target_profit) / contribution) if target_profit else None
+        target_units = (
+            math.ceil((fixed_costs + target_profit) / contribution)
+            if target_profit
+            else None
+        )
 
         margin_of_safety = []
-        for units in [breakeven_units, int(breakeven_units * 1.25), int(breakeven_units * 1.5), int(breakeven_units * 2)]:
+        for units in [
+            breakeven_units,
+            int(breakeven_units * 1.25),
+            int(breakeven_units * 1.5),
+            int(breakeven_units * 2),
+        ]:
             revenue = units * price_per_unit
             total_cost = fixed_costs + units * variable_cost_per_unit
             profit = revenue - total_cost
-            margin_of_safety.append({
-                "units": units,
-                "revenue": round(revenue, 2),
-                "total_cost": round(total_cost, 2),
-                "profit": round(profit, 2),
-            })
+            margin_of_safety.append(
+                {
+                    "units": units,
+                    "revenue": round(revenue, 2),
+                    "total_cost": round(total_cost, 2),
+                    "profit": round(profit, 2),
+                }
+            )
 
         return {
             "breakeven_units": breakeven_units,
@@ -506,19 +577,25 @@ class FinancialCalculatorTool(BaseTool):
             dcf = cf / ((1 + discount_rate) ** t) if discount_rate else cf
             discounted_cumulative += dcf
 
-            yearly.append({
-                "year": t,
-                "cash_flow": round(cf, 2),
-                "cumulative": round(cumulative, 2),
-                "net_position": round(cumulative - initial_investment, 2),
-            })
+            yearly.append(
+                {
+                    "year": t,
+                    "cash_flow": round(cf, 2),
+                    "cumulative": round(cumulative, 2),
+                    "net_position": round(cumulative - initial_investment, 2),
+                }
+            )
 
             if payback is None and cumulative >= initial_investment:
                 prev = cumulative - cf
                 fraction = (initial_investment - prev) / cf if cf else 0
                 payback = t - 1 + fraction
 
-            if discount_rate and discounted_payback is None and discounted_cumulative >= initial_investment:
+            if (
+                discount_rate
+                and discounted_payback is None
+                and discounted_cumulative >= initial_investment
+            ):
                 discounted_payback = t
 
         return {
@@ -539,7 +616,9 @@ class FinancialCalculatorTool(BaseTool):
 
         net_profit = returns - investment
         roi = (net_profit / investment) * 100
-        annualized = ((returns / investment) ** (1 / years) - 1) * 100 if years > 1 else roi
+        annualized = (
+            ((returns / investment) ** (1 / years) - 1) * 100 if years > 1 else roi
+        )
 
         return {
             "roi_percent": round(roi, 2),

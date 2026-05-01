@@ -1,4 +1,5 @@
 """OracleNet decision analysis schemas."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -7,9 +8,17 @@ from typing import Any
 
 class AnalyzeRequest(BaseModel):
     """Input for OracleNet decision analysis."""
-    decision_prompt: str = Field(..., min_length=20, max_length=10000, description="The decision to analyze")
-    context: dict[str, Any] = Field(default_factory=dict, description="Additional context: company info, constraints")
-    depth: str = Field(default="standard", description="Analysis depth: quick, standard, deep")
+
+    decision_prompt: str = Field(
+        ..., min_length=20, max_length=10000, description="The decision to analyze"
+    )
+    context: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional context: company info, constraints",
+    )
+    depth: str = Field(
+        default="standard", description="Analysis depth: quick, standard, deep"
+    )
     model: str | None = Field(default=None, description="Override model for synthesis")
 
 
@@ -71,6 +80,7 @@ class Recommendation(BaseModel):
 
 class DecisionBrief(BaseModel):
     """Complete OracleNet decision analysis output."""
+
     executive_summary: str = ""
     parsed_decision: dict[str, Any] = Field(default_factory=dict)
     historical_analogies: list[HistoricalAnalogy] = Field(default_factory=list)
@@ -87,6 +97,7 @@ class DecisionBrief(BaseModel):
 
 class BriefListItem(BaseModel):
     """Summary item for listing past analyses."""
+
     execution_id: str
     decision_prompt: str
     status: str

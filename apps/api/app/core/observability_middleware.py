@@ -12,7 +12,9 @@ from app.core.telemetry import http_request_duration_seconds, http_requests_tota
 
 
 class ObservabilityMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         tenant_id = str(getattr(request.state, "tenant_id", None) or "")
         path = request.url.path
@@ -36,7 +38,9 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         status = response.status_code
 
         http_requests_total.labels(method=method, path=path, status=status).inc()
-        http_request_duration_seconds.labels(method=method, path=path).observe(duration_s)
+        http_request_duration_seconds.labels(method=method, path=path).observe(
+            duration_s
+        )
 
         response.headers["X-Request-ID"] = request_id
 

@@ -1,4 +1,5 @@
 """Agent Comments — threaded comments for team collaboration on agents."""
+
 from __future__ import annotations
 
 import uuid
@@ -14,6 +15,7 @@ from app.core.responses import error, success
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.agent import Agent
@@ -51,7 +53,9 @@ async def add_comment(
     if agent and agent.creator_id != user.id:
         try:
             await create_notification(
-                db, tenant_id=agent.tenant_id, user_id=agent.creator_id,
+                db,
+                tenant_id=agent.tenant_id,
+                user_id=agent.creator_id,
                 type="agent_comment",
                 title=f"New comment on {agent.name}",
                 message=f"{user.full_name}: {content[:100]}",
@@ -77,19 +81,21 @@ async def list_comments(
         .order_by(AgentComment.created_at.asc())
     )
     rows = result.all()
-    return success([
-        {
-            "id": str(c.id),
-            "content": c.content,
-            "user_name": name,
-            "user_email": email,
-            "is_resolved": c.is_resolved,
-            "parent_id": str(c.parent_id) if c.parent_id else None,
-            "revision_id": str(c.revision_id) if c.revision_id else None,
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-        }
-        for c, name, email in rows
-    ])
+    return success(
+        [
+            {
+                "id": str(c.id),
+                "content": c.content,
+                "user_name": name,
+                "user_email": email,
+                "is_resolved": c.is_resolved,
+                "parent_id": str(c.parent_id) if c.parent_id else None,
+                "revision_id": str(c.revision_id) if c.revision_id else None,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c, name, email in rows
+        ]
+    )
 
 
 @router.put("/{agent_id}/comments/{comment_id}")
@@ -101,7 +107,9 @@ async def update_comment(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     result = await db.execute(
-        select(AgentComment).where(AgentComment.id == comment_id, AgentComment.agent_id == agent_id)
+        select(AgentComment).where(
+            AgentComment.id == comment_id, AgentComment.agent_id == agent_id
+        )
     )
     comment = result.scalar_one_or_none()
     if not comment:

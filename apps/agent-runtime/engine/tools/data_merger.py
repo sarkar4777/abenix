@@ -53,6 +53,7 @@ class DataMergerTool(BaseTool):
                 if isinstance(val, str):
                     try:
                         import json as _j
+
                         parsed = _j.loads(val)
                         data_inputs[f"source_{idx}"] = parsed
                     except Exception:
@@ -104,9 +105,11 @@ class DataMergerTool(BaseTool):
         items: list[dict[str, Any]] = []
         for key, value in data_inputs.items():
             label = labels.get(key, key)
-            items.append({
-                "label": label,
-                "key": key,
-                "data": value,
-            })
+            items.append(
+                {
+                    "label": label,
+                    "key": key,
+                    "data": value,
+                }
+            )
         return {"items": items}

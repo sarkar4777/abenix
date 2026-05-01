@@ -1,4 +1,5 @@
 """Address normalisation — split a free-text address into a structured"""
+
 from __future__ import annotations
 
 import re
@@ -7,24 +8,85 @@ from typing import Any
 from engine.tools.base import BaseTool, ToolResult
 
 _US_STATES = {
-    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
-    "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
-    "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
-    "VA","WA","WV","WI","WY","DC",
+    "AL",
+    "AK",
+    "AZ",
+    "AR",
+    "CA",
+    "CO",
+    "CT",
+    "DE",
+    "FL",
+    "GA",
+    "HI",
+    "ID",
+    "IL",
+    "IN",
+    "IA",
+    "KS",
+    "KY",
+    "LA",
+    "ME",
+    "MD",
+    "MA",
+    "MI",
+    "MN",
+    "MS",
+    "MO",
+    "MT",
+    "NE",
+    "NV",
+    "NH",
+    "NJ",
+    "NM",
+    "NY",
+    "NC",
+    "ND",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VT",
+    "VA",
+    "WA",
+    "WV",
+    "WI",
+    "WY",
+    "DC",
 }
 _COUNTRY_HINTS = {
-    "USA": "US", "UNITED STATES": "US", "U.S.": "US", "U.S.A.": "US",
-    "UK": "GB", "UNITED KINGDOM": "GB", "ENGLAND": "GB", "SCOTLAND": "GB", "WALES": "GB",
-    "GERMANY": "DE", "DEUTSCHLAND": "DE",
-    "FRANCE": "FR", "ITALY": "IT", "SPAIN": "ES", "NETHERLANDS": "NL",
-    "CANADA": "CA", "AUSTRALIA": "AU", "JAPAN": "JP", "INDIA": "IN",
-    "UAE": "AE", "U.A.E.": "AE", "EMIRATES": "AE",
+    "USA": "US",
+    "UNITED STATES": "US",
+    "U.S.": "US",
+    "U.S.A.": "US",
+    "UK": "GB",
+    "UNITED KINGDOM": "GB",
+    "ENGLAND": "GB",
+    "SCOTLAND": "GB",
+    "WALES": "GB",
+    "GERMANY": "DE",
+    "DEUTSCHLAND": "DE",
+    "FRANCE": "FR",
+    "ITALY": "IT",
+    "SPAIN": "ES",
+    "NETHERLANDS": "NL",
+    "CANADA": "CA",
+    "AUSTRALIA": "AU",
+    "JAPAN": "JP",
+    "INDIA": "IN",
+    "UAE": "AE",
+    "U.A.E.": "AE",
+    "EMIRATES": "AE",
 }
 
 _US_ZIP = re.compile(r"\b(\d{5})(?:-?\d{4})?\b")
-_UK_POSTCODE = re.compile(
-    r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.IGNORECASE
-)
+_UK_POSTCODE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.IGNORECASE)
 _CA_POSTCODE = re.compile(r"\b([A-Z]\d[A-Z][\s-]?\d[A-Z]\d)\b", re.IGNORECASE)
 _NUMERIC_POSTCODE = re.compile(r"\b(\d{4,6})\b")
 
@@ -36,8 +98,14 @@ def _normalize(raw: str) -> dict[str, Any]:
 
     # Split on commas first; that handles 80% of pasted addresses.
     parts = [p.strip() for p in address.split(",") if p.strip()]
-    parsed: dict[str, Any] = {"input": raw, "country": None, "postal_code": None,
-                               "state": None, "city": None, "street": None}
+    parsed: dict[str, Any] = {
+        "input": raw,
+        "country": None,
+        "postal_code": None,
+        "state": None,
+        "city": None,
+        "street": None,
+    }
 
     # Country detection — last comma-segment OR any all-caps country word.
     if parts:
@@ -52,17 +120,22 @@ def _normalize(raw: str) -> dict[str, Any]:
     pc_match = _UK_POSTCODE.search(address)
     if pc_match and (parsed["country"] in (None, "GB")):
         parsed["postal_code"] = pc_match.group(1).upper().replace("  ", " ")
-        if parsed["country"] is None: parsed["country"] = "GB"
+        if parsed["country"] is None:
+            parsed["country"] = "GB"
     if not parsed["postal_code"]:
         ca = _CA_POSTCODE.search(address)
         if ca and (parsed["country"] in (None, "CA")):
-            parsed["postal_code"] = ca.group(1).upper().replace("-", " ").replace("  ", " ")
-            if parsed["country"] is None: parsed["country"] = "CA"
+            parsed["postal_code"] = (
+                ca.group(1).upper().replace("-", " ").replace("  ", " ")
+            )
+            if parsed["country"] is None:
+                parsed["country"] = "CA"
     if not parsed["postal_code"]:
         us = _US_ZIP.search(address)
         if us and (parsed["country"] in (None, "US")):
             parsed["postal_code"] = us.group(1)
-            if parsed["country"] is None: parsed["country"] = "US"
+            if parsed["country"] is None:
+                parsed["country"] = "US"
     if not parsed["postal_code"]:
         m = _NUMERIC_POSTCODE.search(address)
         if m:
@@ -74,7 +147,8 @@ def _normalize(raw: str) -> dict[str, Any]:
             tok = token.strip(",.").upper()
             if tok in _US_STATES:
                 parsed["state"] = tok
-                if parsed["country"] is None: parsed["country"] = "US"
+                if parsed["country"] is None:
+                    parsed["country"] = "US"
                 break
         if parsed["state"]:
             break
@@ -91,8 +165,9 @@ def _normalize(raw: str) -> dict[str, Any]:
         # Strip trailing postal code from city
         city_clean = re.sub(r"\b\d{4,5}(-\d{4})?\b", "", city_candidate).strip(", ")
         # also strip US state code
-        city_clean = re.sub(rf"\b({'|'.join(_US_STATES)})\b", "", city_clean,
-                             flags=re.IGNORECASE).strip(", ")
+        city_clean = re.sub(
+            rf"\b({'|'.join(_US_STATES)})\b", "", city_clean, flags=re.IGNORECASE
+        ).strip(", ")
         parsed["city"] = city_clean or None
 
     # Street: everything before the city
@@ -140,7 +215,9 @@ class AddressNormalizeTool(BaseTool):
                 lines.append(f"  {r.get('canonical') or '(unparsed)'}")
             return ToolResult(content="\n".join(lines), metadata={"results": results})
         if not isinstance(a, str):
-            return ToolResult(content="address must be a string or array of strings", is_error=True)
+            return ToolResult(
+                content="address must be a string or array of strings", is_error=True
+            )
         r = _normalize(a)
         lines = [
             f"Address normalize — {a}",

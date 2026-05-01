@@ -1,4 +1,5 @@
 """Wave-2 per-pool consumer — pulls agent-execution jobs off the queue"""
+
 from __future__ import annotations
 
 import asyncio
@@ -45,7 +46,9 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
     Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with Session() as db:
-        res = await db.execute(select(Execution).where(Execution.id == uuid.UUID(execution_id)))
+        res = await db.execute(
+            select(Execution).where(Execution.id == uuid.UUID(execution_id))
+        )
         execution = res.scalar_one_or_none()
         if execution is None:
             return None
@@ -91,22 +94,28 @@ async def _mark_done(
     engine = create_async_engine(db_url, pool_pre_ping=True)
     Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    target_status = ExecutionStatus.COMPLETED if status == "completed" else ExecutionStatus.FAILED
+    target_status = (
+        ExecutionStatus.COMPLETED if status == "completed" else ExecutionStatus.FAILED
+    )
     values: dict[str, Any] = {
         "status": target_status,
         "output_message": output,
         "error_message": error,
         "completed_at": datetime.now(timezone.utc),
     }
-    if input_tokens is not None:  values["input_tokens"]  = input_tokens
-    if output_tokens is not None: values["output_tokens"] = output_tokens
-    if cost is not None and cost > 0: values["cost"] = round(float(cost), 6)
+    if input_tokens is not None:
+        values["input_tokens"] = input_tokens
+    if output_tokens is not None:
+        values["output_tokens"] = output_tokens
+    if cost is not None and cost > 0:
+        values["cost"] = round(float(cost), 6)
     # On failure, classify the error_message into a stable failure_code so
     # /alerts can group it and the Surgeon has something to act on.
     if target_status == ExecutionStatus.FAILED and error:
         try:
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
             from app.core.failure_codes import classify_exception  # type: ignore
+
             values["failure_code"] = classify_exception(Exception(error))
         except Exception:
             # Fallback: a generic code so /alerts at least groups by something.
@@ -122,17 +131,21 @@ async def _mark_done(
 
 _redis_pool: Any = None
 
+
 async def _publish(execution_id: str, event: dict) -> None:
     """Fire an event onto Redis pub/sub + append to the bounded replay log"""
     global _redis_pool
     try:
         import redis.asyncio as aioredis
         import json as _json
+
         if _redis_pool is None:
             redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
             _redis_pool = aioredis.from_url(
-                redis_url, decode_responses=True,
-                socket_connect_timeout=3, socket_timeout=3,
+                redis_url,
+                decode_responses=True,
+                socket_connect_timeout=3,
+                socket_timeout=3,
             )
         payload = _json.dumps(event, default=str)
         channel = f"exec:events:{execution_id}"
@@ -160,37 +173,58 @@ async def _run_one(payload: dict) -> None:
     loaded = await _load_execution(execution_id)
     if loaded is None:
         logger.warning("consumer: execution %s not found; skipping", execution_id)
-        await _publish(execution_id, {"event": "error", "error": "execution row missing"})
+        await _publish(
+            execution_id, {"event": "error", "error": "execution row missing"}
+        )
         return
 
     agent_name = loaded["agent_name"]
     tenant_id = loaded["tenant_id"]
     is_pipeline = loaded["is_pipeline"]
 
-    await _publish(execution_id, {
-        "event": "start",
-        "execution_id": execution_id,
-        "agent": agent_name,
-        "pool": os.environ.get("RUNTIME_POOL", "default"),
-        "mode": "pipeline" if is_pipeline else "agent",
-    })
+    await _publish(
+        execution_id,
+        {
+            "event": "start",
+            "execution_id": execution_id,
+            "agent": agent_name,
+            "pool": os.environ.get("RUNTIME_POOL", "default"),
+            "mode": "pipeline" if is_pipeline else "agent",
+        },
+    )
 
     try:
         if is_pipeline:
-            from engine.pipeline import PipelineExecutor, parse_pipeline_nodes, serialize_pipeline_result
+            from engine.pipeline import (
+                PipelineExecutor,
+                parse_pipeline_nodes,
+                serialize_pipeline_result,
+            )
             from engine.agent_executor import build_tool_registry
 
             async def on_node_start(node_id: str, tool_name: str) -> None:
-                await _publish(execution_id, {
-                    "event": "node_start", "node_id": node_id, "tool_name": tool_name,
-                })
+                await _publish(
+                    execution_id,
+                    {
+                        "event": "node_start",
+                        "node_id": node_id,
+                        "tool_name": tool_name,
+                    },
+                )
 
-            async def on_node_complete(node_id: str, status: str, duration_ms: int,
-                                       output: Any, error_message: str | None = None,
-                                       error_type: str | None = None) -> None:
+            async def on_node_complete(
+                node_id: str,
+                status: str,
+                duration_ms: int,
+                output: Any,
+                error_message: str | None = None,
+                error_type: str | None = None,
+            ) -> None:
                 evt: dict[str, Any] = {
-                    "event": "node_complete", "node_id": node_id,
-                    "status": status, "duration_ms": duration_ms,
+                    "event": "node_complete",
+                    "node_id": node_id,
+                    "status": status,
+                    "duration_ms": duration_ms,
                 }
                 if status == "failed" and error_message:
                     evt["error"] = error_message[:2000]
@@ -220,13 +254,17 @@ async def _run_one(payload: dict) -> None:
             )
             # Inject execution_id into context so the executor's healing
             # capture path can attribute the diff back to this run.
-            result = await executor.execute(nodes, {"user_message": message, "__execution_id": execution_id, **context})
+            result = await executor.execute(
+                nodes,
+                {"user_message": message, "__execution_id": execution_id, **context},
+            )
             serialized = serialize_pipeline_result(result)
             final_text = ""
             if result.final_output:
                 # 50 KB cap matches the DB output_message column.
                 final_text = (
-                    result.final_output if isinstance(result.final_output, str)
+                    result.final_output
+                    if isinstance(result.final_output, str)
                     else json.dumps(result.final_output, default=str)[:50_000]
                 )
 
@@ -242,18 +280,26 @@ async def _run_one(payload: dict) -> None:
                 for nid, nr in (serialized.get("node_results") or {}).items():
                     if (nr.get("status") == "failed") and nr.get("error"):
                         node_errs.append(f"{nid}: {nr['error']}")
-                err_text = ("; ".join(node_errs) or f"failed nodes: {','.join(failed_nodes)}")[:2000]
+                err_text = (
+                    "; ".join(node_errs) or f"failed nodes: {','.join(failed_nodes)}"
+                )[:2000]
 
             await _mark_done(execution_id, pipeline_status, final_text, err_text)
-            await _publish(execution_id, {
-                "event": "done" if pipeline_status == "completed" else "error",
-                "execution_id": execution_id,
-                "output": final_text, "summary": serialized,
-                **({"error": err_text} if err_text else {}),
-            })
+            await _publish(
+                execution_id,
+                {
+                    "event": "done" if pipeline_status == "completed" else "error",
+                    "execution_id": execution_id,
+                    "output": final_text,
+                    "summary": serialized,
+                    **({"error": err_text} if err_text else {}),
+                },
+            )
         else:
             from engine.agent_executor import (
-                AgentExecutor, build_tool_registry, resolve_asset_schemas,
+                AgentExecutor,
+                build_tool_registry,
+                resolve_asset_schemas,
             )
             from engine.llm_router import LLMRouter
 
@@ -290,18 +336,25 @@ async def _run_one(payload: dict) -> None:
             # /analytics show real numbers instead of nulls.
             output = getattr(result, "output", None) or str(result)
             await _mark_done(
-                execution_id, "completed", str(output)[:4000], None,
+                execution_id,
+                "completed",
+                str(output)[:4000],
+                None,
                 input_tokens=getattr(result, "input_tokens", None),
                 output_tokens=getattr(result, "output_tokens", None),
                 cost=getattr(result, "cost", None),
             )
-            await _publish(execution_id, {
-                "event": "done", "execution_id": execution_id,
-                "output": str(output)[:4000],
-                "input_tokens": getattr(result, "input_tokens", None),
-                "output_tokens": getattr(result, "output_tokens", None),
-                "cost": getattr(result, "cost", None),
-            })
+            await _publish(
+                execution_id,
+                {
+                    "event": "done",
+                    "execution_id": execution_id,
+                    "output": str(output)[:4000],
+                    "input_tokens": getattr(result, "input_tokens", None),
+                    "output_tokens": getattr(result, "output_tokens", None),
+                    "cost": getattr(result, "cost", None),
+                },
+            )
     except Exception as e:
         logger.exception("consumer: execution %s failed: %s", execution_id, e)
         await _mark_done(execution_id, "failed", None, str(e)[:2000])
@@ -323,7 +376,9 @@ async def _serve_health(port: int = 8001) -> None:
         generate_latest = None  # type: ignore
         CONTENT_TYPE_LATEST = "text/plain; charset=utf-8"  # type: ignore
 
-    async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _handle(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         try:
             request_line = await reader.readline()
             # Drain headers
@@ -345,7 +400,11 @@ async def _serve_health(port: int = 8001) -> None:
         if path == b"/metrics" and generate_latest is not None:
             try:
                 payload = generate_latest()
-                ctype = CONTENT_TYPE_LATEST.encode() if isinstance(CONTENT_TYPE_LATEST, str) else CONTENT_TYPE_LATEST
+                ctype = (
+                    CONTENT_TYPE_LATEST.encode()
+                    if isinstance(CONTENT_TYPE_LATEST, str)
+                    else CONTENT_TYPE_LATEST
+                )
             except Exception as e:
                 payload = f"# metrics render failed: {e}".encode()
                 ctype = b"text/plain; charset=utf-8"
@@ -390,12 +449,15 @@ async def main() -> None:
     health_task = asyncio.create_task(_serve_health(health_port))
 
     from engine.queue_backend import get_queue_backend  # type: ignore
+
     backend = get_queue_backend()
 
     stop = asyncio.Event()
+
     def _stop(*_a: Any) -> None:
         logger.info("consumer: shutdown signal received")
         stop.set()
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             signal.signal(sig, _stop)
@@ -407,7 +469,8 @@ async def main() -> None:
     if backend_name != "nats":
         logger.warning(
             "consumer: QUEUE_BACKEND=%s — consumer is a no-op (Celery workers "
-            "consume via their own entrypoint). Exiting idle.", backend_name,
+            "consume via their own entrypoint). Exiting idle.",
+            backend_name,
         )
         # Sleep forever so the pod stays alive under liveness probes.
         await stop.wait()

@@ -1,4 +1,5 @@
 """Per-execution meeting session state."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from engine.tools.meeting_adapter import MeetingAdapter
@@ -162,7 +163,7 @@ async def append_transcript(
 
 async def append_decision(
     meeting_id: str,
-    kind: str,            # "answer" | "defer" | "decline" | "leave" | "join"
+    kind: str,  # "answer" | "defer" | "decline" | "leave" | "join"
     summary: str,
     *,
     detail: dict | None = None,
@@ -213,7 +214,9 @@ async def set_kill(meeting_id: str) -> None:
     try:
         k = _keys(meeting_id)
         await r.set(k["kill"], "1", ex=3600)
-        await r.publish(k["pubsub"], json.dumps({"type": "kill", "meeting_id": meeting_id}))
+        await r.publish(
+            k["pubsub"], json.dumps({"type": "kill", "meeting_id": meeting_id})
+        )
     finally:
         # Do NOT close — `r` is the shared pool client, closing would
         # break every other caller in this pod. The pool manages its

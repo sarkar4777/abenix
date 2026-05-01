@@ -19,9 +19,13 @@ class DriftAlert(Base, UUIDMixin, TenantMixin):
         UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
     execution_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("executions.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("executions.id", ondelete="SET NULL"),
+        nullable=True,
     )
-    severity: Mapped[str] = mapped_column(String(20), nullable=False)  # "warning" | "critical"
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # "warning" | "critical"
     metric: Mapped[str] = mapped_column(String(100), nullable=False)
     baseline_value: Mapped[float] = mapped_column(Float, nullable=False)
     current_value: Mapped[float] = mapped_column(Float, nullable=False)

@@ -6,7 +6,6 @@ Handles MERGE semantics (create-or-update) to support incremental cognify runs.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from engine.knowledge.entity_resolver import ResolvedEntity, ResolvedRelationship
 from engine.knowledge.neo4j_client import get_neo4j_driver
@@ -35,20 +34,22 @@ async def write_entities(
         # Batch entities for efficiency
         batch_size = 50
         for i in range(0, len(entities), batch_size):
-            batch = entities[i:i + batch_size]
+            batch = entities[i : i + batch_size]
             params_list = []
             for e in batch:
-                params_list.append({
-                    "kb_id": kb_id,
-                    "canonical_name": e.canonical_name,
-                    "entity_type": e.entity_type,
-                    "description": (e.description or "")[:MAX_DESCRIPTION_LENGTH],
-                    "aliases": (e.aliases or [])[:MAX_ALIASES],
-                    "mention_count": e.mention_count,
-                    "confidence": float(e.confidence),
-                    "pg_id": pg_id_map.get(e.canonical_name, ""),
-                    "source_doc_ids": e.source_doc_ids or [],
-                })
+                params_list.append(
+                    {
+                        "kb_id": kb_id,
+                        "canonical_name": e.canonical_name,
+                        "entity_type": e.entity_type,
+                        "description": (e.description or "")[:MAX_DESCRIPTION_LENGTH],
+                        "aliases": (e.aliases or [])[:MAX_ALIASES],
+                        "mention_count": e.mention_count,
+                        "confidence": float(e.confidence),
+                        "pg_id": pg_id_map.get(e.canonical_name, ""),
+                        "source_doc_ids": e.source_doc_ids or [],
+                    }
+                )
 
             result = await session.run(
                 """
@@ -103,15 +104,19 @@ async def write_relationships(
 
             batch = []
             for r in rels:
-                batch.append({
-                    "kb_id": kb_id,
-                    "source": r.source,
-                    "target": r.target,
-                    "description": (r.description or "")[:MAX_DESCRIPTION_LENGTH],
-                    "weight": float(r.weight),
-                    "source_doc_ids": r.source_doc_ids or [],
-                    "pg_id": pg_id_map.get(f"{r.source}|{safe_type}|{r.target}", ""),
-                })
+                batch.append(
+                    {
+                        "kb_id": kb_id,
+                        "source": r.source,
+                        "target": r.target,
+                        "description": (r.description or "")[:MAX_DESCRIPTION_LENGTH],
+                        "weight": float(r.weight),
+                        "source_doc_ids": r.source_doc_ids or [],
+                        "pg_id": pg_id_map.get(
+                            f"{r.source}|{safe_type}|{r.target}", ""
+                        ),
+                    }
+                )
 
             # Use APOC for dynamic relationship types
             try:
@@ -135,9 +140,16 @@ async def write_relationships(
                 if record:
                     written += record["cnt"]
             except Exception as e:
-                logger.error("Failed to write %d %s relationships: %s", len(rels), safe_type, e)
+                logger.error(
+                    "Failed to write %d %s relationships: %s", len(rels), safe_type, e
+                )
 
-    logger.info("Wrote %d relationships (%d types) to Neo4j for kb %s", written, len(by_type), kb_id)
+    logger.info(
+        "Wrote %d relationships (%d types) to Neo4j for kb %s",
+        written,
+        len(by_type),
+        kb_id,
+    )
     return written
 
 
@@ -155,5 +167,9 @@ async def delete_kb_graph(kb_id: str) -> dict[str, int]:
         )
         record = await result.single()
         deleted = record["deleted"] if record else 0
-        logger.info("Deleted %d entities (and their relationships) from Neo4j for kb %s", deleted, kb_id)
+        logger.info(
+            "Deleted %d entities (and their relationships) from Neo4j for kb %s",
+            deleted,
+            kb_id,
+        )
         return {"entities_deleted": deleted}

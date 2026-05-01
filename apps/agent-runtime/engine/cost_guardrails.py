@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,7 +54,9 @@ def predict_cost(
     total_input = estimated_input_tokens + (tool_count * 500 * max_iterations)
     total_output = estimated_output_tokens * max_iterations
 
-    estimated = (total_input / 1_000_000 * input_price) + (total_output / 1_000_000 * output_price)
+    estimated = (total_input / 1_000_000 * input_price) + (
+        total_output / 1_000_000 * output_price
+    )
 
     within_budget = True
     warning = None
@@ -75,7 +76,9 @@ def predict_cost(
         estimated_input_tokens=total_input,
         estimated_output_tokens=total_output,
         within_budget=within_budget,
-        budget_remaining=round(budget_remaining, 6) if budget_remaining is not None else None,
+        budget_remaining=(
+            round(budget_remaining, 6) if budget_remaining is not None else None
+        ),
         warning=warning,
     )
 
@@ -116,6 +119,7 @@ class CostEnforcer:
         r = await self._get_redis()
 
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         day_key = f"cost:daily:{self._tenant_id}:{now.strftime('%Y-%m-%d')}"
         month_key = f"cost:monthly:{self._tenant_id}:{now.strftime('%Y-%m')}"
@@ -135,7 +139,10 @@ class CostEnforcer:
         agent_daily_total = float(results[4])
 
         # Check per-execution hard limit
-        if self._per_execution_limit and self._accumulated_cost > self._per_execution_limit:
+        if (
+            self._per_execution_limit
+            and self._accumulated_cost > self._per_execution_limit
+        ):
             return CostCheckResult(
                 allowed=False,
                 current_cost=self._accumulated_cost,
@@ -170,12 +177,17 @@ class CostEnforcer:
                 reason=f"Monthly tenant cost limit exceeded: ${monthly_total:.2f} > ${self._monthly_tenant_limit:.2f}",
             )
 
-        return CostCheckResult(allowed=True, current_cost=self._accumulated_cost, limit=self._per_execution_limit)
+        return CostCheckResult(
+            allowed=True,
+            current_cost=self._accumulated_cost,
+            limit=self._per_execution_limit,
+        )
 
     async def get_budget_status(self) -> dict[str, Any]:
         """Get current budget usage status."""
         r = await self._get_redis()
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
 
         day_key = f"cost:daily:{self._tenant_id}:{now.strftime('%Y-%m-%d')}"

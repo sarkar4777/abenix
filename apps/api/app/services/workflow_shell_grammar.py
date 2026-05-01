@@ -1,16 +1,17 @@
 """Talk-to-workflow shell — formal verb grammar."""
+
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
 class ArgSpec:
     """Single argument to a verb."""
+
     name: str
-    typ: str                    # "string", "ident", "number", "any", "json", "node_ref", "duration", "expr"
+    typ: str  # "string", "ident", "number", "any", "json", "node_ref", "duration", "expr"
     required: bool = True
     default: Any = None
     help: str = ""
@@ -19,13 +20,14 @@ class ArgSpec:
 @dataclass
 class VerbSpec:
     """Declarative description of one shell verb."""
+
     name: str
-    intent: str                 # INSPECT | MUTATE | EXECUTE | GOVERN | LEARN
+    intent: str  # INSPECT | MUTATE | EXECUTE | GOVERN | LEARN
     summary: str
     args: list[ArgSpec] = field(default_factory=list)
     examples: list[str] = field(default_factory=list)
     aliases: list[str] = field(default_factory=list)
-    risk: str = "safe"          # safe | low | medium | high
+    risk: str = "safe"  # safe | low | medium | high
 
 
 # ── INSPECT ─────────────────────────────────────────────────────────────
@@ -34,8 +36,21 @@ INSPECT_VERBS: list[VerbSpec] = [
         name="show",
         intent="INSPECT",
         summary="Show a top-level workflow object: workflow, runs, failures, nodes, costs, schedule, patches, history, replays, branches.",
-        args=[ArgSpec("object", "ident", help="workflow | runs | failures | nodes | costs | schedule | patches | history | replays | branches")],
-        examples=["show workflow", "show runs", "show failures", "show nodes", "show costs", "show patches"],
+        args=[
+            ArgSpec(
+                "object",
+                "ident",
+                help="workflow | runs | failures | nodes | costs | schedule | patches | history | replays | branches",
+            )
+        ],
+        examples=[
+            "show workflow",
+            "show runs",
+            "show failures",
+            "show nodes",
+            "show costs",
+            "show patches",
+        ],
     ),
     VerbSpec(
         name="describe",
@@ -66,7 +81,13 @@ INSPECT_VERBS: list[VerbSpec] = [
         name="list",
         intent="INSPECT",
         summary="Tabular listing — patches, history, replays, branches, runs.",
-        args=[ArgSpec("category", "ident", help="patches | history | replays | branches | runs")],
+        args=[
+            ArgSpec(
+                "category",
+                "ident",
+                help="patches | history | replays | branches | runs",
+            )
+        ],
         examples=["list patches", "list runs", "list branches"],
     ),
 ]
@@ -79,9 +100,17 @@ MUTATE_VERBS: list[VerbSpec] = [
         intent="MUTATE",
         summary="Add a node to the pipeline (agent | tool | switch | map | reduce | http).",
         args=[
-            ArgSpec("kind", "ident", help="agent | tool | switch | map | reduce | http"),
+            ArgSpec(
+                "kind", "ident", help="agent | tool | switch | map | reduce | http"
+            ),
             ArgSpec("name", "string", help="new node id"),
-            ArgSpec("after", "node_ref", required=False, default=None, help="optional: which node to insert after"),
+            ArgSpec(
+                "after",
+                "node_ref",
+                required=False,
+                default=None,
+                help="optional: which node to insert after",
+            ),
         ],
         examples=["add tool web_search", "add agent triage after intake"],
         risk="medium",
@@ -110,10 +139,15 @@ MUTATE_VERBS: list[VerbSpec] = [
         intent="MUTATE",
         summary="Set a field on a node (or workflow root). Path is dot-separated: <node>.<field> or .<workflow_field>.",
         args=[
-            ArgSpec("path", "string", help="e.g. extractor.timeout_seconds or .description"),
+            ArgSpec(
+                "path", "string", help="e.g. extractor.timeout_seconds or .description"
+            ),
             ArgSpec("value", "any"),
         ],
-        examples=["set extractor.timeout_seconds 60", "set extractor.on_error continue"],
+        examples=[
+            "set extractor.timeout_seconds 60",
+            "set extractor.on_error continue",
+        ],
         risk="low",
     ),
     VerbSpec(
@@ -122,7 +156,11 @@ MUTATE_VERBS: list[VerbSpec] = [
         summary="Swap the LLM model on an agent_step node.",
         args=[
             ArgSpec("node", "node_ref"),
-            ArgSpec("model", "string", help="claude-sonnet-4-5-20250929 | gemini-2.5-pro | gpt-4o | ..."),
+            ArgSpec(
+                "model",
+                "string",
+                help="claude-sonnet-4-5-20250929 | gemini-2.5-pro | gpt-4o | ...",
+            ),
         ],
         examples=["swap-model extractor gemini-2.5-pro"],
         risk="medium",
@@ -148,7 +186,10 @@ MUTATE_VERBS: list[VerbSpec] = [
             ArgSpec("ref", "string", help="kb id / atlas id / tool name"),
             ArgSpec("node", "node_ref"),
         ],
-        examples=["attach kb fin-glossary to extractor", "attach tool web_search to research"],
+        examples=[
+            "attach kb fin-glossary to extractor",
+            "attach tool web_search to research",
+        ],
         risk="medium",
     ),
 ]
@@ -169,7 +210,13 @@ EXECUTE_VERBS: list[VerbSpec] = [
         summary="Re-run a past execution (optionally with a draft patch applied).",
         args=[
             ArgSpec("run", "string"),
-            ArgSpec("with_patch", "string", required=False, default=None, help="patch id to apply for the replay"),
+            ArgSpec(
+                "with_patch",
+                "string",
+                required=False,
+                default=None,
+                help="patch id to apply for the replay",
+            ),
         ],
         examples=["replay last", "replay abc-123 with-patch p9d1"],
     ),
@@ -198,7 +245,13 @@ EXECUTE_VERBS: list[VerbSpec] = [
         summary="Merge a branch back to main, optionally gated on simulation pass.",
         args=[
             ArgSpec("branch", "string"),
-            ArgSpec("if_pass", "ident", required=False, default=None, help="pass to require simulate to be green first"),
+            ArgSpec(
+                "if_pass",
+                "ident",
+                required=False,
+                default=None,
+                help="pass to require simulate to be green first",
+            ),
         ],
         examples=["merge fix-extractor", "merge experiment-1 if-pass"],
         risk="medium",
@@ -224,7 +277,7 @@ GOVERN_VERBS: list[VerbSpec] = [
             ArgSpec("metric", "ident", help="cost | latency | error-rate | drift"),
             ArgSpec("expr", "expr", help="e.g. > 5/run, > 2s p95, > 10%/h"),
         ],
-        examples=['watch cost alert if > 5/run', 'watch error-rate alert if > 10%/h'],
+        examples=["watch cost alert if > 5/run", "watch error-rate alert if > 10%/h"],
         risk="safe",
     ),
     VerbSpec(
@@ -283,7 +336,13 @@ LEARN_VERBS: list[VerbSpec] = [
         name="suggest",
         intent="LEARN",
         summary="Ask the shell for ideas.  Categories: improvements | cheaper-equivalent | faster-equivalent.",
-        args=[ArgSpec("category", "ident", help="improvements | cheaper-equivalent | faster-equivalent")],
+        args=[
+            ArgSpec(
+                "category",
+                "ident",
+                help="improvements | cheaper-equivalent | faster-equivalent",
+            )
+        ],
         examples=["suggest improvements", "suggest cheaper-equivalent"],
     ),
     VerbSpec(
@@ -312,7 +371,13 @@ LEARN_VERBS: list[VerbSpec] = [
 
 # ── Registry ───────────────────────────────────────────────────────────
 GRAMMAR: dict[str, VerbSpec] = {}
-for spec_list in (INSPECT_VERBS, MUTATE_VERBS, EXECUTE_VERBS, GOVERN_VERBS, LEARN_VERBS):
+for spec_list in (
+    INSPECT_VERBS,
+    MUTATE_VERBS,
+    EXECUTE_VERBS,
+    GOVERN_VERBS,
+    LEARN_VERBS,
+):
     for spec in spec_list:
         GRAMMAR[spec.name] = spec
         for alias in spec.aliases:
@@ -377,7 +442,11 @@ def parse_command(text: str) -> dict[str, Any]:
     if head not in GRAMMAR:
         # Suggest closest by edit distance over verb keys
         suggestion = _closest(head, list(GRAMMAR.keys()))
-        return {"ok": False, "error": f"unknown verb '{head}'", "suggestion": suggestion}
+        return {
+            "ok": False,
+            "error": f"unknown verb '{head}'",
+            "suggestion": suggestion,
+        }
 
     spec = GRAMMAR[head]
 
@@ -408,7 +477,9 @@ def parse_command(text: str) -> dict[str, Any]:
 def _coerce(raw: str, typ: str) -> Any:
     s = raw.strip()
     if typ == "string" or typ == "any":
-        if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
+        if (s.startswith("'") and s.endswith("'")) or (
+            s.startswith('"') and s.endswith('"')
+        ):
             return s[1:-1]
         return s
     if typ == "ident":
@@ -425,6 +496,7 @@ def _coerce(raw: str, typ: str) -> Any:
         return s
     if typ == "json":
         import json
+
         try:
             return json.loads(s)
         except Exception:
@@ -508,8 +580,7 @@ def verb_doc_md(verb: str | None = None) -> str:
         out.append(f"## {intent}")
         for spec in by_intent.get(intent, []):
             sig = " ".join(
-                f"<{a.name}>" if a.required else f"[{a.name}]"
-                for a in spec.args
+                f"<{a.name}>" if a.required else f"[{a.name}]" for a in spec.args
             )
             out.append(f"- `{spec.name} {sig}` — {spec.summary}")
         out.append("")
@@ -524,17 +595,24 @@ def list_verbs() -> list[dict[str, Any]]:
         if spec.name in seen:
             continue
         seen.add(spec.name)
-        rows.append({
-            "name": spec.name,
-            "intent": spec.intent,
-            "summary": spec.summary,
-            "args": [
-                {"name": a.name, "typ": a.typ, "required": a.required,
-                 "default": a.default, "help": a.help}
-                for a in spec.args
-            ],
-            "examples": spec.examples,
-            "aliases": spec.aliases,
-            "risk": spec.risk,
-        })
+        rows.append(
+            {
+                "name": spec.name,
+                "intent": spec.intent,
+                "summary": spec.summary,
+                "args": [
+                    {
+                        "name": a.name,
+                        "typ": a.typ,
+                        "required": a.required,
+                        "default": a.default,
+                        "help": a.help,
+                    }
+                    for a in spec.args
+                ],
+                "examples": spec.examples,
+                "aliases": spec.aliases,
+                "risk": spec.risk,
+            }
+        )
     return rows

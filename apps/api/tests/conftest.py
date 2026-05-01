@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
@@ -18,7 +17,9 @@ from app.core.deps import get_db
 from app.main import app
 
 engine = create_async_engine(settings.database_url, echo=False)
-TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+TestSessionLocal = async_sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
@@ -47,8 +48,9 @@ async def _noop_rate_limit(*args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def _disable_rate_limiting():
-    with patch("app.core.rate_limit.rate_limit_auth", _noop_rate_limit), \
-         patch("app.core.rate_limit.rate_limit_user", _noop_rate_limit):
+    with patch("app.core.rate_limit.rate_limit_auth", _noop_rate_limit), patch(
+        "app.core.rate_limit.rate_limit_user", _noop_rate_limit
+    ):
         yield
 
 
@@ -58,6 +60,8 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = _override_get_db
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
         yield ac
     app.dependency_overrides.clear()

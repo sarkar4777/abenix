@@ -1,4 +1,5 @@
 """Data Retention Policies — tenant-configurable data lifecycle management."""
+
 from __future__ import annotations
 
 import logging
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RetentionPolicy:
     """Retention configuration for a tenant."""
+
     execution_retention_days: int = 90
     message_retention_days: int = 365
     audit_log_retention_days: int = 730  # 2 years minimum for compliance
@@ -28,12 +30,16 @@ def parse_retention_settings(settings: dict[str, Any] | None) -> RetentionPolicy
     return RetentionPolicy(
         execution_retention_days=max(settings.get("execution_retention_days", 90), 7),
         message_retention_days=max(settings.get("message_retention_days", 365), 30),
-        audit_log_retention_days=max(settings.get("audit_log_retention_days", 730), 365),
+        audit_log_retention_days=max(
+            settings.get("audit_log_retention_days", 730), 365
+        ),
         knowledge_retention_days=max(settings.get("knowledge_retention_days", 365), 30),
     )
 
 
-async def enforce_retention(db: AsyncSession, tenant_id: Any, policy: RetentionPolicy) -> dict[str, int]:
+async def enforce_retention(
+    db: AsyncSession, tenant_id: Any, policy: RetentionPolicy
+) -> dict[str, int]:
     """Delete data older than retention policy allows. Returns counts of deleted rows."""
     import uuid as _uuid
     from models.execution import Execution
@@ -41,7 +47,11 @@ async def enforce_retention(db: AsyncSession, tenant_id: Any, policy: RetentionP
     from models.activity_log import ActivityLog
     from models.user import User
 
-    tid = _uuid.UUID(str(tenant_id)) if not isinstance(tenant_id, _uuid.UUID) else tenant_id
+    tid = (
+        _uuid.UUID(str(tenant_id))
+        if not isinstance(tenant_id, _uuid.UUID)
+        else tenant_id
+    )
     now = datetime.now(timezone.utc)
     counts: dict[str, int] = {}
 
@@ -59,9 +69,7 @@ async def enforce_retention(db: AsyncSession, tenant_id: Any, policy: RetentionP
     cutoff = now - timedelta(days=policy.message_retention_days)
     result = await db.execute(
         delete(Conversation).where(
-            Conversation.user_id.in_(
-                select(User.id).where(User.tenant_id == tid)
-            ),
+            Conversation.user_id.in_(select(User.id).where(User.tenant_id == tid)),
             Conversation.created_at < cutoff,
         )
     )
@@ -82,12 +90,15 @@ async def enforce_retention(db: AsyncSession, tenant_id: Any, policy: RetentionP
     return counts
 
 
-async def apply_retention(db: AsyncSession, tenant_id: str, policy: RetentionPolicy) -> dict[str, int]:
+async def apply_retention(
+    db: AsyncSession, tenant_id: str, policy: RetentionPolicy
+) -> dict[str, int]:
     """Apply retention policy — delete records older than configured periods.
 
     Returns counts of deleted records per table.
     """
     import uuid
+
     tid = uuid.UUID(tenant_id)
     now = datetime.now(timezone.utc)
     deleted = {}
@@ -95,6 +106,7 @@ async def apply_retention(db: AsyncSession, tenant_id: str, policy: RetentionPol
     try:
         # Executions
         from models.execution import Execution
+
         cutoff = now - timedelta(days=policy.execution_retention_days)
         result = await db.execute(
             delete(Execution).where(
@@ -105,10 +117,9 @@ async def apply_retention(db: AsyncSession, tenant_id: str, policy: RetentionPol
 
         # Messages
         from models.conversation import Message
+
         cutoff = now - timedelta(days=policy.message_retention_days)
-        result = await db.execute(
-            delete(Message).where(Message.created_at < cutoff)
-        )
+        result = await db.execute(delete(Message).where(Message.created_at < cutoff))
         deleted["messages"] = result.rowcount
 
         await db.commit()

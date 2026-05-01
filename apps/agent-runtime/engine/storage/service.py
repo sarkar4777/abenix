@@ -16,21 +16,32 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")
-STORAGE_LOCAL_DIR = os.environ.get("STORAGE_LOCAL_DIR", os.environ.get("UPLOAD_DIR", "./data/uploads"))
+STORAGE_LOCAL_DIR = os.environ.get(
+    "STORAGE_LOCAL_DIR", os.environ.get("UPLOAD_DIR", "./data/uploads")
+)
 
 # S3-compatible (AWS, MinIO, R2, GCS S3-compat, DigitalOcean Spaces)
-STORAGE_S3_BUCKET = os.environ.get("STORAGE_S3_BUCKET", os.environ.get("S3_BUCKET", "abenix-files"))
-STORAGE_S3_REGION = os.environ.get("STORAGE_S3_REGION", os.environ.get("AWS_REGION", "us-east-1"))
-STORAGE_S3_ENDPOINT = os.environ.get("STORAGE_S3_ENDPOINT", "")  # MinIO: http://minio:9000
-STORAGE_S3_ACCESS_KEY = os.environ.get("STORAGE_S3_ACCESS_KEY", os.environ.get("AWS_ACCESS_KEY_ID", ""))
-STORAGE_S3_SECRET_KEY = os.environ.get("STORAGE_S3_SECRET_KEY", os.environ.get("AWS_SECRET_ACCESS_KEY", ""))
+STORAGE_S3_BUCKET = os.environ.get(
+    "STORAGE_S3_BUCKET", os.environ.get("S3_BUCKET", "abenix-files")
+)
+STORAGE_S3_REGION = os.environ.get(
+    "STORAGE_S3_REGION", os.environ.get("AWS_REGION", "us-east-1")
+)
+STORAGE_S3_ENDPOINT = os.environ.get(
+    "STORAGE_S3_ENDPOINT", ""
+)  # MinIO: http://minio:9000
+STORAGE_S3_ACCESS_KEY = os.environ.get(
+    "STORAGE_S3_ACCESS_KEY", os.environ.get("AWS_ACCESS_KEY_ID", "")
+)
+STORAGE_S3_SECRET_KEY = os.environ.get(
+    "STORAGE_S3_SECRET_KEY", os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+)
 
 # Azure Blob
 STORAGE_AZURE_CONN_STR = os.environ.get("STORAGE_AZURE_CONNECTION_STRING", "")
@@ -84,6 +95,7 @@ class StorageService:
             # Local: return API endpoint path
             # The API will serve the file via GET /api/files/{encoded_path}
             import base64
+
             encoded = base64.urlsafe_b64encode(uri.encode()).decode()
             return f"/api/files/{encoded}"
 
@@ -115,7 +127,9 @@ class StorageService:
         except Exception:
             return False
 
-    async def list_files(self, tenant_id: str, prefix: str = "") -> list[dict[str, Any]]:
+    async def list_files(
+        self, tenant_id: str, prefix: str = ""
+    ) -> list[dict[str, Any]]:
         """List files for a tenant with optional prefix filter."""
         full_prefix = f"{tenant_id}/{prefix}" if prefix else f"{tenant_id}/"
 
@@ -161,16 +175,19 @@ class StorageService:
         if prefix_path.exists():
             for f in prefix_path.rglob("*"):
                 if f.is_file():
-                    files.append({
-                        "key": str(f.relative_to(base)),
-                        "size": f.stat().st_size,
-                        "modified": f.stat().st_mtime,
-                        "uri": f"file://{f.resolve()}",
-                    })
+                    files.append(
+                        {
+                            "key": str(f.relative_to(base)),
+                            "size": f.stat().st_size,
+                            "modified": f.stat().st_mtime,
+                            "uri": f"file://{f.resolve()}",
+                        }
+                    )
         return files
 
     def _get_s3_client(self):
         import boto3
+
         kwargs: dict[str, Any] = {
             "region_name": STORAGE_S3_REGION,
         }
@@ -181,17 +198,23 @@ class StorageService:
             kwargs["endpoint_url"] = STORAGE_S3_ENDPOINT
         return boto3.client("s3", **kwargs)
 
-    async def _s3_upload(self, key: str, data: bytes, content_type: str, metadata: dict | None) -> str:
+    async def _s3_upload(
+        self, key: str, data: bytes, content_type: str, metadata: dict | None
+    ) -> str:
         import io
+
         client = self._get_s3_client()
         extra_args: dict[str, Any] = {"ContentType": content_type}
         if metadata:
             extra_args["Metadata"] = metadata
-        client.upload_fileobj(io.BytesIO(data), STORAGE_S3_BUCKET, key, ExtraArgs=extra_args)
+        client.upload_fileobj(
+            io.BytesIO(data), STORAGE_S3_BUCKET, key, ExtraArgs=extra_args
+        )
         return f"s3://{STORAGE_S3_BUCKET}/{key}"
 
     async def _s3_download(self, uri: str) -> bytes:
         import io
+
         client = self._get_s3_client()
         bucket, key = self._parse_s3_uri(uri)
         buf = io.BytesIO()
@@ -224,15 +247,19 @@ class StorageService:
 
     async def _s3_list(self, prefix: str) -> list[dict[str, Any]]:
         client = self._get_s3_client()
-        response = client.list_objects_v2(Bucket=STORAGE_S3_BUCKET, Prefix=prefix, MaxKeys=1000)
+        response = client.list_objects_v2(
+            Bucket=STORAGE_S3_BUCKET, Prefix=prefix, MaxKeys=1000
+        )
         files = []
         for obj in response.get("Contents", []):
-            files.append({
-                "key": obj["Key"],
-                "size": obj["Size"],
-                "modified": obj["LastModified"].timestamp(),
-                "uri": f"s3://{STORAGE_S3_BUCKET}/{obj['Key']}",
-            })
+            files.append(
+                {
+                    "key": obj["Key"],
+                    "size": obj["Size"],
+                    "modified": obj["LastModified"].timestamp(),
+                    "uri": f"s3://{STORAGE_S3_BUCKET}/{obj['Key']}",
+                }
+            )
         return files
 
     @staticmethod
@@ -244,10 +271,14 @@ class StorageService:
 
     def _get_azure_client(self):
         from azure.storage.blob import BlobServiceClient
+
         return BlobServiceClient.from_connection_string(STORAGE_AZURE_CONN_STR)
 
-    async def _azure_upload(self, key: str, data: bytes, content_type: str, metadata: dict | None) -> str:
+    async def _azure_upload(
+        self, key: str, data: bytes, content_type: str, metadata: dict | None
+    ) -> str:
         from azure.storage.blob import ContentSettings
+
         client = self._get_azure_client()
         blob = client.get_blob_client(STORAGE_AZURE_CONTAINER, key)
         blob.upload_blob(
@@ -267,6 +298,7 @@ class StorageService:
     async def _azure_sas_url(self, uri: str, expires: int) -> str:
         from azure.storage.blob import generate_blob_sas, BlobSasPermissions
         from datetime import datetime, timedelta, timezone
+
         client = self._get_azure_client()
         container, key = self._parse_azure_uri(uri)
         sas = generate_blob_sas(
@@ -301,12 +333,16 @@ class StorageService:
         container_client = client.get_container_client(STORAGE_AZURE_CONTAINER)
         files = []
         for blob in container_client.list_blobs(name_starts_with=prefix):
-            files.append({
-                "key": blob.name,
-                "size": blob.size,
-                "modified": blob.last_modified.timestamp() if blob.last_modified else 0,
-                "uri": f"az://{STORAGE_AZURE_CONTAINER}/{blob.name}",
-            })
+            files.append(
+                {
+                    "key": blob.name,
+                    "size": blob.size,
+                    "modified": (
+                        blob.last_modified.timestamp() if blob.last_modified else 0
+                    ),
+                    "uri": f"az://{STORAGE_AZURE_CONTAINER}/{blob.name}",
+                }
+            )
         return files
 
     @staticmethod

@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
-from app.core.responses import error
 from app.core.security import verify_token
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -60,9 +59,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def _authenticate_via_api_key(
-    raw_key: str, db: AsyncSession
-) -> User | None:
+async def _authenticate_via_api_key(raw_key: str, db: AsyncSession) -> User | None:
     """Authenticate a request using an af_ API key. Returns the User or None."""
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
     result = await db.execute(
@@ -77,9 +74,14 @@ async def _authenticate_via_api_key(
         return None
 
     # Check API key usage limits
-    if api_key.max_monthly_tokens and (api_key.tokens_used or 0) >= api_key.max_monthly_tokens:
+    if (
+        api_key.max_monthly_tokens
+        and (api_key.tokens_used or 0) >= api_key.max_monthly_tokens
+    ):
         return None  # Key token quota exhausted
-    if api_key.max_monthly_cost and float(api_key.cost_used or 0) >= float(api_key.max_monthly_cost):
+    if api_key.max_monthly_cost and float(api_key.cost_used or 0) >= float(
+        api_key.max_monthly_cost
+    ):
         return None  # Key cost quota exhausted
 
     # Update last_used_at
@@ -111,7 +113,8 @@ async def get_current_user(
         if user:
             # Extract acting subject if API key has delegation permission
             from app.core.acting_subject import ActingSubject, can_delegate
-            scopes = getattr(user, '_api_key_scopes', None)
+
+            scopes = getattr(user, "_api_key_scopes", None)
             if can_delegate(scopes):
                 subject = ActingSubject.from_header(x_abenix_subject)
                 if subject:
@@ -134,7 +137,9 @@ async def get_current_user(
     except ValueError:
         raise _auth_error()
 
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.is_active.is_(True))
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise _auth_error()
@@ -154,12 +159,17 @@ async def get_current_tenant(
 
 def require_scope(scope: str) -> Callable:
     """Dependency that checks API key scopes. JWT users pass through."""
+
     async def _check(user: User = Depends(get_current_user)) -> User:
-        scopes = getattr(user, '_api_key_scopes', None)
+        scopes = getattr(user, "_api_key_scopes", None)
         if scopes is not None and scope not in scopes:
             from fastapi import HTTPException
-            raise HTTPException(status_code=403, detail=f"API key missing required scope: {scope}")
+
+            raise HTTPException(
+                status_code=403, detail=f"API key missing required scope: {scope}"
+            )
         return user
+
     return _check
 
 
@@ -167,11 +177,14 @@ def require_role(roles: list[str]) -> Callable:
     async def _check(user: User = Depends(get_current_user)) -> User:
         if user.role.value not in roles:
             from fastapi import HTTPException
+
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
+
     return _check
 
 
 def _auth_error():
     from fastapi import HTTPException
+
     return HTTPException(status_code=401, detail="Not authenticated")

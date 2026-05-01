@@ -1,4 +1,5 @@
 """Redis-backed query result cache for KB hybrid search."""
+
 from __future__ import annotations
 
 import hashlib
@@ -24,10 +25,14 @@ def _get_client() -> Any | None:
         return _redis_client
     try:
         import redis.asyncio as aioredis
+
         url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         _redis_client = aioredis.from_url(
-            url, encoding="utf-8", decode_responses=True,
-            socket_connect_timeout=2, socket_timeout=2,
+            url,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
         )
         return _redis_client
     except Exception as e:
@@ -45,13 +50,16 @@ def cache_key(
     top_k: int,
 ) -> str:
     """Stable cache key — sorts kb_ids so order doesn't matter."""
-    payload = json.dumps({
-        "t": tenant_id,
-        "k": sorted(kb_ids),
-        "q": query.strip().lower(),
-        "m": mode,
-        "n": top_k,
-    }, sort_keys=True)
+    payload = json.dumps(
+        {
+            "t": tenant_id,
+            "k": sorted(kb_ids),
+            "q": query.strip().lower(),
+            "m": mode,
+            "n": top_k,
+        },
+        sort_keys=True,
+    )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
     return f"kbsearch:{digest}"
 
@@ -91,13 +99,17 @@ async def invalidate_tenant(tenant_id: str) -> None:
         cursor = 0
         deleted = 0
         while True:
-            cursor, keys = await client.scan(cursor=cursor, match="kbsearch:*", count=200)
+            cursor, keys = await client.scan(
+                cursor=cursor, match="kbsearch:*", count=200
+            )
             if keys:
                 await client.delete(*keys)
                 deleted += len(keys)
             if cursor == 0:
                 break
         if deleted:
-            logger.info("Search cache: invalidated %d entries (tenant=%s)", deleted, tenant_id)
+            logger.info(
+                "Search cache: invalidated %d entries (tenant=%s)", deleted, tenant_id
+            )
     except Exception:
         pass

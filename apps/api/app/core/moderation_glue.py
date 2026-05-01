@@ -1,4 +1,5 @@
 """Glue between the API layer and the agent-runtime's moderation gate."""
+
 from __future__ import annotations
 
 import logging
@@ -32,13 +33,15 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ModerationGateContext:
     """Wraps a GateConfig + its collected events for post-hoc persistence."""
+
     gate: GateConfig | None = None
     policy_id: uuid.UUID | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
 
 
 async def load_active_policy(
-    db: AsyncSession, tenant_id: uuid.UUID,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
 ) -> ModerationPolicy | None:
     q = (
         select(ModerationPolicy)
@@ -66,16 +69,18 @@ async def build_gate_context(
         decision = kw.get("decision")
         if decision is None:
             return
-        ctx.events.append({
-            "source": kw.get("source", ""),
-            "outcome": decision.outcome,
-            "content_preview": (kw.get("content_preview") or "")[:500],
-            "content_sha256": kw.get("content_sha256"),
-            "execution_id": kw.get("execution_id") or None,
-            "acted_categories": decision.triggered_categories,
-            "provider_response": decision.provider_response,
-            "latency_ms": decision.latency_ms,
-        })
+        ctx.events.append(
+            {
+                "source": kw.get("source", ""),
+                "outcome": decision.outcome,
+                "content_preview": (kw.get("content_preview") or "")[:500],
+                "content_sha256": kw.get("content_sha256"),
+                "execution_id": kw.get("execution_id") or None,
+                "acted_categories": decision.triggered_categories,
+                "provider_response": decision.provider_response,
+                "latency_ms": decision.latency_ms,
+            }
+        )
 
     ctx.policy_id = policy.id
     ctx.gate = GateConfig(
@@ -123,7 +128,11 @@ async def persist_events(
             exec_uuid: uuid.UUID | None = None
             if exec_id_raw:
                 try:
-                    exec_uuid = uuid.UUID(exec_id_raw) if isinstance(exec_id_raw, str) else exec_id_raw
+                    exec_uuid = (
+                        uuid.UUID(exec_id_raw)
+                        if isinstance(exec_id_raw, str)
+                        else exec_id_raw
+                    )
                 except ValueError:
                     exec_uuid = None
             ev = ModerationEvent(

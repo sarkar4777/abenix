@@ -1,11 +1,11 @@
 """Regulatory enforcement & litigation lookup."""
+
 from __future__ import annotations
 
 import json
 import logging
 import re
 import unicodedata
-from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import quote_plus
@@ -51,11 +51,16 @@ def _extract_fine_usd(text: str) -> float | None:
             continue
         groups = m.groups()
         try:
-            amount = float(next((g for g in groups if g and re.match(r"^[\d\.]+$", g)), "0"))
+            amount = float(
+                next((g for g in groups if g and re.match(r"^[\d\.]+$", g)), "0")
+            )
         except ValueError:
             continue
         mult = 1.0
-        suffix = next((g for g in groups if g and g in ("million", "billion", "m", "bn", "b")), None)
+        suffix = next(
+            (g for g in groups if g and g in ("million", "billion", "m", "bn", "b")),
+            None,
+        )
         if suffix in ("million", "m"):
             mult = 1e6
         elif suffix in ("billion", "bn", "b"):
@@ -90,16 +95,22 @@ async def _sec_litigation(name: str) -> list[dict[str, Any]]:
         src = hit.get("_source", {})
         title = src.get("display_names", [""])[0] if src.get("display_names") else ""
         adsh = src.get("adsh", "")
-        out.append({
-            "authority": "SEC (US)",
-            "action_type": "civil_suit",
-            "date": src.get("file_date"),
-            "title": title or src.get("form_type", "Litigation release"),
-            "summary": (src.get("items") or "").strip(),
-            "primary_source_url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&filenum={adsh}" if adsh else "https://www.sec.gov/litigation/litreleases.shtml",
-            "fine_amount_usd": _extract_fine_usd(src.get("items", "")),
-            "confidence": _fuzzy(name, title),
-        })
+        out.append(
+            {
+                "authority": "SEC (US)",
+                "action_type": "civil_suit",
+                "date": src.get("file_date"),
+                "title": title or src.get("form_type", "Litigation release"),
+                "summary": (src.get("items") or "").strip(),
+                "primary_source_url": (
+                    f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&filenum={adsh}"
+                    if adsh
+                    else "https://www.sec.gov/litigation/litreleases.shtml"
+                ),
+                "fine_amount_usd": _extract_fine_usd(src.get("items", "")),
+                "confidence": _fuzzy(name, title),
+            }
+        )
     return out
 
 
@@ -107,8 +118,15 @@ async def _doj_press(name: str) -> list[dict[str, Any]]:
     """Crawl DOJ press-release search."""
     url = f"https://www.justice.gov/opa/pr?keys={quote_plus(name)}"
     try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=True) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"})
+        async with httpx.AsyncClient(
+            timeout=_HTTP_TIMEOUT, follow_redirects=True
+        ) as client:
+            r = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"
+                },
+            )
             if r.status_code != 200:
                 return []
             html = r.text
@@ -123,26 +141,37 @@ async def _doj_press(name: str) -> list[dict[str, Any]]:
         conf = _fuzzy(name, title)
         if conf < 70:
             continue
-        out.append({
-            "authority": "DOJ (US)",
-            "action_type": "criminal_charge",
-            "date": None,
-            "title": title,
-            "summary": "",
-            "primary_source_url": "https://www.justice.gov" + path,
-            "fine_amount_usd": None,
-            "confidence": conf,
-        })
+        out.append(
+            {
+                "authority": "DOJ (US)",
+                "action_type": "criminal_charge",
+                "date": None,
+                "title": title,
+                "summary": "",
+                "primary_source_url": "https://www.justice.gov" + path,
+                "fine_amount_usd": None,
+                "confidence": conf,
+            }
+        )
         if len(out) >= 10:
             break
     return out
 
 
 async def _fca_notices(name: str) -> list[dict[str, Any]]:
-    url = f"https://www.fca.org.uk/search-results?search_term={quote_plus(name)}&start=0"
+    url = (
+        f"https://www.fca.org.uk/search-results?search_term={quote_plus(name)}&start=0"
+    )
     try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=True) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"})
+        async with httpx.AsyncClient(
+            timeout=_HTTP_TIMEOUT, follow_redirects=True
+        ) as client:
+            r = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"
+                },
+            )
             if r.status_code != 200:
                 return []
             html = r.text
@@ -157,16 +186,22 @@ async def _fca_notices(name: str) -> list[dict[str, Any]]:
         conf = _fuzzy(name, title)
         if conf < 70:
             continue
-        out.append({
-            "authority": "FCA (UK)",
-            "action_type": "fine" if "fine" in title.lower() or "penal" in title.lower() else "final_notice",
-            "date": None,
-            "title": title,
-            "summary": "",
-            "primary_source_url": "https://www.fca.org.uk" + path,
-            "fine_amount_usd": _extract_fine_usd(title),
-            "confidence": conf,
-        })
+        out.append(
+            {
+                "authority": "FCA (UK)",
+                "action_type": (
+                    "fine"
+                    if "fine" in title.lower() or "penal" in title.lower()
+                    else "final_notice"
+                ),
+                "date": None,
+                "title": title,
+                "summary": "",
+                "primary_source_url": "https://www.fca.org.uk" + path,
+                "fine_amount_usd": _extract_fine_usd(title),
+                "confidence": conf,
+            }
+        )
         if len(out) >= 10:
             break
     return out
@@ -177,7 +212,12 @@ async def _courtlistener(name: str) -> list[dict[str, Any]]:
     url = f"https://www.courtlistener.com/api/rest/v3/search/?q={quote_plus(name)}&type=r&format=json"
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"})
+            r = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"
+                },
+            )
             if r.status_code != 200:
                 return []
             data = r.json()
@@ -186,16 +226,18 @@ async def _courtlistener(name: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for hit in (data.get("results") or [])[:10]:
         title = hit.get("caseName") or hit.get("caseNameShort") or ""
-        out.append({
-            "authority": hit.get("court") or "US Federal / State Court",
-            "action_type": "civil_suit",
-            "date": hit.get("dateFiled"),
-            "title": title,
-            "summary": hit.get("snippet", "")[:400],
-            "primary_source_url": f"https://www.courtlistener.com{hit.get('absolute_url','')}",
-            "fine_amount_usd": _extract_fine_usd(hit.get("snippet", "")),
-            "confidence": _fuzzy(name, title),
-        })
+        out.append(
+            {
+                "authority": hit.get("court") or "US Federal / State Court",
+                "action_type": "civil_suit",
+                "date": hit.get("dateFiled"),
+                "title": title,
+                "summary": hit.get("snippet", "")[:400],
+                "primary_source_url": f"https://www.courtlistener.com{hit.get('absolute_url','')}",
+                "fine_amount_usd": _extract_fine_usd(hit.get("snippet", "")),
+                "confidence": _fuzzy(name, title),
+            }
+        )
     return out
 
 
@@ -203,7 +245,12 @@ async def _bailii(name: str) -> list[dict[str, Any]]:
     url = f"https://www.bailii.org/cgi-bin/sino_search_1.cgi?query={quote_plus(name)}&method=boolean&highlight=1"
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"})
+            r = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; Abenix-KYC/1.0; +https://abenix.local)"
+                },
+            )
             if r.status_code != 200:
                 return []
             html = r.text
@@ -218,16 +265,18 @@ async def _bailii(name: str) -> list[dict[str, Any]]:
         conf = _fuzzy(name, title)
         if conf < 70:
             continue
-        out.append({
-            "authority": "BAILII (UK/IE Courts)",
-            "action_type": "judgment",
-            "date": None,
-            "title": title,
-            "summary": "",
-            "primary_source_url": "https://www.bailii.org" + path,
-            "fine_amount_usd": None,
-            "confidence": conf,
-        })
+        out.append(
+            {
+                "authority": "BAILII (UK/IE Courts)",
+                "action_type": "judgment",
+                "date": None,
+                "title": title,
+                "summary": "",
+                "primary_source_url": "https://www.bailii.org" + path,
+                "fine_amount_usd": None,
+                "confidence": conf,
+            }
+        )
         if len(out) >= 10:
             break
     return out
@@ -275,7 +324,8 @@ class RegulatoryEnforcementTool(BaseTool):
             "min_confidence": {
                 "type": "integer",
                 "default": 75,
-                "minimum": 50, "maximum": 100,
+                "minimum": 50,
+                "maximum": 100,
             },
         },
         "required": ["name"],
@@ -283,6 +333,7 @@ class RegulatoryEnforcementTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         import asyncio
+
         name = (arguments.get("name") or "").strip()
         if not name:
             return ToolResult(content="Error: 'name' is required.", is_error=True)
@@ -291,11 +342,16 @@ class RegulatoryEnforcementTool(BaseTool):
         min_conf = int(arguments.get("min_confidence", 75))
 
         tasks = []
-        if want_all or "sec" in sources: tasks.append(_sec_litigation(name))
-        if want_all or "doj" in sources: tasks.append(_doj_press(name))
-        if want_all or "fca" in sources: tasks.append(_fca_notices(name))
-        if want_all or "courtlistener" in sources: tasks.append(_courtlistener(name))
-        if want_all or "bailii" in sources: tasks.append(_bailii(name))
+        if want_all or "sec" in sources:
+            tasks.append(_sec_litigation(name))
+        if want_all or "doj" in sources:
+            tasks.append(_doj_press(name))
+        if want_all or "fca" in sources:
+            tasks.append(_fca_notices(name))
+        if want_all or "courtlistener" in sources:
+            tasks.append(_courtlistener(name))
+        if want_all or "bailii" in sources:
+            tasks.append(_bailii(name))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_hits: list[dict[str, Any]] = []
@@ -309,8 +365,17 @@ class RegulatoryEnforcementTool(BaseTool):
         filtered = [h for h in all_hits if h.get("confidence", 0) >= min_conf]
 
         # Grade
-        severe = [h for h in filtered if h["action_type"] in ("criminal_charge", "debarment", "licence_revocation")]
-        fines = [h for h in filtered if h.get("fine_amount_usd") and h["fine_amount_usd"] >= 1_000_000]
+        severe = [
+            h
+            for h in filtered
+            if h["action_type"]
+            in ("criminal_charge", "debarment", "licence_revocation")
+        ]
+        fines = [
+            h
+            for h in filtered
+            if h.get("fine_amount_usd") and h["fine_amount_usd"] >= 1_000_000
+        ]
         if severe or (len(fines) >= 2):
             grade = "H"
             reason = "Criminal charge / debarment / licence revocation OR multiple material fines"
@@ -322,21 +387,32 @@ class RegulatoryEnforcementTool(BaseTool):
             reason = "No enforcement actions or litigation found"
 
         return ToolResult(
-            content=json.dumps({
-                "queried_name": name,
-                "sources_checked": sources,
-                "total_hits": len(filtered),
-                "hits": sorted(filtered, key=lambda x: (x.get("confidence", 0), x.get("fine_amount_usd") or 0), reverse=True)[:25],
-                "risk_grade": grade,
-                "risk_grade_reason": reason,
-                "warnings": warnings,
-                "disclaimer": (
-                    "Primary-source searches are best-effort HTML scrapes — a "
-                    "negative result is NOT a guarantee that no action exists. "
-                    "For regulated counterparties always pair this tool with "
-                    "adverse_media and a direct check against the specific "
-                    "regulator of interest."
-                ),
-            }, indent=2, default=str),
+            content=json.dumps(
+                {
+                    "queried_name": name,
+                    "sources_checked": sources,
+                    "total_hits": len(filtered),
+                    "hits": sorted(
+                        filtered,
+                        key=lambda x: (
+                            x.get("confidence", 0),
+                            x.get("fine_amount_usd") or 0,
+                        ),
+                        reverse=True,
+                    )[:25],
+                    "risk_grade": grade,
+                    "risk_grade_reason": reason,
+                    "warnings": warnings,
+                    "disclaimer": (
+                        "Primary-source searches are best-effort HTML scrapes — a "
+                        "negative result is NOT a guarantee that no action exists. "
+                        "For regulated counterparties always pair this tool with "
+                        "adverse_media and a direct check against the specific "
+                        "regulator of interest."
+                    ),
+                },
+                indent=2,
+                default=str,
+            ),
             metadata={"hits": len(filtered), "grade": grade},
         )

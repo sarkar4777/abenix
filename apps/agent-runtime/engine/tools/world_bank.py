@@ -1,4 +1,5 @@
 """World Bank Open Data — country-level macro indicators."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -59,7 +60,9 @@ class WorldBankTool(BaseTool):
         start = int(arguments.get("start_year", 2018))
         end = int(arguments.get("end_year", 2024))
         if not country or not indicator:
-            return ToolResult(content="country_code and indicator are required", is_error=True)
+            return ToolResult(
+                content="country_code and indicator are required", is_error=True
+            )
         ind_code = _INDICATOR_ALIASES.get(indicator, indicator)
 
         url = f"{_BASE}/country/{country}/indicator/{ind_code}"
@@ -94,8 +97,11 @@ class WorldBankTool(BaseTool):
 
         # Response is a 2-element list: [meta, [records]]
         if not isinstance(payload, list) or len(payload) < 2:
-            return ToolResult(content=f"Unexpected response shape: {str(payload)[:200]}", is_error=True)
-        meta, records = payload[0], payload[1] or []
+            return ToolResult(
+                content=f"Unexpected response shape: {str(payload)[:200]}",
+                is_error=True,
+            )
+        _meta, records = payload[0], payload[1] or []
         if not records:
             return ToolResult(
                 content=f"No data for {country}/{ind_code} in {start}-{end}.",
@@ -129,8 +135,12 @@ class WorldBankTool(BaseTool):
         return ToolResult(
             content="\n".join(lines),
             metadata={
-                "country": country, "country_label": country_label,
-                "indicator": ind_code, "indicator_label": ind_label,
-                "values": [{"date": r.get("date"), "value": r.get("value")} for r in records],
+                "country": country,
+                "country_label": country_label,
+                "indicator": ind_code,
+                "indicator_label": ind_label,
+                "values": [
+                    {"date": r.get("date"), "value": r.get("value")} for r in records
+                ],
             },
         )

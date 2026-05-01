@@ -14,9 +14,15 @@ def upgrade() -> None:
     op.create_table(
         "conversations",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("tenant_id", UUID(as_uuid=True), sa.ForeignKey("tenants.id"), nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("agent_id", UUID(as_uuid=True), sa.ForeignKey("agents.id"), nullable=True),
+        sa.Column(
+            "tenant_id", UUID(as_uuid=True), sa.ForeignKey("tenants.id"), nullable=False
+        ),
+        sa.Column(
+            "user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False
+        ),
+        sa.Column(
+            "agent_id", UUID(as_uuid=True), sa.ForeignKey("agents.id"), nullable=True
+        ),
         sa.Column("title", sa.String(255), nullable=False, server_default="New Chat"),
         sa.Column("model_used", sa.String(100), nullable=True),
         sa.Column("is_archived", sa.Boolean, nullable=False, server_default="false"),
@@ -25,17 +31,28 @@ def upgrade() -> None:
         sa.Column("total_tokens", sa.Integer, nullable=False, server_default="0"),
         sa.Column("total_cost", sa.Numeric(10, 6), nullable=False, server_default="0"),
         sa.Column("message_count", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_conversations_user_id", "conversations", ["user_id"])
     op.create_index("ix_conversations_tenant_id", "conversations", ["tenant_id"])
-    op.create_index("ix_conversations_user_updated", "conversations", ["user_id", "updated_at"])
+    op.create_index(
+        "ix_conversations_user_updated", "conversations", ["user_id", "updated_at"]
+    )
 
     op.create_table(
         "messages",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("conversation_id", UUID(as_uuid=True), sa.ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "conversation_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("conversations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("role", sa.String(20), nullable=False),
         sa.Column("content", sa.Text, nullable=False, server_default=""),
         sa.Column("blocks", JSONB, nullable=True),
@@ -46,11 +63,19 @@ def upgrade() -> None:
         sa.Column("model_used", sa.String(100), nullable=True),
         sa.Column("duration_ms", sa.Integer, nullable=True),
         sa.Column("attachments", JSONB, nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_messages_conversation_id", "messages", ["conversation_id"])
-    op.create_index("ix_messages_conversation_created", "messages", ["conversation_id", "created_at"])
+    op.create_index(
+        "ix_messages_conversation_created",
+        "messages",
+        ["conversation_id", "created_at"],
+    )
 
 
 def downgrade() -> None:

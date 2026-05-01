@@ -18,7 +18,6 @@ from app.core.stripe import (
     is_mock_mode,
     PLATFORM_FEE_PERCENT,
 )
-from app.core.ws_manager import ws_manager
 from app.schemas.marketplace import SubscribeRequest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -28,7 +27,6 @@ from models.marketplace import Review, Subscription
 from models.payout import Payout, PayoutStatus
 from models.tenant import Tenant
 from models.user import User
-
 
 router = APIRouter(prefix="/api/marketplace", tags=["marketplace"])
 
@@ -214,7 +212,11 @@ async def subscribe_to_agent(
         )
         creator = creator_result.scalar_one_or_none()
 
-        if not creator or not creator.stripe_connect_id or not creator.stripe_connect_onboarded:
+        if (
+            not creator
+            or not creator.stripe_connect_id
+            or not creator.stripe_connect_onboarded
+        ):
             return error("Agent creator has not set up payments", 400)
 
         if is_mock_mode():
@@ -326,7 +328,7 @@ async def _notify_new_subscriber(
             type="new_subscriber",
             title="New subscriber",
             message=f"{subscriber.full_name or subscriber.email} subscribed to {agent.name}",
-            link=f"/creator",
+            link="/creator",
             metadata={
                 "agent_id": str(agent.id),
                 "agent_name": agent.name,

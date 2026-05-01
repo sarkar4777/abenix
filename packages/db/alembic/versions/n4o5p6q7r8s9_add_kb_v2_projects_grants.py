@@ -1,8 +1,8 @@
 """KB v2 — projects + collection grants + per-collection ontology hooks."""
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
-
 
 revision = "n4o5p6q7r8s9"
 down_revision = "m3n4o5p6q7r8"
@@ -13,127 +13,199 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
     postgresql.ENUM(
-        "private", "project", "tenant",
-        name="collection_visibility", create_type=False,
+        "private",
+        "project",
+        "tenant",
+        name="collection_visibility",
+        create_type=False,
     ).create(bind, checkfirst=True)
     postgresql.ENUM(
-        "READ", "WRITE", "ADMIN",
-        name="collection_permission", create_type=False,
+        "READ",
+        "WRITE",
+        "ADMIN",
+        name="collection_permission",
+        create_type=False,
     ).create(bind, checkfirst=True)
 
     op.create_table(
         "knowledge_projects",
-        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True),
-                  primary_key=True),
-        sa.Column("tenant_id", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("tenants.id"), nullable=False, index=True),
+        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "tenant_id",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tenants.id"),
+            nullable=False,
+            index=True,
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("slug", sa.String(120), nullable=False),
         sa.Column("description", sa.Text(), nullable=False, server_default=""),
-        sa.Column("ontology_schema_id",
-                  sa.dialects.postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("created_by", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True),
-                  server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True),
-                  server_default=sa.func.now()),
+        sa.Column(
+            "ontology_schema_id",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "created_by",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
         sa.UniqueConstraint("tenant_id", "slug", name="uq_kproj_tenant_slug"),
     )
     op.create_index(
-        "ix_kproj_tenant_created", "knowledge_projects",
+        "ix_kproj_tenant_created",
+        "knowledge_projects",
         ["tenant_id", "created_at"],
     )
 
     op.add_column(
         "knowledge_bases",
-        sa.Column("project_id",
-                  sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("knowledge_projects.id"), nullable=True),
+        sa.Column(
+            "project_id",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("knowledge_projects.id"),
+            nullable=True,
+        ),
     )
     op.add_column(
         "knowledge_bases",
         sa.Column(
             "default_visibility",
-            postgresql.ENUM("private", "project", "tenant",
-                            name="collection_visibility",
-                            create_type=False),
-            nullable=False, server_default="project",
+            postgresql.ENUM(
+                "private",
+                "project",
+                "tenant",
+                name="collection_visibility",
+                create_type=False,
+            ),
+            nullable=False,
+            server_default="project",
         ),
     )
     op.add_column(
         "knowledge_bases",
-        sa.Column("created_by", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("users.id"), nullable=True),
+        sa.Column(
+            "created_by",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id"),
+            nullable=True,
+        ),
     )
     op.add_column(
         "knowledge_bases",
-        sa.Column("vector_backend", sa.String(20),
-                  nullable=False, server_default="pinecone"),
+        sa.Column(
+            "vector_backend", sa.String(20), nullable=False, server_default="pinecone"
+        ),
     )
     op.create_index("ix_kb_project", "knowledge_bases", ["project_id"])
 
     op.create_table(
         "agent_collection_grants",
-        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True),
-                  primary_key=True),
-        sa.Column("agent_id", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("agents.id", ondelete="CASCADE"),
-                  nullable=False),
-        sa.Column("collection_id", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
-                  nullable=False),
+        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "agent_id",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("agents.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "collection_id",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column(
             "permission",
-            postgresql.ENUM("READ", "WRITE", "ADMIN",
-                            name="collection_permission", create_type=False),
-            nullable=False, server_default="READ",
+            postgresql.ENUM(
+                "READ",
+                "WRITE",
+                "ADMIN",
+                name="collection_permission",
+                create_type=False,
+            ),
+            nullable=False,
+            server_default="READ",
         ),
-        sa.Column("granted_by", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("granted_at", sa.DateTime(timezone=True),
-                  server_default=sa.func.now()),
-        sa.UniqueConstraint("agent_id", "collection_id",
-                            name="uq_agent_collection_grant"),
+        sa.Column(
+            "granted_by",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id"),
+            nullable=True,
+        ),
+        sa.Column(
+            "granted_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
+        sa.UniqueConstraint(
+            "agent_id", "collection_id", name="uq_agent_collection_grant"
+        ),
     )
     op.create_index(
-        "ix_agent_collection_grants_agent", "agent_collection_grants",
+        "ix_agent_collection_grants_agent",
+        "agent_collection_grants",
         ["agent_id"],
     )
     op.create_index(
-        "ix_agent_collection_grants_collection", "agent_collection_grants",
+        "ix_agent_collection_grants_collection",
+        "agent_collection_grants",
         ["collection_id"],
     )
 
     op.create_table(
         "user_collection_grants",
-        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True),
-                  primary_key=True),
-        sa.Column("user_id", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("users.id", ondelete="CASCADE"),
-                  nullable=False),
-        sa.Column("collection_id", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
-                  nullable=False),
+        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "user_id",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "collection_id",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column(
             "permission",
-            postgresql.ENUM("READ", "WRITE", "ADMIN",
-                            name="collection_permission", create_type=False),
-            nullable=False, server_default="READ",
+            postgresql.ENUM(
+                "READ",
+                "WRITE",
+                "ADMIN",
+                name="collection_permission",
+                create_type=False,
+            ),
+            nullable=False,
+            server_default="READ",
         ),
-        sa.Column("granted_by", sa.dialects.postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("granted_at", sa.DateTime(timezone=True),
-                  server_default=sa.func.now()),
+        sa.Column(
+            "granted_by",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id"),
+            nullable=True,
+        ),
+        sa.Column(
+            "granted_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
-        sa.UniqueConstraint("user_id", "collection_id",
-                            name="uq_user_collection_grant"),
+        sa.UniqueConstraint(
+            "user_id", "collection_id", name="uq_user_collection_grant"
+        ),
     )
     op.create_index(
-        "ix_user_collection_grants_user", "user_collection_grants", ["user_id"],
+        "ix_user_collection_grants_user",
+        "user_collection_grants",
+        ["user_id"],
     )
     op.create_index(
-        "ix_user_collection_grants_collection", "user_collection_grants",
+        "ix_user_collection_grants_collection",
+        "user_collection_grants",
         ["collection_id"],
     )
 
@@ -194,16 +266,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_user_collection_grants_collection",
-                  table_name="user_collection_grants")
-    op.drop_index("ix_user_collection_grants_user",
-                  table_name="user_collection_grants")
+    op.drop_index(
+        "ix_user_collection_grants_collection", table_name="user_collection_grants"
+    )
+    op.drop_index("ix_user_collection_grants_user", table_name="user_collection_grants")
     op.drop_table("user_collection_grants")
 
-    op.drop_index("ix_agent_collection_grants_collection",
-                  table_name="agent_collection_grants")
-    op.drop_index("ix_agent_collection_grants_agent",
-                  table_name="agent_collection_grants")
+    op.drop_index(
+        "ix_agent_collection_grants_collection", table_name="agent_collection_grants"
+    )
+    op.drop_index(
+        "ix_agent_collection_grants_agent", table_name="agent_collection_grants"
+    )
     op.drop_table("agent_collection_grants")
 
     op.drop_index("ix_kb_project", table_name="knowledge_bases")

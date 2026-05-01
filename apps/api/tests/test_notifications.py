@@ -8,11 +8,14 @@ from httpx import AsyncClient
 
 async def _register(client: AsyncClient) -> str:
     email = f"notif-{uuid.uuid4().hex[:8]}@test.com"
-    resp = await client.post("/api/auth/register", json={
-        "email": email,
-        "password": "securepass123",
-        "full_name": "Notification Tester",
-    })
+    resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": "securepass123",
+            "full_name": "Notification Tester",
+        },
+    )
     return resp.json()["data"]["access_token"]
 
 
@@ -63,7 +66,9 @@ async def test_notifications_require_auth(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_notification_pagination(client: AsyncClient):
     token = await _register(client)
-    resp = await client.get("/api/notifications?page=1&per_page=5", headers=_auth(token))
+    resp = await client.get(
+        "/api/notifications?page=1&per_page=5", headers=_auth(token)
+    )
     assert resp.status_code == 200
     meta = resp.json()["meta"]
     assert meta["page"] == 1
@@ -93,22 +98,34 @@ async def test_live_stats_requires_auth(client: AsyncClient):
 async def test_subscribe_creates_notification(client: AsyncClient):
     publisher_token = await _register(client)
 
-    create_resp = await client.post("/api/agents", json={
-        "name": f"Notif Agent {uuid.uuid4().hex[:6]}",
-        "system_prompt": "Test notifications.",
-        "description": "Agent for notification test",
-    }, headers=_auth(publisher_token))
+    create_resp = await client.post(
+        "/api/agents",
+        json={
+            "name": f"Notif Agent {uuid.uuid4().hex[:6]}",
+            "system_prompt": "Test notifications.",
+            "description": "Agent for notification test",
+        },
+        headers=_auth(publisher_token),
+    )
     agent_id = create_resp.json()["data"]["id"]
 
     await client.post(f"/api/agents/{agent_id}/publish", headers=_auth(publisher_token))
-    await client.post(f"/api/agents/{agent_id}/review", json={
-        "action": "approve",
-    }, headers=_auth(publisher_token))
+    await client.post(
+        f"/api/agents/{agent_id}/review",
+        json={
+            "action": "approve",
+        },
+        headers=_auth(publisher_token),
+    )
 
     subscriber_token = await _register(client)
-    sub_resp = await client.post(f"/api/marketplace/subscribe/{agent_id}", json={
-        "plan_type": "free",
-    }, headers=_auth(subscriber_token))
+    sub_resp = await client.post(
+        f"/api/marketplace/subscribe/{agent_id}",
+        json={
+            "plan_type": "free",
+        },
+        headers=_auth(subscriber_token),
+    )
     assert sub_resp.status_code == 201
 
     resp = await client.get("/api/notifications", headers=_auth(publisher_token))
@@ -123,31 +140,47 @@ async def test_subscribe_creates_notification(client: AsyncClient):
 async def test_mark_read_works(client: AsyncClient):
     publisher_token = await _register(client)
 
-    create_resp = await client.post("/api/agents", json={
-        "name": f"Read Agent {uuid.uuid4().hex[:6]}",
-        "system_prompt": "Test mark read.",
-        "description": "Agent for read test",
-    }, headers=_auth(publisher_token))
+    create_resp = await client.post(
+        "/api/agents",
+        json={
+            "name": f"Read Agent {uuid.uuid4().hex[:6]}",
+            "system_prompt": "Test mark read.",
+            "description": "Agent for read test",
+        },
+        headers=_auth(publisher_token),
+    )
     agent_id = create_resp.json()["data"]["id"]
 
     await client.post(f"/api/agents/{agent_id}/publish", headers=_auth(publisher_token))
-    await client.post(f"/api/agents/{agent_id}/review", json={
-        "action": "approve",
-    }, headers=_auth(publisher_token))
+    await client.post(
+        f"/api/agents/{agent_id}/review",
+        json={
+            "action": "approve",
+        },
+        headers=_auth(publisher_token),
+    )
 
     subscriber_token = await _register(client)
-    await client.post(f"/api/marketplace/subscribe/{agent_id}", json={
-        "plan_type": "free",
-    }, headers=_auth(subscriber_token))
+    await client.post(
+        f"/api/marketplace/subscribe/{agent_id}",
+        json={
+            "plan_type": "free",
+        },
+        headers=_auth(subscriber_token),
+    )
 
     list_resp = await client.get("/api/notifications", headers=_auth(publisher_token))
     notifications = list_resp.json()["data"]
     assert len(notifications) > 0
 
     notif_id = notifications[0]["id"]
-    read_resp = await client.post(f"/api/notifications/{notif_id}/read", headers=_auth(publisher_token))
+    read_resp = await client.post(
+        f"/api/notifications/{notif_id}/read", headers=_auth(publisher_token)
+    )
     assert read_resp.status_code == 200
     assert read_resp.json()["data"]["is_read"] is True
 
-    count_resp = await client.get("/api/notifications/unread-count", headers=_auth(publisher_token))
+    count_resp = await client.get(
+        "/api/notifications/unread-count", headers=_auth(publisher_token)
+    )
     assert count_resp.json()["data"]["unread"] == 0

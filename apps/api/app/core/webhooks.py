@@ -2,13 +2,13 @@
 
 Supports HMAC-SHA256 signing, 3x retry with exponential backoff, and delivery logging.
 """
+
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
 import logging
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -60,7 +60,10 @@ async def deliver_webhook(
             if resp.status_code < 300:
                 logger.info(
                     "Webhook delivered: event=%s url=%s status=%d attempt=%d",
-                    event, url, resp.status_code, attempt + 1,
+                    event,
+                    url,
+                    resp.status_code,
+                    attempt + 1,
                 )
                 return {
                     "delivered": True,
@@ -72,23 +75,32 @@ async def deliver_webhook(
             last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
             logger.warning(
                 "Webhook delivery failed: event=%s url=%s status=%d attempt=%d",
-                event, url, resp.status_code, attempt + 1,
+                event,
+                url,
+                resp.status_code,
+                attempt + 1,
             )
 
         except Exception as e:
             last_error = str(e)
             logger.warning(
                 "Webhook delivery error: event=%s url=%s error=%s attempt=%d",
-                event, url, last_error, attempt + 1,
+                event,
+                url,
+                last_error,
+                attempt + 1,
             )
 
         if attempt < max_retries and attempt < len(backoff_schedule):
             import asyncio
+
             await asyncio.sleep(backoff_schedule[attempt])
 
     logger.error(
         "Webhook delivery exhausted: event=%s url=%s error=%s",
-        event, url, last_error,
+        event,
+        url,
+        last_error,
     )
     return {
         "delivered": False,
@@ -132,13 +144,18 @@ async def deliver_execution_webhook(
                     wh.failure_count = (wh.failure_count or 0) + 1
                     if wh.failure_count >= 10:
                         wh.is_active = False
-                        logger.warning("Webhook %s auto-disabled after %d failures", wh.url, wh.failure_count)
+                        logger.warning(
+                            "Webhook %s auto-disabled after %d failures",
+                            wh.url,
+                            wh.failure_count,
+                        )
                 else:
                     wh.failure_count = 0
 
                 # Log delivery attempt
                 try:
                     from models.webhook_delivery import WebhookDelivery
+
                     log = WebhookDelivery(
                         tenant_id=uuid.UUID(tenant_id),
                         webhook_id=wh.id,

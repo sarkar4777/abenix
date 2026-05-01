@@ -1,4 +1,5 @@
 """Send SMS / WhatsApp messages via Twilio."""
+
 from __future__ import annotations
 
 import os
@@ -27,9 +28,14 @@ class TwilioSmsTool(BaseTool):
                 "type": "string",
                 "description": "E.164 phone number ('+447700900123') or 'whatsapp:+447700900123'.",
             },
-            "body": {"type": "string", "description": "Message text. Max 1600 chars for SMS, longer for WhatsApp."},
+            "body": {
+                "type": "string",
+                "description": "Message text. Max 1600 chars for SMS, longer for WhatsApp.",
+            },
             "channel": {
-                "type": "string", "enum": ["sms", "whatsapp"], "default": "sms",
+                "type": "string",
+                "enum": ["sms", "whatsapp"],
+                "default": "sms",
             },
             "media_url": {
                 "type": "string",
@@ -66,8 +72,13 @@ class TwilioSmsTool(BaseTool):
                 metadata={
                     "skipped": True,
                     "reason": "TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / "
-                              "TWILIO_FROM_NUMBER (or TWILIO_WHATSAPP_FROM) not set",
-                    "queued": {"to": to, "from": from_, "body": body, "channel": channel},
+                    "TWILIO_FROM_NUMBER (or TWILIO_WHATSAPP_FROM) not set",
+                    "queued": {
+                        "to": to,
+                        "from": from_,
+                        "body": body,
+                        "channel": channel,
+                    },
                 },
             )
 
@@ -84,7 +95,10 @@ class TwilioSmsTool(BaseTool):
                 r.raise_for_status()
                 data = r.json()
         except httpx.HTTPStatusError as e:
-            return ToolResult(content=f"Twilio HTTP {e.response.status_code}: {e.response.text[:200]}", is_error=True)
+            return ToolResult(
+                content=f"Twilio HTTP {e.response.status_code}: {e.response.text[:200]}",
+                is_error=True,
+            )
         except Exception as e:
             return ToolResult(content=f"Twilio error: {e}", is_error=True)
 
@@ -97,7 +111,10 @@ class TwilioSmsTool(BaseTool):
                 f"  Price: {data.get('price', '?')} {data.get('price_unit', '')}"
             ),
             metadata={
-                "sid": data.get("sid"), "status": data.get("status"),
-                "channel": channel, "to": data.get("to"), "from": data.get("from"),
+                "sid": data.get("sid"),
+                "status": data.get("status"),
+                "channel": channel,
+                "to": data.get("to"),
+                "from": data.get("from"),
             },
         )

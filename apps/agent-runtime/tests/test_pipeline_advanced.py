@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from typing import Any
@@ -15,17 +14,15 @@ from engine.pipeline import (
     NodeCondition,
     PipelineExecutor,
     PipelineNode,
-    PipelineResult,
-    _extract_field,
 )
 from engine.tools.base import BaseTool, ToolRegistry, ToolResult
-
 
 # ── Test helpers ──────────────────────────────────────────────────
 
 
 class EchoTool(BaseTool):
     """Returns its arguments as JSON output."""
+
     name = "echo"
     description = "Echo arguments"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -36,6 +33,7 @@ class EchoTool(BaseTool):
 
 class FailOnceTool(BaseTool):
     """Fails on first call, succeeds on subsequent calls."""
+
     name = "fail_once"
     description = "Fails first time"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -54,6 +52,7 @@ class FailOnceTool(BaseTool):
 
 class AlwaysFailTool(BaseTool):
     """Always returns an error."""
+
     name = "always_fail"
     description = "Always fails"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -64,6 +63,7 @@ class AlwaysFailTool(BaseTool):
 
 class ListTool(BaseTool):
     """Returns a list for forEach testing."""
+
     name = "list_tool"
     description = "Returns a list"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -75,18 +75,18 @@ class ListTool(BaseTool):
 
 class NestedListTool(BaseTool):
     """Returns a nested structure for forEach nested field extraction testing."""
+
     name = "nested_list_tool"
     description = "Returns nested data"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        return ToolResult(
-            content=json.dumps({"data": {"results": [1, 2, 3]}})
-        )
+        return ToolResult(content=json.dumps({"data": {"results": [1, 2, 3]}}))
 
 
 class StringItemTool(BaseTool):
     """Returns a non-list value in the items field for negative testing."""
+
     name = "string_item_tool"
     description = "Returns a string instead of a list"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -238,9 +238,7 @@ class TestForEach:
         assert len(downstream_output["results"]) == 2
 
     @pytest.mark.asyncio
-    async def test_for_each_invalid_source(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_for_each_invalid_source(self, registry: ToolRegistry) -> None:
         """forEach referencing a non-existent source node should fail gracefully."""
         nodes = [
             PipelineNode(
@@ -260,9 +258,7 @@ class TestForEach:
         assert "not a list" in result.node_results["for_each_node"].error
 
     @pytest.mark.asyncio
-    async def test_for_each_non_list_source(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_for_each_non_list_source(self, registry: ToolRegistry) -> None:
         """forEach on a source that returns a non-list value should fail with error."""
         nodes = [
             PipelineNode(
@@ -286,9 +282,7 @@ class TestForEach:
         assert "not a list" in result.node_results["for_each_node"].error
 
     @pytest.mark.asyncio
-    async def test_for_each_with_input_mappings(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_for_each_with_input_mappings(self, registry: ToolRegistry) -> None:
         """forEach node that also has input_mappings from another node."""
         nodes = [
             PipelineNode(
@@ -388,9 +382,7 @@ class TestRetry:
         assert output["success"] is True
 
     @pytest.mark.asyncio
-    async def test_retry_exhausted_still_fails(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_retry_exhausted_still_fails(self, registry: ToolRegistry) -> None:
         """always_fail with max_retries=3 should fail after all retries."""
         nodes = [
             PipelineNode(
@@ -406,9 +398,7 @@ class TestRetry:
         assert "doomed_node" in result.failed_nodes
 
     @pytest.mark.asyncio
-    async def test_retry_zero_means_no_retry(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_retry_zero_means_no_retry(self, registry: ToolRegistry) -> None:
         """always_fail with max_retries=0 should fail immediately, only 1 attempt."""
         nodes = [
             PipelineNode(
@@ -423,9 +413,7 @@ class TestRetry:
         assert result.node_results["no_retry_node"].attempt == 1
 
     @pytest.mark.asyncio
-    async def test_retry_delay_is_respected(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_retry_delay_is_respected(self, registry: ToolRegistry) -> None:
         """Retry with delay should take at least the configured delay time."""
         # Use a fresh FailOnceTool so it starts with _call_count=0
         fresh_reg = ToolRegistry()
@@ -449,9 +437,7 @@ class TestRetry:
         assert elapsed_ms >= 200
 
     @pytest.mark.asyncio
-    async def test_retry_attempt_in_result(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_retry_attempt_in_result(self, registry: ToolRegistry) -> None:
         """NodeResult.attempt field is correctly set after retries."""
         # Use a fresh FailOnceTool so it starts with _call_count=0
         fresh_reg = ToolRegistry()
@@ -470,9 +456,7 @@ class TestRetry:
         assert result.node_results["attempt_node"].attempt == 2
 
     @pytest.mark.asyncio
-    async def test_retry_does_not_retry_skipped(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_retry_does_not_retry_skipped(self, registry: ToolRegistry) -> None:
         """A node skipped due to a condition should not be retried."""
         nodes = [
             PipelineNode(
@@ -517,7 +501,8 @@ class TestStreamingCallbacks:
         nodes = [
             PipelineNode(id="n1", tool_name="echo", arguments={"a": 1}),
             PipelineNode(
-                id="n2", tool_name="echo",
+                id="n2",
+                tool_name="echo",
                 arguments={"b": 2},
                 depends_on=["n1"],
             ),
@@ -535,9 +520,7 @@ class TestStreamingCallbacks:
             assert tool_name == "echo"
 
     @pytest.mark.asyncio
-    async def test_on_node_complete_called(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_on_node_complete_called(self, registry: ToolRegistry) -> None:
         """on_node_complete callback is called with (node_id, status, duration_ms, output)."""
         complete_calls: list[tuple[str, str, int, Any]] = []
 
@@ -561,9 +544,7 @@ class TestStreamingCallbacks:
         assert output == {"x": 42}
 
     @pytest.mark.asyncio
-    async def test_callbacks_receive_correct_data(
-        self, registry: ToolRegistry
-    ) -> None:
+    async def test_callbacks_receive_correct_data(self, registry: ToolRegistry) -> None:
         """Verify callback arguments match actual execution results."""
         start_calls: list[tuple[str, str]] = []
         complete_calls: list[tuple[str, str, int, Any]] = []
@@ -620,7 +601,8 @@ class TestStreamingCallbacks:
         nodes = [
             PipelineNode(id="n1", tool_name="echo", arguments={"ok": True}),
             PipelineNode(
-                id="n2", tool_name="echo",
+                id="n2",
+                tool_name="echo",
                 arguments={"still": "running"},
                 depends_on=["n1"],
             ),
