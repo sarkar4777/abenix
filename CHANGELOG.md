@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.2 — 2026-05-01
+
+### Added
+
+### Changed
+- README claim of 100+ tools softened to 85+ (registry returns 87). Changed
+- Pipeline failures now return 200 with status=failed + execution_id (was 500 + no id). Self-signup tenants get a default moderation policy auto-seeded. /api/auth/me + signup responses echo role under data.user.role. Fixed
+
+### Fixed
+
 ## v0.1.1 — 2026-05-01
 
 ### Added

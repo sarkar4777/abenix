@@ -1117,6 +1117,11 @@ async def execute_agent(
                             return
                         if ev == "error":
                             errored = str(evt.get("error") or "execution failed")
+                            # Failed pipelines still publish a summary alongside
+                            # the error event — capture it so the response
+                            # carries node_results / failed_nodes / status.
+                            output_text = str(evt.get("output") or "")
+                            summary = evt.get("summary") or {}
                             return
 
                 try:
@@ -1125,12 +1130,34 @@ async def execute_agent(
                     errored = f"timed out after {body.wait_timeout_seconds}s"
 
                 if errored:
-                    return error(errored, 504 if errored.startswith("timed out") else 500)
+                    # Return 200 with status=failed so callers can drill into
+                    # the execution by id. The consumer has already persisted
+                    # the failed row + failure_code; a 5xx here would have
+                    # made that invisible to clients (and to dashboards).
+                    if errored.startswith("timed out"):
+                        return error(errored, 504)
+                    _failed_summary = summary or {"status": "failed", "error": errored}
+                    if isinstance(_failed_summary, dict) and not _failed_summary.get("status"):
+                        _failed_summary["status"] = "failed"
+                    return success({
+                        "execution_id": str(execution.id),
+                        "task_id": task_id,
+                        "pool": agent_pool,
+                        "mode": "sync_via_queue",
+                        "status": "failed",
+                        "error": errored,
+                        "output": output_text,
+                        "summary": _failed_summary,
+                    })
+                # Surface pipeline status from the consumer's done event so
+                # callers see status=completed/failed without a follow-up GET.
+                _qstatus = summary.get("status") if isinstance(summary, dict) else None
                 return success({
                     "execution_id": str(execution.id),
                     "task_id": task_id,
                     "pool": agent_pool,
                     "mode": "sync_via_queue",
+                    "status": _qstatus or "completed",
                     "output": output_text,
                     "summary": summary,
                 })
@@ -1602,14 +1629,30 @@ async def _non_stream_pipeline_execution(
     except Exception as e:
         execution.status = ExecutionStatus.FAILED
         execution.error_message = str(e)[:2000]
-        # Classify exception → stable failure_code for dashboards/alerts.
         from app.core.failure_codes import classify_exception, emit_outcome_metric
         execution.failure_code = classify_exception(e)
         execution.completed_at = datetime.now(timezone.utc)
         emit_outcome_metric(outcome="FAILED", failure_code=execution.failure_code)
         await db.commit()
         await fail_state(str(execution.id), tenant_id, str(e))
-        return error(f"Pipeline execution failed: {e}", 500)
+        # Return 200 with a failed-result envelope so callers can drill into
+        # the execution by id. Returning 500 swallowed execution_id and made
+        # the failed run invisible to clients (and to the dashboard).
+        return success({
+            "execution_id": str(execution.id),
+            "status": "failed",
+            "failure_code": execution.failure_code,
+            "error": str(e)[:2000],
+            "node_results": {},
+            "execution_path": [],
+            "failed_nodes": [],
+            "skipped_nodes": [],
+            "total_duration_ms": 0,
+            "duration_ms": 0,
+            "final_output": None,
+            "output": None,
+            "cost": 0.0,
+        })
 
     serialized = serialize_pipeline_result(result)
     execution.status = (
@@ -1617,6 +1660,8 @@ async def _non_stream_pipeline_execution(
         if result.status == "completed"
         else ExecutionStatus.FAILED
     )
+    if result.status != "completed" and not execution.failure_code:
+        execution.failure_code = "PIPELINE_NODE_FAILED"
     execution.duration_ms = result.total_duration_ms
     execution.completed_at = datetime.now(timezone.utc)
     if result.final_output:

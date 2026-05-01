@@ -40,7 +40,7 @@ flowchart LR
     subgraph platform["Abenix core"]
         ATLAS[🧬 Atlas<br/>ontology canvas]
         KB[(📚 Knowledge Engine<br/>vector + graph)]
-        AGENTS[🤖 Agent runtime<br/>100+ tools · MCP · sandbox]
+        AGENTS[🤖 Agent runtime<br/>85+ tools · MCP · sandbox]
     end
 
     subgraph outputs["Outputs"]
@@ -191,7 +191,7 @@ Token cost typically drops **5–10×** because agents read curated evidence, no
   <img src="docs/screenshots/07-knowledge-bases.png" alt="Knowledge Bases" width="100%" />
 </p>
 
-### 3. Pipelines + 100+ built-in tools
+### 3. Pipelines + 85+ built-in tools
 
 <p align="center">
   <img src="docs/screenshots/02-agent-builder.png" alt="Agent Builder" width="100%" />

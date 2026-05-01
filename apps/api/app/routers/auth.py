@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
+from models.moderation_policy import ModerationAction, ModerationPolicy
 from models.tenant import Tenant
 from models.user import User, UserRole
 
@@ -68,6 +69,31 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
         tenant_id=tenant.id,
     )
     db.add(user)
+    await db.flush()
+
+    # Seed a default moderation policy so the gate is wired the moment a
+    # tenant exists. Categories with no explicit action fall back to BLOCK
+    # at threshold 0.5; admins can soften per-category from /moderation.
+    policy = ModerationPolicy(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name="Default Policy",
+        description="Auto-seeded on tenant creation. Edit at /moderation.",
+        is_active=True,
+        pre_llm=True,
+        post_llm=True,
+        on_tool_output=False,
+        provider="openai",
+        provider_model="omni-moderation-latest",
+        thresholds={},
+        default_threshold=0.5,
+        category_actions={},
+        default_action=ModerationAction.BLOCK,
+        custom_patterns=[],
+        redaction_mask="█████",
+        created_by=user.id,
+    )
+    db.add(policy)
     await db.commit()
     await db.refresh(user)
 
