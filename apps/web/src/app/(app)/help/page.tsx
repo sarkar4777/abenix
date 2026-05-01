@@ -142,7 +142,7 @@ const categories: Category[] = [
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>If you&apos;re reading this in a deployed instance, the platform is already up. To run it yourself:</p>
-            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`git clone https://github.com/your-org/abenix.git
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`git clone https://github.com/sarkar4777/abenix.git
 cd abenix
 bash scripts/dev-local.sh`}</pre>
             <p>Boots Postgres, Redis, the API, the web app, and an agent runtime locally. Sign in with the seeded admin (<code className="text-cyan-300">admin@abenix.dev / Admin123456</code>).</p>

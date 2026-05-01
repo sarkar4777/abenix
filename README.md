@@ -92,7 +92,7 @@ The standard playbook for n8n + LangChain agents is: pick a vector DB (Pinecone,
 
 #### 3. Multi-tenancy is real, not "run another instance"
 
-n8n self-hosted is one workspace per process — multi-customer SaaS means N copies of n8n. Abenix has `tenant_id` on every row, signup auto-creates a tenant, per-user quotas, per-feature flags, [`ResourceShare`](packages/db/models/resource_share.py) for cross-tenant grants, and [`actAs` delegation](packages/db/models/subject_policy.py) so a downstream app (e.g. the example app) can call Abenix on behalf of *its* end users without leaking tenant boundaries. Five real apps in this repo — the example app, Saudi Tourism, Industrial-IoT, ResolveAI, ClaimsIQ — ship on top of this exact path. It's not whiteboard-ware.
+n8n self-hosted is one workspace per process — multi-customer SaaS means N copies of n8n. Abenix has `tenant_id` on every row, signup auto-creates a tenant, per-user quotas, per-feature flags, [`ResourceShare`](packages/db/models/resource_share.py) for cross-tenant grants, and [`actAs` delegation](packages/db/models/subject_policy.py) so a downstream app (e.g. ContractIQ) can call Abenix on behalf of *its* end users without leaking tenant boundaries. Five real apps in this repo — ContractIQ, Saudi Tourism, Industrial-IoT, ResolveAI, ClaimsIQ — ship on top of this exact path. It's not whiteboard-ware.
 
 #### 4. Failures are first-class — self-healing pipelines + a typed workflow shell
 
@@ -119,7 +119,7 @@ Pick the path that matches what you want to do:
 | **AKS port-forwards** — bring an already-deployed AKS cluster to `localhost:*` (firewall-safe) | `bash scripts/portforward-azure.sh` |
 
 ```bash
-git clone https://github.com/your-org/abenix.git
+git clone https://github.com/sarkar4777/abenix.git
 cd abenix
 cp .env.example .env       # local-dev defaults; fill in LLM keys (Anthropic / OpenAI / Google)
 bash scripts/dev-local.sh

@@ -932,7 +932,7 @@ export default function DocsPage() {
                   <P>Docker Desktop (or Podman), Node.js 18+, Python 3.11+, and Git.</P>
 
                   <H3>1. Clone and start</H3>
-                  <CodeBlock language="bash" code={`git clone https://github.com/your-org/abenix.git
+                  <CodeBlock language="bash" code={`git clone https://github.com/sarkar4777/abenix.git
 cd abenix
 chmod +x start.sh
 ./start.sh            # spins up all services via Docker Compose`} />
@@ -3594,7 +3594,7 @@ jobs:
       - run: ./scripts/deploy.sh cloud
         env:
           IMAGE_TAG: \${{ github.sha }}
-          REGISTRY: ghcr.io/your-org`} />
+          REGISTRY: ghcr.io/sarkar4777`} />
 
                   <H3>Health Check Probes (Kubernetes)</H3>
                   <P>All pods expose health endpoints for Kubernetes probes:</P>
