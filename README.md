@@ -92,7 +92,7 @@ The standard playbook for n8n + LangChain agents is: pick a vector DB (Pinecone,
 
 #### 3. Multi-tenancy is real, not "run another instance"
 
-n8n self-hosted is one workspace per process — multi-customer SaaS means N copies of n8n. Abenix has `tenant_id` on every row, signup auto-creates a tenant, per-user quotas, per-feature flags, [`ResourceShare`](packages/db/models/resource_share.py) for cross-tenant grants, and [`actAs` delegation](packages/db/models/subject_policy.py) so a downstream app (e.g. ContractIQ) can call Abenix on behalf of *its* end users without leaking tenant boundaries. Five real apps in this repo — ContractIQ, Saudi Tourism, Industrial-IoT, ResolveAI, ClaimsIQ — ship on top of this exact path. It's not whiteboard-ware.
+n8n self-hosted is one workspace per process — multi-customer SaaS means N copies of n8n. Abenix has `tenant_id` on every row, signup auto-creates a tenant, per-user quotas, per-feature flags, [`ResourceShare`](packages/db/models/resource_share.py) for cross-tenant grants, and [`actAs` delegation](packages/db/models/subject_policy.py) so a downstream app (e.g. the example app) can call Abenix on behalf of *its* end users without leaking tenant boundaries. Five real apps in this repo — the example app, Saudi Tourism, Industrial-IoT, ResolveAI, ClaimsIQ — ship on top of this exact path. It's not whiteboard-ware.
 
 #### 4. Failures are first-class — self-healing pipelines + a typed workflow shell
 
@@ -619,21 +619,46 @@ flowchart TB
     subgraph platform["Abenix platform"]
         SDK_PY[Python SDK]
         SDK_TS[TypeScript SDK]
+        SDK_JV[Java/JVM SDK]
         REST[REST API]
         AGENTS[Agents · Pipelines · KBs · Atlas]
     end
 
     APP1 --> SDK_PY
     APP2 --> SDK_TS
+    APP3 --> SDK_JV
     APP3 --> REST
     SDK_PY --> AGENTS
     SDK_TS --> AGENTS
+    SDK_JV --> AGENTS
     REST --> AGENTS
 
     style platform fill:#1e293b,stroke:#7c3aed,color:#fff
 ```
 
-The SDK is in [`packages/sdk/python`](packages/sdk/python) and [`packages/sdk/typescript`](packages/sdk/typescript). The actAs pattern lets your app pass the end-user identity through to Abenix for proper isolation.
+Three SDKs ship with the platform:
+
+- **Python** — [`packages/sdk/python`](packages/sdk/python). Used by the example app, Saudi Tourism, Industrial-IoT, and ResolveAI in this repo.
+- **TypeScript** — [`packages/sdk/js`](packages/sdk/js).
+- **Java / JVM** — [`claimsiq/sdk`](claimsiq/sdk). Stdlib-only public surface so Kotlin and Scala consumers get zero glue. JDK 21 `HttpClient` for HTTP + SSE; Jackson is the only runtime dep besides SLF4J. Public types: [`Abenix`](claimsiq/sdk/src/main/java/com/abenix/sdk/Abenix.java) (entry point), [`ActingSubject`](claimsiq/sdk/src/main/java/com/abenix/sdk/ActingSubject.java) (delegation header), [`ExecutionResult`](claimsiq/sdk/src/main/java/com/abenix/sdk/ExecutionResult.java), [`WatchStream`](claimsiq/sdk/src/main/java/com/abenix/sdk/WatchStream.java) + [`SseWatchStream`](claimsiq/sdk/src/main/java/com/abenix/sdk/SseWatchStream.java) (live DAG snapshots from a running execution), [`DagSnapshot`](claimsiq/sdk/src/main/java/com/abenix/sdk/DagSnapshot.java), [`AbenixException`](claimsiq/sdk/src/main/java/com/abenix/sdk/AbenixException.java). [ClaimsIQ](claimsiq/) is the reference consumer — its [`ClaimsService`](claimsiq/app/src/main/java/com/abenix/claimsiq/service/ClaimsService.java) calls `Abenix.execute(...)` for every adjudication and the [Live DAG view](claimsiq/app/src/main/java/com/abenix/claimsiq/ui/LiveDagView.java) subscribes to `Abenix.watch(...)` for SSE updates.
+
+```java
+// Minimal Java usage — taken from claimsiq/app's ClaimsService.
+try (Abenix forge = Abenix.builder()
+        .baseUrl(System.getenv("ABENIX_API_URL"))
+        .apiKey(System.getenv("CLAIMSIQ_ABENIX_API_KEY"))
+        .actAs(new ActingSubject("claimsiq", userId, email, name))  // tenant-isolated delegation
+        .build()) {
+
+    ExecutionResult res = forge.execute("claimsiq-adjudicate",
+        Map.of("claim_id", claimId, "claim_type", "auto"));
+
+    System.out.println(res.output());                  // textual response
+    System.out.println(res.cost() + " (" + res.tokens() + " tokens)");
+}
+```
+
+The `actAs` pattern lets your app pass the end-user identity through to Abenix so the platform's tenant isolation, RBAC, and audit log all attribute to the right user. Same wire format across all three SDKs (`X-Abenix-Subject` HTTP header).
 
 ---
 
