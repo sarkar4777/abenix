@@ -1,0 +1,116 @@
+{{- /*
+NATS JetStream — minimal in-repo manifest (StatefulSet + headless Service
++ ConfigMap) — activated when .Values.scaling.queueBackend == "nats".
+
+Why not a sub-chart: keeps helm-dep-update out of the local dev loop
+so `bash start-azure.sh` / `bash scripts/dev-local.sh` still work without
+an internet-bound helm repo refresh. The manifest is intentionally
+single-replica and file-storage-backed so Kind / Minikube can run
+it too; set cluster.enabled in values to scale up for Azure.
+
+Config: we enable JetStream with a 10 Gi file store and the classic
+`agents.>` subject space for per-pool subjects (`agents.default`,
+`agents.chat`, etc.). Replace with a proper nats-operator setup in
+Phase 5 production (multi-region replication, mTLS, etc.).
+*/}}
+{{- if eq (default "celery" .Values.scaling.queueBackend) "nats" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-nats-config
+  namespace: {{ .Release.Namespace }}
+data:
+  nats.conf: |
+    port: 4222
+    monitor_port: 8222
+    jetstream: {
+      store_dir: "/data"
+      max_memory_store: 256MB
+      max_file_store: 5GB
+    }
+    accounts: {
+      SYS: { users: [ { user: "sys", password: "sys" } ] }
+      # JetStream must be explicitly enabled per account, otherwise
+      # pull-subscribe returns "JetStream not enabled for account".
+      A: {
+        jetstream: enabled
+        users: [ { user: "abenix", password: "abenix-dev" } ]
+      }
+    }
+    system_account: SYS
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-nats
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: nats
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-nats
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: nats
+spec:
+  serviceName: {{ .Release.Name }}-nats
+  replicas: {{ default 1 .Values.nats.cluster.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nats
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          # `-sd /data` is redundant — the JetStream block in nats.conf
+          # already sets store_dir. Having both trips the v2.10 config
+          # validator ("Duplicate 'store_dir' configuration").
+          args: ["-c", "/etc/nats/nats.conf", "-js"]
+          ports:
+            - { name: client, containerPort: 4222 }
+            - { name: monitor, containerPort: 8222 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: config, mountPath: /etc/nats }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8222 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8222 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-nats-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ default "5Gi" ((.Values.nats.jetstream).fileStorage).size | quote }}
+{{- end }}

@@ -1,0 +1,313 @@
+web:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/abenix/web
+    tag: latest
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+api:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/abenix/api
+    tag: latest
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+agent-runtime:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/abenix/agent-runtime
+    tag: latest
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 65
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+worker:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/abenix/worker
+    tag: latest
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+postgresql:
+  architecture: replication
+  # Custom image: bitnamilegacy/postgresql:16.4.0-debian-12-r14 with the
+  # pgvector extension layered in. Built from infra/docker/
+  # Dockerfile.postgres-pgvector. Lets KB collections use
+  # vector_backend='pgvector' instead of falling back to Pinecone.
+  image:
+    registry: your-acr.azurecr.io
+    repository: postgresql-pgvector
+    tag: "16"
+  auth:
+    existingSecret: abenix-secrets
+    secretKeys:
+      adminPasswordKey: postgres-password
+  primary:
+    # Bitnami's default ServiceAccount has no imagePullSecrets — make
+    # sure the ACR pull secret is attached on every pod.
+    serviceAccount:
+      imagePullSecrets:
+        - name: acr-pull-secret
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    persistence:
+      size: 50Gi
+      storageClass: managed-premium
+  readReplicas:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    persistence:
+      size: 50Gi
+      storageClass: managed-premium
+  pgpool:
+    enabled: true
+    replicaCount: 1
+    maxPool: 20
+    numInitChildren: 100
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+redis:
+  architecture: standalone
+  auth:
+    existingSecret: abenix-secrets
+    existingSecretPasswordKey: redis-password
+  master:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 4Gi
+    persistence:
+      size: 10Gi
+      storageClass: managed-premium
+
+neo4j:
+  image:
+    repository: neo4j
+    tag: "5.20.0"
+    pullPolicy: IfNotPresent
+  database: neo4j
+  auth:
+    username: neo4j
+    existingSecret: abenix-secrets
+    existingSecretPasswordKey: neo4j-password
+  plugins:
+    - apoc
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  jvm:
+    heap:
+      initial: 512m
+      max: 1g
+    pagecache: 512m
+  replicaCount: 1
+
+cognifyWorker:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/abenix/worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  queue: cognify
+  concurrency: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+
+pinecone:
+  indexName: abenix
+
+objectStorage:
+  type: local
+  uploadDir: /data/uploads
+  exportDir: /data/exports
+  # ML model files (sklearn/pytorch/onnx/xgboost/tf) live on the shared
+  # /data mount so multi-replica serving + the Cognify worker can read
+  # what the API uploaded.
+  mlModelsDir: /data/ml-models
+  # Code Runner asset zips (one folder per registered repo) + the
+  # binary/build cache (sha256-keyed compiled artifacts so Go/Java/Rust
+  # don't re-build every invocation).
+  codeAssetStore: /data/code-assets
+  codeAssetBuildCache: /data/code-asset-cache
+  bucket: ""
+  region: ""
+  container: ""
+
+# Shared workspace storage. On minikube the default `hostPath` works
+# because all pods land on the same node. For multi-node k8s flip
+# `usePVC: true` and set `storageClass` to a ReadWriteMany class
+# (NFS, EFS-CSI, Azure Files, cephfs). The application code is identical
+# in both modes — only the volume source changes.
+sharedData:
+  usePVC: false
+  storageClass: ""
+  storageSize: "20Gi"
+
+meeting:
+  # LiveKit connection for the Meeting Representative agent. Set these in
+  # the tenant's secret or override per-environment via `helm --set`.
+  livekit:
+    url: ""
+    apiKey: ""
+    apiSecret: ""
+    meetUrl: "https://meet.livekit.io"
+  # OpenAI TTS voice for the bot speaking into the meeting
+  ttsVoice: "alloy"
+  # Optional: webhook URL the defer_to_human tool pings when the bot
+  # pushes a question back to the user.
+  deferNotifyWebhookUrl: ""
+
+sandboxedJob:
+  # The sandboxed_job tool runs one-shot commands in isolated containers
+  # (kubernetes Job in cluster, docker on host). Always on by default —
+  # disable per-environment by setting `enabled: "false"`.
+  enabled: "true"
+  # Comma-separated allow-list. Only listed images can be launched.
+  allowedImages: "alpine:3.20,busybox:1.36,python:3.12-slim,gcc:13,golang:1.22-alpine,rust:1.80-slim,eclipse-temurin:21-jdk,node:20-alpine,sbtscala/scala-sbt:eclipse-temurin-jammy-21.0.2_13_1.10.0_3.4.2,zenika/kotlin:1.9.24-jdk-jre-alpine-slim,mcr.microsoft.com/dotnet/sdk:8.0,ruby:3.3-alpine"
+  # Optional: target namespace for k8s Jobs (defaults to the API pod's own
+  # namespace). The default ServiceAccount needs Role + RoleBinding granting
+  # batch/jobs + pods CRUD in that namespace.
+  namespace: ""
+
+databaseName: abenix
+frontendUrl: "http://localhost:3000"
+
+environment: production
+logLevel: info
+
+secrets:
+  databaseUrl: ""
+  redisUrl: ""
+  redisPassword: ""
+  postgresPassword: ""
+  jwtSecret: ""
+  stripeSecretKey: ""
+  anthropicApiKey: ""
+  neo4jPassword: ""
+  openaiApiKey: ""
+  pineconeApiKey: ""
+  googleApiKey: ""
+
+ingress:
+  enabled: true
+  className: nginx
+  host: app.abenix.io
+  tls:
+    enabled: true
+    secretName: abenix-tls
+
+networkPolicy:
+  enabled: false
+
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  image: postgres:16-alpine
+  s3Bucket: ""
+  persistentVolume:
+    enabled: false
+  neo4j:
+    enabled: false
+    schedule: "0 3 * * *"
+
+monitoring:
+  enabled: false
+  scrapeInterval: 30s
+  scrapeTimeout: 10s
+  additionalLabels: {}

@@ -1,0 +1,58 @@
+{{- if and .Values.monitoring (and .Values.monitoring.prometheusRules .Values.monitoring.prometheusRules.enabled) }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+spec:
+  groups:
+    - name: abenix.api
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            rate(abenix_http_requests_total{status=~"5.."}[5m])
+            / rate(abenix_http_requests_total[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Abenix API error rate > 5%"
+            description: "{{ "{{" }} $value | humanizePercentage {{ "}}" }} of requests are failing"
+
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.95, rate(abenix_http_request_duration_seconds_bucket[5m])) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Abenix API p95 latency > 2s"
+
+        - alert: ExecutionFailureRate
+          expr: |
+            rate(abenix_executions_completed_total{status="failed"}[10m])
+            / rate(abenix_executions_completed_total[10m]) > 0.2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Agent execution failure rate > 20%"
+
+        - alert: PostgresDown
+          expr: abenix_health_check{component="postgres"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PostgreSQL is unreachable"
+
+        - alert: RedisDown
+          expr: abenix_health_check{component="redis"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis is unreachable"
+{{- end }}

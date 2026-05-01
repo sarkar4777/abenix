@@ -1,0 +1,50 @@
+{
+  "name": "iris-species-classifier",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Classifies iris flowers into setosa, versicolor, or virginica from sepal/petal measurements. Trained on 150 samples, 4 features.",
+  "input_schema": {
+    "features": [
+      "sepal_length_cm",
+      "sepal_width_cm",
+      "petal_length_cm",
+      "petal_width_cm"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [
+      5.1,
+      3.5,
+      1.4,
+      0.2
+    ]
+  },
+  "output_schema": {
+    "type": "classification",
+    "classes": [
+      "setosa",
+      "versicolor",
+      "virginica"
+    ],
+    "output_fields": [
+      "predicted_class",
+      "probabilities"
+    ]
+  },
+  "training_metrics": {
+    "accuracy": 0.9933333333333333,
+    "samples": 150,
+    "features": 4,
+    "classes": 3
+  },
+  "tags": [
+    "classification",
+    "iris",
+    "demo",
+    "sklearn"
+  ]
+}

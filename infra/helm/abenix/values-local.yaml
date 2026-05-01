@@ -1,0 +1,306 @@
+# values-local.yaml — Minikube / local Kubernetes development
+# Usage: bash scripts/deploy.sh local
+#        (or helm install abenix . -f values-local.yaml)
+#
+# Wave-2 (2026-04-22 onwards): this file now defaults to the same
+# NATS-backed execution posture that AKS uses, so dev/prod behaviour
+# is identical. Agent execution goes through NATS JetStream; Celery
+# still handles batch workloads (KB ingest, scheduled triggers,
+# code-runner builds). Flip scaling.enabled: false at the bottom to
+# revert to the legacy embedded-inline posture if you prefer it.
+
+environment: development
+logLevel: debug
+# Wave-2: API publishes to NATS instead of running inline. Override to
+# "embedded" if you flip scaling.execRemote off.
+runtimeMode: remote
+
+# -- Web (Next.js standalone) -----------------------------------------------
+web:
+  replicaCount: 1
+  image:
+    repository: localhost:5000/abenix/web
+    tag: latest
+    pullPolicy: Never
+  service:
+    port: 3000
+  health:
+    path: /
+    initialDelaySeconds: 15
+    periodSeconds: 30
+  autoscaling:
+    enabled: false
+  env:
+    HOSTNAME: "0.0.0.0"
+    NEXT_PUBLIC_API_URL: "http://localhost:8000"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# -- API (FastAPI) -----------------------------------------------------------
+api:
+  replicaCount: 1
+  image:
+    repository: localhost:5000/abenix/api
+    tag: latest
+    pullPolicy: Never
+  health:
+    path: /api/health
+    initialDelaySeconds: 15
+    periodSeconds: 30
+  autoscaling:
+    enabled: false
+  # NOTE: With 4 uvicorn workers and the embedded engine (LLM router, tool
+  # registry, MCP, knowledge stack) the API needs at least 1Gi RAM to avoid
+  # OOM-killing workers mid-request during agent execution. Bumping these
+  # below 1Gi causes the chat path to disconnect with RemoteProtocolError.
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+# -- Agent Runtime (disabled in local-embedded mode) -------------------------
+# Enable via: values-local-runtime.yaml or values-production.yaml
+agent-runtime:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: localhost:5000/abenix/agent-runtime
+    tag: latest
+    pullPolicy: Never
+  autoscaling:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+# -- Worker (Celery — documents + agents queues) -----------------------------
+worker:
+  replicaCount: 1
+  image:
+    repository: localhost:5000/abenix/worker
+    tag: latest
+    pullPolicy: Never
+  autoscaling:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+# -- Cognify Worker (separate Celery for cognify queue) ----------------------
+cognifyWorker:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: localhost:5000/abenix/worker
+    tag: latest
+    pullPolicy: Never
+  queue: cognify
+  concurrency: 1
+  autoscaling:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# -- Neo4j -------------------------------------------------------------------
+neo4j:
+  image:
+    repository: neo4j
+    tag: "5-community"
+    pullPolicy: IfNotPresent
+  database: neo4j
+  auth:
+    username: neo4j
+    existingSecret: abenix-secrets
+    existingSecretPasswordKey: neo4j-password
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+  jvm:
+    heap:
+      initial: 256m
+      max: 512m
+    pagecache: 128m
+
+# -- PostgreSQL (Bitnami) — standalone for local ----------------------------
+postgresql:
+  architecture: standalone
+  image:
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  auth:
+    existingSecret: abenix-secrets
+    secretKeys:
+      adminPasswordKey: postgres-password
+    database: abenix
+  primary:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    persistence:
+      size: 5Gi
+      storageClass: ""
+  pgpool:
+    enabled: false
+
+# -- Redis (Bitnami) — standalone for local ---------------------------------
+redis:
+  architecture: standalone
+  image:
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  auth:
+    existingSecret: abenix-secrets
+    existingSecretPasswordKey: redis-password
+  master:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    persistence:
+      size: 2Gi
+      storageClass: ""
+
+# -- Secrets (provide via --set or external secret manager) ------------------
+secrets:
+  databaseUrl: "postgresql+asyncpg://postgres:localpass@abenix-postgresql:5432/abenix?ssl=disable"
+  redisUrl: "redis://abenix-redis-master:6379"
+  redisPassword: "localpass"
+  postgresPassword: "localpass"
+  jwtSecret: "local-dev-jwt-secret-change-me"
+  stripeSecretKey: ""
+  anthropicApiKey: ""
+  neo4jPassword: "abenix-neo4j-pass"
+  openaiApiKey: ""
+  pineconeApiKey: ""
+  googleApiKey: ""
+
+# -- Object storage ----------------------------------------------------------
+objectStorage:
+  type: local
+  uploadDir: /data/uploads
+  bucket: ""
+  region: ""
+
+pinecone:
+  indexName: abenix-dev
+
+databaseName: abenix
+
+# -- Ingress — disabled for local (use port-forward) ------------------------
+ingress:
+  enabled: false
+  className: nginx
+  host: localhost
+  tls:
+    enabled: false
+    secretName: ""
+
+# -- Network policies — disabled for local ----------------------------------
+networkPolicy:
+  enabled: false
+
+# -- Backup — disabled for local -------------------------------------------
+backup:
+  enabled: false
+
+# -- ML Models — shared storage for model files ─────────────────────────────
+mlModels:
+  enabled: true
+  storageClass: ""         # empty = default storage class (minikube: hostpath)
+  storageSize: 5Gi
+  mountPath: /data/ml-models
+
+# -- Monitoring — disabled for local ----------------------------------------
+monitoring:
+  enabled: false
+
+# ── Wave-2 scaling — NATS-default on minikube, same as AKS ─────────────────
+# scripts/deploy.sh local runs with this ON so dev/prod behaviour matches.
+# If you want the old embedded-inline posture (lighter, no NATS), just set
+# scaling.enabled: false + scaling.execRemote: false below.
+scaling:
+  enabled: true
+  execRemote: true
+  queueBackend: nats
+  agentRuntimeImage:
+    repository: localhost:5000/abenix/agent-runtime
+    tag: latest
+    pullPolicy: Never
+  keda:
+    # KEDA on minikube is optional; deploy.sh installs it when enabled=true
+    enabled: false
+    prometheusUrl: ""
+  alerts:
+    enabled: false              # PrometheusRule CRD not on vanilla minikube
+  pools:
+    # One tight pool is enough for local dev. Flip to values-local-runtime.yaml
+    # if you want all four AKS pools on minikube.
+    - key: default
+      min_replicas: 1
+      max_replicas: 2
+      concurrency_per_replica: 3
+      resources:
+        requests: { cpu: 100m, memory: 384Mi }
+        limits:   { cpu: 500m, memory: 768Mi }
+
+nats:
+  enabled: true
+  cluster:
+    enabled: false
+    replicas: 1
+  jetstream:
+    enabled: true
+    fileStorage:
+      size: 1Gi

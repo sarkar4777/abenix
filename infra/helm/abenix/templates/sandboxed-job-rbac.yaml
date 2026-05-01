@@ -1,0 +1,52 @@
+{{- if eq (.Values.sandboxedJob.enabled | default "true" | toString) "true" }}
+# Grants the API/worker ServiceAccount permission to create Job + read pod
+# logs in the target namespace, so the sandboxed_job tool's kubernetes
+# backend works without the operator having to manually run kubectl apply.
+#
+# Without this, every sandboxed_job execution returns:
+#   k8s job submission failed: (403) jobs.batch is forbidden
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-sandboxed-job-runner
+  namespace: {{ .Values.sandboxedJob.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # ML model serving deployments — POST /api/ml-models/{id}/deploy with
+  # deployment_type='k8s' creates a Deployment + Service per model.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-sandboxed-job-runner-binding
+  namespace: {{ .Values.sandboxedJob.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ .Release.Name }}-sandboxed-job-runner
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

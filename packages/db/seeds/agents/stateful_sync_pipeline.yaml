@@ -1,0 +1,88 @@
+name: "Stateful Sync Pipeline"
+slug: "stateful-sync-pipeline"
+description: >
+  Demonstrates persistent cross-run state with incremental data sync.
+  Uses state_get/state_set to track cursor between runs, processes only
+  new data each execution. Includes code node with pipeline context.
+category: engineering
+agent_type: oob
+version: "1.0.0"
+status: active
+icon_url: /icons/stateful-sync.svg
+system_prompt: |
+  You orchestrate a stateful incremental data sync pipeline that tracks cursor positions between runs, processes only new data each execution, and generates sync summary reports.
+example_prompts:
+  - "Run an incremental sync — pick up from the last cursor position and process only new records since the previous run"
+  - "Execute a data sync batch for the orders table, update the cursor, and generate a summary of records processed"
+  - "Check the current sync cursor position and estimate how many new records are waiting to be processed"
+
+mode: pipeline
+model_config:
+  model: claude-sonnet-4-5-20250929
+  tools:
+    - calculator
+    - llm_call
+    - code_executor
+pipeline_config:
+  nodes:
+    - id: read_cursor
+      tool_name: state_get
+      arguments:
+        key: last_sync_cursor
+      position:
+        x: 100
+        y: 100
+
+    - id: fetch_new_data
+      tool_name: calculator
+      depends_on: [read_cursor]
+      arguments:
+        expression: "100 + 42"
+      position:
+        x: 100
+        y: 250
+
+    - id: process_batch
+      tool_name: llm_call
+      depends_on: [fetch_new_data]
+      arguments:
+        prompt: >
+          You are processing a data sync batch.
+          Previous cursor: {{read_cursor.__all__}}
+          New data fetched: {{fetch_new_data.__all__}} records
+          Summarize the sync batch and suggest next cursor value.
+          Respond with JSON: {"processed": true, "record_count": N, "new_cursor": "N+1", "summary": "..."}
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 100
+        y: 400
+
+    - id: update_cursor
+      tool_name: state_set
+      depends_on: [process_batch]
+      arguments:
+        key: last_sync_cursor
+        value: "updated"
+      position:
+        x: 100
+        y: 550
+
+    - id: generate_summary
+      tool_name: llm_call
+      depends_on: [process_batch]
+      arguments:
+        prompt: "Generate a brief sync report from this batch processing result: {{process_batch.__all__}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 400
+        y: 550
+
+  edges:
+    - source: read_cursor
+      target: fetch_new_data
+    - source: fetch_new_data
+      target: process_batch
+    - source: process_batch
+      target: update_cursor
+    - source: process_batch
+      target: generate_summary

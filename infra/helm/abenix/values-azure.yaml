@@ -1,0 +1,258 @@
+# values-azure.yaml — AKS demo / staging deployment
+#
+# Sized for a 3-node D4s_v5 AKS cluster (12 vCPU / 48 GB total).
+# Keeps pods small enough that everything schedules; scales up via HPA if
+# traffic actually arrives.
+#
+# Used by scripts/deploy-azure.sh.
+
+environment: staging
+logLevel: info
+runtimeMode: embedded              # API runs the agent engine in-process
+
+# ── Secrets ────────────────────────────────────────────────────────────────
+# These become the abenix-secrets Kubernetes Secret (see
+# templates/secrets.yaml). Override via --set during helm install for
+# production values (or source from a vault integration).
+#
+# Redis has auth disabled below, so REDIS_URL must not include a password
+# (otherwise celery tries AUTH and the server returns
+# "AUTH <password> called without any password configured").
+secrets:
+  databaseUrl: "postgresql+asyncpg://postgres:localpass@abenix-postgresql:5432/abenix?ssl=disable"
+  redisUrl: "redis://abenix-redis-master:6379/0"
+  redisPassword: ""
+  postgresPassword: "localpass"
+  jwtSecret: "azure-dev-jwt-secret-change-me"
+  neo4jPassword: "abenix-neo4j-pass"
+  anthropicApiKey: ""
+  openaiApiKey: ""
+  googleApiKey: ""
+  pineconeApiKey: ""
+  stripeSecretKey: ""
+
+# ── Web (Next.js) ──────────────────────────────────────────────────────────
+web:
+  replicaCount: 1
+  image:
+    repository: abenixacr71a48.azurecr.io/web
+    tag: scaling-v2
+    pullPolicy: Always              # ACR images always pulled by tag
+  service:
+    port: 3000
+  health:
+    path: /
+    initialDelaySeconds: 15
+    periodSeconds: 30
+  autoscaling:
+    enabled: false
+  env:
+    HOSTNAME: "0.0.0.0"
+    # Will be overridden to the ingress URL by the deploy script
+    NEXT_PUBLIC_API_URL: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+# ── API (FastAPI) ──────────────────────────────────────────────────────────
+api:
+  replicaCount: 1
+  image:
+    repository: abenixacr71a48.azurecr.io/api
+    tag: wave2
+    pullPolicy: Always
+  health:
+    path: /api/health
+    initialDelaySeconds: 30
+    periodSeconds: 30
+  autoscaling:
+    enabled: false
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: "2",  memory: 2Gi }
+  envFrom:
+    - secretRef:
+        name: abenix-secrets
+    - configMapRef:
+        name: abenix-config
+
+# ── Agent runtime (embedded mode — disabled) ───────────────────────────────
+agent-runtime:
+  enabled: false
+
+# ── Worker ─────────────────────────────────────────────────────────────────
+worker:
+  replicaCount: 1
+  image:
+    repository: abenixacr71a48.azurecr.io/worker
+    tag: procps-fix
+    pullPolicy: Always
+  autoscaling:
+    enabled: false
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+
+# ── Cognify worker (separate queue, same image) ────────────────────────────
+cognifyWorker:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: abenixacr71a48.azurecr.io/worker
+    tag: procps-fix
+    pullPolicy: Always
+  queue: cognify
+  concurrency: 1
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+
+# ── PostgreSQL (sub-chart) ─────────────────────────────────────────────────
+# Bitnami deprecated semantic tags on docker.io/bitnami in 2025 — they now
+# publish only :latest there and keep semver tags at docker.io/bitnamilegacy.
+# Point the image registry/repo at the legacy path so the chart's pinned
+# tags (e.g. 16.4.0-debian-12-r14) still resolve.
+postgresql:
+  enabled: true
+  architecture: standalone            # Service name "abenix-postgresql" expected by API init
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+  auth:
+    postgresPassword: localpass
+    database: abenix
+  primary:
+    persistence:
+      size: 10Gi
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: "1",  memory: 1Gi }
+
+# ── Redis (sub-chart) ──────────────────────────────────────────────────────
+redis:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+  auth:
+    enabled: false
+  master:
+    persistence:
+      size: 4Gi
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+  replica:
+    replicaCount: 0
+
+# ── Neo4j (knowledge graph) ────────────────────────────────────────────────
+neo4j:
+  enabled: true
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits:   { cpu: "1",  memory: 2Gi }
+  persistentVolume:
+    size: 10Gi
+
+# ── Ingress — we use our own ingress-nginx, disable chart ingress ──────────
+ingress:
+  enabled: false
+
+# ── Service type — ClusterIP (ingress fronts everything) ───────────────────
+service:
+  type: ClusterIP
+
+# ── Feature toggles matching values-local.yaml ─────────────────────────────
+networkPolicy:
+  enabled: false
+backup:
+  enabled: false
+mlModels:
+  enabled: true
+  storageClass: ""
+  storageSize: 10Gi
+  # Image each deployed model's Pod pulls. AKS points at the ACR copy;
+  # minikube uses the localhost:5000 registry the default in the chart.
+  servingImage: abenixacr71a48.azurecr.io/model-serving:wave2
+monitoring:
+  enabled: false
+pdb:
+  enabled: false
+
+# ── 360° Scaling (plan of record in SCALING_PLAN.md) ───────────────────────
+# Wave-2 is now the default posture: per-request agent executions run on
+# NATS-backed per-pool worker pods. Individual agents can opt out by
+# setting runtime_pool=inline in the admin UI. Celery still handles the
+# non-agent batch workloads it's always been good at (cognify KB ingest,
+# scheduled triggers, code-runner builds) — we're NOT replacing Celery,
+# we're giving agent execution its own dedicated queue.
+#
+# Cost posture at idle: ~1 small NATS pod + 1 default-pool runtime pod.
+# Cost under load: up to maxReplicas per pool, KEDA scales on lag.
+scaling:
+  enabled: true
+  execRemote: true              # Agent executions enqueue onto NATS
+  queueBackend: nats            # celery | nats
+  # Reuses the main agent-runtime image unless overridden
+  agentRuntimeImage: {}         # { repository: "...", tag: "...", pullPolicy: Always }
+  keda:
+    enabled: true               # Set false if KEDA operator isn't on the cluster
+    prometheusUrl: "http://abenix-prometheus:9090"
+  alerts:
+    # PrometheusRule CRDs require prometheus-operator. Flip to true once
+    # the cluster has the operator (AKS ships it as an add-on).
+    enabled: false
+  pools:
+    # min=1 so there's always one warm worker for the default pool —
+    # smooths out "first request after idle" latency.
+    - key: default
+      min_replicas: 1
+      max_replicas: 5
+      concurrency_per_replica: 3
+      resources:
+        requests: { cpu: 200m, memory: 512Mi }
+        limits:   { cpu: "1",  memory: 1Gi }
+    # chat pool runs cold — agents flagged runtime_pool=inline stay on
+    # the API pod for lowest streaming latency; anything explicitly
+    # routed here gets a short queue hop in exchange for crash isolation.
+    - key: chat
+      min_replicas: 0
+      max_replicas: 3
+      concurrency_per_replica: 6
+      resources:
+        requests: { cpu: 200m, memory: 512Mi }
+        limits:   { cpu: "1",  memory: 1Gi }
+    # heavy-reasoning: cold-start is fine; Gemini 2.5-Pro work is minutes,
+    # 30s spin-up is a rounding error.
+    - key: heavy-reasoning
+      min_replicas: 0
+      max_replicas: 4
+      concurrency_per_replica: 2
+      resources:
+        requests: { cpu: 500m, memory: 1Gi }
+        limits:   { cpu: "2",  memory: 2Gi }
+    - key: long-running
+      min_replicas: 0
+      max_replicas: 3
+      concurrency_per_replica: 1
+      keda_queue_trigger: "1"   # scale up on even a single queued job
+      resources:
+        requests: { cpu: 500m, memory: 1Gi }
+        limits:   { cpu: "2",  memory: 2Gi }
+
+# ── NATS JetStream — now the default queue for agent execution ─────────────
+# Single-replica JetStream at default — set cluster.enabled: true with
+# replicas: 3 for prod HA.
+nats:
+  enabled: true
+  cluster:
+    enabled: false
+    replicas: 1
+  jetstream:
+    enabled: true
+    fileStorage:
+      size: 5Gi
+
+# ── Global image pull policy ───────────────────────────────────────────────
+global:
+  imagePullPolicy: Always

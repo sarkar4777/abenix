@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: abenix-config
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+data:
+  # Non-sensitive configuration only — credentials are in abenix-secrets
+  ENVIRONMENT: {{ .Values.environment | default "production" | quote }}
+  DEBUG: {{ if eq (.Values.environment | default "production") "production" }}"false"{{ else }}"true"{{ end }}
+  LOG_LEVEL: {{ .Values.logLevel | default "info" | quote }}
+  PGSSLMODE: "disable"
+  RUNTIME_MODE: {{ .Values.runtimeMode | default "embedded" | quote }}
+  RUNTIME_URL: "http://{{ .Release.Name }}-agent-runtime:8001"
+  # Wave-2: when true, the API publishes agent jobs onto the queue
+  # backend instead of running them inline. Requires per-pool
+  # Deployments (scaling.enabled) + a valid queueBackend selection.
+  SCALING_EXEC_REMOTE: {{ .Values.scaling.execRemote | default false | quote }}
+  QUEUE_BACKEND: {{ default "celery" .Values.scaling.queueBackend | quote }}
+  {{- if eq (default "celery" .Values.scaling.queueBackend) "nats" }}
+  NATS_URL: "nats://{{ .Release.Name }}-nats:4222"
+  NATS_USER: "abenix"
+  NATS_PASSWORD: "abenix-dev"
+  {{- end }}
+  NEO4J_URI: "bolt://{{ .Release.Name }}-neo4j:7687"
+  NEO4J_DATABASE: {{ .Values.neo4j.database | default "neo4j" | quote }}
+  # Default matches the index the worker code references and the README
+  # documents. The previous default of plain "abenix" 404'd in
+  # every real account because nobody's index is named that.
+  PINECONE_INDEX_NAME: {{ .Values.pinecone.indexName | default "abenix-knowledge" | quote }}
+  UPLOAD_DIR: {{ .Values.objectStorage.uploadDir | default "/data/uploads" | quote }}
+  EXPORT_DIR: {{ .Values.objectStorage.exportDir | default "/data/exports" | quote }}
+  STORAGE_BACKEND: {{ .Values.objectStorage.type | default "local" | quote }}
+  STORAGE_LOCAL_DIR: {{ .Values.objectStorage.uploadDir | default "/data/uploads" | quote }}
+  # ML model files + Code Runner asset zips + build cache — all under
+  # the shared /data mount so worker pods see what API uploaded. On
+  # minikube /data is a hostPath; for multi-node k8s flip the
+  # `sharedData.usePVC` value to switch this dir to a ReadWriteMany PVC.
+  ML_MODELS_DIR: {{ .Values.objectStorage.mlModelsDir | default "/data/ml-models" | quote }}
+  CODE_ASSET_STORE: {{ .Values.objectStorage.codeAssetStore | default "/data/code-assets" | quote }}
+  CODE_ASSET_BUILD_CACHE: {{ .Values.objectStorage.codeAssetBuildCache | default "/data/code-asset-cache" | quote }}
+  {{- if eq (.Values.objectStorage.type | default "local") "s3" }}
+  STORAGE_S3_BUCKET: {{ .Values.objectStorage.bucket | quote }}
+  STORAGE_S3_REGION: {{ .Values.objectStorage.region | default "us-east-1" | quote }}
+  STORAGE_S3_ENDPOINT: {{ .Values.objectStorage.endpoint | default "" | quote }}
+  {{- end }}
+  {{- if eq (.Values.objectStorage.type | default "local") "azure" }}
+  STORAGE_AZURE_CONTAINER: {{ .Values.objectStorage.container | default "abenix-files" | quote }}
+  {{- end }}
+  DATABASE_HOST: "{{ .Release.Name }}-postgresql"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: {{ .Values.databaseName | default "abenix" | quote }}
+  FRONTEND_URL: {{ .Values.frontendUrl | default "http://localhost:3000" | quote }}
+  # Sandboxed-job runner — on by default in every deploy. Override the
+  # allow-list via .Values.sandboxedJob.allowedImages.
+  SANDBOXED_JOB_ENABLED: {{ .Values.sandboxedJob.enabled | default "true" | quote }}
+  # Code-runner assets often need outbound HTTP (pip installs, dataset
+  # pulls, etc.). Admins can flip this off per-cluster if the security
+  # posture demands it, but default allows it so the feature works.
+  SANDBOXED_JOB_ALLOW_NETWORK: {{ .Values.sandboxedJob.allowNetwork | default "true" | quote }}
+  # ML model k8s deploy image — each deployed model gets its own Pod
+  # pulling this image. Must point at a registry reachable from the
+  # cluster (defaults to the local minikube registry; override for AKS).
+  ML_MODEL_SERVING_IMAGE: {{ .Values.mlModels.servingImage | default "localhost:5000/abenix/model-serving:latest" | quote }}
+  # Default allow-list covers the core code_asset languages (Python, Node,
+  # Go, Rust, Ruby, Java). Operators can tighten or broaden via
+  # .Values.sandboxedJob.allowedImages. The code_asset tool picks the
+  # tightest-fitting tag for the asset's declared version.
+  SANDBOXED_JOB_ALLOWED_IMAGES: {{ .Values.sandboxedJob.allowedImages | default "alpine:3.20,busybox:1.36,python:3.8-slim,python:3.9-slim,python:3.10-slim,python:3.11-slim,python:3.12-slim,python:3.13-slim,node:18-alpine,node:20-alpine,node:22-alpine,golang:1.21-alpine,golang:1.22-alpine,golang:1.23-alpine,rust:1.75-slim,ruby:3.2-slim,ruby:3.3-slim,eclipse-temurin:11-jdk,eclipse-temurin:17-jdk,eclipse-temurin:21-jdk" | quote }}
+  {{- if .Values.sandboxedJob.namespace }}
+  SANDBOXED_JOB_NAMESPACE: {{ .Values.sandboxedJob.namespace | quote }}
+  {{- end }}
+  # Meeting Representative — LiveKit config. Secrets live in abenix-secrets.
+  {{- if .Values.meeting }}
+  LIVEKIT_URL: {{ .Values.meeting.livekit.url | default "" | quote }}
+  LIVEKIT_MEET_URL: {{ .Values.meeting.livekit.meetUrl | default "https://meet.livekit.io" | quote }}
+  OPENAI_TTS_VOICE: {{ .Values.meeting.ttsVoice | default "alloy" | quote }}
+  {{- if .Values.meeting.deferNotifyWebhookUrl }}
+  DEFER_NOTIFY_WEBHOOK_URL: {{ .Values.meeting.deferNotifyWebhookUrl | quote }}
+  {{- end }}
+  {{- end }}

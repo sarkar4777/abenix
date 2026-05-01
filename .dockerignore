@@ -1,0 +1,41 @@
+.git
+.github
+.claude
+**/node_modules
+**/.next
+**/.turbo
+**/.pytest_cache
+**/__pycache__
+node_modules
+logs
+**/logs
+e2e
+**/e2e
+infra
+*.md
+.env*
+__pycache__
+.pytest_cache
+.next
+.turbo
+test-results
+**/test-results
+playwright-report
+**/playwright-report
+# Wave-2 builds target apps/api and apps/agent-runtime only — the
+# standalone app trees below ship in their own images, so excluding
+# them trims the upload tarball from ~700 MB to ~30 MB.
+example_app
+sauditourism
+ppa-analysis
+tpi-analysis
+migration-analyzer
+livekit-voice-assistant
+*.tar.gz
+*.zip
+**/.venv
+venv
+.venv
+dist
+build
+coverage

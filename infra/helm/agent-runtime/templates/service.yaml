@@ -1,0 +1,16 @@
+{{- if ne (toString .Values.enabled) "false" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-runtime.fullname" . }}
+  labels:
+    {{- include "agent-runtime.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}
+      protocol: TCP
+  selector:
+    {{- include "agent-runtime.selectorLabels" . | nindent 4 }}
+{{- end }}

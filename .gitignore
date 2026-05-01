@@ -1,0 +1,83 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.claudeignore
+
+# Build outputs
+.next/
+dist/
+build/
+*.egg-info/
+
+# Turbo
+.turbo/
+
+# Environment + secrets
+.env
+.env.local
+.env.*.local
+.claude
+
+# Cluster + cloud-specific identifiers (security risk in public repos)
+.azure-endpoint
+scripts/azure.env
+scripts/aws.env
+scripts/gcp.env
+scripts/cluster.env
+*.kubeconfig
+kubeconfig
+*.pem
+*.key
+*.crt
+secrets.*
+credentials.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Uploads
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+.pytest_cache/
+htmlcov/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/*.tfvars
+
+# Alembic
+alembic/versions/*.pyc
+
+# Generated presentation — build via: python scripts/build_presentation.py
+presentation.pptx
+scripts/build_presentation.py
+aimodels/*.pkl
+*.pkl
+
+# Playwright test artifacts
+e2e/test-results/
+test-results/
+playwright-report/
+
+# Big demo fixtures — 125 MB of public PDFs (NIST / Stanford AI Index / etc.).
+# Re-downloaded on demand by test_big_kb_ontology_demo.spec.ts; not worth
+# committing to the repo.
+e2e/fixtures/ai_gov_corpus/

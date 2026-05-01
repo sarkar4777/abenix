@@ -1,0 +1,70 @@
+{
+  "name": "churn-predictor",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Predicts customer churn probability for a telco-style subscription business. Input: 8 customer features. Output: binary churn label + probability.",
+  "input_schema": {
+    "features": [
+      "tenure_months",
+      "monthly_charges",
+      "total_charges",
+      "contract_months",
+      "is_senior",
+      "has_partner",
+      "support_tickets_30d",
+      "payment_auto"
+    ],
+    "types": [
+      "int",
+      "float",
+      "float",
+      "int",
+      "int",
+      "int",
+      "int",
+      "int"
+    ],
+    "example": [
+      12,
+      74.35,
+      892.2,
+      1,
+      0,
+      1,
+      3,
+      0
+    ],
+    "feature_notes": {
+      "contract_months": "1 for month-to-month, 12 for 1-year, 24 for 2-year",
+      "is_senior": "0 or 1",
+      "has_partner": "0 or 1",
+      "payment_auto": "0 or 1 \u2014 whether the customer is enrolled in autopay"
+    }
+  },
+  "output_schema": {
+    "type": "binary_classification",
+    "classes": [
+      "retained",
+      "churned"
+    ],
+    "output_fields": [
+      "predicted_class",
+      "probabilities"
+    ]
+  },
+  "training_metrics": {
+    "accuracy_test": 0.705,
+    "base_churn_rate_test": 0.0775,
+    "samples_train": 3200,
+    "samples_test": 800,
+    "features": 8
+  },
+  "tags": [
+    "classification",
+    "churn",
+    "telco",
+    "demo",
+    "sklearn",
+    "business"
+  ]
+}

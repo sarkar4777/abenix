@@ -1,0 +1,35 @@
+replicaCount: 3
+
+image:
+  repository: abenix/agent-runtime
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8001
+
+health:
+  path: /health
+  initialDelaySeconds: 15
+  periodSeconds: 30
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 65
+
+env: {}
+envFrom: []
+
+nodeSelector: {}
+tolerations: []

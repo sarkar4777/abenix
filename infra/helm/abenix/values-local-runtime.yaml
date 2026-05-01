@@ -1,0 +1,72 @@
+# values-local-runtime.yaml — Minikube with Wave-2 NATS + per-pool workers
+#
+# This is the production-like architecture that AKS also uses — identical
+# Helm template rendering; only difference from values-azure.yaml is the
+# single-node resource sizing and local image registry.
+#
+# Usage:
+#   bash scripts/deploy.sh local-runtime   (preferred)
+#   helm install abenix . -f values-local.yaml -f values-local-runtime.yaml
+#
+# This file OVERLAYS on top of values-local.yaml — only overrides what differs.
+
+# API enqueues to NATS instead of running execution inline
+runtimeMode: remote
+
+# Wave-2 scaling — flipped ON for minikube so dev/prod behaviour matches
+scaling:
+  enabled: true
+  execRemote: true
+  queueBackend: nats
+  agentRuntimeImage:
+    repository: localhost:5000/abenix/agent-runtime
+    tag: latest
+    pullPolicy: Never
+  keda:
+    # Minikube: KEDA is optional. deploy.sh installs it when available;
+    # if absent the ScaledObjects just don't render (pools run at
+    # min_replicas, no auto-scale).
+    enabled: false
+    prometheusUrl: ""
+  alerts:
+    # PrometheusRule CRD rarely installed on minikube — skip alerts.
+    enabled: false
+  pools:
+    # Tighter sizing than AKS — minikube is a single node.
+    - key: default
+      min_replicas: 1
+      max_replicas: 2
+      concurrency_per_replica: 3
+      resources:
+        requests: { cpu: 100m, memory: 384Mi }
+        limits:   { cpu: 500m, memory: 768Mi }
+    - key: chat
+      min_replicas: 0
+      max_replicas: 2
+      concurrency_per_replica: 4
+      resources:
+        requests: { cpu: 100m, memory: 384Mi }
+        limits:   { cpu: 500m, memory: 768Mi }
+    - key: heavy-reasoning
+      min_replicas: 0
+      max_replicas: 2
+      concurrency_per_replica: 1
+      resources:
+        requests: { cpu: 200m, memory: 512Mi }
+        limits:   { cpu: "1",  memory: 1Gi }
+
+# NATS JetStream — single replica, 2Gi file store (plenty for local dev)
+nats:
+  enabled: true
+  cluster:
+    enabled: false
+    replicas: 1
+  jetstream:
+    enabled: true
+    fileStorage:
+      size: 2Gi
+
+# The legacy embedded agent-runtime deployment stays disabled — Wave-2
+# per-pool deployments replace it.
+agent-runtime:
+  enabled: false

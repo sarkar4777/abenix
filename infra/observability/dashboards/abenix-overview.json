@@ -1,0 +1,169 @@
+{
+  "title": "Abenix — Operations Overview",
+  "uid": "abenix-overview",
+  "tags": ["abenix", "overview"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Active executions",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "sum(abenix_active_executions)", "refId": "A"}],
+      "fieldConfig": {"defaults": {
+        "color": {"mode": "thresholds"},
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "green", "value": null},
+          {"color": "yellow", "value": 50},
+          {"color": "red", "value": 200}
+        ]}
+      }},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Executions / hour",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "sum(rate(abenix_execution_outcomes_total[1h])) * 3600", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Failure rate (5m)",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+      "targets": [{
+        "expr": "100 * sum(rate(abenix_execution_outcomes_total{outcome=\"FAILED\"}[5m])) / clamp_min(sum(rate(abenix_execution_outcomes_total[5m])), 0.001)",
+        "refId": "A"
+      }],
+      "fieldConfig": {"defaults": {
+        "unit": "percent",
+        "color": {"mode": "thresholds"},
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "green", "value": null},
+          {"color": "yellow", "value": 5},
+          {"color": "red", "value": 20}
+        ]}
+      }},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 4, "type": "stat", "title": "LLM spend (24h, $)",
+      "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "sum(increase(abenix_llm_cost_usd_provider_total[24h]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 2}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 5, "type": "stat", "title": "Tokens (24h)",
+      "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "sum(increase(abenix_llm_tokens_provider_total[24h]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 6, "type": "stat", "title": "Stale sweeps (24h)",
+      "gridPos": {"x": 20, "y": 0, "w": 4, "h": 4},
+      "description": "Executions the sweeper marked FAILED. Healthy = 0. Spikes mean pods are crashing silently.",
+      "targets": [{"expr": "sum(increase(abenix_stale_sweeps_total[24h]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {
+        "color": {"mode": "thresholds"},
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "green", "value": null},
+          {"color": "yellow", "value": 1},
+          {"color": "red", "value": 10}
+        ]}
+      }},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+
+    {
+      "id": 10, "type": "timeseries", "title": "Execution outcomes (rate/min)",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (outcome) (rate(abenix_execution_outcomes_total[1m])) * 60", "refId": "A", "legendFormat": "{{outcome}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"stacking": {"mode": "normal"}}}}
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Failure breakdown by failure_code (rate/min)",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "description": "Structured failure codes — answers 'why are runs failing right now'.",
+      "targets": [
+        {"expr": "sum by (failure_code) (rate(abenix_execution_outcomes_total{outcome=\"FAILED\"}[1m])) * 60", "refId": "A", "legendFormat": "{{failure_code}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"stacking": {"mode": "normal"}}}}
+    },
+
+    {
+      "id": 20, "type": "timeseries", "title": "LLM tokens (in + out) by provider",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (provider) (rate(abenix_llm_tokens_provider_total[5m])) * 60", "refId": "A", "legendFormat": "{{provider}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "LLM $ spend by model",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (model) (rate(abenix_llm_cost_usd_provider_total[5m])) * 60", "refId": "A", "legendFormat": "{{model}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 4}}
+    },
+
+    {
+      "id": 30, "type": "timeseries", "title": "LLM call latency (p50 / p90 / p99)",
+      "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.5,  sum by (le) (rate(abenix_llm_call_duration_provider_seconds_bucket[5m])))", "refId": "A", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.9,  sum by (le) (rate(abenix_llm_call_duration_provider_seconds_bucket[5m])))", "refId": "B", "legendFormat": "p90"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(abenix_llm_call_duration_provider_seconds_bucket[5m])))", "refId": "C", "legendFormat": "p99"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 31, "type": "timeseries", "title": "Sandbox runs by image family",
+      "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (image_family, outcome) (rate(abenix_sandbox_runs_total[5m])) * 60", "refId": "A", "legendFormat": "{{image_family}} ({{outcome}})"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+
+    {
+      "id": 40, "type": "timeseries", "title": "Tool calls (top 10)",
+      "gridPos": {"x": 0, "y": 28, "w": 12, "h": 8},
+      "description": "Each tool's invocation rate. Use this to spot a runaway agent calling the same tool 100x in a loop.",
+      "targets": [
+        {"expr": "topk(10, sum by (tool_name) (rate(abenix_tool_calls_total[5m])) * 60)", "refId": "A", "legendFormat": "{{tool_name}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 41, "type": "timeseries", "title": "Notifications by channel",
+      "gridPos": {"x": 12, "y": 28, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (channel) (rate(abenix_notifications_sent_total[5m])) * 60", "refId": "A", "legendFormat": "{{channel}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+
+    {
+      "id": 50, "type": "timeseries", "title": "HTTP request rate by status class",
+      "gridPos": {"x": 0, "y": 36, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (status) (rate(abenix_http_requests_total[1m])) * 60", "refId": "A", "legendFormat": "{{status}}"}
+      ]
+    },
+    {
+      "id": 51, "type": "timeseries", "title": "HTTP latency p50/p99",
+      "gridPos": {"x": 12, "y": 36, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.5,  sum by (le) (rate(abenix_http_request_duration_seconds_bucket[5m])))", "refId": "A", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(abenix_http_request_duration_seconds_bucket[5m])))", "refId": "B", "legendFormat": "p99"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    }
+  ],
+  "templating": {"list": []}
+}

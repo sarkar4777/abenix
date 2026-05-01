@@ -1,0 +1,156 @@
+{{- /*
+Per-pool agent-runtime Deployments + Services — one per entry in
+.Values.scaling.pools. KEDA ScaledObjects (optional) scale each pool
+on its own queue depth so a Monte-Carlo burst on the long-running pool
+doesn't starve the chat pool.
+
+Everything here is conditional on .Values.scaling.enabled so existing
+local / minikube deployments stay unchanged. Flip the flag and the
+pools appear without breaking anything else.
+*/}}
+{{- $release := .Release.Name -}}
+{{- $ns := .Release.Namespace -}}
+{{- $img := .Values.scaling.agentRuntimeImage | default (index .Values "agent-runtime" "image") -}}
+{{- if .Values.scaling.enabled }}
+
+{{- range .Values.scaling.pools }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $release }}-agent-runtime-{{ .key }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: agent-runtime
+    app.kubernetes.io/component: runtime-pool
+    app.kubernetes.io/instance: {{ $release }}
+    abenix.io/pool: {{ .key }}
+spec:
+  replicas: {{ default 1 .min_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-runtime
+      abenix.io/pool: {{ .key }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-runtime
+        abenix.io/pool: {{ .key }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+    spec:
+      {{- if .nodeAffinity }}
+      nodeSelector:
+        abenix.io/node-pool: {{ .nodeAffinity }}
+      {{- end }}
+      containers:
+        - name: agent-runtime
+          image: "{{ $img.repository }}:{{ $img.tag }}"
+          imagePullPolicy: {{ $img.pullPolicy | default "Always" }}
+          # Override the default uvicorn entry: this pod runs the Wave-2
+          # consumer that drains the pool's queue, not the embedded API.
+          command: ["python3", "consumer.py"]
+          env:
+            - name: RUNTIME_POOL
+              value: {{ .key | quote }}
+            - name: RUNTIME_MODE
+              value: "remote"
+            - name: QUEUE_BACKEND
+              value: {{ default "celery" $.Values.scaling.queueBackend | quote }}
+            - name: AGENT_CONCURRENCY
+              value: {{ default 3 .concurrency_per_replica | quote }}
+            {{- if eq (default "celery" $.Values.scaling.queueBackend) "nats" }}
+            - name: NATS_URL
+              value: "nats://{{ $release }}-nats:4222"
+            - name: NATS_USER
+              value: "abenix"
+            - name: NATS_PASSWORD
+              value: "abenix-dev"
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ $release }}-secrets
+            - configMapRef:
+                name: {{ $release }}-config
+          ports:
+            - containerPort: 8001
+              name: http
+          resources:
+            {{- toYaml (default (dict "requests" (dict "cpu" "200m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "1Gi")) .resources) | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /health, port: 8001 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /health, port: 8001 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $release }}-agent-runtime-{{ .key }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: agent-runtime
+    abenix.io/pool: {{ .key }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agent-runtime
+    abenix.io/pool: {{ .key }}
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001
+
+{{- if $.Values.scaling.keda.enabled }}
+---
+# KEDA ScaledObject — scales on pool backlog. Uses the right primitive
+# for whichever queueBackend is active so the scaler reads the correct
+# depth signal:
+#   * celery → Redis list  (celery.pool.<pool>)
+#   * nats   → JetStream consumer pending  (agents.<pool>)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $release }}-agent-runtime-{{ .key }}
+  namespace: {{ $ns }}
+  labels:
+    abenix.io/pool: {{ .key }}
+spec:
+  scaleTargetRef:
+    name: {{ $release }}-agent-runtime-{{ .key }}
+  minReplicaCount: {{ default 1 .min_replicas }}
+  maxReplicaCount: {{ default 10 .max_replicas }}
+  pollingInterval: 15
+  cooldownPeriod: 300            # 5 min — keep warm pods for bursts
+  triggers:
+    {{- if eq (default "celery" $.Values.scaling.queueBackend) "nats" }}
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "http://{{ $release }}-nats:8222"
+        account: "$G"
+        stream: "agents"
+        consumer: "abenix-{{ .key }}-consumer"
+        lagThreshold: {{ default "3" .keda_queue_trigger | quote }}
+    {{- else }}
+    - type: redis
+      metadata:
+        address: {{ $release }}-redis-master:6379
+        listName: celery.pool.{{ .key }}
+        listLength: {{ default "3" .keda_queue_trigger | quote }}
+    {{- end }}
+    {{- if $.Values.scaling.keda.prometheusUrl }}
+    - type: prometheus
+      metadata:
+        serverAddress: {{ $.Values.scaling.keda.prometheusUrl | quote }}
+        metricName: abenix_execution_p95_ms
+        query: 'histogram_quantile(0.95, sum by(le) (rate(abenix_execution_duration_seconds_bucket{pool="{{ .key }}"}[5m]))) * 1000'
+        threshold: "90000"       # 90s p95 triggers scale-up
+    {{- end }}
+{{- end }}
+
+{{- end }}
+{{- end }}

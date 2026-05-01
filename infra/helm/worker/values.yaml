@@ -1,0 +1,26 @@
+replicaCount: 2
+
+image:
+  repository: abenix/worker
+  tag: latest
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 75
+
+env: {}
+envFrom: []
+
+nodeSelector: {}
+tolerations: []

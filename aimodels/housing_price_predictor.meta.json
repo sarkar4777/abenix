@@ -1,0 +1,57 @@
+{
+  "name": "housing-price-predictor",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Predicts California housing prices (in $100k units) from 8 block-level features. Gradient boosted regression.",
+  "input_schema": {
+    "features": [
+      "MedInc",
+      "HouseAge",
+      "AveRooms",
+      "AveBedrms",
+      "Population",
+      "AveOccup",
+      "Latitude",
+      "Longitude"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [
+      8.3252,
+      41.0,
+      6.984126984126984,
+      1.0238095238095237,
+      322.0,
+      2.5555555555555554,
+      37.88,
+      -122.23
+    ]
+  },
+  "output_schema": {
+    "type": "regression",
+    "unit": "100000 USD",
+    "output_fields": [
+      "predicted_price"
+    ]
+  },
+  "training_metrics": {
+    "r2_test": 0.6920252914836493,
+    "samples_train": 16512,
+    "samples_test": 4128,
+    "features": 8
+  },
+  "tags": [
+    "regression",
+    "housing",
+    "demo",
+    "sklearn"
+  ]
+}

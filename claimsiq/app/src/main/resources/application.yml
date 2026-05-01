@@ -1,0 +1,62 @@
+server:
+  port: ${PORT:3005}
+  forward-headers-strategy: framework
+  shutdown: graceful
+
+spring:
+  application:
+    name: claimsiq
+  # Optional Postgres persistence for claim rows + events. Falls back
+  # to an in-memory H2 when DATABASE_URL isn't set, same pattern
+  # resolveai uses — lets local dev run without touching the shared DB.
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:mem:claimsiq;DB_CLOSE_DELAY=-1;MODE=PostgreSQL}
+    username: ${DB_USER:sa}
+    password: ${DB_PASS:}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+# Vaadin
+vaadin:
+  # Default to production mode — the docker image is always built with
+  # -Pvaadin.productionMode=true (frontend bundle compiled into the jar).
+  # Override with VAADIN_PRODUCTION_MODE=false only for local Gradle runs.
+  productionMode: ${VAADIN_PRODUCTION_MODE:true}
+  launch-browser: false
+  allowed-packages: com.abenix.claimsiq
+
+# ClaimsIQ-specific
+claimsiq:
+  abenix:
+    base-url: ${ABENIX_API_URL:http://localhost:8000}
+    api-key: ${CLAIMSIQ_ABENIX_API_KEY:}
+    subject-type: ${CLAIMSIQ_ACTING_SUBJECT_TYPE:claimsiq}
+  pipeline:
+    slug: claimsiq-adjudicate
+    wait-timeout-seconds: 240
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+      # Expose /actuator/health/liveness and /actuator/health/readiness
+      # for the k8s probes. Auto-enables in k8s but making it explicit
+      # means local `docker run` also gets them (useful for the
+      # Docker HEALTHCHECK directive in app/Dockerfile).
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true

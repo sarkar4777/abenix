@@ -1,0 +1,90 @@
+## LiveKit dev server inside the cluster.
+## Used by the Meeting Representative agent (and any custom agent that
+## uses the meeting_* tools) so that:
+##   - The agent pod can reach LiveKit's WebRTC ports via cluster DNS,
+##     bypassing the host-network NAT issues that break webRTC media
+##     when LiveKit runs as a separate Docker container on the host.
+##   - The browser can join the same room via a NodePort on the
+##     minikube node (LIVEKIT_PUBLIC_URL).
+##
+## NOT for production. Production should:
+##   - Use LiveKit Cloud OR a real self-hosted deployment with TLS
+##   - Use proper API keys (not `devkey`/`secret`) in a real Secret
+##   - Tune autoscaling + resource limits for actual call volume
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit-server
+  namespace: abenix
+  labels: { app: livekit-server, app.kubernetes.io/component: meeting }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: livekit-server } }
+  template:
+    metadata:
+      labels: { app: livekit-server }
+    spec:
+      containers:
+        - name: livekit
+          image: livekit/livekit-server:latest
+          # `--dev` enables built-in placeholder keys (devkey/secret) so we
+          # don't need a Secret for local. `--bind 0.0.0.0` is required —
+          # 1.10+ binds to 127.0.0.1 by default which is invisible from
+          # outside the container.
+          # `--node-ip` advertises this address to peers in ICE candidates.
+          # Pods reach the service via DNS; the browser via the NodePort
+          # below. We hand out 127.0.0.1 so the browser-side ICE candidate
+          # resolves to the host's port-forward.
+          args:
+            - "--dev"
+            - "--bind"
+            - "0.0.0.0"
+            - "--node-ip"
+            - "127.0.0.1"
+          ports:
+            - containerPort: 7880   # WebSocket signaling
+              name: signal
+            - containerPort: 7881   # TCP fallback for WebRTC
+              name: rtc-tcp
+            - containerPort: 7882   # UDP for WebRTC media
+              name: rtc-udp
+              protocol: UDP
+          readinessProbe:
+            httpGet: { path: "/", port: 7880 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1,    memory: 1Gi }
+---
+# Internal Service — used by the API pod (agent runtime calls LiveKit
+# at livekit-server.abenix.svc.cluster.local:7880).
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-server
+  namespace: abenix
+  labels: { app: livekit-server }
+spec:
+  type: ClusterIP
+  selector: { app: livekit-server }
+  ports:
+    - { name: signal,  port: 7880, targetPort: 7880, protocol: TCP }
+    - { name: rtc-tcp, port: 7881, targetPort: 7881, protocol: TCP }
+---
+# NodePort Service — used by the user's browser via minikube's nodeip
+# (or via the deploy.sh-set-up port-forward at ws://localhost:7880).
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-nodeport
+  namespace: abenix
+  labels: { app: livekit-server }
+spec:
+  type: NodePort
+  selector: { app: livekit-server }
+  ports:
+    - { name: signal,  port: 7880, targetPort: 7880, nodePort: 30880, protocol: TCP }
+    - { name: rtc-tcp, port: 7881, targetPort: 7881, nodePort: 30881, protocol: TCP }
+    - { name: rtc-udp, port: 7882, targetPort: 7882, nodePort: 30882, protocol: UDP }

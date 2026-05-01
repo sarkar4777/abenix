@@ -1,0 +1,33 @@
+FROM python:3.12.8-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+FROM base AS deps
+# Install API dependencies from pyproject.toml
+COPY apps/api/pyproject.toml ./pyproject.toml
+RUN pip install --no-cache-dir .
+# Install agent-runtime dependencies (shared engine code)
+COPY apps/agent-runtime/requirements.txt ./requirements-runtime.txt
+RUN pip install --no-cache-dir -r requirements-runtime.txt 2>/dev/null || true
+
+FROM base AS runtime
+COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=deps /usr/local/bin /usr/local/bin
+COPY packages/db/ ./packages/db/
+COPY packages/sdk/python/ ./packages/sdk/python/
+COPY apps/agent-runtime/ ./apps/agent-runtime/
+COPY apps/api/ ./apps/api/
+WORKDIR /app/apps/api
+
+ENV PYTHONPATH="/app/packages/db:/app/packages/sdk/python:/app/apps/agent-runtime"
+
+RUN adduser --system --uid 1001 appuser
+USER appuser
+
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

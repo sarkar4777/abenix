@@ -1,0 +1,6 @@
+[project]
+name = "rul-estimator"
+version = "0.1.0"
+description = "Remaining-useful-life estimator for rotating machinery."
+requires-python = ">=3.11"
+dependencies = []

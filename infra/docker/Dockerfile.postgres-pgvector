@@ -1,0 +1,34 @@
+# Bitnami PostgreSQL 16 + pgvector extension.
+#
+# Bitnami's image doesn't include pgvector and ships only Bitnami's
+# own packages (no Debian apt registry for postgresql-16-pgvector),
+# so we copy the compiled vector.so + extension control files from
+# the canonical pgvector image directly into Bitnami's install
+# layout. Works because pgvector's build and Bitnami's postgres
+# are compiled against the same major version (16).
+#
+# Build + push:
+#   docker build --platform=linux/amd64 \
+#     -f infra/docker/Dockerfile.postgres-pgvector \
+#     -t your-acr.azurecr.io/postgresql-pgvector:16 .
+#   docker push your-acr.azurecr.io/postgresql-pgvector:16
+FROM pgvector/pgvector:pg16 AS pgvector-src
+
+FROM bitnamilegacy/postgresql:16.4.0-debian-12-r14
+USER 0
+# Copy the compiled extension .so and its SQL control files into the
+# Bitnami install tree. pg_config reported /opt/bitnami/postgresql for
+# both sharedir and libdir root, so the standard `lib` and
+# `share/extension` subpaths are where Postgres searches.
+COPY --from=pgvector-src /usr/lib/postgresql/16/lib/vector.so \
+     /opt/bitnami/postgresql/lib/vector.so
+COPY --from=pgvector-src /usr/share/postgresql/16/extension/vector.control \
+     /opt/bitnami/postgresql/share/extension/vector.control
+COPY --from=pgvector-src /usr/share/postgresql/16/extension/vector--*.sql \
+     /opt/bitnami/postgresql/share/extension/
+
+# Ownership + perms matching Bitnami's conventions (non-root user 1001).
+RUN chown -R 1001:1001 /opt/bitnami/postgresql/lib/vector.so \
+                        /opt/bitnami/postgresql/share/extension/vector*
+
+USER 1001

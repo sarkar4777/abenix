@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "neo4j.fullname" . }}
+  labels:
+    {{- include "neo4j.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "neo4j.fullname" . }}
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "neo4j.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "neo4j.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsUser: 7474
+        runAsGroup: 7474
+        fsGroup: 7474
+      containers:
+        - name: neo4j
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: bolt
+              containerPort: 7687
+              protocol: TCP
+            - name: http
+              containerPort: 7474
+              protocol: TCP
+          command:
+            - "/bin/bash"
+            - "-c"
+            - |
+              export NEO4J_AUTH="neo4j/${DB_PASSWORD}"
+              exec /startup/docker-entrypoint.sh neo4j
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: {{ .Values.auth.existingSecretPasswordKey }}
+            - name: NEO4J_dbms_default__database
+              value: {{ .Values.database | default "neo4j" | quote }}
+            - name: NEO4J_server_memory_heap_initial__size
+              value: {{ .Values.jvm.heap.initial | default "512m" | quote }}
+            - name: NEO4J_server_memory_heap_max__size
+              value: {{ .Values.jvm.heap.max | default "1g" | quote }}
+            - name: NEO4J_server_memory_pagecache_size
+              value: {{ .Values.jvm.pagecache | default "512m" | quote }}
+            - name: NEO4J_PLUGINS
+              value: '["apoc"]'
+            - name: NEO4J_dbms_security_procedures_unrestricted
+              value: "apoc.*"
+            - name: NEO4J_dbms_security_procedures_allowlist
+              value: "apoc.*"
+            - name: NEO4J_server_default__listen__address
+              value: "0.0.0.0"
+          # Neo4j only needs DB_PASSWORD (injected via env above).
+          # Do NOT use envFrom with the shared secret — Neo4j's strict
+          # config parser rejects unknown env vars like POSTGRES_PASSWORD.
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - "wget -q --spider http://localhost:7474 2>/dev/null"
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: plugins
+              mountPath: /plugins
+      volumes:
+        - name: plugins
+          emptyDir: {}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | default "10Gi" }}
+  {{- else }}
+      - name: data
+        emptyDir: {}
+  {{- end }}

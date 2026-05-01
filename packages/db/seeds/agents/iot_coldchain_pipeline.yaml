@@ -1,0 +1,291 @@
+name: "IoT Cold Chain Pipeline"
+slug: iot-coldchain-pipeline
+description: >-
+  Industrial-IoT pipeline for reefer-container cold-chain
+  monitoring. Takes a window of telemetry (temperature, door
+  state, GPS) and a product spec, runs the uploaded Go
+  cold-chain-corrector (Kalman smoothing + excursion detection)
+  in a sandboxed k8s Job, asks an LLM to adjudicate spoilage risk
+  against FSMA / GDP rules + product stability data, and branches
+  to claim drafting + customer notification when severity crosses
+  MEDIUM.
+
+  Requires one uploaded code asset:
+    * coldchain_asset_id — Go cold-chain-corrector
+agent_type: oob
+category: logistics
+icon: Thermometer
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  Industrial IoT cold-chain pipeline. Orchestrates a Go telemetry
+  cleaner (sandboxed k8s job) plus LLM adjudication plus
+  conditional insurance-claim drafting and customer notification.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.2
+  max_iterations: 20
+  max_tokens: 4096
+  tools:
+    - code_asset
+    - code_executor
+    - agent_step
+    - database_writer
+    - current_time
+    - knowledge_search
+    - email_sender
+
+input_variables:
+  - name: message
+    type: string
+    description: "JSON window with {readings, product_spec, shipment_context}."
+    required: true
+  - name: coldchain_asset_id
+    type: string
+    description: "UUID of the uploaded cold-chain-corrector code asset."
+    required: true
+
+example_prompts:
+  - '{"readings":[{"timestamp":"2026-04-22T10:00:00Z","temp_c":4.2}],"product_spec":{"min_c":2,"max_c":8,"excursion_minutes":10,"door_open_minutes":5,"sku":"PHARM-A-INSULIN"},"shipment_context":{"shipment_id":"SHP-001"}}'
+
+pipeline_config:
+  nodes:
+    - id: timestamp
+      tool_name: current_time
+      label: "Timestamp"
+      arguments: { timezone: "UTC" }
+      depends_on: []
+      position: { x: 80, y: 60 }
+
+    - id: validate_input
+      tool_name: code_executor
+      label: "1. Validate Window"
+      arguments:
+        code: |
+          import json
+          raw = context.get("message", "{}")
+          asset_id = context.get("coldchain_asset_id", "")
+          if isinstance(raw, str):
+              try: data = json.loads(raw)
+              except Exception: data = {}
+          elif isinstance(raw, dict):
+              data = raw
+          else:
+              data = {}
+
+          if not asset_id:
+              result = {
+                  "ok": False,
+                  "error": "ASSET_NOT_DEPLOYED",
+                  "message": "coldchain_asset_id missing — deploy the asset first.",
+              }
+          elif not data.get("readings") or not data.get("product_spec"):
+              result = {
+                  "ok": False,
+                  "error": "BAD_INPUT",
+                  "message": "window requires readings[] and product_spec{}",
+              }
+          else:
+              result = {
+                  "ok": True,
+                  "window": {
+                      "readings": data["readings"],
+                      "product_spec": data["product_spec"],
+                  },
+                  "shipment_context": data.get("shipment_context") or {},
+                  "asset_id": asset_id,
+              }
+          print(json.dumps(result))
+      depends_on:
+        - timestamp
+      position: { x: 360, y: 60 }
+
+    - id: monitor
+      tool_name: code_asset
+      label: "2. Run Go Corrector (k8s Job)"
+      arguments:
+        code_asset_id: "{{context.coldchain_asset_id}}"
+        timeout_seconds: 120
+        memory_mb: 512
+      input_mappings:
+        input:
+          source_node: validate_input
+          source_field: window
+      depends_on:
+        - validate_input
+      position: { x: 360, y: 220 }
+
+    - id: adjudicate
+      tool_name: agent_step
+      label: "3. LLM Excursion Adjudicator"
+      arguments:
+        system_prompt: |
+          You are a cold-chain adjudicator. Decide spoilage risk,
+          liability, notification tier, and recommended action for
+          a shipment based on the telemetry analysis + product
+          spec.
+
+          Rules:
+            - No excursions + door minutes within spec -> OK, 0 risk.
+            - Peak > max by <= 2C for < 30min -> LOW (~10%)
+            - Peak > max by <= 4C for < 60min -> MEDIUM (~35%)
+            - > 4C OR > 60 total min -> HIGH (70%+)
+            - Below min for protein / biologic products -> HIGH regardless
+
+          Liability:
+            - Door events + dwell stops > 0 -> carrier handling
+            - Excursions during transit, doors closed -> reefer failure -> carrier
+            - Telemetry began after pickup -> shipper origin dock
+            - Otherwise ambiguous
+
+          Call knowledge_search at most ONCE for product-specific
+          stability if the KB likely has it.
+
+          Return JSON only (no markdown):
+            {
+              "severity": "OK" | "LOW" | "MEDIUM" | "HIGH",
+              "spoilage_risk_pct": 0-100,
+              "liability": "carrier" | "shipper" | "consignee" | "ambiguous",
+              "notification_tier": "LOG_ONLY" | "NOTIFY_QA" | "NOTIFY_CONSIGNEE_AND_QA",
+              "evidence": ["..."],
+              "rationale": "3-4 sentences",
+              "recommended_action": "release_to_customer" | "quarantine_pending_qa" | "reject_shipment"
+            }
+        input_message: |
+          Adjudicate this telemetry:
+            monitor_result: {{monitor.result}}
+            product_spec:   {{validate_input.window.product_spec}}
+            shipment_context: {{validate_input.shipment_context}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 4
+        temperature: 0.2
+      depends_on:
+        - monitor
+      position: { x: 360, y: 380 }
+
+    - id: route
+      tool_name: code_executor
+      label: "4. Route by Severity"
+      arguments:
+        code: |
+          import json
+          adj = context.get("adjudicate", {}) or {}
+          resp = adj.get("response") if isinstance(adj, dict) else adj
+          if isinstance(resp, str):
+              try: resp = json.loads(resp)
+              except Exception: resp = {}
+          sev = (resp or {}).get("severity") or "OK"
+          tier = (resp or {}).get("notification_tier") or "LOG_ONLY"
+          result = {
+              "severity": sev,
+              "notification_tier": tier,
+              "claim_required": sev in ("MEDIUM", "HIGH"),
+              "notify_customer": tier == "NOTIFY_CONSIGNEE_AND_QA",
+          }
+          print(json.dumps(result))
+      depends_on:
+        - adjudicate
+      position: { x: 620, y: 380 }
+
+    - id: draft_claim
+      tool_name: agent_step
+      label: "5. Draft Insurance Claim (MED/HIGH only)"
+      condition:
+        source_node: route
+        field: claim_required
+        operator: eq
+        value: true
+      arguments:
+        system_prompt: |
+          You are an insurance-claim drafter. Compute claim amount as
+            (units_in_shipment * unit_value_usd) * (spoilage_risk_pct / 100)
+          rounded to whole dollars. If product spec doesn't give units
+          / unit_value, note assumptions explicitly.
+
+          Consult knowledge_search ONCE for the carrier policy clause if
+          present. Else write "standard terms".
+
+          Return JSON:
+            {
+              "claim_id": "<short id>",
+              "shipment_id": "...",
+              "carrier": "...",
+              "amount_usd": <number>,
+              "excursion_summary": { ... from monitor summary ... },
+              "policy_clause_cited": "...",
+              "evidence": ["..."],
+              "customer_letter_markdown": "<brief, friendly>"
+            }
+        input_message: |
+          Draft claim for:
+            adjudication: {{adjudicate.response}}
+            monitor_result: {{monitor.result}}
+            product_spec: {{validate_input.window.product_spec}}
+            shipment_context: {{validate_input.shipment_context}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 5
+        temperature: 0.3
+      depends_on:
+        - route
+      position: { x: 620, y: 540 }
+
+    - id: final_report
+      tool_name: code_executor
+      label: "6. Assemble Final Report"
+      arguments:
+        code: |
+          import json
+
+          def as_dict(x):
+              if isinstance(x, dict): return x
+              if isinstance(x, str):
+                  try: return json.loads(x)
+                  except Exception: return {"raw": x}
+              return {}
+
+          validate = as_dict(context.get("validate_input"))
+          if not validate.get("ok"):
+              result = {
+                  "status": "blocked",
+                  "error": validate.get("error"),
+                  "message": validate.get("message"),
+              }
+          else:
+              monitor = as_dict(context.get("monitor"))
+              monitor_core = as_dict(monitor.get("result") or monitor)
+              adj_env = as_dict(context.get("adjudicate"))
+              adj = as_dict(adj_env.get("response") if isinstance(adj_env, dict) else {})
+              route = as_dict(context.get("route"))
+              claim_env = as_dict(context.get("draft_claim"))
+              claim = as_dict(claim_env.get("response") if isinstance(claim_env, dict) else {})
+
+              result = {
+                  "status": "ok",
+                  "timestamp": context.get("timestamp"),
+                  "shipment_id": (validate.get("shipment_context") or {}).get("shipment_id"),
+                  "monitor": monitor_core,
+                  "adjudication": adj,
+                  "route": route,
+                  "claim": claim or None,
+              }
+          print(json.dumps(result, default=str))
+      depends_on:
+        - route
+        - draft_claim
+      position: { x: 360, y: 700 }
+
+  edges:
+    - { source: timestamp,      target: validate_input }
+    - { source: validate_input, target: monitor }
+    - { source: monitor,        target: adjudicate }
+    - { source: adjudicate,     target: route }
+    - { source: route,          target: draft_claim }
+    - { source: route,          target: final_report }
+    - { source: draft_claim,    target: final_report }
+
+  viewport: { x: 0, y: 0, zoom: 0.75 }

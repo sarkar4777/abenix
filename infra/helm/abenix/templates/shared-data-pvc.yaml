@@ -1,0 +1,25 @@
+{{- if .Values.sharedData.usePVC }}
+# Shared workspace PVC. Mounted at /data in api + worker + agent-runtime
+# pods so KB uploads, ML model files, and Code Runner artifacts are
+# visible across pods on multi-node clusters.
+#
+# AccessMode: ReadWriteMany — every pod reads and writes the same
+# directory tree. The default storage class on most managed clusters is
+# RWO; you must point this at a ReadWriteMany class (NFS, EFS, Azure
+# Files, cephfs, …) for it to actually work.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: abenix-shared-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: shared-data
+    app.kubernetes.io/part-of: abenix
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: {{ .Values.sharedData.storageClass | default "" | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.sharedData.storageSize | default "20Gi" }}
+{{- end }}

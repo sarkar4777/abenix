@@ -1,0 +1,93 @@
+name: "Quality Gate Pipeline"
+slug: "quality-gate-pipeline"
+description: >
+  Confidence-gated document analysis pipeline. Analyzes documents with an
+  LLM, then routes based on the analysis quality — thorough analyses are
+  auto-processed, while incomplete analyses go to human review.
+category: operations
+agent_type: oob
+version: "1.0.0"
+status: active
+icon_url: /icons/quality-gate.svg
+system_prompt: |
+  You orchestrate a confidence-gated document analysis pipeline that analyzes documents, then routes based on quality — thorough analyses are auto-processed while incomplete analyses are sent to human review.
+example_prompts:
+  - "Analyze this vendor security questionnaire and route high-confidence findings to auto-processing, low-confidence to human review"
+  - "Process this insurance claim document through the quality gate — extract key data and flag any sections needing manual verification"
+  - "Run this lease agreement through analysis — if completeness is high, generate the summary report; otherwise, list what's missing"
+
+mode: pipeline
+model_config:
+  model: claude-sonnet-4-5-20250929
+  tools:
+    - llm_call
+    - human_approval
+    - data_merger
+pipeline_config:
+  nodes:
+    - id: analyze_document
+      tool_name: llm_call
+      arguments:
+        prompt: >
+          Analyze this document thoroughly. Respond with JSON containing:
+          {"summary": "...", "risk_factors": [...], "completeness": "high|medium|low",
+           "confidence": 0.0-1.0, "key_findings": [...]}
+
+          Document: {{context.user_message}}
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 100
+        y: 100
+
+    - id: auto_process
+      tool_name: llm_call
+      depends_on: [analyze_document]
+      condition:
+        source_node: analyze_document
+        field: response
+        operator: contains
+        value: '"completeness": "high"'
+      arguments:
+        prompt: "Generate a summary report from this high-quality analysis: {{analyze_document.__all__}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 100
+        y: 250
+
+    - id: needs_review
+      tool_name: llm_call
+      depends_on: [analyze_document]
+      condition:
+        source_node: analyze_document
+        field: response
+        operator: not_contains
+        value: '"completeness": "high"'
+      arguments:
+        prompt: "This analysis needs improvement. List what's missing and draft a review request: {{analyze_document.__all__}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 400
+        y: 250
+
+    - id: final_output
+      tool_name: llm_call
+      depends_on: [auto_process, needs_review]
+      arguments:
+        prompt: >
+          Compile the final output. If auto-processed: {{auto_process.__all__}}
+          If flagged for review: {{needs_review.__all__}}
+          Produce a concise executive summary.
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 100
+        y: 400
+
+  edges:
+    - source: analyze_document
+      target: auto_process
+    - source: analyze_document
+      target: needs_review
+    - source: auto_process
+      target: final_output
+    - source: needs_review
+      target: final_output

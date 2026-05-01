@@ -1,0 +1,261 @@
+{
+  "@context": {
+    "atlas": "https://abenix/atlas/2c2ec450-1d81-4a6d-a9c6-8215db6f09db#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+  },
+  "@graph": [
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Counterparty",
+      "@type": "owl:Class",
+      "rdfs:label": "Counterparty",
+      "rdfs:comment": "",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#ACME_Corp",
+      "@type": "owl:NamedIndividual",
+      "rdfs:label": "ACME Corp",
+      "rdfs:comment": "",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Trade",
+      "@type": "owl:Class",
+      "rdfs:label": "Trade",
+      "rdfs:comment": "",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Ssi",
+      "@type": "owl:Class",
+      "rdfs:label": "Ssi",
+      "rdfs:comment": "Standard Settlement Instruction",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#LegalEntity",
+      "@type": "owl:Class",
+      "rdfs:label": "LegalEntity",
+      "rdfs:comment": "Organisation with rights and obligations",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Account",
+      "@type": "owl:Class",
+      "rdfs:label": "Account",
+      "rdfs:comment": "Financial holding container",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Order",
+      "@type": "owl:Class",
+      "rdfs:label": "Order",
+      "rdfs:comment": "Instruction to trade",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Instrument",
+      "@type": "owl:Class",
+      "rdfs:label": "Instrument",
+      "rdfs:comment": "Tradable financial asset",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Quote",
+      "@type": "owl:Class",
+      "rdfs:label": "Quote",
+      "rdfs:comment": "Price observation",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Market",
+      "@type": "owl:Class",
+      "rdfs:label": "Market",
+      "rdfs:comment": "Venue where instruments trade",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Settlement",
+      "@type": "owl:Class",
+      "rdfs:label": "Settlement",
+      "rdfs:comment": "Final transfer of obligations",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Position",
+      "@type": "owl:Class",
+      "rdfs:label": "Position",
+      "rdfs:comment": "Net exposure to an instrument",
+      "atlas:properties": {}
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_fac931d9-0535-44ea-9224-3a211f8c064e",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "has_trade",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Counterparty"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Trade"
+      },
+      "atlas:cardinality_from": "1",
+      "atlas:cardinality_to": "*"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_c723e8c9-7a19-4b2d-88f5-bda5af0fc5fb",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "settles_via",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Trade"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Ssi"
+      },
+      "atlas:cardinality_from": "*",
+      "atlas:cardinality_to": "1"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_3f8d0b9b-7dbd-4711-86ea-6d3159268298",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "is_a",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Counterparty"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#LegalEntity"
+      },
+      "atlas:cardinality_from": "*",
+      "atlas:cardinality_to": "1"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_07803583-f799-4ecb-b91c-fb686301a233",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "holds",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Counterparty"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Account"
+      },
+      "atlas:cardinality_from": "1",
+      "atlas:cardinality_to": "*"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_52d57693-b828-498a-8b01-a189bbfc09f6",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "between",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Trade"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Counterparty"
+      },
+      "atlas:cardinality_from": "1..*",
+      "atlas:cardinality_to": "2"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_ff188760-b0fe-4c81-b7a8-e8b44fde44d4",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "produces",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Order"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Trade"
+      },
+      "atlas:cardinality_from": "1",
+      "atlas:cardinality_to": "0..1"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_934d685e-d443-4f4e-82ba-87c1893a8386",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "references",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Trade"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Instrument"
+      },
+      "atlas:cardinality_from": "*",
+      "atlas:cardinality_to": "1"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_4e053d63-5a39-48b0-bd15-186581040d25",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "prices",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Quote"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Instrument"
+      },
+      "atlas:cardinality_from": "*",
+      "atlas:cardinality_to": "1"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_848095a4-9983-49b1-84c6-761ada60c197",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "routed_to",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Order"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Market"
+      },
+      "atlas:cardinality_from": "*",
+      "atlas:cardinality_to": "1"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_333fa5df-bd8d-46b8-832a-8b20cc96f152",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "settles_via",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Trade"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Settlement"
+      },
+      "atlas:cardinality_from": "1",
+      "atlas:cardinality_to": "1"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_e0cd2a10-a5d0-472e-b9f1-4f5cd01977c1",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "held_in",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Position"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Account"
+      },
+      "atlas:cardinality_from": "*",
+      "atlas:cardinality_to": "1"
+    },
+    {
+      "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#edge_057331af-4449-45ed-aee6-e7f3ee971a5b",
+      "@type": "owl:ObjectProperty",
+      "rdfs:label": "of",
+      "rdfs:domain": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Position"
+      },
+      "rdfs:range": {
+        "@id": "atlas:2c2ec450-1d81-4a6d-a9c6-8215db6f09db#Instrument"
+      },
+      "atlas:cardinality_from": "*",
+      "atlas:cardinality_to": "1"
+    }
+  ],
+  "atlas:meta": {
+    "id": "2c2ec450-1d81-4a6d-a9c6-8215db6f09db",
+    "name": "E2E Smoke Test 1777478100437",
+    "description": "",
+    "kb_id": null,
+    "version": 8,
+    "node_count": 12,
+    "edge_count": 12,
+    "settings": {},
+    "created_at": "2026-04-29T15:53:21.830358+00:00",
+    "updated_at": "2026-04-29T15:54:07.855207+00:00"
+  }
+}

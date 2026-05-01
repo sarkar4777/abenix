@@ -1,0 +1,51 @@
+response_id,month,region,nationality,purpose,overall_rating,accommodation_rating,food_rating,transport_rating,attractions_rating,value_for_money,would_recommend,sentiment,comment
+1,2024-01,Riyadh,British,Business,4,5,4,3,4,3,yes,positive,Excellent hotel standards and conference facilities
+2,2024-01,Riyadh,Indian,Business,4,4,5,3,3,4,yes,positive,Great food variety and professional services
+3,2024-01,Makkah,Indonesian,Religious,5,4,4,3,5,4,yes,positive,Spiritually fulfilling experience
+4,2024-01,Makkah,Pakistani,Religious,5,3,4,2,5,3,yes,positive,The Haram expansion is wonderful
+5,2024-01,Makkah,Egyptian,Religious,4,3,3,2,5,3,yes,positive,Umrah was beautiful but transport was difficult
+6,2024-01,Jeddah,Emirati,Leisure,4,4,5,3,4,3,yes,positive,Jeddah waterfront is impressive
+7,2024-01,NEOM,German,Leisure,5,5,4,4,5,4,yes,positive,NEOM is a glimpse of the future
+8,2024-01,Al-Ula,French,Leisure,5,5,5,4,5,5,yes,positive,Al-Ula is absolutely breathtaking
+9,2024-01,Al-Ula,American,Leisure,5,5,4,3,5,4,yes,positive,Hegra rivals Petra in beauty
+10,2024-01,Asir,Saudi,Domestic,4,3,4,3,4,4,yes,positive,Beautiful mountains and cool weather
+11,2024-02,Riyadh,Chinese,Leisure,3,4,3,2,3,2,neutral,Mixed feelings about visa process
+12,2024-02,Riyadh,UAE,Leisure,4,4,4,4,4,4,yes,positive,Riyadh Season was amazing
+13,2024-02,Makkah,Turkish,Religious,4,4,3,3,5,3,yes,positive,Well organized Umrah services
+14,2024-02,Madinah,Malaysian,Religious,5,4,4,3,5,4,yes,positive,Peace and tranquility in Madinah
+15,2024-02,Jeddah,British,Leisure,3,3,4,2,3,3,maybe,neutral,Good food but taxi issues
+16,2024-03,Riyadh,Saudi,Domestic,4,4,4,4,4,4,yes,positive,Riyadh boulevard is world class
+17,2024-03,Makkah,Bangladeshi,Religious,4,3,3,2,5,3,yes,positive,Blessed to visit the Holy Mosque
+18,2024-03,NEOM,British,Leisure,4,5,4,3,4,3,yes,positive,Stunning desert landscapes
+19,2024-03,Al-Ula,Japanese,Leisure,5,5,5,4,5,5,yes,positive,Cultural heritage is phenomenal
+20,2024-03,Eastern,Kuwaiti,Leisure,3,3,3,3,3,3,maybe,neutral,Limited attractions for families
+21,2024-04,Riyadh,Indian,Business,4,4,4,3,4,4,yes,positive,Tech conference was excellent
+22,2024-04,Makkah,Nigerian,Religious,5,3,4,2,5,3,yes,positive,Life-changing Umrah experience
+23,2024-04,Jeddah,Emirati,Leisure,4,4,5,3,4,4,yes,positive,Red Sea diving is incredible
+24,2024-04,Al-Ula,Italian,Leisure,5,5,5,4,5,5,yes,positive,Best archaeological site I have visited
+25,2024-04,Asir,Saudi,Domestic,5,4,5,4,5,5,yes,positive,Al Soudah park is magnificent
+26,2024-05,Riyadh,German,Business,3,4,3,2,3,3,maybe,neutral,Navigating the city without a car is difficult
+27,2024-05,Makkah,Indonesian,Religious,5,4,4,3,5,4,yes,positive,Ramadan in Makkah is incomparable
+28,2024-05,Madinah,Somali,Religious,5,3,3,2,5,3,yes,positive,The Prophet Mosque is magnificent
+29,2024-05,NEOM,Swiss,Leisure,4,5,4,4,4,3,yes,positive,Innovative architecture and pristine beaches
+30,2024-05,Tabuk,Saudi,Domestic,3,3,3,3,3,3,maybe,neutral,Needs more tourist infrastructure
+31,2024-06,Makkah,Pakistani,Religious,5,3,3,2,5,3,yes,positive,Hajj was the pinnacle of my faith
+32,2024-06,Makkah,Egyptian,Religious,4,3,3,1,5,2,yes,mixed,Hajj was spiritual but extremely crowded
+33,2024-06,Makkah,Turkish,Religious,4,4,3,2,5,3,yes,positive,Well managed Hajj this year
+34,2024-06,Madinah,Indonesian,Religious,5,4,4,3,5,4,yes,positive,Madinah after Hajj is pure peace
+35,2024-06,Jeddah,UAE,Leisure,3,4,4,2,3,2,maybe,neutral,Too hot in summer for outdoor activities
+36,2024-06,Asir,Saudi,Domestic,5,4,5,4,5,5,yes,positive,Asir mountains are perfect summer escape
+37,2024-07,Riyadh,Saudi,Domestic,3,4,3,3,2,3,maybe,neutral,Summer heat limits what you can do
+38,2024-07,Makkah,Malaysian,Religious,5,4,4,3,5,4,yes,positive,Late Hajj season visit was wonderful
+39,2024-07,Asir,Saudi,Domestic,5,4,5,4,5,5,yes,positive,Best domestic summer destination
+40,2024-07,Tabuk,Saudi,Domestic,3,3,3,2,3,3,maybe,neutral,Remote but charming
+41,2024-08,Riyadh,Saudi,Domestic,3,4,3,3,2,3,no,negative,Nothing to do in summer heat
+42,2024-08,Asir,Saudi,Domestic,4,4,4,3,4,4,yes,positive,Cool climate is refreshing
+43,2024-09,Riyadh,UAE,Leisure,4,4,4,4,4,4,yes,positive,Looking forward to Riyadh Season
+44,2024-09,Makkah,Algerian,Religious,4,3,3,2,5,3,yes,positive,Umrah season off-peak is better
+45,2024-09,NEOM,American,Leisure,4,5,4,4,5,4,yes,positive,Trojena ski resort is incredible
+46,2024-10,Riyadh,British,Leisure,5,5,5,4,5,4,yes,positive,Riyadh Season opening night was spectacular
+47,2024-10,Riyadh,Emirati,Leisure,5,4,5,4,5,5,yes,positive,Best entertainment destination in GCC
+48,2024-10,Al-Ula,French,Leisure,5,5,5,4,5,5,yes,positive,Return visit and still amazed
+49,2024-10,NEOM,German,Leisure,5,5,4,4,5,4,yes,positive,THE LINE project is mind-blowing
+50,2024-10,Eastern,Bahraini,Leisure,4,4,3,4,3,3,yes,positive,Ithra center is impressive

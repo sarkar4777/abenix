@@ -1,0 +1,24 @@
+dependencies:
+- name: web
+  repository: file://../web
+  version: 0.1.0
+- name: api
+  repository: file://../api
+  version: 0.1.0
+- name: agent-runtime
+  repository: file://../agent-runtime
+  version: 0.1.0
+- name: worker
+  repository: file://../worker
+  version: 0.1.0
+- name: neo4j
+  repository: file://../neo4j
+  version: 0.1.0
+- name: postgresql
+  repository: https://charts.bitnami.com/bitnami
+  version: 15.5.38
+- name: redis
+  repository: https://charts.bitnami.com/bitnami
+  version: 19.6.4
+digest: sha256:4f74f485a85f12b148d44274a99ca35845819ef5e95734d935ffe40d0ea026dc
+generated: "2026-04-02T13:51:11.9855007+02:00"

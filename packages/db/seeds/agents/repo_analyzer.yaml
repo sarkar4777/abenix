@@ -1,0 +1,187 @@
+name: "Repository Analyzer"
+slug: repo-analyzer
+description: >
+  Deep-dive analysis of any GitHub repository. Examines code structure,
+  quality patterns, dependency health, CI/CD configuration, issue trends,
+  and generates actionable improvement recommendations. Works like having
+  a senior engineer review your entire codebase.
+category: Engineering
+agent_type: OOB
+version: "1.0.0"
+icon_url: /icons/repo-analyzer.svg
+system_prompt: |
+  You are an expert code analyst and senior software engineer. When given a
+  GitHub repository, you conduct a thorough multi-dimensional analysis:
+
+  1. **Repository Overview**: Stars, forks, contributors, activity level
+  2. **Code Structure**: File organization, module boundaries, architecture patterns
+  3. **Code Quality**: Naming conventions, complexity, duplication indicators
+  4. **Dependencies**: Package health, outdated versions, known vulnerabilities
+  5. **CI/CD**: Workflow configuration, test coverage indicators, deployment patterns
+  6. **Issues & PRs**: Open issue trends, PR review velocity, stale items
+  7. **Security**: Exposed secrets patterns, dependency vulnerabilities, OWASP concerns
+
+  Always start by fetching the repository metadata and file tree. Then
+  strategically read key files (README, package.json/requirements.txt,
+  CI configs, main entry points). Summarize findings with severity ratings
+  and prioritized recommendations.
+
+  Format your final report with clear sections, ratings (1-5 stars), and
+  a summary table of findings.
+
+example_prompts:
+  - "Analyze the vercel/next.js repository — code quality, dependency health, CI/CD setup, and open issue trends"
+  - "Review our private repo acme-corp/billing-service for security vulnerabilities, outdated dependencies, and architecture concerns"
+  - "Compare the contributor activity and PR review velocity between facebook/react and vuejs/core over the last 6 months"
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.3
+  max_iterations: 15
+  tools:
+    - github_tool
+    - llm_call
+    - code_executor
+    - text_analyzer
+    - json_transformer
+    - http_client
+    - web_search
+    - data_merger
+
+mode: pipeline
+pipeline_config:
+  nodes:
+    # Default to a small public repo so demos work without GITHUB_TOKEN.
+    # Override by setting {{context.owner}} and {{context.repo}} at execution time.
+    - id: repo_meta
+      tool_name: github_tool
+      arguments:
+        operation: get_repo
+        owner: octocat
+        repo: spoon-knife
+      position:
+        x: 100
+        y: 100
+    - id: file_tree
+      tool_name: github_tool
+      arguments:
+        operation: list_files
+        owner: octocat
+        repo: spoon-knife
+      position:
+        x: 400
+        y: 100
+    - id: languages
+      tool_name: github_tool
+      arguments:
+        operation: get_languages
+        owner: octocat
+        repo: spoon-knife
+      position:
+        x: 700
+        y: 100
+    - id: recent_commits
+      tool_name: github_tool
+      arguments:
+        operation: get_commits
+        owner: octocat
+        repo: spoon-knife
+        per_page: 20
+      position:
+        x: 1000
+        y: 100
+    - id: open_issues
+      tool_name: github_tool
+      arguments:
+        operation: list_issues
+        owner: octocat
+        repo: spoon-knife
+        state: open
+        per_page: 20
+      position:
+        x: 1300
+        y: 100
+    - id: open_prs
+      tool_name: github_tool
+      arguments:
+        operation: list_pull_requests
+        owner: octocat
+        repo: spoon-knife
+        state: open
+      position:
+        x: 1600
+        y: 100
+    - id: ci_workflows
+      tool_name: github_tool
+      arguments:
+        operation: get_workflows
+        owner: octocat
+        repo: spoon-knife
+      position:
+        x: 1900
+        y: 100
+    - id: merge_data
+      tool_name: data_merger
+      arguments:
+        merge_strategy: nested
+      depends_on:
+        - repo_meta
+        - file_tree
+        - languages
+        - recent_commits
+        - open_issues
+        - open_prs
+        - ci_workflows
+      input_mappings:
+        input_repo: { source_node: repo_meta, source_field: __all__ }
+        input_files: { source_node: file_tree, source_field: __all__ }
+        input_languages: { source_node: languages, source_field: __all__ }
+        input_commits: { source_node: recent_commits, source_field: __all__ }
+        input_issues: { source_node: open_issues, source_field: __all__ }
+        input_prs: { source_node: open_prs, source_field: __all__ }
+        input_ci: { source_node: ci_workflows, source_field: __all__ }
+      position:
+        x: 1000
+        y: 250
+    - id: analysis_report
+      tool_name: llm_call
+      arguments:
+        model: claude-sonnet-4-5-20250929
+        temperature: 0.3
+        max_tokens: 8192
+        system_prompt: |
+          You are a senior software engineer conducting a repository audit.
+          Analyze the provided data and generate a comprehensive report with:
+          - Executive Summary (2-3 sentences)
+          - Health Score (A-F grade)
+          - Code Structure Analysis
+          - Dependency Assessment
+          - CI/CD Evaluation
+          - Activity & Community Health
+          - Security Observations
+          - Top 5 Prioritized Recommendations
+          Format as clean markdown.
+      depends_on:
+        - merge_data
+      input_mappings:
+        prompt: { source_node: merge_data, source_field: __all__ }
+      max_retries: 1
+      position:
+        x: 1000
+        y: 400
+
+  edges:
+    - { source: repo_meta, target: merge_data }
+    - { source: file_tree, target: merge_data }
+    - { source: languages, target: merge_data }
+    - { source: recent_commits, target: merge_data }
+    - { source: open_issues, target: merge_data }
+    - { source: open_prs, target: merge_data }
+    - { source: ci_workflows, target: merge_data }
+    - { source: merge_data, target: analysis_report }
+
+mcp_extensions:
+  - name: github-mcp
+    url: https://mcp.github.com
+    auth_type: api_key
+    description: Enhanced GitHub operations via MCP

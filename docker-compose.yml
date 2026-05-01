@@ -1,0 +1,130 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: abenix-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-abenix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-abenix}
+      POSTGRES_DB: ${POSTGRES_DB:-abenix}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abenix"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: abenix-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: abenix-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@abenix.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_LISTEN_PORT: 5050
+    ports:
+      - "5050:5050"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools
+
+  minio:
+    image: minio/minio:latest
+    container_name: abenix-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-abenix}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-abenix123}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: abenix-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 abenix abenix123;
+      mc mb local/abenix-uploads --ignore-existing;
+      mc mb local/abenix-exports --ignore-existing;
+      echo 'Buckets created';
+      "
+    profiles:
+      - init
+
+  # NATS JetStream — default transport for per-request agent execution.
+  # Same server the AKS chart deploys, so dev/prod parity is 1:1.
+  # Celery + Redis (above) stay for batch jobs (KB ingest, scheduled
+  # triggers, code-runner builds) — they don't go through NATS.
+  nats:
+    image: nats:2.10-alpine
+    container_name: abenix-nats
+    command: ["-c", "/etc/nats/nats.conf", "-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats_data:/data
+      - ./scripts/nats-local.conf:/etc/nats/nats.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: abenix-neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-abenix}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512M
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-abenix} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
+  minio_data:
+  neo4j_data:
+  neo4j_logs:
+  nats_data:

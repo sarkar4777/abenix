@@ -1,0 +1,34 @@
+{
+  "name": "abenix",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:e2e": "npx playwright test",
+    "test:e2e:ui": "npx playwright test --ui",
+    "test:e2e:headed": "npx playwright test --headed",
+    "test:web": "npm run test --workspace=apps/web",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "start": "bash scripts/dev-local.sh",
+    "stop": "bash scripts/dev-local.sh --stop"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "prettier": "^3.2.0",
+    "turbo": "^2.3.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "npm@10.8.0",
+  "dependencies": {
+    "jszip": "^3.10.1"
+  }
+}

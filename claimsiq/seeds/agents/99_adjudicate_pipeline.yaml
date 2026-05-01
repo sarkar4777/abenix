@@ -1,0 +1,121 @@
+name: "ClaimsIQ — Adjudicate Claim"
+slug: claimsiq-adjudicate
+description: >-
+  End-to-end insurance claim pipeline: FNOL → Policy Match → Damage
+  Assessment (multimodal) → Fraud Screen → Valuation → Decision.
+  Under ~45s p50 on Sonnet-class models; every action cites a policy
+  section and carries a fraud-risk tier.
+agent_type: oob
+category: insurance
+icon: Workflow
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  Claims adjudication pipeline for ClaimsIQ. Nodes run in dependency
+  order; each emits structured JSON read by the next via
+  {{prev.field}} references.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.1
+  max_iterations: 15
+  max_tokens: 4096
+  tools:
+    - agent_step
+    - knowledge_search
+    - image_analyzer
+    - adverse_media
+    - sanctions_screening
+    - pep_screening
+    - market_data
+    - financial_calculator
+    - human_approval
+  pipeline_config:
+    nodes:
+      - id: fnol
+        type: agent
+        agent_slug: claimsiq-fnol-intake
+        input: "{{input.message}}"
+        context:
+          claim_id:       "{{input.claim_id}}"
+          claimant_id:    "{{input.claimant_id}}"
+          channel:        "{{input.channel}}"
+          photo_urls:     "{{input.photo_urls}}"
+
+      - id: policy_match
+        type: agent
+        agent_slug: claimsiq-policy-matcher
+        input: >-
+          Claim type:   {{fnol.claim_type}}
+          Loss date:    {{fnol.loss_date}}
+          Policy #:     {{fnol.policy_number}}
+          Summary:      {{fnol.summary}}
+        context:
+          policy_number: "{{fnol.policy_number}}"
+
+      - id: damage_assess
+        type: agent
+        agent_slug: claimsiq-damage-assessor
+        input: >-
+          Claim type:       {{fnol.claim_type}}
+          FNOL summary:     {{fnol.summary}}
+          Estimated loss:   {{fnol.estimated_loss_usd}}
+          Photos:           {{input.photo_urls}}
+        context:
+          photo_urls:    "{{input.photo_urls}}"
+          claim_type:    "{{fnol.claim_type}}"
+
+      - id: fraud_screen
+        type: agent
+        agent_slug: claimsiq-fraud-screener
+        input: >-
+          FNOL: {{fnol}}
+          Damage inconsistencies: {{damage_assess.inconsistencies}}
+          Policy: {{policy_match.coverage_gap_notes}}
+        context:
+          involved_parties:  "{{fnol.involved_parties}}"
+          loss_location:     "{{fnol.loss_location}}"
+
+      - id: valuate
+        type: agent
+        agent_slug: claimsiq-valuator
+        input: >-
+          Damage assessment:    {{damage_assess}}
+          Coverage:             {{policy_match.coverage_sections}}
+          Deductible:           {{policy_match.deductible_usd}}
+          Policy limit:         {{policy_match.policy_limit_usd}}
+
+      - id: decide
+        type: agent
+        agent_slug: claimsiq-claim-decider
+        input: >-
+          FNOL:       {{fnol}}
+          Policy:     {{policy_match}}
+          Damage:     {{damage_assess}}
+          Fraud:      {{fraud_screen}}
+          Valuation:  {{valuate}}
+
+
+      - id: final_report
+        type: structured
+        output:
+          decision:                "{{decide.decision}}"
+          decision_reason:         "{{decide.decision_reason}}"
+          approved_amount_usd:     "{{decide.approved_amount_usd}}"
+          draft_letter:            "{{decide.draft_letter}}"
+          adjuster_notes:          "{{decide.adjuster_notes}}"
+          next_steps_claimant:     "{{decide.next_steps_claimant}}"
+          citations:               "{{decide.citations}}"
+          fraud_risk_tier:         "{{fraud_screen.risk_tier}}"
+          fraud_score:             "{{fraud_screen.fraud_score}}"
+          net_settlement_usd:      "{{valuate.net_settlement_usd}}"
+          damage_severity:         "{{damage_assess.severity}}"
+          requires_human_approval: "{{decide.requires_human_approval}}"
+          deflection_score:        "{{decide.deflection_score}}"
+          fnol:                    "{{fnol}}"
+          policy_match:            "{{policy_match}}"
+          damage_assessment:       "{{damage_assess}}"
+          fraud_screen:            "{{fraud_screen}}"
+          valuation:               "{{valuate}}"

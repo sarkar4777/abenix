@@ -1,0 +1,164 @@
+# ResolveAI — Kubernetes manifests (standalone application).
+#
+# Deploys ResolveAI API (port 8004) and Web (port 3004) into the same
+# namespace as Abenix so the API can reach abenix-api + Postgres
+# via cluster DNS, and inherit the tenant's agent-forge-managed agents
+# / KBs / pipelines.
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: resolveai-secrets
+  namespace: abenix
+type: Opaque
+stringData:
+  # Minted by deploy-azure.sh at deploy time if not pre-seeded.
+  RESOLVEAI_ABENIX_API_KEY: "REPLACE_AT_DEPLOY_TIME"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: resolveai-config
+  namespace: abenix
+data:
+  ABENIX_API_URL: "http://abenix-api:8000"
+  DATABASE_URL: "postgresql+asyncpg://postgres:localpass@abenix-postgresql:5432/abenix"
+  PORT: "8004"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resolveai-api
+  namespace: abenix
+  labels:
+    app: resolveai-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: resolveai-api
+  template:
+    metadata:
+      labels:
+        app: resolveai-api
+    spec:
+      containers:
+        - name: api
+          image: localhost:5000/abenix/resolveai-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8004
+              name: http
+          envFrom:
+            - secretRef:
+                name: resolveai-secrets
+            - configMapRef:
+                name: resolveai-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8004
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8004
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "384Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resolveai-api
+  namespace: abenix
+spec:
+  type: ClusterIP
+  selector:
+    app: resolveai-api
+  ports:
+    - name: http
+      port: 8004
+      targetPort: 8004
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resolveai-web
+  namespace: abenix
+  labels:
+    app: resolveai-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: resolveai-web
+  template:
+    metadata:
+      labels:
+        app: resolveai-web
+    spec:
+      containers:
+        - name: web
+          image: localhost:5000/abenix/resolveai-web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3004
+              name: http
+          env:
+            # next.config.js rewrite target — browser hits /api/resolveai/*,
+            # the server proxies to the cluster-internal resolveai-api.
+            - name: RESOLVEAI_API_INTERNAL_URL
+              value: "http://resolveai-api:8004"
+            - name: NODE_ENV
+              value: "production"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3004
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3004
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resolveai-web
+  namespace: abenix
+spec:
+  type: NodePort
+  selector:
+    app: resolveai-web
+  ports:
+    - name: http
+      port: 3004
+      targetPort: 3004
+      nodePort: 30304

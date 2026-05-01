@@ -1,0 +1,131 @@
+name: "Smart Routing Pipeline"
+slug: "smart-routing-pipeline"
+description: >
+  AI-powered ticket routing pipeline using LLM classification. Automatically
+  categorizes incoming requests into billing, technical, or escalation tracks
+  and routes to specialized handlers. Demonstrates LLM dynamic routing,
+  switch-based multi-branch execution, and merge node for result aggregation.
+category: operations
+agent_type: oob
+version: "1.0.0"
+status: active
+icon_url: /icons/smart-routing.svg
+system_prompt: |
+  You orchestrate an AI-powered ticket routing pipeline that classifies incoming requests into billing, technical, or escalation tracks using LLM classification, routes to specialized handlers, and merges results.
+example_prompts:
+  - "Route this customer message: 'I was charged twice for my March subscription and need a refund for the duplicate payment'"
+  - "Classify and handle: 'Our SSO integration stopped working after your last update and none of our team can log in'"
+  - "Process this request: 'I need to speak with a manager immediately — your service has been down 3 times this week and we're losing revenue'"
+
+mode: pipeline
+model_config:
+  model: claude-sonnet-4-5-20250929
+  tools:
+    - llm_route
+    - llm_call
+    - text_analyzer
+    - data_merger
+    - structured_analyzer
+pipeline_config:
+  nodes:
+    - id: classify
+      tool_name: llm_route
+      arguments:
+        prompt: "Classify this support request into exactly one category"
+        branches: ["billing", "technical", "escalation"]
+        context: "{{context.message}}"
+      position:
+        x: 100
+        y: 100
+
+    - id: route_switch
+      tool_name: "__switch__"
+      depends_on: [classify]
+      switch:
+        source_node: classify
+        field: route
+        cases:
+          - operator: eq
+            value: billing
+            target_node: billing_handler
+          - operator: eq
+            value: technical
+            target_node: technical_handler
+          - operator: eq
+            value: escalation
+            target_node: escalation_handler
+        default_node: technical_handler
+      position:
+        x: 100
+        y: 250
+
+    - id: billing_handler
+      tool_name: llm_call
+      depends_on: [route_switch]
+      condition:
+        source_node: route_switch
+        field: route
+        operator: eq
+        value: billing
+      arguments:
+        prompt: "Draft a billing support response for: {{context.message}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 100
+        y: 400
+
+    - id: technical_handler
+      tool_name: llm_call
+      depends_on: [route_switch]
+      condition:
+        source_node: route_switch
+        field: route
+        operator: eq
+        value: technical
+      arguments:
+        prompt: "Draft a technical support response for: {{context.message}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 400
+        y: 400
+
+    - id: escalation_handler
+      tool_name: llm_call
+      depends_on: [route_switch]
+      condition:
+        source_node: route_switch
+        field: route
+        operator: eq
+        value: escalation
+      arguments:
+        prompt: "This requires escalation. Draft an urgent escalation response for: {{context.message}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 700
+        y: 400
+
+    - id: merge_results
+      tool_name: "__merge__"
+      depends_on: [billing_handler, technical_handler, escalation_handler]
+      merge:
+        mode: append
+        source_nodes: [billing_handler, technical_handler, escalation_handler]
+      position:
+        x: 400
+        y: 550
+
+  edges:
+    - source: classify
+      target: route_switch
+    - source: route_switch
+      target: billing_handler
+    - source: route_switch
+      target: technical_handler
+    - source: route_switch
+      target: escalation_handler
+    - source: billing_handler
+      target: merge_results
+    - source: technical_handler
+      target: merge_results
+    - source: escalation_handler
+      target: merge_results

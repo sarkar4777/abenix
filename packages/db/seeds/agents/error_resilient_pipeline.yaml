@@ -1,0 +1,98 @@
+name: "Error Resilient Pipeline"
+slug: "error-resilient-pipeline"
+description: >
+  Demonstrates fault-tolerant pipeline execution with per-node timeouts,
+  error branches for fallback logic, and continue-on-fail for non-critical
+  steps. Gracefully handles failures without losing the entire execution.
+category: engineering
+agent_type: oob
+version: "1.0.0"
+status: active
+icon_url: /icons/error-resilient.svg
+system_prompt: |
+  You orchestrate a fault-tolerant pipeline that fetches live data, processes it with fallback logic, and generates analysis reports while gracefully handling failures without losing the entire execution.
+example_prompts:
+  - "Fetch the latest Bitcoin price data and generate an analysis report — use cached data if the live feed is unavailable"
+  - "Pull current S&P 500 market data, analyze trends, and produce a report even if some enrichment steps fail"
+  - "Research NVIDIA's latest quarterly earnings with fallback to cached data if the web search times out"
+
+mode: pipeline
+model_config:
+  model: claude-sonnet-4-5-20250929
+  tools:
+    - web_search
+    - llm_call
+    - calculator
+    - json_transformer
+pipeline_config:
+  nodes:
+    - id: fetch_live_data
+      tool_name: web_search
+      timeout_seconds: 15
+      on_error: error_branch
+      error_branch_node: use_cached_data
+      arguments:
+        query: "{{context.user_message}}"
+      position:
+        x: 100
+        y: 100
+
+    - id: use_cached_data
+      tool_name: llm_call
+      arguments:
+        prompt: "The live data fetch failed. Generate reasonable sample data for analysis about: {{context.user_message}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 400
+        y: 100
+
+    - id: process_data
+      tool_name: llm_call
+      depends_on: [fetch_live_data]
+      on_error: continue
+      arguments:
+        prompt: "Analyze and summarize this data: {{fetch_live_data.__all__}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 100
+        y: 250
+
+    - id: validate_output
+      tool_name: calculator
+      depends_on: [process_data]
+      on_error: continue
+      arguments:
+        expression: "1 + 1"
+      position:
+        x: 100
+        y: 400
+
+    - id: enrich_metadata
+      tool_name: calculator
+      depends_on: [process_data]
+      on_error: continue
+      arguments:
+        expression: "42 * 2"
+      position:
+        x: 400
+        y: 400
+
+    - id: generate_report
+      tool_name: llm_call
+      depends_on: [process_data]
+      arguments:
+        prompt: "Generate a final analysis report. Main analysis: {{process_data.__all__}}"
+        model: claude-sonnet-4-5-20250929
+      position:
+        x: 700
+        y: 400
+
+  edges:
+    - source: fetch_live_data
+      target: process_data
+    - source: process_data
+      target: validate_output
+    - source: process_data
+      target: enrich_metadata
+    - source: process_data
+      target: generate_report

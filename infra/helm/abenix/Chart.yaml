@@ -1,0 +1,28 @@
+apiVersion: v2
+name: abenix
+version: 0.2.0
+appVersion: "0.2.0"
+description: Abenix — AI Agent Platform
+type: application
+dependencies:
+  - name: web
+    version: 0.1.0
+    repository: file://../web
+  - name: api
+    version: 0.1.0
+    repository: file://../api
+  - name: agent-runtime
+    version: 0.1.0
+    repository: file://../agent-runtime
+  - name: worker
+    version: 0.1.0
+    repository: file://../worker
+  - name: neo4j
+    version: 0.1.0
+    repository: file://../neo4j
+  - name: postgresql
+    version: 15.5.38
+    repository: https://charts.bitnami.com/bitnami
+  - name: redis
+    version: 19.6.4
+    repository: https://charts.bitnami.com/bitnami

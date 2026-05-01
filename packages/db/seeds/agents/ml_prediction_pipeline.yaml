@@ -1,0 +1,278 @@
+name: "ML Prediction Pipeline — Customer Churn"
+slug: ml-prediction-pipeline
+description: >-
+  Production-shaped pipeline that demonstrates the full ML lifecycle inside
+  Abenix using a business use case: customer churn scoring. The flow:
+  validate input → discover deployed models → run prediction → bucket risk →
+  LLM narrative → structured output.
+
+  Default model: churn-predictor (shipped as a sample in aimodels/). Works
+  with any model whose schema is a feature list — swap model_name in the
+  user message to run it against a different model (iris, housing, etc.)
+  without editing the pipeline.
+
+  REQUIRES: at least one deployed model. If none are deployed the pipeline
+  exits cleanly at the validation step with instructions.
+agent_type: oob
+category: ml
+icon_url: "Brain"
+version: "2.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  ML Prediction Pipeline — orchestrates a trained model call alongside
+  pre/post processing and a natural-language explanation.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.2
+  max_iterations: 12
+  tools:
+    - ml_model
+    - code_executor
+    - llm_call
+    - current_time
+
+input_variables:
+  - name: message
+    type: string
+    description: >-
+      The prediction request. Default use case (churn): describe a customer
+      and the pipeline predicts their churn probability. Alternative models
+      can be targeted by naming them explicitly.
+    required: true
+  - name: model_name
+    type: string
+    description: "Model slug to call (default: churn-predictor)"
+    required: false
+    default: "churn-predictor"
+  - name: features
+    type: object
+    description: >-
+      Optional structured feature dict. If omitted, the pipeline parses the
+      customer description from {{message}} via llm_call.
+    required: false
+
+example_prompts:
+  - "Customer: 8 months tenure, $85/mo, $680 total charges, month-to-month, not senior, no partner, 4 support tickets last 30 days, no autopay. Will they churn?"
+  - "Predict churn for: 36 month tenure, $110/mo, $3960 total, 2-year contract, senior, has partner, 0 tickets, autopay enabled."
+  - "model_name=iris-species-classifier — sepal_length=5.1, sepal_width=3.5, petal_length=1.4, petal_width=0.2"
+  - "List all deployed models and their schemas."
+
+pipeline_config:
+  nodes:
+    - id: timestamp
+      tool_name: current_time
+      label: "Timestamp"
+      arguments:
+        timezone: "UTC"
+      depends_on: []
+      position: { x: 80, y: 60 }
+
+    - id: discover_models
+      tool_name: ml_model
+      label: "1. Discover Deployed Models"
+      arguments:
+        operation: list_models
+      depends_on: []
+      position: { x: 360, y: 60 }
+
+    - id: guard_no_models
+      tool_name: code_executor
+      label: "2. Guard — At Least One Model Deployed"
+      arguments:
+        code: |
+          # Fail fast if no models are deployed so the user gets a clear
+          # actionable error instead of an opaque prediction failure.
+          import json
+          raw = {{discover_models.response | tojson}}
+          if isinstance(raw, str):
+              try:
+                  raw = json.loads(raw)
+              except Exception:
+                  raw = {"models": []}
+          models = raw.get("models", raw) if isinstance(raw, dict) else raw
+          if not models:
+              result = {
+                  "ok": False,
+                  "error": "NO_MODELS_DEPLOYED",
+                  "message": (
+                      "No ML models are currently deployed. "
+                      "Go to /ml-models, upload a .pkl from the aimodels/ "
+                      "folder (iris, housing, or churn), and click Deploy."
+                  ),
+              }
+          else:
+              result = {
+                  "ok": True,
+                  "model_count": len(models),
+                  "model_names": [m.get("name") for m in models if isinstance(m, dict)],
+              }
+          print(json.dumps(result))
+      depends_on:
+        - discover_models
+      position: { x: 360, y: 220 }
+
+    - id: parse_features
+      tool_name: llm_call
+      label: "3. Parse Customer Description → Feature Vector"
+      arguments:
+        prompt: |
+          You are a feature extractor for the `churn-predictor` model.
+
+          The model expects 8 features IN THIS ORDER:
+            1. tenure_months       (int,   months the customer has been with us)
+            2. monthly_charges     (float, USD per month)
+            3. total_charges       (float, USD lifetime)
+            4. contract_months     (int,   1 = M2M, 12 = 1-year, 24 = 2-year)
+            5. is_senior           (int,   0 or 1)
+            6. has_partner         (int,   0 or 1)
+            7. support_tickets_30d (int,   support interactions last 30 days)
+            8. payment_auto        (int,   1 if on autopay else 0)
+
+          If the user is targeting a DIFFERENT model (see message), extract the
+          features in that model's declared order instead.
+
+          Target model: {{model_name}}
+          User message: {{message}}
+
+          Models available (with schemas):
+          {{discover_models.response}}
+
+          Respond with ONLY a JSON object of the exact form:
+            {"features": [v1, v2, ...], "model_name": "<slug>", "rationale": "<one sentence>"}
+
+          Fill missing features with sensible defaults based on context and note
+          them in rationale. Do not include markdown fences.
+        model: claude-sonnet-4-5-20250929
+        temperature: 0.0
+      depends_on:
+        - guard_no_models
+      position: { x: 360, y: 380 }
+
+    - id: predict
+      tool_name: ml_model
+      label: "4. Run Prediction"
+      arguments:
+        operation: predict
+        model_name: "{{parse_features.response.model_name}}"
+        input_data: "{{parse_features.response.features}}"
+      depends_on:
+        - parse_features
+      position: { x: 360, y: 540 }
+
+    - id: risk_bucket
+      tool_name: code_executor
+      label: "5. Post-process — Risk Bucketing"
+      arguments:
+        code: |
+          # Normalize different model output shapes (classification vs regression)
+          # into a single structured record, and bucket classification
+          # probabilities into a risk tier.
+          import json
+          pred = {{predict.response | tojson}}
+          if isinstance(pred, str):
+              try:
+                  pred = json.loads(pred)
+              except Exception:
+                  pred = {"raw": pred}
+
+          out = {"raw": pred}
+          probs = pred.get("probabilities") if isinstance(pred, dict) else None
+          if probs and isinstance(probs, list) and len(probs) >= 2:
+              churn_prob = float(probs[1]) if len(probs) == 2 else max(float(p) for p in probs)
+              out["churn_probability"] = round(churn_prob, 4)
+              out["risk_tier"] = (
+                  "HIGH" if churn_prob >= 0.66
+                  else "MEDIUM" if churn_prob >= 0.33
+                  else "LOW"
+              )
+              out["predicted_class"] = pred.get("predicted_class")
+          elif isinstance(pred, dict) and "predicted_price" in pred:
+              out["predicted_value"] = pred.get("predicted_price")
+          elif isinstance(pred, dict) and "predicted_class" in pred:
+              out["predicted_class"] = pred.get("predicted_class")
+              out["probabilities"] = probs
+          print(json.dumps(out))
+      depends_on:
+        - predict
+      position: { x: 360, y: 700 }
+
+    - id: explain
+      tool_name: llm_call
+      label: "6. Narrative Explanation"
+      arguments:
+        prompt: |
+          You are a data science analyst. Write a 3-paragraph narrative for
+          a business reader.
+
+          Input customer / request: {{message}}
+          Feature extraction rationale: {{parse_features.response.rationale}}
+          Model: {{parse_features.response.model_name}}
+          Prediction: {{risk_bucket.response}}
+          Timestamp: {{timestamp.response}}
+
+          Paragraph 1 — State the prediction plainly (no jargon).
+          Paragraph 2 — Explain WHY the model likely predicted this, referring
+                        to the strongest feature signals. Be honest about
+                        uncertainty if probability is near 0.5.
+          Paragraph 3 — Recommended next action. For a HIGH churn-risk customer,
+                        suggest a retention offer. For LOW, suggest upsell or
+                        none. For regression, contextualize the value.
+
+          Return a markdown document. No preamble, no fences.
+        model: claude-sonnet-4-5-20250929
+        temperature: 0.3
+      depends_on:
+        - risk_bucket
+      position: { x: 360, y: 860 }
+
+    - id: final_report
+      tool_name: code_executor
+      label: "7. Assemble Structured Output"
+      arguments:
+        code: |
+          # Produce a machine-readable result alongside the narrative so
+          # downstream systems can consume this without parsing markdown.
+          import json
+          guard = {{guard_no_models.response | tojson}}
+          if isinstance(guard, str):
+              try:
+                  guard = json.loads(guard)
+              except Exception:
+                  guard = {}
+          if isinstance(guard, dict) and guard.get("ok") is False:
+              print(json.dumps({
+                  "status": "blocked",
+                  "reason": guard.get("error"),
+                  "message": guard.get("message"),
+              }))
+          else:
+              bucket = {{risk_bucket.response | tojson}}
+              if isinstance(bucket, str):
+                  try:
+                      bucket = json.loads(bucket)
+                  except Exception:
+                      bucket = {"raw": bucket}
+              print(json.dumps({
+                  "status": "ok",
+                  "model": {{parse_features.response | tojson}}.get("model_name") if isinstance({{parse_features.response | tojson}}, dict) else None,
+                  "prediction": bucket,
+                  "narrative_markdown": {{explain.response | tojson}},
+                  "timestamp": {{timestamp.response | tojson}},
+              }))
+      depends_on:
+        - explain
+      position: { x: 360, y: 1020 }
+
+  edges:
+    - { source: discover_models, target: guard_no_models }
+    - { source: guard_no_models, target: parse_features }
+    - { source: parse_features, target: predict }
+    - { source: predict, target: risk_bucket }
+    - { source: risk_bucket, target: explain }
+    - { source: explain, target: final_report }
+    - { source: timestamp, target: explain }
+
+  viewport: { x: 0, y: 0, zoom: 0.65 }
