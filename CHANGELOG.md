@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.5 — 2026-05-01
+
+### Added
+
+### Changed
+- Moderation exceptions raised from inside a tool context were being mis-classified as TOOL_ERROR because of a rule-ordering bug in app.core.failure_codes — fixed; MODERATION_BLOCKED now beats TOOL_ERROR as the comment always claimed. Fixed
+- 132 pure-Python unit tests added under tests/unit/ covering the platform's core primitives (failure-code classifier, JWT/bcrypt security, moderation evaluator + gate, pipeline parser/executor/topo-sort, response envelopes, tool registry). CI's test job now runs them on a clean runner with no live services required, and is back as a blocking gate before build. Added
+
+### Fixed
+
 ## v1.0.4 — 2026-05-01
 
 ### Added

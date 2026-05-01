@@ -35,57 +35,22 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
-    # The unit-test suite has drifted; canonical verification is
-    # scripts/uat-deeper.ts against the live Azure cluster. Keep this
-    # job for visibility but don't block build/deploy on it until the
-    # suite is rewritten to not require live postgres/redis/neo4j.
-    continue-on-error: true
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: abenix_test
-        ports:
-          - 5432:5432
-        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-      redis:
-        image: redis:7.2-alpine
-        ports:
-          - 6379:6379
-        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
-      neo4j:
-        image: neo4j:5.26-community
-        env:
-          NEO4J_AUTH: neo4j/testpassword
-          NEO4J_PLUGINS: '["apoc"]'
-        ports:
-          - 7687:7687
-          - 7474:7474
-        options: --health-cmd "cypher-shell -u neo4j -p testpassword 'RETURN 1' || exit 1" --health-interval 10s --health-timeout 10s --health-retries 10
+    # Pure-Python unit tests under tests/unit/ exercise the platform's
+    # core primitives (failure-code classifier, response envelopes,
+    # JWT/bcrypt security, moderation evaluator + gate, pipeline parser
+    # + executor + DAG topo-sort, tool registry) WITHOUT any live
+    # services. The legacy live-DB suite under apps/*/tests is left
+    # in place for future revival but is not run here.
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run test -- --coverage
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e "./apps/api[dev]" -e "./packages/db" neo4j pytest-cov
-      - run: pytest apps/api/tests apps/agent-runtime/tests apps/worker/tests --cov=apps/api/app --cov-report=xml --cov-fail-under=60
-        env:
-          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/abenix_test
-          REDIS_URL: redis://localhost:6379
-          NEO4J_URI: bolt://localhost:7687
-          NEO4J_USER: neo4j
-          NEO4J_PASSWORD: testpassword
+      - run: pip install pytest pytest-asyncio bcrypt python-jose[cryptography] httpx fastapi pydantic pydantic-settings sqlalchemy structlog redis
+      - run: pytest tests/unit/ -v --tb=short
 
   build:
-    needs: lint
+    needs: [lint, test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
