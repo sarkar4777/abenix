@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.4 — 2026-05-01
+
+### Added
+
+### Changed
+- Web Docker image: strip esbuild Go binaries from runtime stage. CVE-2024-24790 (net/netip) and CVE-2025-68121 (crypto/tls) flagged on the embedded Go stdlib are eliminated; esbuild is build-time only and is never invoked at runtime. Fixed
+
+### Fixed
+
 ## v1.0.3 — 2026-05-01
 
 ### Added
