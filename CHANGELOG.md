@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.3 — 2026-05-01
+
+### Added
+
+### Changed
+- CI: removed deploy-staging + deploy jobs (no managed cluster + no environment-scoped secrets in this repo). Trivy CRITICAL scan is now informational, findings still flow to the Security tab via SARIF. Rollout remains a manual operator action via scripts/deploy-azure.sh. Changed
+
+### Fixed
+
 ## v1.0.2 — 2026-05-01
 
 ### Added
