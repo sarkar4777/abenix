@@ -68,7 +68,16 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
         }
 
 
-async def _mark_done(execution_id: str, status: str, output: str | None, error: str | None) -> None:
+async def _mark_done(
+    execution_id: str,
+    status: str,
+    output: str | None,
+    error: str | None,
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cost: float | None = None,
+) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -89,6 +98,9 @@ async def _mark_done(execution_id: str, status: str, output: str | None, error: 
         "error_message": error,
         "completed_at": datetime.now(timezone.utc),
     }
+    if input_tokens is not None:  values["input_tokens"]  = input_tokens
+    if output_tokens is not None: values["output_tokens"] = output_tokens
+    if cost is not None and cost > 0: values["cost"] = round(float(cost), 6)
     # On failure, classify the error_message into a stable failure_code so
     # /alerts can group it and the Surgeon has something to act on.
     if target_status == ExecutionStatus.FAILED and error:
@@ -273,12 +285,22 @@ async def _run_one(payload: dict) -> None:
                 asset_schemas=_asset_schemas,
             )
             result = await executor.invoke(message)
-            # AgentExecutor returns ExecutionResult(output, tool_calls, ...)
+            # AgentExecutor returns ExecutionResult(output, tool_calls, input_tokens,
+            # output_tokens, cost, ...). Pass these through so /executions and
+            # /analytics show real numbers instead of nulls.
             output = getattr(result, "output", None) or str(result)
-            await _mark_done(execution_id, "completed", str(output)[:4000], None)
+            await _mark_done(
+                execution_id, "completed", str(output)[:4000], None,
+                input_tokens=getattr(result, "input_tokens", None),
+                output_tokens=getattr(result, "output_tokens", None),
+                cost=getattr(result, "cost", None),
+            )
             await _publish(execution_id, {
                 "event": "done", "execution_id": execution_id,
                 "output": str(output)[:4000],
+                "input_tokens": getattr(result, "input_tokens", None),
+                "output_tokens": getattr(result, "output_tokens", None),
+                "cost": getattr(result, "cost", None),
             })
     except Exception as e:
         logger.exception("consumer: execution %s failed: %s", execution_id, e)
