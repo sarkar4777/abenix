@@ -159,6 +159,16 @@ export default function ChatPage() {
     loadAgents();
   }, [loadConversations, loadAgents]);
 
+  // Auto-select an agent so the first-time user lands on an enabled chat
+  // input. Prefer code-assistant if seeded, fall back to the first agent.
+  // Skips when an agent is already selected (e.g. an existing conversation
+  // restored its own agent_id).
+  useEffect(() => {
+    if (selectedAgent || agents.length === 0) return;
+    const preferred = agents.find(a => a.slug === 'code-assistant') || agents[0];
+    if (preferred) setSelectedAgent(preferred);
+  }, [agents, selectedAgent]);
+
   const openConversation = useCallback(async (convId: string) => {
     try {
       const res = await apiFetch(`/api/conversations/${convId}`);
