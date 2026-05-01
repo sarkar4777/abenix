@@ -439,6 +439,11 @@ async def get_agent(
     agent = result.scalar_one_or_none()
     if not agent:
         return error("Agent not found", 404)
+    # Soft-delete: a deleted agent has status=ARCHIVED. Hide it from regular
+    # GETs so the user-visible behaviour matches "I deleted it, it's gone."
+    # Admins can still recover by querying /api/agents?status=archived.
+    if agent.status == AgentStatus.ARCHIVED and agent.agent_type != AgentType.OOB:
+        return error("Agent not found", 404)
 
     return success(_serialize_agent(agent))
 
