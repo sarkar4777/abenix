@@ -27,8 +27,12 @@ class MarketDataTool(BaseTool):
             "data_type": {
                 "type": "string",
                 "enum": [
-                    "stock_quote", "stock_history", "forex", "commodity",
-                    "energy_price", "economic_indicator",
+                    "stock_quote",
+                    "stock_history",
+                    "forex",
+                    "commodity",
+                    "energy_price",
+                    "economic_indicator",
                 ],
                 "description": "Type of market data to fetch",
             },
@@ -70,14 +74,19 @@ class MarketDataTool(BaseTool):
         try:
             result = await fn(arguments)
             output = json.dumps(result, indent=2, default=str)
-            return ToolResult(content=output, metadata={"data_type": data_type, "symbol": symbol})
+            return ToolResult(
+                content=output, metadata={"data_type": data_type, "symbol": symbol}
+            )
         except Exception as e:
             return ToolResult(content=f"Market data error: {e}", is_error=True)
 
     async def _fetch_url(self, url: str) -> dict[str, Any]:
         import aiohttp
+
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(
+                url, timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
                 if resp.status != 200:
                     raise ValueError(f"HTTP {resp.status}: {await resp.text()}")
                 return await resp.json()
@@ -144,14 +153,16 @@ class MarketDataTool(BaseTool):
         series = data[ts_key[0]]
         points = []
         for date, vals in sorted(series.items(), reverse=True)[:30]:
-            points.append({
-                "date": date,
-                "open": float(vals.get("1. open", 0)),
-                "high": float(vals.get("2. high", 0)),
-                "low": float(vals.get("3. low", 0)),
-                "close": float(vals.get("4. close", 0)),
-                "volume": int(vals.get("5. volume", 0)),
-            })
+            points.append(
+                {
+                    "date": date,
+                    "open": float(vals.get("1. open", 0)),
+                    "high": float(vals.get("2. high", 0)),
+                    "low": float(vals.get("3. low", 0)),
+                    "close": float(vals.get("4. close", 0)),
+                    "volume": int(vals.get("5. volume", 0)),
+                }
+            )
 
         return {"symbol": symbol, "period": period, "data_points": points}
 
@@ -278,6 +289,7 @@ class MarketDataTool(BaseTool):
 
     def _mock_stock_quote(self, symbol: str) -> dict[str, Any]:
         import hashlib
+
         h = int(hashlib.md5(symbol.encode()).hexdigest()[:8], 16)
         price = 50 + (h % 200)
         return {
@@ -296,6 +308,7 @@ class MarketDataTool(BaseTool):
     def _mock_stock_history(self, symbol: str, period: str) -> dict[str, Any]:
         import hashlib
         from datetime import datetime, timedelta
+
         h = int(hashlib.md5(symbol.encode()).hexdigest()[:8], 16)
         base = 100 + (h % 200)
         points = []
@@ -303,15 +316,22 @@ class MarketDataTool(BaseTool):
         for i in range(30):
             d = today - timedelta(days=i)
             drift = (i % 7 - 3) * 0.5
-            points.append({
-                "date": d.strftime("%Y-%m-%d"),
-                "open": round(base + drift, 2),
-                "high": round(base + drift + 2, 2),
-                "low": round(base + drift - 1.5, 2),
-                "close": round(base + drift + 0.5, 2),
-                "volume": 500_000 + (h + i * 1000) % 2_000_000,
-            })
-        return {"symbol": symbol, "period": period, "data_points": points, "mode": "mock"}
+            points.append(
+                {
+                    "date": d.strftime("%Y-%m-%d"),
+                    "open": round(base + drift, 2),
+                    "high": round(base + drift + 2, 2),
+                    "low": round(base + drift - 1.5, 2),
+                    "close": round(base + drift + 0.5, 2),
+                    "volume": 500_000 + (h + i * 1000) % 2_000_000,
+                }
+            )
+        return {
+            "symbol": symbol,
+            "period": period,
+            "data_points": points,
+            "mode": "mock",
+        }
 
     def _mock_forex(self, from_c: str, to_c: str) -> dict[str, Any]:
         rates = {"EUR": 1.08, "GBP": 1.27, "JPY": 0.0067, "AUD": 0.65, "CAD": 0.74}
@@ -326,15 +346,25 @@ class MarketDataTool(BaseTool):
         }
 
     def _mock_commodity(self, symbol: str) -> dict[str, Any]:
-        prices = {"WTI": 72.5, "BRENT": 77.8, "NATURAL_GAS": 2.85, "COPPER": 4.2, "GOLD": 2050.0}
+        prices = {
+            "WTI": 72.5,
+            "BRENT": 77.8,
+            "NATURAL_GAS": 2.85,
+            "COPPER": 4.2,
+            "GOLD": 2050.0,
+        }
         base = prices.get(symbol, 50.0)
         from datetime import datetime, timedelta
+
         today = datetime.now()
         return {
             "commodity": symbol,
             "unit": "USD",
             "data": [
-                {"date": (today - timedelta(days=30 * i)).strftime("%Y-%m"), "value": round(base + (i % 5 - 2) * 1.5, 2)}
+                {
+                    "date": (today - timedelta(days=30 * i)).strftime("%Y-%m"),
+                    "value": round(base + (i % 5 - 2) * 1.5, 2),
+                }
                 for i in range(12)
             ],
             "mode": "mock",
@@ -342,6 +372,7 @@ class MarketDataTool(BaseTool):
 
     def _mock_energy_price(self, series_id: str) -> dict[str, Any]:
         from datetime import datetime, timedelta
+
         today = datetime.now()
         return {
             "series": series_id,
@@ -362,11 +393,15 @@ class MarketDataTool(BaseTool):
         values = {"GDP": 25500, "INFLATION": 3.2, "CPI": 307.5, "UNEMPLOYMENT": 3.8}
         base = values.get(symbol, 100)
         from datetime import datetime, timedelta
+
         today = datetime.now()
         return {
             "indicator": symbol,
             "data": [
-                {"date": (today - timedelta(days=90 * i)).strftime("%Y-%m-%d"), "value": round(base + (i % 3 - 1) * base * 0.01, 2)}
+                {
+                    "date": (today - timedelta(days=90 * i)).strftime("%Y-%m-%d"),
+                    "value": round(base + (i % 3 - 1) * base * 0.01, 2),
+                }
                 for i in range(12)
             ],
             "mode": "mock",

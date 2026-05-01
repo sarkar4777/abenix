@@ -66,6 +66,7 @@ def calculate_confidence(factors: ConfidenceFactors) -> float:
 @dataclass
 class ExecutionTrace:
     """Full trace of an execution for replay and debugging."""
+
     execution_id: str = ""
     agent_id: str = ""
     steps: list[dict[str, Any]] = field(default_factory=list)
@@ -82,16 +83,18 @@ class ExecutionTrace:
         error: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        self.steps.append({
-            "step_number": len(self.steps) + 1,
-            "type": step_type,  # "llm_call", "tool_call", "pipeline_node", "decision"
-            "name": name,
-            "input": _safe_serialize(input_data),
-            "output": _safe_serialize(output_data),
-            "duration_ms": duration_ms,
-            "error": error,
-            "metadata": metadata or {},
-        })
+        self.steps.append(
+            {
+                "step_number": len(self.steps) + 1,
+                "type": step_type,  # "llm_call", "tool_call", "pipeline_node", "decision"
+                "name": name,
+                "input": _safe_serialize(input_data),
+                "output": _safe_serialize(output_data),
+                "duration_ms": duration_ms,
+                "error": error,
+                "metadata": metadata or {},
+            }
+        )
 
         # Update confidence factors
         if step_type == "tool_call":

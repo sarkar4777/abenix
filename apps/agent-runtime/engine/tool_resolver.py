@@ -6,7 +6,11 @@ import logging
 from typing import Any
 
 from engine.mcp_client import MCPClient, MCPTool
-from engine.mcp_security import MCPSecurityContext, MCPSecurityPolicy, validate_tool_annotations
+from engine.mcp_security import (
+    MCPSecurityContext,
+    MCPSecurityPolicy,
+    validate_tool_annotations,
+)
 from engine.tools.base import BaseTool, ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)

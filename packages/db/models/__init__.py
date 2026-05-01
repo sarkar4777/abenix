@@ -5,7 +5,9 @@ from models.agent import Agent, AgentStatus, AgentType
 from models.execution import Execution, ExecutionStatus
 from models.knowledge_project import CollectionVisibility, KnowledgeProject
 from models.project_member import (
-    PROJECT_ROLE_RANK, ProjectMember, ProjectRole,
+    PROJECT_ROLE_RANK,
+    ProjectMember,
+    ProjectRole,
 )
 from models.ontology_schema import OntologySchema
 from models.knowledge_base import Document, DocumentStatus, KBStatus, KnowledgeBase
@@ -48,14 +50,25 @@ from models.pipeline_state import PipelineState
 from models.drift_alert import DriftAlert
 from models.saved_tool import SavedTool
 from models.ml_model import (
-    MLModel, MLModelFramework, MLModelStatus,
-    MLModelDeployment, DeploymentType, DeploymentStatus,
+    MLModel,
+    MLModelFramework,
+    MLModelStatus,
+    MLModelDeployment,
+    DeploymentType,
+    DeploymentStatus,
 )
 from models.meeting import (
-    Meeting, MeetingDeferral, MeetingProvider, MeetingStatus, PersonaItem,
+    Meeting,
+    MeetingDeferral,
+    MeetingProvider,
+    MeetingStatus,
+    PersonaItem,
 )
 from models.code_asset import CodeAsset, CodeAssetSource, CodeAssetStatus
-from models.resource_share import ResourceShare, SharePermission
+from models.resource_share import (
+    ResourceShare,
+    SharePermission as ResourceSharePermission,
+)
 from models.moderation_policy import (
     ModerationAction,
     ModerationEvent,
@@ -145,6 +158,13 @@ __all__ = [
     "CodeAssetSource",
     "CodeAssetStatus",
     "ResourceShare",
+    "ResourceSharePermission",
+    "MLModel",
+    "MLModelFramework",
+    "MLModelStatus",
+    "MLModelDeployment",
+    "DeploymentType",
+    "DeploymentStatus",
     "ModerationPolicy",
     "ModerationAction",
     "ModerationEvent",

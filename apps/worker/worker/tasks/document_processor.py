@@ -5,7 +5,6 @@ Pipeline: detect type -> extract text -> chunk -> embed -> store in Pinecone -> 
 
 import logging
 import os
-import uuid
 from pathlib import Path
 
 from worker.celery_app import celery_app
@@ -25,7 +24,11 @@ def _strip_file_scheme(p: str) -> str:
         return ""
     for prefix in ("file:///", "file://", "file:/"):
         if p.startswith(prefix):
-            return "/" + p[len(prefix):] if not p[len(prefix):].startswith("/") else p[len(prefix):]
+            return (
+                "/" + p[len(prefix) :]
+                if not p[len(prefix) :].startswith("/")
+                else p[len(prefix) :]
+            )
     return p
 
 
@@ -44,7 +47,10 @@ def _extract_text(file_path: str, file_type: str) -> str:
                 pages.append(text)
         return "\n\n".join(pages)
 
-    if ft in ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
+    if ft in (
+        "docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ):
         from docx import Document
 
         doc = Document(str(path))
@@ -56,7 +62,9 @@ def _extract_text(file_path: str, file_type: str) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _chunk_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> list[str]:
+def _chunk_text(
+    text: str, chunk_size: int = 1000, chunk_overlap: int = 200
+) -> list[str]:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     splitter = RecursiveCharacterTextSplitter(
@@ -87,8 +95,13 @@ def _embed_chunks(chunks: list[str]) -> list[list[float]]:
 def _vector_backend_for(kb_id: str) -> str:
     """Return 'pinecone' or 'pgvector' based on the collection setting."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix")
-    sync_url = db_url.replace("+asyncpg", "").replace("postgresql+asyncpg", "postgresql")
+
+    db_url = os.environ.get(
+        "DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix"
+    )
+    sync_url = db_url.replace("+asyncpg", "").replace(
+        "postgresql+asyncpg", "postgresql"
+    )
     if "?" in sync_url:
         base, query = sync_url.split("?", 1)
         kept = [p for p in query.split("&") if not p.lower().startswith("ssl=")]
@@ -110,15 +123,23 @@ def _vector_backend_for(kb_id: str) -> str:
 
 
 def _store_vectors_pgvector(
-    kb_id: str, doc_id: str, filename: str,
-    chunks: list[str], embeddings: list[list[float]],
+    kb_id: str,
+    doc_id: str,
+    filename: str,
+    chunks: list[str],
+    embeddings: list[list[float]],
 ) -> int:
     """Insert chunks + embeddings directly into Postgres (pgvector)."""
     import json as _json
     import uuid as _uuid
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix")
-    sync_url = db_url.replace("+asyncpg", "").replace("postgresql+asyncpg", "postgresql")
+
+    db_url = os.environ.get(
+        "DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix"
+    )
+    sync_url = db_url.replace("+asyncpg", "").replace(
+        "postgresql+asyncpg", "postgresql"
+    )
     if "?" in sync_url:
         base, query = sync_url.split("?", 1)
         kept = [p for p in query.split("&") if not p.lower().startswith("ssl=")]
@@ -129,7 +150,8 @@ def _store_vectors_pgvector(
         with conn.cursor() as cur:
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 metadata = {
-                    "filename": filename, "chunk_index": i,
+                    "filename": filename,
+                    "chunk_index": i,
                     "text_preview": chunk[:200],
                 }
                 # pgvector accepts string-formatted arrays: '[0.1, 0.2, ...]'
@@ -146,8 +168,13 @@ def _store_vectors_pgvector(
                                   embedding = EXCLUDED.embedding
                     """,
                     (
-                        str(_uuid.uuid4()), kb_id, doc_id, i, chunk,
-                        _json.dumps(metadata), emb_str,
+                        str(_uuid.uuid4()),
+                        kb_id,
+                        doc_id,
+                        i,
+                        chunk,
+                        _json.dumps(metadata),
+                        emb_str,
                     ),
                 )
             conn.commit()
@@ -157,8 +184,11 @@ def _store_vectors_pgvector(
 
 
 def _store_vectors_pinecone(
-    kb_id: str, doc_id: str, filename: str,
-    chunks: list[str], embeddings: list[list[float]],
+    kb_id: str,
+    doc_id: str,
+    filename: str,
+    chunks: list[str],
+    embeddings: list[list[float]],
 ) -> int:
     from pinecone import Pinecone
 
@@ -168,17 +198,19 @@ def _store_vectors_pinecone(
     vectors = []
     for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
         vector_id = f"{doc_id}_{i}"
-        vectors.append({
-            "id": vector_id,
-            "values": embedding,
-            "metadata": {
-                "kb_id": kb_id,
-                "doc_id": doc_id,
-                "filename": filename,
-                "chunk_index": i,
-                "text": chunk[:8000],
-            },
-        })
+        vectors.append(
+            {
+                "id": vector_id,
+                "values": embedding,
+                "metadata": {
+                    "kb_id": kb_id,
+                    "doc_id": doc_id,
+                    "filename": filename,
+                    "chunk_index": i,
+                    "text": chunk[:8000],
+                },
+            }
+        )
 
     batch_size = 100
     for i in range(0, len(vectors), batch_size):
@@ -197,6 +229,7 @@ def _store_vectors(
 ) -> int:
     """Dispatch to the collection's configured vector backend, with"""
     import logging
+
     log = logging.getLogger(__name__)
     backend = _vector_backend_for(kb_id)
 
@@ -206,7 +239,8 @@ def _store_vectors(
         except Exception as e:
             log.warning(
                 "pgvector store failed for kb=%s, falling back to Pinecone: %s",
-                kb_id, e,
+                kb_id,
+                e,
             )
             return _store_vectors_pinecone(kb_id, doc_id, filename, chunks, embeddings)
 
@@ -220,7 +254,8 @@ def _store_vectors(
         # rather than lose the document.
         log.warning(
             "Pinecone store failed for kb=%s, falling back to pgvector: %s",
-            kb_id, e,
+            kb_id,
+            e,
         )
         return _store_vectors_pgvector(kb_id, doc_id, filename, chunks, embeddings)
 
@@ -230,8 +265,12 @@ def _update_document_status(
 ) -> None:
     import psycopg2
 
-    db_url = os.environ.get("DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix")
-    sync_url = db_url.replace("+asyncpg", "").replace("postgresql+asyncpg", "postgresql")
+    db_url = os.environ.get(
+        "DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix"
+    )
+    sync_url = db_url.replace("+asyncpg", "").replace(
+        "postgresql+asyncpg", "postgresql"
+    )
     # asyncpg accepts `?ssl=...` but psycopg2 rejects it — strip the ssl query
     # params (and sslmode if invalid) so the sync connection succeeds.
     if "?" in sync_url:
@@ -296,10 +335,17 @@ def process_document(
     try:
         # Download from StorageService if URI (s3://, az://), otherwise use local path
         actual_path = file_path
-        if file_path.startswith("s3://") or file_path.startswith("az://") or file_path.startswith("file://"):
-            import asyncio, tempfile
+        if (
+            file_path.startswith("s3://")
+            or file_path.startswith("az://")
+            or file_path.startswith("file://")
+        ):
+            import asyncio
+            import tempfile
+
             try:
                 from engine.storage import get_storage
+
                 storage = get_storage()
                 loop = asyncio.new_event_loop()
                 data = loop.run_until_complete(storage.download(file_path))
@@ -311,14 +357,18 @@ def process_document(
                 tmp.close()
                 actual_path = tmp.name
             except Exception as e:
-                logger.warning("StorageService download failed, trying direct path: %s", e)
+                logger.warning(
+                    "StorageService download failed, trying direct path: %s", e
+                )
 
         text = _extract_text(actual_path, file_type)
         if not text.strip():
             _update_document_status(doc_id, kb_id, "failed", 0)
             return {"status": "failed", "doc_id": doc_id, "error": "No text extracted"}
 
-        self.update_state(state="PROCESSING", meta={"doc_id": doc_id, "step": "chunking"})
+        self.update_state(
+            state="PROCESSING", meta={"doc_id": doc_id, "step": "chunking"}
+        )
         chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
         if not chunks:
@@ -331,7 +381,9 @@ def process_document(
         )
         embeddings = _embed_chunks(chunks)
 
-        self.update_state(state="PROCESSING", meta={"doc_id": doc_id, "step": "storing"})
+        self.update_state(
+            state="PROCESSING", meta={"doc_id": doc_id, "step": "storing"}
+        )
         stored = _store_vectors(kb_id, doc_id, filename, chunks, embeddings)
 
         _update_document_status(doc_id, kb_id, "ready", stored)

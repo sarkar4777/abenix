@@ -1,4 +1,5 @@
 """Seed script to insert OOB agents into the database."""
+
 from __future__ import annotations
 
 import asyncio
@@ -53,36 +54,55 @@ RETIRED_SLUGS: set[str] = {
 
 
 async def _migrate_legacy_system_tenant(
-    db: AsyncSession, target_tenant: Tenant,
+    db: AsyncSession,
+    target_tenant: Tenant,
 ) -> None:
     """Move every resource off the legacy 'abenix-system' tenant."""
-    legacy = (await db.execute(
-        select(Tenant).where(Tenant.slug == LEGACY_SYSTEM_TENANT_SLUG)
-    )).scalar_one_or_none()
+    legacy = (
+        await db.execute(select(Tenant).where(Tenant.slug == LEGACY_SYSTEM_TENANT_SLUG))
+    ).scalar_one_or_none()
     if legacy is None or legacy.id == target_tenant.id:
         return
 
     from sqlalchemy import text as _t
+
     moves = 0
     # Move every tenant-scoped resource. The list mirrors models with
     # tenant_id columns; new tenant-scoped tables added later just
     # need one more line here.
     for table in (
-        "agents", "executions", "knowledge_collections",
-        "knowledge_projects", "cognify_jobs", "graph_entities",
-        "retrieval_feedback", "retrieval_metrics",
-        "ml_models", "code_assets", "saved_tools",
-        "portfolio_schemas", "agent_memories", "moderation_policies",
-        "moderation_events", "agent_triggers", "pipeline_states",
-        "drift_alerts", "webhooks", "webhook_deliveries",
-        "batch_jobs", "workspaces", "memory_palace_entries",
-        "user_token_quotas", "subject_policies",
+        "agents",
+        "executions",
+        "knowledge_collections",
+        "knowledge_projects",
+        "cognify_jobs",
+        "graph_entities",
+        "retrieval_feedback",
+        "retrieval_metrics",
+        "ml_models",
+        "code_assets",
+        "saved_tools",
+        "portfolio_schemas",
+        "agent_memories",
+        "moderation_policies",
+        "moderation_events",
+        "agent_triggers",
+        "pipeline_states",
+        "drift_alerts",
+        "webhooks",
+        "webhook_deliveries",
+        "batch_jobs",
+        "workspaces",
+        "memory_palace_entries",
+        "user_token_quotas",
+        "subject_policies",
     ):
         try:
-            r = await db.execute(_t(
-                f"UPDATE {table} SET tenant_id = :new "
-                f"WHERE tenant_id = :old"
-            ).bindparams(new=target_tenant.id, old=legacy.id))
+            r = await db.execute(
+                _t(
+                    f"UPDATE {table} SET tenant_id = :new " f"WHERE tenant_id = :old"
+                ).bindparams(new=target_tenant.id, old=legacy.id)
+            )
             moves += r.rowcount or 0
         except Exception:
             # Some tables may not exist in older DBs — skip silently.
@@ -91,16 +111,20 @@ async def _migrate_legacy_system_tenant(
     # Move users too — the system@abenix.dev account stays alive
     # but joins the unified tenant.
     try:
-        await db.execute(_t(
-            "UPDATE users SET tenant_id = :new WHERE tenant_id = :old"
-        ).bindparams(new=target_tenant.id, old=legacy.id))
+        await db.execute(
+            _t("UPDATE users SET tenant_id = :new WHERE tenant_id = :old").bindparams(
+                new=target_tenant.id, old=legacy.id
+            )
+        )
     except Exception:
         pass
 
     # Drop the now-empty legacy tenant. Safe — every FK was repointed.
     try:
         await db.delete(legacy)
-        print(f"  Migrated {moves} resources off legacy 'Abenix System' tenant and removed it.")
+        print(
+            f"  Migrated {moves} resources off legacy 'Abenix System' tenant and removed it."
+        )
     except Exception as e:
         print(f"  Could not delete legacy tenant (non-fatal): {e}")
 
@@ -108,9 +132,10 @@ async def _migrate_legacy_system_tenant(
 async def ensure_shared_tenant(db: AsyncSession) -> tuple[Tenant, User]:
     """Find-or-create the single shared 'Abenix' tenant."""
     from models.tenant import TenantPlan
-    tenant = (await db.execute(
-        select(Tenant).where(Tenant.name == SHARED_TENANT_NAME)
-    )).scalar_one_or_none()
+
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.name == SHARED_TENANT_NAME))
+    ).scalar_one_or_none()
 
     if tenant is None:
         tenant = Tenant(
@@ -130,16 +155,19 @@ async def ensure_shared_tenant(db: AsyncSession) -> tuple[Tenant, User]:
     # One-shot consolidation of any pre-existing legacy split.
     await _migrate_legacy_system_tenant(db, tenant)
 
-    system_user = (await db.execute(
-        select(User).where(User.email == SYSTEM_USER_EMAIL)
-    )).scalar_one_or_none()
+    system_user = (
+        await db.execute(select(User).where(User.email == SYSTEM_USER_EMAIL))
+    ).scalar_one_or_none()
 
     if system_user is None:
         import bcrypt
+
         system_user = User(
             tenant_id=tenant.id,
             email=SYSTEM_USER_EMAIL,
-            password_hash=bcrypt.hashpw(uuid.uuid4().hex.encode(), bcrypt.gensalt()).decode(),
+            password_hash=bcrypt.hashpw(
+                uuid.uuid4().hex.encode(), bcrypt.gensalt()
+            ).decode(),
             full_name="Abenix System",
             role="ADMIN",
             is_active=True,
@@ -160,7 +188,9 @@ ensure_system_tenant = ensure_shared_tenant
 
 async def seed_agents() -> None:
     engine = create_async_engine(DATABASE_URL, echo=False)
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async with session_factory() as db:
         tenant, system_user = await ensure_shared_tenant(db)
@@ -219,7 +249,9 @@ async def seed_agents() -> None:
                 runtime_pool=rp,
                 min_replicas=int(data.get("min_replicas", 0 if rp == "inline" else 1)),
                 max_replicas=int(data.get("max_replicas", 1 if rp == "inline" else 10)),
-                concurrency_per_replica=int(data.get("concurrency_per_replica", 1 if rp == "inline" else 3)),
+                concurrency_per_replica=int(
+                    data.get("concurrency_per_replica", 1 if rp == "inline" else 3)
+                ),
                 rate_limit_qps=data.get("rate_limit_qps"),
                 daily_budget_usd=data.get("daily_budget_usd"),
             )

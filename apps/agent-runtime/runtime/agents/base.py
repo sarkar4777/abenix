@@ -23,7 +23,9 @@ class BaseAgent(ABC):
         self.config = config
 
     @abstractmethod
-    async def invoke(self, input_message: str, context: dict[str, Any] | None = None) -> str:
+    async def invoke(
+        self, input_message: str, context: dict[str, Any] | None = None
+    ) -> str:
         """Execute the agent with the given input."""
         ...
 

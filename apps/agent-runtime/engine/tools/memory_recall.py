@@ -68,9 +68,15 @@ class MemoryRecallTool(BaseTool):
             palace_engine = create_async_engine(self._db_url, echo=False)
             async with AsyncSession(palace_engine, expire_on_commit=False) as palace_db:
                 from engine.memory.palace import MemoryPalace
-                palace = MemoryPalace(db=palace_db, agent_id=uuid_mod.UUID(self._agent_id), tenant_id=uuid_mod.UUID(self._tenant_id))
+
+                palace = MemoryPalace(
+                    db=palace_db,
+                    agent_id=uuid_mod.UUID(self._agent_id),
+                    tenant_id=uuid_mod.UUID(self._tenant_id),
+                )
                 palace_results = await palace.recall(
-                    query=search, key=key,
+                    query=search,
+                    key=key,
                     wing_name=arguments.get("wing"),
                     mode=arguments.get("mode", "search"),
                     limit=limit,
@@ -83,7 +89,9 @@ class MemoryRecallTool(BaseTool):
                         lines.append(context)
                         lines.append("")
                     for m in palace_results:
-                        lines.append(f"[{m.get('hall_type', 'factual')}] {m['key']} (importance={m['importance']}): {m['content']}")
+                        lines.append(
+                            f"[{m.get('hall_type', 'factual')}] {m['key']} (importance={m['importance']}): {m['content']}"
+                        )
                     await palace_db.commit()
                     await palace_engine.dispose()
                     return ToolResult(content="\n".join(lines))
@@ -102,7 +110,10 @@ class MemoryRecallTool(BaseTool):
 
             import sys
             from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
+
+            sys.path.insert(
+                0, str(Path(__file__).resolve().parents[3] / "packages" / "db")
+            )
             from models.agent_memory import AgentMemory, MemoryType
 
             async with AsyncSession(engine, expire_on_commit=False) as db:
@@ -114,7 +125,9 @@ class MemoryRecallTool(BaseTool):
                 if key:
                     query = query.where(AgentMemory.key == key)
                 if memory_type:
-                    query = query.where(AgentMemory.memory_type == MemoryType(memory_type))
+                    query = query.where(
+                        AgentMemory.memory_type == MemoryType(memory_type)
+                    )
                 if search:
                     pattern = f"%{search}%"
                     query = query.where(
@@ -144,7 +157,11 @@ class MemoryRecallTool(BaseTool):
 
             lines = []
             for m in memories:
-                type_label = m.memory_type.value if hasattr(m.memory_type, "value") else str(m.memory_type)
+                type_label = (
+                    m.memory_type.value
+                    if hasattr(m.memory_type, "value")
+                    else str(m.memory_type)
+                )
                 lines.append(
                     f"[{type_label}] {m.key} (importance={m.importance}): {m.value}"
                 )

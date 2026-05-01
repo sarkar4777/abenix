@@ -66,6 +66,7 @@ class LLMRouteTool(BaseTool):
         if llm is None:
             try:
                 from engine.llm_router import LLMRouter
+
                 llm = LLMRouter()
             except Exception:
                 # Final fallback: simple keyword matching (no LLM available)
@@ -76,7 +77,9 @@ class LLMRouteTool(BaseTool):
                         best = b
                         break
                 return ToolResult(
-                    content=json.dumps({"route": best, "confidence": 0.5, "method": "keyword_fallback"}),
+                    content=json.dumps(
+                        {"route": best, "confidence": 0.5, "method": "keyword_fallback"}
+                    ),
                 )
 
         try:
@@ -92,7 +95,7 @@ class LLMRouteTool(BaseTool):
             confidence = 0.5
             if "{" in text:
                 try:
-                    json_str = text[text.index("{"):text.rindex("}") + 1]
+                    json_str = text[text.index("{") : text.rindex("}") + 1]
                     # Fix single quotes to double quotes
                     json_str = json_str.replace("'", '"')
                     parsed = json.loads(json_str)
@@ -116,6 +119,6 @@ class LLMRouteTool(BaseTool):
 
             return ToolResult(
                 content=json.dumps({"route": route, "confidence": confidence}),
-                )
+            )
         except Exception as e:
             return ToolResult(content=f"LLM routing failed: {e}", is_error=True)

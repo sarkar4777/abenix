@@ -21,6 +21,7 @@ class PipelinePatchStatus(str, enum.Enum):
 
 class PipelineRunDiff(UUIDMixin, TenantMixin, Base):
     """Snapshot of a single pipeline-run failure."""
+
     __tablename__ = "pipeline_run_diffs"
 
     pipeline_id: Mapped[uuid.UUID] = mapped_column(
@@ -49,6 +50,7 @@ class PipelineRunDiff(UUIDMixin, TenantMixin, Base):
 
 class PipelinePatchProposal(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A drafted JSON-Patch against a pipeline's DSL."""
+
     __tablename__ = "pipeline_patch_proposals"
 
     pipeline_id: Mapped[uuid.UUID] = mapped_column(
@@ -75,8 +77,11 @@ class PipelinePatchProposal(UUIDMixin, TenantMixin, TimestampMixin, Base):
     json_patch: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     dsl_after: Mapped[dict[str, Any]] = mapped_column(JSONB)
     status: Mapped[PipelinePatchStatus] = mapped_column(
-        Enum(PipelinePatchStatus, name="pipeline_patch_status",
-             values_callable=lambda x: [e.value for e in x]),
+        Enum(
+            PipelinePatchStatus,
+            name="pipeline_patch_status",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=PipelinePatchStatus.PENDING,
     )
     decided_by: Mapped[uuid.UUID | None] = mapped_column(

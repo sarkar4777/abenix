@@ -1,4 +1,5 @@
 """Resolve which collections an agent (or acting subject) can read."""
+
 from __future__ import annotations
 
 import sys
@@ -12,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
 
 from models.collection_grant import (  # noqa: E402
-    AgentCollectionGrant, CollectionPermission, PERMISSION_RANK,
+    AgentCollectionGrant,
+    CollectionPermission,
+    PERMISSION_RANK,
     UserCollectionGrant,
 )
 from models.knowledge_base import KBStatus, KnowledgeBase  # noqa: E402
@@ -28,9 +31,7 @@ async def resolve_agent_collections(
 ) -> list[uuid.UUID]:
     """Return the collection ids an agent is allowed to query."""
     min_rank = PERMISSION_RANK[minimum_permission]
-    allowed_perms = [
-        p for p, r in PERMISSION_RANK.items() if r >= min_rank
-    ]
+    allowed_perms = [p for p, r in PERMISSION_RANK.items() if r >= min_rank]
 
     # Legacy FK + v2 grants, deduped, tenant-scoped, status filter.
     grant_subq = (
@@ -41,16 +42,13 @@ async def resolve_agent_collections(
         )
         .scalar_subquery()
     )
-    q = (
-        select(KnowledgeBase.id)
-        .where(
-            KnowledgeBase.tenant_id == tenant_id,
-            KnowledgeBase.status == KBStatus.READY,
-            or_(
-                KnowledgeBase.agent_id == agent_id,
-                KnowledgeBase.id.in_(grant_subq),
-            ),
-        )
+    q = select(KnowledgeBase.id).where(
+        KnowledgeBase.tenant_id == tenant_id,
+        KnowledgeBase.status == KBStatus.READY,
+        or_(
+            KnowledgeBase.agent_id == agent_id,
+            KnowledgeBase.id.in_(grant_subq),
+        ),
     )
     rows = (await db.execute(q)).all()
     ids = {row[0] for row in rows}
@@ -86,9 +84,7 @@ async def resolve_user_collections(
 ) -> list[uuid.UUID]:
     """Collections a user can see at >= the given permission."""
     min_rank = PERMISSION_RANK[minimum_permission]
-    allowed_perms = [
-        p for p, r in PERMISSION_RANK.items() if r >= min_rank
-    ]
+    allowed_perms = [p for p, r in PERMISSION_RANK.items() if r >= min_rank]
 
     grant_subq = (
         select(UserCollectionGrant.collection_id)
@@ -98,15 +94,12 @@ async def resolve_user_collections(
         )
         .scalar_subquery()
     )
-    q = (
-        select(KnowledgeBase.id)
-        .where(
-            KnowledgeBase.tenant_id == tenant_id,
-            or_(
-                KnowledgeBase.created_by == user_id,
-                KnowledgeBase.id.in_(grant_subq),
-            ),
-        )
+    q = select(KnowledgeBase.id).where(
+        KnowledgeBase.tenant_id == tenant_id,
+        or_(
+            KnowledgeBase.created_by == user_id,
+            KnowledgeBase.id.in_(grant_subq),
+        ),
     )
     rows = (await db.execute(q)).all()
     return [row[0] for row in rows]
@@ -131,9 +124,7 @@ async def assert_collection_access(
         return True
 
     min_rank = PERMISSION_RANK[minimum_permission]
-    allowed_perms = [
-        p for p, r in PERMISSION_RANK.items() if r >= min_rank
-    ]
+    allowed_perms = [p for p, r in PERMISSION_RANK.items() if r >= min_rank]
     grant = await db.execute(
         select(UserCollectionGrant).where(
             UserCollectionGrant.user_id == user_id,

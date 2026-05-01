@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -105,6 +104,7 @@ async def test_router_retry_on_failure():
     router = LLMRouter()
 
     call_count = 0
+
     async def failing_then_success(**kwargs):
         nonlocal call_count
         call_count += 1

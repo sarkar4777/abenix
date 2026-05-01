@@ -34,8 +34,14 @@ class SpreadsheetAnalyzerTool(BaseTool):
             "operation": {
                 "type": "string",
                 "enum": [
-                    "overview", "read_sheet", "read_range", "formulas",
-                    "statistics", "pivot", "compare_sheets", "search",
+                    "overview",
+                    "read_sheet",
+                    "read_range",
+                    "formulas",
+                    "statistics",
+                    "pivot",
+                    "compare_sheets",
+                    "search",
                 ],
                 "description": "Analysis operation to perform",
                 "default": "overview",
@@ -107,7 +113,9 @@ class SpreadsheetAnalyzerTool(BaseTool):
         except Exception as e:
             return ToolResult(content=f"Spreadsheet error: {e}", is_error=True)
 
-    def _handle_csv(self, path: Path, operation: str, args: dict[str, Any]) -> dict[str, Any]:
+    def _handle_csv(
+        self, path: Path, operation: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
         delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
         text = path.read_text(encoding="utf-8", errors="replace")
         reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
@@ -128,7 +136,9 @@ class SpreadsheetAnalyzerTool(BaseTool):
         else:
             return {"headers": headers, "row_count": len(rows), "rows": rows[:max_rows]}
 
-    def _csv_overview(self, headers: list[str], rows: list[dict[str, str]], path: Path) -> dict[str, Any]:
+    def _csv_overview(
+        self, headers: list[str], rows: list[dict[str, str]], path: Path
+    ) -> dict[str, Any]:
         col_types: dict[str, str] = {}
         for h in headers:
             vals = [r.get(h, "") for r in rows[:50] if r.get(h, "").strip()]
@@ -153,11 +163,17 @@ class SpreadsheetAnalyzerTool(BaseTool):
             "sample_rows": rows[:5],
         }
 
-    def _csv_statistics(self, headers: list[str], rows: list[dict[str, str]]) -> dict[str, Any]:
+    def _csv_statistics(
+        self, headers: list[str], rows: list[dict[str, str]]
+    ) -> dict[str, Any]:
         stats: dict[str, Any] = {}
         for h in headers:
             vals = [r.get(h, "") for r in rows]
-            nums = [float(v.replace(",", "").replace("$", "").replace("%", "")) for v in vals if self._is_numeric(v)]
+            nums = [
+                float(v.replace(",", "").replace("$", "").replace("%", ""))
+                for v in vals
+                if self._is_numeric(v)
+            ]
             if nums:
                 stats[h] = {
                     "type": "numeric",
@@ -177,22 +193,36 @@ class SpreadsheetAnalyzerTool(BaseTool):
                     "count": len([v for v in vals if v.strip()]),
                     "missing": len([v for v in vals if not v.strip()]),
                     "unique": len(unique),
-                    "top_values": sorted(((v, vals.count(v)) for v in unique), key=lambda x: x[1], reverse=True)[:5],
+                    "top_values": sorted(
+                        ((v, vals.count(v)) for v in unique),
+                        key=lambda x: x[1],
+                        reverse=True,
+                    )[:5],
                 }
         return {"statistics": stats}
 
-    def _csv_search(self, headers: list[str], rows: list[dict[str, str]], term: str) -> dict[str, Any]:
+    def _csv_search(
+        self, headers: list[str], rows: list[dict[str, str]], term: str
+    ) -> dict[str, Any]:
         if not term:
             return {"error": "search_term is required"}
         matches = []
         for i, row in enumerate(rows):
             for h in headers:
                 if term.lower() in row.get(h, "").lower():
-                    matches.append({"row": i + 1, "column": h, "value": row[h], "full_row": row})
+                    matches.append(
+                        {"row": i + 1, "column": h, "value": row[h], "full_row": row}
+                    )
                     break
-        return {"search_term": term, "match_count": len(matches), "matches": matches[:50]}
+        return {
+            "search_term": term,
+            "match_count": len(matches),
+            "matches": matches[:50],
+        }
 
-    def _csv_pivot(self, headers: list[str], rows: list[dict[str, str]], args: dict[str, Any]) -> dict[str, Any]:
+    def _csv_pivot(
+        self, headers: list[str], rows: list[dict[str, str]], args: dict[str, Any]
+    ) -> dict[str, Any]:
         pivot_rows = args.get("pivot_rows", "")
         pivot_values = args.get("pivot_values", "")
         func = args.get("pivot_func", "sum")
@@ -206,7 +236,9 @@ class SpreadsheetAnalyzerTool(BaseTool):
             if pivot_values:
                 v = row.get(pivot_values, "")
                 if self._is_numeric(v):
-                    groups[key].append(float(v.replace(",", "").replace("$", "").replace("%", "")))
+                    groups[key].append(
+                        float(v.replace(",", "").replace("$", "").replace("%", ""))
+                    )
             else:
                 groups[key].append(1)
 
@@ -231,9 +263,16 @@ class SpreadsheetAnalyzerTool(BaseTool):
             "rows": pivot_result,
         }
 
-    def _handle_excel(self, path: Path, operation: str, args: dict[str, Any]) -> dict[str, Any]:
+    def _handle_excel(
+        self, path: Path, operation: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
         from openpyxl import load_workbook
-        wb = load_workbook(str(path), read_only=(operation != "formulas"), data_only=(operation != "formulas"))
+
+        wb = load_workbook(
+            str(path),
+            read_only=(operation != "formulas"),
+            data_only=(operation != "formulas"),
+        )
 
         if operation == "overview":
             return self._excel_overview(wb, path)
@@ -259,12 +298,14 @@ class SpreadsheetAnalyzerTool(BaseTool):
         sheets = []
         for name in wb.sheetnames:
             ws = wb[name]
-            sheets.append({
-                "name": name,
-                "rows": ws.max_row or 0,
-                "columns": ws.max_column or 0,
-                "dimensions": ws.dimensions,
-            })
+            sheets.append(
+                {
+                    "name": name,
+                    "rows": ws.max_row or 0,
+                    "columns": ws.max_column or 0,
+                    "dimensions": ws.dimensions,
+                }
+            )
 
         first_sheet = wb[wb.sheetnames[0]]
         headers = []
@@ -290,7 +331,9 @@ class SpreadsheetAnalyzerTool(BaseTool):
         max_rows = args.get("max_rows", 100)
 
         if sheet_name not in wb.sheetnames:
-            return {"error": f"Sheet '{sheet_name}' not found. Available: {wb.sheetnames}"}
+            return {
+                "error": f"Sheet '{sheet_name}' not found. Available: {wb.sheetnames}"
+            }
 
         ws = wb[sheet_name]
         headers: list[str] = []
@@ -301,7 +344,9 @@ class SpreadsheetAnalyzerTool(BaseTool):
             if i == 0:
                 headers = [str(v) for v in vals]
             else:
-                row_dict = {headers[j]: vals[j] for j in range(min(len(headers), len(vals)))}
+                row_dict = {
+                    headers[j]: vals[j] for j in range(min(len(headers), len(vals)))
+                }
                 rows.append(row_dict)
 
         return {
@@ -340,11 +385,17 @@ class SpreadsheetAnalyzerTool(BaseTool):
         formulas = []
         for row in ws.iter_rows():
             for cell in row:
-                if cell.value and isinstance(cell.value, str) and cell.value.startswith("="):
-                    formulas.append({
-                        "cell": cell.coordinate,
-                        "formula": cell.value,
-                    })
+                if (
+                    cell.value
+                    and isinstance(cell.value, str)
+                    and cell.value.startswith("=")
+                ):
+                    formulas.append(
+                        {
+                            "cell": cell.coordinate,
+                            "formula": cell.value,
+                        }
+                    )
 
         return {
             "sheet": sheet_name,
@@ -362,7 +413,9 @@ class SpreadsheetAnalyzerTool(BaseTool):
 
         for i, row in enumerate(ws.iter_rows(max_row=max_rows, values_only=True)):
             if i == 0:
-                headers = [str(c) if c is not None else f"col_{j}" for j, c in enumerate(row)]
+                headers = [
+                    str(c) if c is not None else f"col_{j}" for j, c in enumerate(row)
+                ]
             else:
                 for j, val in enumerate(row):
                     if j < len(headers):
@@ -404,13 +457,19 @@ class SpreadsheetAnalyzerTool(BaseTool):
             for row in ws.iter_rows(max_row=min(ws.max_row or 0, 5000)):
                 for cell in row:
                     if cell.value and term.lower() in str(cell.value).lower():
-                        matches.append({
-                            "sheet": sheet_name,
-                            "cell": cell.coordinate,
-                            "value": str(cell.value),
-                        })
+                        matches.append(
+                            {
+                                "sheet": sheet_name,
+                                "cell": cell.coordinate,
+                                "value": str(cell.value),
+                            }
+                        )
 
-        return {"search_term": term, "match_count": len(matches), "matches": matches[:100]}
+        return {
+            "search_term": term,
+            "match_count": len(matches),
+            "matches": matches[:100],
+        }
 
     def _excel_compare(self, wb: Any, args: dict[str, Any]) -> dict[str, Any]:
         sheets = wb.sheetnames
@@ -420,11 +479,13 @@ class SpreadsheetAnalyzerTool(BaseTool):
         comparison = []
         for name in sheets:
             ws = wb[name]
-            comparison.append({
-                "name": name,
-                "rows": ws.max_row or 0,
-                "columns": ws.max_column or 0,
-            })
+            comparison.append(
+                {
+                    "name": name,
+                    "rows": ws.max_row or 0,
+                    "columns": ws.max_column or 0,
+                }
+            )
 
         return {"sheets": comparison, "sheet_count": len(sheets)}
 
@@ -438,7 +499,13 @@ class SpreadsheetAnalyzerTool(BaseTool):
             if i == 0:
                 headers = [str(c) if c is not None else "" for c in row]
             else:
-                rows.append({headers[j]: str(v) if v is not None else "" for j, v in enumerate(row) if j < len(headers)})
+                rows.append(
+                    {
+                        headers[j]: str(v) if v is not None else ""
+                        for j, v in enumerate(row)
+                        if j < len(headers)
+                    }
+                )
 
         return self._csv_pivot(headers, rows, args)
 
@@ -451,4 +518,5 @@ class SpreadsheetAnalyzerTool(BaseTool):
 
     def _is_date(self, val: str) -> bool:
         import re
+
         return bool(re.match(r"\d{1,4}[-/]\d{1,2}[-/]\d{1,4}", val.strip()))

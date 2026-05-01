@@ -36,19 +36,13 @@ class Payout(UUIDMixin, TimestampMixin, Base):
     agent_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agents.id"), index=True
     )
-    stripe_transfer_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
-    stripe_charge_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
+    stripe_transfer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stripe_charge_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     amount_total: Mapped[float] = mapped_column(Numeric(10, 2))
     platform_fee: Mapped[float] = mapped_column(Numeric(10, 2))
     creator_amount: Mapped[float] = mapped_column(Numeric(10, 2))
     currency: Mapped[str] = mapped_column(String(3), default="usd")
-    status: Mapped[str] = mapped_column(
-        String(50), default=PayoutStatus.PENDING.value
-    )
+    status: Mapped[str] = mapped_column(String(50), default=PayoutStatus.PENDING.value)
 
     creator: Mapped["User"] = relationship()
     agent: Mapped["Agent"] = relationship()

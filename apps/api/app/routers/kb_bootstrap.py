@@ -1,4 +1,5 @@
 """Bootstrap + per-subject collection endpoints for standalone-app integrations."""
+
 from __future__ import annotations
 
 import re
@@ -23,11 +24,11 @@ from models.agent import Agent  # noqa: E402
 from models.collection_grant import (  # noqa: E402
     AgentCollectionGrant,
     CollectionPermission,
-    UserCollectionGrant,
 )
 from models.knowledge_base import KBStatus, KnowledgeBase  # noqa: E402
 from models.knowledge_project import (  # noqa: E402
-    CollectionVisibility, KnowledgeProject,
+    CollectionVisibility,
+    KnowledgeProject,
 )
 from models.user import User  # noqa: E402
 
@@ -46,14 +47,17 @@ def _slugify(text: str) -> str:
 
 class BootstrapCollectionSpec(BaseModel):
     """One collection to create inside the bootstrapped project."""
+
     name: str = Field(..., min_length=1, max_length=255)
     slug: str | None = Field(None, max_length=120)
     description: str = Field("", max_length=2000)
     default_visibility: str = Field(
-        "project", pattern="^(private|project|tenant)$",
+        "project",
+        pattern="^(private|project|tenant)$",
     )
     vector_backend: str = Field(
-        "pinecone", pattern="^(pinecone|pgvector)$",
+        "pinecone",
+        pattern="^(pinecone|pgvector)$",
     )
     # Agents that should be granted access to this collection. Strings
     # are agent slugs (e.g. "st-chat"); resolved at bootstrap time to
@@ -61,7 +65,8 @@ class BootstrapCollectionSpec(BaseModel):
     # bootstrap is "best effort, idempotent".
     agent_slugs: list[str] = Field(default_factory=list)
     agent_permission: str = Field(
-        "READ", pattern="^(READ|WRITE|ADMIN)$",
+        "READ",
+        pattern="^(READ|WRITE|ADMIN)$",
     )
 
 
@@ -74,19 +79,25 @@ class BootstrapRequest(BaseModel):
 
 class EnsureSubjectCollectionRequest(BaseModel):
     """Per-user collection inside a project."""
+
     subject_type: str = Field(..., min_length=1, max_length=64)
     subject_id: str = Field(..., min_length=1, max_length=120)
     description: str = Field("", max_length=500)
     default_visibility: str = Field(
-        "private", pattern="^(private|project|tenant)$",
+        "private",
+        pattern="^(private|project|tenant)$",
     )
     vector_backend: str = Field(
-        "pinecone", pattern="^(pinecone|pgvector)$",
+        "pinecone",
+        pattern="^(pinecone|pgvector)$",
     )
 
 
 async def _resolve_agents_by_slug(
-    db: AsyncSession, *, tenant_id: uuid.UUID, slugs: list[str],
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    slugs: list[str],
 ) -> list[Agent]:
     """Look up agents by slug or by name within the tenant."""
     if not slugs:
@@ -111,8 +122,12 @@ async def _resolve_agents_by_slug(
 
 
 async def _grant_agent(
-    db: AsyncSession, *, agent_id: uuid.UUID, collection_id: uuid.UUID,
-    permission: CollectionPermission, granted_by: uuid.UUID,
+    db: AsyncSession,
+    *,
+    agent_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    permission: CollectionPermission,
+    granted_by: uuid.UUID,
 ) -> None:
     """Idempotent agent grant — UPSERT semantics."""
     existing = await db.execute(
@@ -123,12 +138,14 @@ async def _grant_agent(
     )
     g = existing.scalar_one_or_none()
     if g is None:
-        db.add(AgentCollectionGrant(
-            agent_id=agent_id,
-            collection_id=collection_id,
-            permission=permission,
-            granted_by=granted_by,
-        ))
+        db.add(
+            AgentCollectionGrant(
+                agent_id=agent_id,
+                collection_id=collection_id,
+                permission=permission,
+                granted_by=granted_by,
+            )
+        )
     elif g.permission != permission:
         g.permission = permission
         g.granted_by = granted_by
@@ -146,12 +163,14 @@ async def bootstrap_project(
 
     # Find-or-create the project. The lookup is by (tenant_id, slug)
     # which is unique-constrained, so the second call is a pure no-op.
-    proj = (await db.execute(
-        select(KnowledgeProject).where(
-            KnowledgeProject.tenant_id == user.tenant_id,
-            KnowledgeProject.slug == slug,
+    proj = (
+        await db.execute(
+            select(KnowledgeProject).where(
+                KnowledgeProject.tenant_id == user.tenant_id,
+                KnowledgeProject.slug == slug,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if proj is None:
         proj = KnowledgeProject(
             tenant_id=user.tenant_id,
@@ -169,13 +188,15 @@ async def bootstrap_project(
         c_slug = _slugify(spec.slug or spec.name)
         c_name = sanitize_input(spec.name)
 
-        kb = (await db.execute(
-            select(KnowledgeBase).where(
-                KnowledgeBase.tenant_id == user.tenant_id,
-                KnowledgeBase.project_id == proj.id,
-                KnowledgeBase.name == c_name,
+        kb = (
+            await db.execute(
+                select(KnowledgeBase).where(
+                    KnowledgeBase.tenant_id == user.tenant_id,
+                    KnowledgeBase.project_id == proj.id,
+                    KnowledgeBase.name == c_name,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if kb is None:
             kb = KnowledgeBase(
                 tenant_id=user.tenant_id,
@@ -195,7 +216,9 @@ async def bootstrap_project(
         # response so the caller can debug typos without bootstrap
         # itself failing.
         agents = await _resolve_agents_by_slug(
-            db, tenant_id=user.tenant_id, slugs=spec.agent_slugs,
+            db,
+            tenant_id=user.tenant_id,
+            slugs=spec.agent_slugs,
         )
         found_slugs = set()
         for a in agents:
@@ -212,24 +235,28 @@ async def bootstrap_project(
             if s not in found_slugs:
                 skipped_agents.append(s)
 
-        created_collections.append({
-            "id": str(kb.id),
-            "name": kb.name,
-            "slug": c_slug,
-            "agents_granted": list(found_slugs),
-        })
+        created_collections.append(
+            {
+                "id": str(kb.id),
+                "name": kb.name,
+                "slug": c_slug,
+                "agents_granted": list(found_slugs),
+            }
+        )
 
     await db.commit()
     await db.refresh(proj)
-    return success({
-        "project": {
-            "id": str(proj.id),
-            "slug": proj.slug,
-            "name": proj.name,
-        },
-        "collections": created_collections,
-        "skipped_agents": skipped_agents,
-    })
+    return success(
+        {
+            "project": {
+                "id": str(proj.id),
+                "slug": proj.slug,
+                "name": proj.name,
+            },
+            "collections": created_collections,
+            "skipped_agents": skipped_agents,
+        }
+    )
 
 
 @router.post("/{slug}/subject-collections/ensure")
@@ -240,24 +267,28 @@ async def ensure_subject_collection(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Find-or-create the subject's collection inside a project."""
-    proj = (await db.execute(
-        select(KnowledgeProject).where(
-            KnowledgeProject.tenant_id == user.tenant_id,
-            KnowledgeProject.slug == _slugify(slug),
+    proj = (
+        await db.execute(
+            select(KnowledgeProject).where(
+                KnowledgeProject.tenant_id == user.tenant_id,
+                KnowledgeProject.slug == _slugify(slug),
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if proj is None:
         return error("Project not found", 404)
 
     name = f"{body.subject_type}-{body.subject_id}"
 
-    kb = (await db.execute(
-        select(KnowledgeBase).where(
-            KnowledgeBase.tenant_id == user.tenant_id,
-            KnowledgeBase.project_id == proj.id,
-            KnowledgeBase.name == name,
+    kb = (
+        await db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.tenant_id == user.tenant_id,
+                KnowledgeBase.project_id == proj.id,
+                KnowledgeBase.name == name,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if kb is None:
         kb = KnowledgeBase(
             tenant_id=user.tenant_id,
@@ -276,15 +307,23 @@ async def ensure_subject_collection(
         # Mirror agent grants from sibling collections in the project so
         # the per-user collection inherits whatever agent permissions
         # the project's other collections have.
-        sibling_grants = (await db.execute(
-            select(AgentCollectionGrant).join(
-                KnowledgeBase,
-                AgentCollectionGrant.collection_id == KnowledgeBase.id,
-            ).where(
-                KnowledgeBase.project_id == proj.id,
-                KnowledgeBase.id != kb.id,
+        sibling_grants = (
+            (
+                await db.execute(
+                    select(AgentCollectionGrant)
+                    .join(
+                        KnowledgeBase,
+                        AgentCollectionGrant.collection_id == KnowledgeBase.id,
+                    )
+                    .where(
+                        KnowledgeBase.project_id == proj.id,
+                        KnowledgeBase.id != kb.id,
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
         seen: set[uuid.UUID] = set()
         for g in sibling_grants:
             if g.agent_id in seen:
@@ -300,9 +339,11 @@ async def ensure_subject_collection(
 
     await db.commit()
     await db.refresh(kb)
-    return success({
-        "id": str(kb.id),
-        "name": kb.name,
-        "project_id": str(proj.id),
-        "project_slug": proj.slug,
-    })
+    return success(
+        {
+            "id": str(kb.id),
+            "name": kb.name,
+            "project_id": str(proj.id),
+            "project_slug": proj.slug,
+        }
+    )

@@ -1,4 +1,5 @@
 """OpenAI Moderation API client + in-process policy evaluator."""
+
 from __future__ import annotations
 
 import hashlib
@@ -35,7 +36,7 @@ _SEVERITY = {ACTION_ALLOW: 0, ACTION_FLAG: 1, ACTION_REDACT: 2, ACTION_BLOCK: 3}
 
 @dataclass
 class ModerationDecision:
-    outcome: str = "allowed"          # allowed|flagged|redacted|blocked|error
+    outcome: str = "allowed"  # allowed|flagged|redacted|blocked|error
     action: str = ACTION_ALLOW
     triggered_categories: list[str] = field(default_factory=list)
     category_scores: dict[str, float] = field(default_factory=dict)
@@ -63,7 +64,9 @@ def _pick_action(
     return best, acts[best]
 
 
-async def _call_openai(content: str, model: str, timeout_s: float = 10.0) -> dict[str, Any]:
+async def _call_openai(
+    content: str, model: str, timeout_s: float = 10.0
+) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not configured")
@@ -159,7 +162,9 @@ async def evaluate(
     decision.flagged = flagged
     decision.provider_response = provider_body
 
-    all_triggered = list(dict.fromkeys(provider_triggered + pattern_triggered_categories))
+    all_triggered = list(
+        dict.fromkeys(provider_triggered + pattern_triggered_categories)
+    )
     decision.triggered_categories = all_triggered
 
     # 3. Pick the worst action across all triggered categories.
@@ -180,7 +185,9 @@ async def evaluate(
             decision.outcome = "flagged"
         elif action == ACTION_REDACT:
             decision.outcome = "redacted"
-            decision.redacted_content = _redact(content, custom_patterns, redaction_mask)
+            decision.redacted_content = _redact(
+                content, custom_patterns, redaction_mask
+            )
         elif action == ACTION_BLOCK:
             decision.outcome = "blocked"
         reasons = []

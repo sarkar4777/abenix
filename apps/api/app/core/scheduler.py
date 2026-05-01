@@ -1,4 +1,5 @@
 """Cron Trigger Scheduler — APScheduler-based job runner for scheduled agent trigge"""
+
 from __future__ import annotations
 
 import asyncio
@@ -58,6 +59,7 @@ async def _check_due_triggers() -> None:
     # Lazy imports to avoid circular dependencies
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
     from app.core.deps import async_session
@@ -69,15 +71,17 @@ async def _check_due_triggers() -> None:
     try:
         async with async_session() as db:
             result = await db.execute(
-                select(AgentTrigger, Agent).join(
-                    Agent, AgentTrigger.agent_id == Agent.id
-                ).where(and_(
-                    AgentTrigger.trigger_type == "schedule",
-                    AgentTrigger.is_active.is_(True),
-                    AgentTrigger.next_run_at.isnot(None),
-                    AgentTrigger.next_run_at <= now,
-                    Agent.status == AgentStatus.ACTIVE,
-                ))
+                select(AgentTrigger, Agent)
+                .join(Agent, AgentTrigger.agent_id == Agent.id)
+                .where(
+                    and_(
+                        AgentTrigger.trigger_type == "schedule",
+                        AgentTrigger.is_active.is_(True),
+                        AgentTrigger.next_run_at.isnot(None),
+                        AgentTrigger.next_run_at <= now,
+                        Agent.status == AgentStatus.ACTIVE,
+                    )
+                )
             )
             due_triggers = result.all()
 
@@ -87,7 +91,9 @@ async def _check_due_triggers() -> None:
             for trigger, agent in due_triggers:
                 logger.info(
                     "Executing scheduled trigger '%s' (id=%s) for agent '%s'",
-                    trigger.name, trigger.id, agent.name,
+                    trigger.name,
+                    trigger.id,
+                    agent.name,
                 )
 
                 # Spawn background execution task
@@ -120,7 +126,11 @@ async def _run_trigger(trigger: Any, agent: Any, db: Any) -> None:
             trigger_id=str(trigger.id),
             agent_id=str(agent.id),
             message=trigger.default_message or "Scheduled execution",
-            context=trigger.default_context if isinstance(trigger.default_context, dict) else {},
+            context=(
+                trigger.default_context
+                if isinstance(trigger.default_context, dict)
+                else {}
+            ),
             tenant_id=str(trigger.tenant_id),
         )
 
@@ -130,9 +140,11 @@ async def _run_trigger(trigger: Any, agent: Any, db: Any) -> None:
         # Update last_status via a fresh session
         try:
             from app.core.deps import async_session
+
             async with async_session() as fresh_db:
                 from sqlalchemy import update
                 from models.agent_trigger import AgentTrigger
+
                 await fresh_db.execute(
                     update(AgentTrigger)
                     .where(AgentTrigger.id == trigger.id)
@@ -148,6 +160,7 @@ async def sweep_stale_executions() -> None:
     import os
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
     from sqlalchemy import select, update
@@ -166,17 +179,23 @@ async def sweep_stale_executions() -> None:
     try:
         async with async_session() as db:
             from sqlalchemy import text as _sql_text
-            r = await db.execute(_sql_text(
-                "SELECT pg_try_advisory_lock(:k)"
-            ), {"k": SWEEP_LOCK_KEY})
+
+            r = await db.execute(
+                _sql_text("SELECT pg_try_advisory_lock(:k)"), {"k": SWEEP_LOCK_KEY}
+            )
             if not bool(r.scalar()):
-                logger.debug("sweep_stale_executions: another replica holds the lock; skipping")
+                logger.debug(
+                    "sweep_stale_executions: another replica holds the lock; skipping"
+                )
                 return
             # Find the stale rows first so we can notify the owning users.
             r = await db.execute(
                 select(
-                    Execution.id, Execution.user_id, Execution.tenant_id,
-                    Execution.agent_id, Execution.created_at,
+                    Execution.id,
+                    Execution.user_id,
+                    Execution.tenant_id,
+                    Execution.agent_id,
+                    Execution.created_at,
                 ).where(
                     Execution.status == ExecutionStatus.RUNNING,
                     Execution.created_at < cutoff,
@@ -188,13 +207,15 @@ async def sweep_stale_executions() -> None:
             ids = [row[0] for row in stale]
             logger.info(
                 "Sweeping %d stale executions (older than %d min)",
-                len(ids), max_minutes,
+                len(ids),
+                max_minutes,
             )
             # Emit a Prometheus counter so the Grafana "Stale sweeps
             # (24h)" panel lights up. A healthy cluster has this near
             # zero — spikes indicate pods are crashing silently.
             try:
                 from app.core.telemetry import stale_sweeps_total
+
                 stale_sweeps_total.labels(reason="owning_pod_crashed").inc(len(ids))
             except Exception:
                 pass
@@ -219,6 +240,7 @@ async def sweep_stale_executions() -> None:
         try:
             from models.notification import Notification, NotificationType
             from app.core.ws_manager import ws_manager
+
             async with async_session() as db:
                 for ex_id, uid, tid, agent_id, created in stale:
                     if not uid:
@@ -249,7 +271,8 @@ async def sweep_stale_executions() -> None:
                     continue
                 try:
                     await ws_manager.send_to_user(
-                        uid, "notification",
+                        uid,
+                        "notification",
                         {
                             "type": "execution_failed",
                             "title": "Agent run abandoned",
@@ -277,6 +300,7 @@ async def reset_monthly_quotas():
 
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
     from models.user import User
@@ -291,9 +315,7 @@ async def reset_monthly_quotas():
                     quota_reset_at=datetime.now(timezone.utc),
                 )
             )
-            await db.execute(
-                update(ApiKey).values(tokens_used=0, cost_used=0)
-            )
+            await db.execute(update(ApiKey).values(tokens_used=0, cost_used=0))
             await db.commit()
         logger.info("Monthly token quotas reset successfully")
     except Exception as e:

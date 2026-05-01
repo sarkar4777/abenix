@@ -33,7 +33,9 @@ async def get_neo4j_driver() -> AsyncDriver:
             await _driver.verify_connectivity()
             logger.info("Neo4j connection verified")
         except Exception as e:
-            logger.warning("Neo4j not available: %s (knowledge graph features disabled)", e)
+            logger.warning(
+                "Neo4j not available: %s (knowledge graph features disabled)", e
+            )
     return _driver
 
 
@@ -122,7 +124,8 @@ async def get_subgraph(kb_id: str, limit: int = 100) -> dict[str, Any]:
             ORDER BY e.mention_count DESC
             LIMIT $limit
             """,
-            kb_id=kb_id, limit=limit,
+            kb_id=kb_id,
+            limit=limit,
         )
         nodes = [dict(record) async for record in result]
         node_ids = {n["name"] for n in nodes}
@@ -135,7 +138,8 @@ async def get_subgraph(kb_id: str, limit: int = 100) -> dict[str, Any]:
             RETURN a.canonical_name AS source, b.canonical_name AS target,
                    type(r) AS relationship, r.weight AS weight
             """,
-            kb_id=kb_id, names=list(node_ids),
+            kb_id=kb_id,
+            names=list(node_ids),
         )
         edges = [dict(record) async for record in result]
 

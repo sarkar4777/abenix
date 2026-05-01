@@ -66,7 +66,9 @@ class SubPipelineTool(BaseTool):
         timeout_seconds = arguments.get("timeout_seconds", 60)
 
         if not raw_nodes:
-            return ToolResult(content="Error: at least one node is required", is_error=True)
+            return ToolResult(
+                content="Error: at least one node is required", is_error=True
+            )
 
         try:
             from engine.pipeline import (
@@ -82,6 +84,7 @@ class SubPipelineTool(BaseTool):
                 registry = self._parent_registry
             else:
                 from engine.tools.base import ToolRegistry
+
                 registry = ToolRegistry()
 
             executor = PipelineExecutor(
@@ -105,6 +108,8 @@ class SubPipelineTool(BaseTool):
             )
 
         except ValueError as e:
-            return ToolResult(content=f"Sub-pipeline validation error: {e}", is_error=True)
+            return ToolResult(
+                content=f"Sub-pipeline validation error: {e}", is_error=True
+            )
         except Exception as e:
             return ToolResult(content=f"Sub-pipeline failed: {e}", is_error=True)

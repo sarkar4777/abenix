@@ -1,4 +1,5 @@
 """IP Whitelist Middleware — restrict API access to specific IP ranges."""
+
 from __future__ import annotations
 
 import ipaddress

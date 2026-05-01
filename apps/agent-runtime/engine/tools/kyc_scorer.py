@@ -1,4 +1,5 @@
 """KYC risk scorer — deterministic aggregation for the MET-style header."""
+
 from __future__ import annotations
 
 import json
@@ -55,7 +56,10 @@ def _indicator_ii_score_from_volume(notional_usd: float | None) -> tuple[int, st
 _INDUSTRY_SCORES: dict[str, tuple[int, str]] = {
     # Higher-risk sectors (laundering, sanctions evasion, bribery exposure)
     "arms_defence": (30, "Arms & defence — extreme sanctions exposure, end-user risk"),
-    "gambling_casinos": (30, "Gambling / casinos — frequent STR filings, cash-intensive"),
+    "gambling_casinos": (
+        30,
+        "Gambling / casinos — frequent STR filings, cash-intensive",
+    ),
     "crypto_vasp": (28, "Virtual Asset Service Provider — FATF R.15 enhanced DD"),
     "mining_extractives": (25, "Mining / extractives — Transparency PWYP exposure"),
     "oil_gas": (22, "Oil & gas — sanctions and corruption risk"),
@@ -72,7 +76,10 @@ _INDUSTRY_SCORES: dict[str, tuple[int, str]] = {
     "wholesale_distribution": (12, "Wholesale / distribution"),
     "professional_services": (10, "Professional services"),
     "agriculture": (10, "Agriculture / agri-commodities"),
-    "wood_furniture_paper": (16.25, "Wood, furniture & paper manufacturing — MET reference template"),
+    "wood_furniture_paper": (
+        16.25,
+        "Wood, furniture & paper manufacturing — MET reference template",
+    ),
     # Lower risk
     "utility_regulated": (6, "Regulated utility — subject to national oversight"),
     "public_sector": (3, "Public sector / government-owned entity"),
@@ -159,15 +166,22 @@ class KYCScorerTool(BaseTool):
                     "Free-text also accepted — we'll fuzzy match."
                 ),
             },
-            "sanctions_hit": {"type": "boolean", "description": "Has a sanctions match been found?"},
-            "pep_match": {"type": "boolean", "description": "Is the counterparty or UBO a PEP / family / associate?"},
+            "sanctions_hit": {
+                "type": "boolean",
+                "description": "Has a sanctions match been found?",
+            },
+            "pep_match": {
+                "type": "boolean",
+                "description": "Is the counterparty or UBO a PEP / family / associate?",
+            },
             "adverse_media_grade": {
                 "type": "string",
                 "enum": ["L", "M", "H", "unknown"],
                 "description": "Output grade from `adverse_media` tool.",
             },
             "legal_existence_red_flags": {
-                "type": "array", "items": {"type": "string"},
+                "type": "array",
+                "items": {"type": "string"},
                 "description": "Red-flag codes from `legal_existence_verifier`.",
             },
             "ubo_discovery_gaps": {
@@ -198,16 +212,26 @@ class KYCScorerTool(BaseTool):
         # Extra signals
         extra_triggers: list[str] = []
         if sanctions_hit:
-            extra_triggers.append("Sanctions match present — Enhanced DD mandatory under FATF R.6")
+            extra_triggers.append(
+                "Sanctions match present — Enhanced DD mandatory under FATF R.6"
+            )
         if pep_match:
-            extra_triggers.append("PEP / family / close-associate match — Enhanced DD under FATF R.12")
+            extra_triggers.append(
+                "PEP / family / close-associate match — Enhanced DD under FATF R.12"
+            )
         if adverse_grade == "H":
-            extra_triggers.append("High-grade adverse media — manual legal review recommended")
+            extra_triggers.append(
+                "High-grade adverse media — manual legal review recommended"
+            )
         critical_legal = {"dissolved_or_struck_off", "no_registry_match"}
         if any(f in critical_legal for f in legal_flags):
-            extra_triggers.append("Legal-existence critical red flag — onboarding should be blocked pending manual verification")
+            extra_triggers.append(
+                "Legal-existence critical red flag — onboarding should be blocked pending manual verification"
+            )
         if ubo_gaps >= 2:
-            extra_triggers.append("≥2 UBO discovery gaps — require shareholder register copy")
+            extra_triggers.append(
+                "≥2 UBO discovery gaps — require shareholder register copy"
+            )
 
         extra_signals_triggered = bool(extra_triggers)
         check_type = _check_type_from_aggregate(aggregate, extra_signals_triggered)
@@ -223,33 +247,48 @@ class KYCScorerTool(BaseTool):
             grade = "L"
 
         return ToolResult(
-            content=json.dumps({
-                "inputs": {
-                    "cpi_rank": cpi, "annual_notional_usd": vol,
-                    "industry_segment": industry,
-                    "sanctions_hit": sanctions_hit, "pep_match": pep_match,
-                    "adverse_media_grade": adverse_grade,
-                    "legal_existence_red_flags": legal_flags,
-                    "ubo_discovery_gaps": ubo_gaps,
+            content=json.dumps(
+                {
+                    "inputs": {
+                        "cpi_rank": cpi,
+                        "annual_notional_usd": vol,
+                        "industry_segment": industry,
+                        "sanctions_hit": sanctions_hit,
+                        "pep_match": pep_match,
+                        "adverse_media_grade": adverse_grade,
+                        "legal_existence_red_flags": legal_flags,
+                        "ubo_discovery_gaps": ubo_gaps,
+                    },
+                    "indicator_i": {
+                        "score": ind_i_score,
+                        "rationale": ind_i_rationale,
+                        "title": "Country of Domicile Corruption Index Rank",
+                    },
+                    "indicator_ii": {
+                        "score": ind_ii_score,
+                        "rationale": ind_ii_rationale,
+                        "title": "Annual Contracted Volume / Notional Value",
+                    },
+                    "indicator_iii": {
+                        "score": ind_iii_score,
+                        "rationale": ind_iii_rationale,
+                        "title": "Industry Segment",
+                    },
+                    "aggregated_score": aggregate,
+                    "type_of_check": check_type,
+                    "extra_signal_triggers": extra_triggers,
+                    "kyc_risk_grade": grade,
+                    "rubric_version": "2026.04",
+                    "explainer": (
+                        "Aggregated = Indicator I + II + III. Base check type: "
+                        "≤15 Simplified, 16-60 Standard, >60 Enhanced. Any "
+                        "extra-signal trigger bumps the type one level. KYC "
+                        "grade is then the worst of check-type and signal "
+                        "severity. Override in firm policy where required."
+                    ),
                 },
-                "indicator_i": {"score": ind_i_score, "rationale": ind_i_rationale,
-                                 "title": "Country of Domicile Corruption Index Rank"},
-                "indicator_ii": {"score": ind_ii_score, "rationale": ind_ii_rationale,
-                                  "title": "Annual Contracted Volume / Notional Value"},
-                "indicator_iii": {"score": ind_iii_score, "rationale": ind_iii_rationale,
-                                   "title": "Industry Segment"},
-                "aggregated_score": aggregate,
-                "type_of_check": check_type,
-                "extra_signal_triggers": extra_triggers,
-                "kyc_risk_grade": grade,
-                "rubric_version": "2026.04",
-                "explainer": (
-                    "Aggregated = Indicator I + II + III. Base check type: "
-                    "≤15 Simplified, 16-60 Standard, >60 Enhanced. Any "
-                    "extra-signal trigger bumps the type one level. KYC "
-                    "grade is then the worst of check-type and signal "
-                    "severity. Override in firm policy where required."
-                ),
-            }, indent=2, default=str),
+                indent=2,
+                default=str,
+            ),
             metadata={"grade": grade, "check_type": check_type, "aggregate": aggregate},
         )

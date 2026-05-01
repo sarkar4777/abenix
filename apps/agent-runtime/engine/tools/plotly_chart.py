@@ -1,11 +1,11 @@
 """Generate Plotly chart spec (JSON) from structured data."""
+
 from __future__ import annotations
 
 import json
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
-
 
 _LAYOUT_DEFAULTS = {
     "template": "plotly_dark",
@@ -20,14 +20,20 @@ def _line_or_bar(kind: str, args: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"{kind} requires series[]")
     traces = []
     for s in series:
-        traces.append({
-            "type": "scatter" if kind == "line" else "bar",
-            "mode": "lines+markers" if kind == "line" else None,
-            "name": s.get("name", "series"),
-            "x": s.get("x", []),
-            "y": s.get("y", []),
-            **({"line": {"shape": "spline"}} if kind == "line" and s.get("smooth") else {}),
-        })
+        traces.append(
+            {
+                "type": "scatter" if kind == "line" else "bar",
+                "mode": "lines+markers" if kind == "line" else None,
+                "name": s.get("name", "series"),
+                "x": s.get("x", []),
+                "y": s.get("y", []),
+                **(
+                    {"line": {"shape": "spline"}}
+                    if kind == "line" and s.get("smooth")
+                    else {}
+                ),
+            }
+        )
         # Drop None values from inserted dict keys so Plotly doesn't choke.
         traces[-1] = {k: v for k, v in traces[-1].items() if v is not None}
     return {"data": traces}
@@ -40,27 +46,51 @@ def _scatter(args: dict[str, Any]) -> dict[str, Any]:
     xs = [p.get("x") for p in points]
     ys = [p.get("y") for p in points]
     text = [p.get("label", "") for p in points]
-    return {"data": [{"type": "scatter", "mode": "markers+text", "x": xs, "y": ys, "text": text,
-                       "textposition": "top center"}]}
+    return {
+        "data": [
+            {
+                "type": "scatter",
+                "mode": "markers+text",
+                "x": xs,
+                "y": ys,
+                "text": text,
+                "textposition": "top center",
+            }
+        ]
+    }
 
 
 def _pie(args: dict[str, Any]) -> dict[str, Any]:
     slices = args.get("slices") or []
     if not slices:
         raise ValueError("pie requires slices[]")
-    return {"data": [{"type": "pie",
-                       "labels": [s.get("label") for s in slices],
-                       "values": [s.get("value", 0) for s in slices],
-                       "hole": 0.4 if args.get("donut") else 0.0}]}
+    return {
+        "data": [
+            {
+                "type": "pie",
+                "labels": [s.get("label") for s in slices],
+                "values": [s.get("value", 0) for s in slices],
+                "hole": 0.4 if args.get("donut") else 0.0,
+            }
+        ]
+    }
 
 
 def _heatmap(args: dict[str, Any]) -> dict[str, Any]:
     z = args.get("z")
     if not z:
         raise ValueError("heatmap requires z (2D array)")
-    return {"data": [{"type": "heatmap", "z": z,
-                       "x": args.get("x"), "y": args.get("y"),
-                       "colorscale": args.get("colorscale", "Viridis")}]}
+    return {
+        "data": [
+            {
+                "type": "heatmap",
+                "z": z,
+                "x": args.get("x"),
+                "y": args.get("y"),
+                "colorscale": args.get("colorscale", "Viridis"),
+            }
+        ]
+    }
 
 
 class PlotlyChartTool(BaseTool):
@@ -75,7 +105,8 @@ class PlotlyChartTool(BaseTool):
         "type": "object",
         "properties": {
             "chart_type": {
-                "type": "string", "enum": ["line", "bar", "scatter", "pie", "heatmap"],
+                "type": "string",
+                "enum": ["line", "bar", "scatter", "pie", "heatmap"],
                 "default": "line",
             },
             "title": {"type": "string"},
@@ -122,9 +153,12 @@ class PlotlyChartTool(BaseTool):
             return ToolResult(content=str(e), is_error=True)
 
         layout = {**_LAYOUT_DEFAULTS}
-        if arguments.get("title"):    layout["title"] = arguments["title"]
-        if arguments.get("x_label"):  layout["xaxis"] = {"title": arguments["x_label"]}
-        if arguments.get("y_label"):  layout["yaxis"] = {"title": arguments["y_label"]}
+        if arguments.get("title"):
+            layout["title"] = arguments["title"]
+        if arguments.get("x_label"):
+            layout["xaxis"] = {"title": arguments["x_label"]}
+        if arguments.get("y_label"):
+            layout["yaxis"] = {"title": arguments["y_label"]}
         fig["layout"] = layout
 
         spec = json.dumps(fig)

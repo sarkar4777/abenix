@@ -1,10 +1,10 @@
 """Country-risk and jurisdiction-risk aggregator."""
+
 from __future__ import annotations
 
 import csv
 import json
 import logging
-import os
 import re
 import time
 from io import StringIO
@@ -35,11 +35,14 @@ _BROWSER_HEADERS = {
 
 
 async def _fetch_with_wayback_fallback(
-    url: str, prefer_latest_snapshot: bool = False,
+    url: str,
+    prefer_latest_snapshot: bool = False,
 ) -> tuple[bytes | None, str | None]:
     """Fetch url directly; on 403/timeout, fall back to the Wayback Machine"""
     async with httpx.AsyncClient(
-        timeout=_HTTP_TIMEOUT, follow_redirects=True, headers=_BROWSER_HEADERS,
+        timeout=_HTTP_TIMEOUT,
+        follow_redirects=True,
+        headers=_BROWSER_HEADERS,
     ) as client:
         if not prefer_latest_snapshot:
             try:
@@ -80,37 +83,136 @@ async def _fetch_with_wayback_fallback(
                     if rr.status_code == 200:
                         return rr.content, f"served via Wayback Machine snapshot {ts}"
         except Exception as exc:
-            return None, f"direct fetch and Wayback both failed: {exc.__class__.__name__}"
+            return (
+                None,
+                f"direct fetch and Wayback both failed: {exc.__class__.__name__}",
+            )
         return None, f"{url} unreachable (direct blocked, no Wayback snapshot)"
 
 
 # ISO 3166-1 alpha-2 → country name helpers (partial but covers our hot cases).
 _ISO2_TO_NAME = {
-    "AF": "Afghanistan", "AL": "Albania", "DZ": "Algeria", "AR": "Argentina", "AM": "Armenia",
-    "AU": "Australia", "AT": "Austria", "AZ": "Azerbaijan", "BD": "Bangladesh", "BY": "Belarus",
-    "BE": "Belgium", "BZ": "Belize", "BO": "Bolivia", "BA": "Bosnia and Herzegovina", "BR": "Brazil",
-    "BG": "Bulgaria", "KH": "Cambodia", "CM": "Cameroon", "CA": "Canada", "KY": "Cayman Islands",
-    "CL": "Chile", "CN": "China", "CO": "Colombia", "CD": "Democratic Republic of the Congo",
-    "CR": "Costa Rica", "HR": "Croatia", "CU": "Cuba", "CY": "Cyprus", "CZ": "Czechia",
-    "DK": "Denmark", "DO": "Dominican Republic", "EC": "Ecuador", "EG": "Egypt", "SV": "El Salvador",
-    "EE": "Estonia", "FI": "Finland", "FR": "France", "GE": "Georgia", "DE": "Germany",
-    "GH": "Ghana", "GR": "Greece", "GT": "Guatemala", "HT": "Haiti", "HN": "Honduras",
-    "HK": "Hong Kong", "HU": "Hungary", "IS": "Iceland", "IN": "India", "ID": "Indonesia",
-    "IR": "Iran", "IQ": "Iraq", "IE": "Ireland", "IL": "Israel", "IT": "Italy",
-    "JM": "Jamaica", "JP": "Japan", "JO": "Jordan", "KZ": "Kazakhstan", "KE": "Kenya",
-    "KP": "North Korea", "KR": "South Korea", "KW": "Kuwait", "LV": "Latvia", "LB": "Lebanon",
-    "LY": "Libya", "LT": "Lithuania", "LU": "Luxembourg", "MY": "Malaysia", "MT": "Malta",
-    "MX": "Mexico", "MD": "Moldova", "MN": "Mongolia", "ME": "Montenegro", "MA": "Morocco",
-    "MM": "Myanmar", "NL": "Netherlands", "NZ": "New Zealand", "NI": "Nicaragua", "NG": "Nigeria",
-    "MK": "North Macedonia", "NO": "Norway", "PK": "Pakistan", "PA": "Panama", "PY": "Paraguay",
-    "PE": "Peru", "PH": "Philippines", "PL": "Poland", "PT": "Portugal", "QA": "Qatar",
-    "RO": "Romania", "RU": "Russia", "SA": "Saudi Arabia", "RS": "Serbia", "SG": "Singapore",
-    "SK": "Slovakia", "SI": "Slovenia", "SO": "Somalia", "ZA": "South Africa", "ES": "Spain",
-    "LK": "Sri Lanka", "SD": "Sudan", "SE": "Sweden", "CH": "Switzerland", "SY": "Syria",
-    "TW": "Taiwan", "TZ": "Tanzania", "TH": "Thailand", "TN": "Tunisia", "TR": "Turkey",
-    "UG": "Uganda", "UA": "Ukraine", "AE": "United Arab Emirates", "GB": "United Kingdom",
-    "US": "United States", "UY": "Uruguay", "UZ": "Uzbekistan", "VE": "Venezuela", "VN": "Vietnam",
-    "YE": "Yemen", "ZM": "Zambia", "ZW": "Zimbabwe",
+    "AF": "Afghanistan",
+    "AL": "Albania",
+    "DZ": "Algeria",
+    "AR": "Argentina",
+    "AM": "Armenia",
+    "AU": "Australia",
+    "AT": "Austria",
+    "AZ": "Azerbaijan",
+    "BD": "Bangladesh",
+    "BY": "Belarus",
+    "BE": "Belgium",
+    "BZ": "Belize",
+    "BO": "Bolivia",
+    "BA": "Bosnia and Herzegovina",
+    "BR": "Brazil",
+    "BG": "Bulgaria",
+    "KH": "Cambodia",
+    "CM": "Cameroon",
+    "CA": "Canada",
+    "KY": "Cayman Islands",
+    "CL": "Chile",
+    "CN": "China",
+    "CO": "Colombia",
+    "CD": "Democratic Republic of the Congo",
+    "CR": "Costa Rica",
+    "HR": "Croatia",
+    "CU": "Cuba",
+    "CY": "Cyprus",
+    "CZ": "Czechia",
+    "DK": "Denmark",
+    "DO": "Dominican Republic",
+    "EC": "Ecuador",
+    "EG": "Egypt",
+    "SV": "El Salvador",
+    "EE": "Estonia",
+    "FI": "Finland",
+    "FR": "France",
+    "GE": "Georgia",
+    "DE": "Germany",
+    "GH": "Ghana",
+    "GR": "Greece",
+    "GT": "Guatemala",
+    "HT": "Haiti",
+    "HN": "Honduras",
+    "HK": "Hong Kong",
+    "HU": "Hungary",
+    "IS": "Iceland",
+    "IN": "India",
+    "ID": "Indonesia",
+    "IR": "Iran",
+    "IQ": "Iraq",
+    "IE": "Ireland",
+    "IL": "Israel",
+    "IT": "Italy",
+    "JM": "Jamaica",
+    "JP": "Japan",
+    "JO": "Jordan",
+    "KZ": "Kazakhstan",
+    "KE": "Kenya",
+    "KP": "North Korea",
+    "KR": "South Korea",
+    "KW": "Kuwait",
+    "LV": "Latvia",
+    "LB": "Lebanon",
+    "LY": "Libya",
+    "LT": "Lithuania",
+    "LU": "Luxembourg",
+    "MY": "Malaysia",
+    "MT": "Malta",
+    "MX": "Mexico",
+    "MD": "Moldova",
+    "MN": "Mongolia",
+    "ME": "Montenegro",
+    "MA": "Morocco",
+    "MM": "Myanmar",
+    "NL": "Netherlands",
+    "NZ": "New Zealand",
+    "NI": "Nicaragua",
+    "NG": "Nigeria",
+    "MK": "North Macedonia",
+    "NO": "Norway",
+    "PK": "Pakistan",
+    "PA": "Panama",
+    "PY": "Paraguay",
+    "PE": "Peru",
+    "PH": "Philippines",
+    "PL": "Poland",
+    "PT": "Portugal",
+    "QA": "Qatar",
+    "RO": "Romania",
+    "RU": "Russia",
+    "SA": "Saudi Arabia",
+    "RS": "Serbia",
+    "SG": "Singapore",
+    "SK": "Slovakia",
+    "SI": "Slovenia",
+    "SO": "Somalia",
+    "ZA": "South Africa",
+    "ES": "Spain",
+    "LK": "Sri Lanka",
+    "SD": "Sudan",
+    "SE": "Sweden",
+    "CH": "Switzerland",
+    "SY": "Syria",
+    "TW": "Taiwan",
+    "TZ": "Tanzania",
+    "TH": "Thailand",
+    "TN": "Tunisia",
+    "TR": "Turkey",
+    "UG": "Uganda",
+    "UA": "Ukraine",
+    "AE": "United Arab Emirates",
+    "GB": "United Kingdom",
+    "US": "United States",
+    "UY": "Uruguay",
+    "UZ": "Uzbekistan",
+    "VE": "Venezuela",
+    "VN": "Vietnam",
+    "YE": "Yemen",
+    "ZM": "Zambia",
+    "ZW": "Zimbabwe",
 }
 
 
@@ -156,7 +258,11 @@ async def _fetch_cpi() -> tuple[list[dict[str, Any]], int | None, str | None]:
             _CRI_CACHE["cpi"] = (time.time(), (parsed_rows, latest_year))
             return parsed_rows, latest_year, warn
     _CRI_CACHE["cpi"] = (time.time(), ([], None))
-    return [], None, "Transparency International CPI unreachable (OWID + datahub + TI CDN all failed)"
+    return (
+        [],
+        None,
+        "Transparency International CPI unreachable (OWID + datahub + TI CDN all failed)",
+    )
 
 
 def _parse_cpi_csv(text: str, src_label: str) -> tuple[list[dict[str, Any]], int]:
@@ -190,13 +296,17 @@ def _parse_cpi_csv(text: str, src_label: str) -> tuple[list[dict[str, Any]], int
                     score = float(row[score_col])
                 except (ValueError, TypeError):
                     score = None
-            normalized.append({
-                "country": row[entity_i] if entity_i < len(row) else "",
-                "iso3": row[code_i] if code_i is not None and code_i < len(row) else "",
-                "year": y,
-                "score": score,
-                "rank": None,  # OWID carries score only; rank derived below
-            })
+            normalized.append(
+                {
+                    "country": row[entity_i] if entity_i < len(row) else "",
+                    "iso3": (
+                        row[code_i] if code_i is not None and code_i < len(row) else ""
+                    ),
+                    "year": y,
+                    "score": score,
+                    "rank": None,  # OWID carries score only; rank derived below
+                }
+            )
         # Derive ranks per year from scores (higher score = lower rank num)
         years = sorted({r["year"] for r in normalized if r["year"]})
         latest = max(years) if years else 2023
@@ -211,7 +321,7 @@ def _parse_cpi_csv(text: str, src_label: str) -> tuple[list[dict[str, Any]], int
 
     # TI direct CSV — columns like "CPI 2023 Score", "CPI 2023 Rank"
     score_cols = {h for h in header_l if "cpi score" in h}
-    rank_cols = {h for h in header_l if "rank" in h}
+    {h for h in header_l if "rank" in h}
     if score_cols and "country" in header_l:
         country_i = header_l.index("country") if "country" in header_l else 0
         iso3_i = header_l.index("iso3") if "iso3" in header_l else None
@@ -226,22 +336,39 @@ def _parse_cpi_csv(text: str, src_label: str) -> tuple[list[dict[str, Any]], int
                 y = int(m.group(1))
                 latest = max(latest, y)
                 col_i = header_l.index(h_l)
-                rank_col = next((i for i, rh in enumerate(header_l) if "rank" in rh and str(y) in rh), None)
+                rank_col = next(
+                    (
+                        i
+                        for i, rh in enumerate(header_l)
+                        if "rank" in rh and str(y) in rh
+                    ),
+                    None,
+                )
                 try:
                     score = float(row[col_i]) if row[col_i] else None
                 except (ValueError, IndexError):
                     score = None
                 try:
-                    rank = int(float(row[rank_col])) if rank_col is not None and row[rank_col] else None
+                    rank = (
+                        int(float(row[rank_col]))
+                        if rank_col is not None and row[rank_col]
+                        else None
+                    )
                 except (ValueError, IndexError):
                     rank = None
-                normalized.append({
-                    "country": row[country_i],
-                    "iso3": row[iso3_i] if iso3_i is not None and iso3_i < len(row) else "",
-                    "year": y,
-                    "score": score,
-                    "rank": rank,
-                })
+                normalized.append(
+                    {
+                        "country": row[country_i],
+                        "iso3": (
+                            row[iso3_i]
+                            if iso3_i is not None and iso3_i < len(row)
+                            else ""
+                        ),
+                        "year": y,
+                        "score": score,
+                        "rank": rank,
+                    }
+                )
         return normalized, latest
 
     # datahub shape: Jurisdiction, 1998, 1999, ..., last column = latest
@@ -255,22 +382,30 @@ def _parse_cpi_csv(text: str, src_label: str) -> tuple[list[dict[str, Any]], int
                 country = row[0]
                 for col_i, yr in year_cols:
                     try:
-                        val = float(row[col_i]) if col_i < len(row) and row[col_i] not in ("-", "") else None
+                        val = (
+                            float(row[col_i])
+                            if col_i < len(row) and row[col_i] not in ("-", "")
+                            else None
+                        )
                     except ValueError:
                         val = None
-                    normalized.append({
-                        "country": country,
-                        "iso3": "",
-                        "year": yr,
-                        "score": val,
-                        "rank": None,
-                    })
+                    normalized.append(
+                        {
+                            "country": country,
+                            "iso3": "",
+                            "year": yr,
+                            "score": val,
+                            "rank": None,
+                        }
+                    )
             return normalized, latest_year
 
     return [], 2023
 
 
-def _cpi_lookup(rows: list[dict[str, Any]], year: int | None, iso2: str, name: str) -> dict[str, Any] | None:
+def _cpi_lookup(
+    rows: list[dict[str, Any]], year: int | None, iso2: str, name: str
+) -> dict[str, Any] | None:
     """Find the row for this country in the normalized CPI rows."""
     if not rows:
         return None
@@ -279,8 +414,10 @@ def _cpi_lookup(rows: list[dict[str, Any]], year: int | None, iso2: str, name: s
     iso3_hint = _ISO2_TO_ISO3.get(iso2.upper())
 
     candidates = [
-        r for r in rows
-        if r.get("year") == target_year and (
+        r
+        for r in rows
+        if r.get("year") == target_year
+        and (
             r.get("country", "").lower() == name_lc
             or (iso3_hint and r.get("iso3", "").upper() == iso3_hint)
         )
@@ -288,7 +425,8 @@ def _cpi_lookup(rows: list[dict[str, Any]], year: int | None, iso2: str, name: s
     if not candidates:
         # Try any year if target year absent
         candidates = [
-            r for r in rows
+            r
+            for r in rows
             if r.get("country", "").lower() == name_lc
             or (iso3_hint and r.get("iso3", "").upper() == iso3_hint)
         ]
@@ -311,30 +449,126 @@ def _cpi_lookup(rows: list[dict[str, Any]], year: int | None, iso2: str, name: s
 
 # ISO-2 to ISO-3 (subset — sufficient for the country list we support)
 _ISO2_TO_ISO3 = {
-    "AF": "AFG", "AL": "ALB", "DZ": "DZA", "AR": "ARG", "AM": "ARM",
-    "AU": "AUS", "AT": "AUT", "AZ": "AZE", "BD": "BGD", "BY": "BLR",
-    "BE": "BEL", "BZ": "BLZ", "BO": "BOL", "BA": "BIH", "BR": "BRA",
-    "BG": "BGR", "KH": "KHM", "CM": "CMR", "CA": "CAN", "KY": "CYM",
-    "CL": "CHL", "CN": "CHN", "CO": "COL", "CD": "COD", "CR": "CRI",
-    "HR": "HRV", "CU": "CUB", "CY": "CYP", "CZ": "CZE", "DK": "DNK",
-    "DO": "DOM", "EC": "ECU", "EG": "EGY", "SV": "SLV", "EE": "EST",
-    "FI": "FIN", "FR": "FRA", "GE": "GEO", "DE": "DEU", "GH": "GHA",
-    "GR": "GRC", "GT": "GTM", "HT": "HTI", "HN": "HND", "HK": "HKG",
-    "HU": "HUN", "IS": "ISL", "IN": "IND", "ID": "IDN", "IR": "IRN",
-    "IQ": "IRQ", "IE": "IRL", "IL": "ISR", "IT": "ITA", "JM": "JAM",
-    "JP": "JPN", "JO": "JOR", "KZ": "KAZ", "KE": "KEN", "KP": "PRK",
-    "KR": "KOR", "KW": "KWT", "LV": "LVA", "LB": "LBN", "LY": "LBY",
-    "LT": "LTU", "LU": "LUX", "MY": "MYS", "MT": "MLT", "MX": "MEX",
-    "MD": "MDA", "MN": "MNG", "ME": "MNE", "MA": "MAR", "MM": "MMR",
-    "NL": "NLD", "NZ": "NZL", "NI": "NIC", "NG": "NGA", "MK": "MKD",
-    "NO": "NOR", "PK": "PAK", "PA": "PAN", "PY": "PRY", "PE": "PER",
-    "PH": "PHL", "PL": "POL", "PT": "PRT", "QA": "QAT", "RO": "ROU",
-    "RU": "RUS", "SA": "SAU", "RS": "SRB", "SG": "SGP", "SK": "SVK",
-    "SI": "SVN", "SO": "SOM", "ZA": "ZAF", "ES": "ESP", "LK": "LKA",
-    "SD": "SDN", "SE": "SWE", "CH": "CHE", "SY": "SYR", "TW": "TWN",
-    "TZ": "TZA", "TH": "THA", "TN": "TUN", "TR": "TUR", "UG": "UGA",
-    "UA": "UKR", "AE": "ARE", "GB": "GBR", "US": "USA", "UY": "URY",
-    "UZ": "UZB", "VE": "VEN", "VN": "VNM", "YE": "YEM", "ZM": "ZMB",
+    "AF": "AFG",
+    "AL": "ALB",
+    "DZ": "DZA",
+    "AR": "ARG",
+    "AM": "ARM",
+    "AU": "AUS",
+    "AT": "AUT",
+    "AZ": "AZE",
+    "BD": "BGD",
+    "BY": "BLR",
+    "BE": "BEL",
+    "BZ": "BLZ",
+    "BO": "BOL",
+    "BA": "BIH",
+    "BR": "BRA",
+    "BG": "BGR",
+    "KH": "KHM",
+    "CM": "CMR",
+    "CA": "CAN",
+    "KY": "CYM",
+    "CL": "CHL",
+    "CN": "CHN",
+    "CO": "COL",
+    "CD": "COD",
+    "CR": "CRI",
+    "HR": "HRV",
+    "CU": "CUB",
+    "CY": "CYP",
+    "CZ": "CZE",
+    "DK": "DNK",
+    "DO": "DOM",
+    "EC": "ECU",
+    "EG": "EGY",
+    "SV": "SLV",
+    "EE": "EST",
+    "FI": "FIN",
+    "FR": "FRA",
+    "GE": "GEO",
+    "DE": "DEU",
+    "GH": "GHA",
+    "GR": "GRC",
+    "GT": "GTM",
+    "HT": "HTI",
+    "HN": "HND",
+    "HK": "HKG",
+    "HU": "HUN",
+    "IS": "ISL",
+    "IN": "IND",
+    "ID": "IDN",
+    "IR": "IRN",
+    "IQ": "IRQ",
+    "IE": "IRL",
+    "IL": "ISR",
+    "IT": "ITA",
+    "JM": "JAM",
+    "JP": "JPN",
+    "JO": "JOR",
+    "KZ": "KAZ",
+    "KE": "KEN",
+    "KP": "PRK",
+    "KR": "KOR",
+    "KW": "KWT",
+    "LV": "LVA",
+    "LB": "LBN",
+    "LY": "LBY",
+    "LT": "LTU",
+    "LU": "LUX",
+    "MY": "MYS",
+    "MT": "MLT",
+    "MX": "MEX",
+    "MD": "MDA",
+    "MN": "MNG",
+    "ME": "MNE",
+    "MA": "MAR",
+    "MM": "MMR",
+    "NL": "NLD",
+    "NZ": "NZL",
+    "NI": "NIC",
+    "NG": "NGA",
+    "MK": "MKD",
+    "NO": "NOR",
+    "PK": "PAK",
+    "PA": "PAN",
+    "PY": "PRY",
+    "PE": "PER",
+    "PH": "PHL",
+    "PL": "POL",
+    "PT": "PRT",
+    "QA": "QAT",
+    "RO": "ROU",
+    "RU": "RUS",
+    "SA": "SAU",
+    "RS": "SRB",
+    "SG": "SGP",
+    "SK": "SVK",
+    "SI": "SVN",
+    "SO": "SOM",
+    "ZA": "ZAF",
+    "ES": "ESP",
+    "LK": "LKA",
+    "SD": "SDN",
+    "SE": "SWE",
+    "CH": "CHE",
+    "SY": "SYR",
+    "TW": "TWN",
+    "TZ": "TZA",
+    "TH": "THA",
+    "TN": "TUN",
+    "TR": "TUR",
+    "UG": "UGA",
+    "UA": "UKR",
+    "AE": "ARE",
+    "GB": "GBR",
+    "US": "USA",
+    "UY": "URY",
+    "UZ": "UZB",
+    "VE": "VEN",
+    "VN": "VNM",
+    "YE": "YEM",
+    "ZM": "ZMB",
     "ZW": "ZWE",
 }
 
@@ -404,7 +638,9 @@ async def _fetch_eu_tax_blacklist() -> tuple[list[str], str | None]:
     html = content.decode("utf-8", errors="ignore")
     anx = re.search(r"Annex\s+I.{0,8000}", html, re.DOTALL | re.IGNORECASE)
     segment = anx.group(0) if anx else html
-    for m in re.finditer(r"<li[^>]*>\s*([A-Z][A-Za-z\u00C0-\u017F \(\)\-']{2,40})\s*</li>", segment):
+    for m in re.finditer(
+        r"<li[^>]*>\s*([A-Z][A-Za-z\u00C0-\u017F \(\)\-']{2,40})\s*</li>", segment
+    ):
         cand = m.group(1).strip()
         if cand in _ISO2_TO_NAME.values() and cand not in countries:
             countries.append(cand)
@@ -452,7 +688,9 @@ async def _fetch_wgi(iso2: str) -> dict[str, Any]:
     }
 
 
-_OFAC_PROGRAMS_URL = "https://ofac.treasury.gov/sanctions-programs-and-country-information"
+_OFAC_PROGRAMS_URL = (
+    "https://ofac.treasury.gov/sanctions-programs-and-country-information"
+)
 
 
 async def _fetch_ofac_country_programs(iso2: str, country_name: str) -> list[str]:
@@ -474,12 +712,22 @@ async def _fetch_ofac_country_programs(iso2: str, country_name: str) -> list[str
     # We match by country name in any link or cell and grab the nearest programme label.
     name_lower = country_name.lower()
     # Look for sections containing the country name.
-    for block in re.finditer(r"<(?:tr|div)[^>]*>(.{20,2000}?)</(?:tr|div)>", html, re.DOTALL):
+    for block in re.finditer(
+        r"<(?:tr|div)[^>]*>(.{20,2000}?)</(?:tr|div)>", html, re.DOTALL
+    ):
         segment = block.group(1)
         if name_lower in segment.lower():
-            for m in re.finditer(r"<a[^>]+href=\"([^\"]+sanctions?[^\"]*)\"[^>]*>([^<]{3,120})</a>", segment, re.IGNORECASE):
+            for m in re.finditer(
+                r"<a[^>]+href=\"([^\"]+sanctions?[^\"]*)\"[^>]*>([^<]{3,120})</a>",
+                segment,
+                re.IGNORECASE,
+            ):
                 label = re.sub(r"\s+", " ", m.group(2)).strip()
-                if label and label.lower() != country_name.lower() and label not in programs:
+                if (
+                    label
+                    and label.lower() != country_name.lower()
+                    and label not in programs
+                ):
                     programs.append(label)
     return programs[:10]
 
@@ -601,57 +849,75 @@ class CountryRiskIndexTool(BaseTool):
 
         # Overall jurisdiction risk grade
         _ORDER = {"L": 0, "M": 1, "H": 2}
+
         def _elevate(cur: str, to: str) -> str:
             return to if _ORDER[to] > _ORDER[cur] else cur
 
         reasons: list[str] = []
         grade = "L"
         if ofac_programs and any("comprehensive" in p.lower() for p in ofac_programs):
-            grade = _elevate(grade, "H"); reasons.append("Under comprehensive OFAC sanctions")
+            grade = _elevate(grade, "H")
+            reasons.append("Under comprehensive OFAC sanctions")
         elif ofac_programs:
-            grade = _elevate(grade, "M"); reasons.append(f"Subject to {len(ofac_programs)} OFAC sanctions programme(s)")
+            grade = _elevate(grade, "M")
+            reasons.append(
+                f"Subject to {len(ofac_programs)} OFAC sanctions programme(s)"
+            )
         if fatf_status == "black":
-            grade = _elevate(grade, "H"); reasons.append("FATF call-for-action jurisdiction")
+            grade = _elevate(grade, "H")
+            reasons.append("FATF call-for-action jurisdiction")
         elif fatf_status == "grey":
-            grade = _elevate(grade, "M"); reasons.append("FATF grey-list jurisdiction")
+            grade = _elevate(grade, "M")
+            reasons.append("FATF grey-list jurisdiction")
         if name in eu_list:
-            grade = _elevate(grade, "M"); reasons.append("EU non-cooperative tax jurisdiction")
+            grade = _elevate(grade, "M")
+            reasons.append("EU non-cooperative tax jurisdiction")
         cc = wgi.get("control_of_corruption_percentile_rank")
         if isinstance(cc, (int, float)) and cc < 30:
-            grade = _elevate(grade, "H"); reasons.append(f"Low control-of-corruption percentile ({cc:.0f})")
+            grade = _elevate(grade, "H")
+            reasons.append(f"Low control-of-corruption percentile ({cc:.0f})")
         elif isinstance(cc, (int, float)) and cc < 50:
-            grade = _elevate(grade, "M"); reasons.append(f"Moderate control-of-corruption percentile ({cc:.0f})")
+            grade = _elevate(grade, "M")
+            reasons.append(f"Moderate control-of-corruption percentile ({cc:.0f})")
         if cpi_rank and cpi_rank > 100:
-            grade = _elevate(grade, "M"); reasons.append(f"CPI rank {int(cpi_rank)} indicates elevated corruption perception")
+            grade = _elevate(grade, "M")
+            reasons.append(
+                f"CPI rank {int(cpi_rank)} indicates elevated corruption perception"
+            )
 
         if not reasons:
             reasons.append("No significant jurisdiction risk signal detected")
 
         return ToolResult(
-            content=json.dumps({
-                "iso2": iso2,
-                "country_name": name,
-                "cpi_rank": cpi_rank,
-                "cpi_score": cpi_data.get("cpi_score"),
-                "cpi_year": cpi_data.get("cpi_year"),
-                "fatf_status": fatf_status,
-                "fatf_black_list": fatf_data.get("black", []),
-                "fatf_grey_list": fatf_data.get("grey", []),
-                "eu_non_cooperative_tax": name in eu_list,
-                "ofac_country_programs": ofac_programs,
-                "wgi": wgi,
-                "met_indicator_i_score": indicator_i_score,
-                "met_indicator_i_explanation": indicator_i_explanation,
-                "jurisdiction_risk_grade": grade,
-                "jurisdiction_risk_reasons": reasons,
-                "sanctions_applicable_for_standard_check": bool(ofac_programs) or fatf_status == "black",
-                "warnings": warnings,
-                "disclaimer": (
-                    "Country-risk signals are composite and approximate. A "
-                    "jurisdiction marked 'clear' can still contain specific "
-                    "sanctioned persons and entities — always combine with "
-                    "the `sanctions_screening` tool for the counterparty."
-                ),
-            }, indent=2, default=str),
+            content=json.dumps(
+                {
+                    "iso2": iso2,
+                    "country_name": name,
+                    "cpi_rank": cpi_rank,
+                    "cpi_score": cpi_data.get("cpi_score"),
+                    "cpi_year": cpi_data.get("cpi_year"),
+                    "fatf_status": fatf_status,
+                    "fatf_black_list": fatf_data.get("black", []),
+                    "fatf_grey_list": fatf_data.get("grey", []),
+                    "eu_non_cooperative_tax": name in eu_list,
+                    "ofac_country_programs": ofac_programs,
+                    "wgi": wgi,
+                    "met_indicator_i_score": indicator_i_score,
+                    "met_indicator_i_explanation": indicator_i_explanation,
+                    "jurisdiction_risk_grade": grade,
+                    "jurisdiction_risk_reasons": reasons,
+                    "sanctions_applicable_for_standard_check": bool(ofac_programs)
+                    or fatf_status == "black",
+                    "warnings": warnings,
+                    "disclaimer": (
+                        "Country-risk signals are composite and approximate. A "
+                        "jurisdiction marked 'clear' can still contain specific "
+                        "sanctioned persons and entities — always combine with "
+                        "the `sanctions_screening` tool for the counterparty."
+                    ),
+                },
+                indent=2,
+                default=str,
+            ),
             metadata={"grade": grade, "fatf": fatf_status},
         )

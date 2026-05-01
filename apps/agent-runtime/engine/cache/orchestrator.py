@@ -76,9 +76,7 @@ class CacheOrchestrator:
                 rag_context=rag_context,
             )
             cache_hits.labels(layer="prompt").inc()
-            return CacheResult(
-                hit=False, layer="prompt", optimized_kwargs=optimized
-            )
+            return CacheResult(hit=False, layer="prompt", optimized_kwargs=optimized)
 
         cache_misses.inc()
         return CacheResult(hit=False, layer="none")

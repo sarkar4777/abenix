@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, asdict
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +14,9 @@ SUBJECT_HEADER = "X-Abenix-Subject"
 @dataclass
 class ActingSubject:
     """Represents an end user that the API key holder is acting on behalf of."""
-    subject_type: str          # e.g., "example_app", "external", "user"
-    subject_id: str            # the third-party system's user ID
+
+    subject_type: str  # e.g., "example_app", "external", "user"
+    subject_id: str  # the third-party system's user ID
     email: str | None = None
     display_name: str | None = None
     metadata: dict | None = None  # optional extra context

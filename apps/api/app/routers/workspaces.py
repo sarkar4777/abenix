@@ -2,6 +2,7 @@
 
 Endpoints: POST/GET/PUT/DELETE /api/workspaces
 """
+
 from __future__ import annotations
 
 import re
@@ -17,6 +18,7 @@ from app.core.responses import error, success
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.user import User
@@ -40,18 +42,20 @@ async def list_workspaces(
         select(Workspace).where(Workspace.tenant_id == user.tenant_id)
     )
     workspaces = result.scalars().all()
-    return success([
-        {
-            "id": str(ws.id),
-            "name": ws.name,
-            "slug": ws.slug,
-            "description": ws.description,
-            "is_default": ws.is_default,
-            "settings": ws.settings,
-            "created_at": ws.created_at.isoformat() if ws.created_at else None,
-        }
-        for ws in workspaces
-    ])
+    return success(
+        [
+            {
+                "id": str(ws.id),
+                "name": ws.name,
+                "slug": ws.slug,
+                "description": ws.description,
+                "is_default": ws.is_default,
+                "settings": ws.settings,
+                "created_at": ws.created_at.isoformat() if ws.created_at else None,
+            }
+            for ws in workspaces
+        ]
+    )
 
 
 @router.post("")
@@ -76,13 +80,16 @@ async def create_workspace(
     await db.commit()
     await db.refresh(ws)
 
-    return success({
-        "id": str(ws.id),
-        "name": ws.name,
-        "slug": ws.slug,
-        "description": ws.description,
-        "is_default": ws.is_default,
-    }, status_code=201)
+    return success(
+        {
+            "id": str(ws.id),
+            "name": ws.name,
+            "slug": ws.slug,
+            "description": ws.description,
+            "is_default": ws.is_default,
+        },
+        status_code=201,
+    )
 
 
 @router.get("/{workspace_id}")
@@ -101,14 +108,16 @@ async def get_workspace(
     if not ws:
         return error("Workspace not found", 404)
 
-    return success({
-        "id": str(ws.id),
-        "name": ws.name,
-        "slug": ws.slug,
-        "description": ws.description,
-        "is_default": ws.is_default,
-        "settings": ws.settings,
-    })
+    return success(
+        {
+            "id": str(ws.id),
+            "name": ws.name,
+            "slug": ws.slug,
+            "description": ws.description,
+            "is_default": ws.is_default,
+            "settings": ws.settings,
+        }
+    )
 
 
 @router.put("/{workspace_id}")

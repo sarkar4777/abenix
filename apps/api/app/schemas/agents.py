@@ -13,7 +13,9 @@ class ExecuteRequest(BaseModel):
 
 class ModelConfigSchema(BaseModel):
     """Agent model configuration. Core fields are typed; extra fields (tool_config,
-    input_variables, mode, pipeline_config, mcp_extensions, etc.) are preserved as-is."""
+    input_variables, mode, pipeline_config, mcp_extensions, etc.) are preserved as-is.
+    """
+
     model: str = "claude-sonnet-4-5-20250929"
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     tools: list[str] = []
@@ -39,7 +41,9 @@ class UpdateAgentRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     system_prompt: str | None = None
-    agent_model_config: ModelConfigSchema | None = Field(default=None, alias="model_config")
+    agent_model_config: ModelConfigSchema | None = Field(
+        default=None, alias="model_config"
+    )
     category: str | None = None
     icon_url: str | None = None
     status: str | None = None

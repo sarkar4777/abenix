@@ -1,7 +1,7 @@
 """Token-bucket rate limiter for per-(tenant, agent) request throttling."""
+
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -38,7 +38,7 @@ if Counter is not None:
 @dataclass
 class RateLimitDecision:
     allowed: bool
-    reason: str = ""          # "qps_exceeded" | "budget_exceeded" | ""
+    reason: str = ""  # "qps_exceeded" | "budget_exceeded" | ""
     retry_after_seconds: int = 0
     remaining_tokens: float = 0.0
 
@@ -102,8 +102,8 @@ class RateLimiter:
             return RateLimitDecision(allowed=True)
 
         key = f"rl:{tenant_id}:{agent_slug}"
-        capacity = float(qps)   # 1-second burst window
-        refill = float(qps)     # steady-state qps
+        capacity = float(qps)  # 1-second burst window
+        refill = float(qps)  # steady-state qps
         now = time.time()
 
         try:
@@ -113,8 +113,10 @@ class RateLimiter:
         except Exception as e:
             logger.warning("rate_limiter redis failure — failing open: %s", e)
             if _RATE_LIMIT_FAIL_OPEN is not None:
-                try: _RATE_LIMIT_FAIL_OPEN.inc()
-                except Exception: pass
+                try:
+                    _RATE_LIMIT_FAIL_OPEN.inc()
+                except Exception:
+                    pass
             return RateLimitDecision(allowed=True)
 
         allowed = int(result[0]) == 1

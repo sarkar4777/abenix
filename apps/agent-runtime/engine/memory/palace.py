@@ -1,4 +1,5 @@
 """MemoryPalace — Hierarchical AI memory with AAAK compression."""
+
 from __future__ import annotations
 
 import logging
@@ -29,7 +30,13 @@ class MemoryPalace:
         source: str | None = None,
     ) -> dict[str, Any]:
         """Store a memory in the palace hierarchy with AAAK compression."""
-        from models.memory_palace import MemoryWing, MemoryHall, MemoryRoom, MemoryDrawer, HallType
+        from models.memory_palace import (
+            MemoryWing,
+            MemoryHall,
+            MemoryRoom,
+            MemoryDrawer,
+            HallType,
+        )
 
         # Find or create wing
         result = await self.db.execute(
@@ -75,6 +82,7 @@ class MemoryPalace:
 
         # Compress with AAAK
         from engine.memory.aaak_compressor import compress_to_aaak
+
         aaak_summary = await compress_to_aaak(content)
 
         # Find or create room (upsert by key/name)
@@ -135,17 +143,25 @@ class MemoryPalace:
         """Recall memories from the palace."""
         from models.memory_palace import MemoryWing, MemoryHall, MemoryRoom
 
-        query_stmt = select(MemoryRoom).join(MemoryHall).join(MemoryWing).where(
-            MemoryWing.agent_id == self.agent_id,
-            MemoryWing.tenant_id == self.tenant_id,
+        query_stmt = (
+            select(MemoryRoom)
+            .join(MemoryHall)
+            .join(MemoryWing)
+            .where(
+                MemoryWing.agent_id == self.agent_id,
+                MemoryWing.tenant_id == self.tenant_id,
+            )
         )
 
         if wing_name:
             query_stmt = query_stmt.where(MemoryWing.name == wing_name)
         if hall_type:
             from models.memory_palace import HallType
+
             try:
-                query_stmt = query_stmt.where(MemoryHall.hall_type == HallType(hall_type))
+                query_stmt = query_stmt.where(
+                    MemoryHall.hall_type == HallType(hall_type)
+                )
             except ValueError:
                 pass
 
@@ -237,7 +253,9 @@ class MemoryPalace:
                 delete(MemoryRoom).where(
                     MemoryRoom.name == key,
                     MemoryRoom.hall_id.in_(
-                        select(MemoryHall.id).join(MemoryWing).where(
+                        select(MemoryHall.id)
+                        .join(MemoryWing)
+                        .where(
                             MemoryWing.agent_id == self.agent_id,
                             MemoryWing.tenant_id == self.tenant_id,
                         )
@@ -254,13 +272,17 @@ class MemoryPalace:
         from models.memory_palace import MemoryWing, MemoryHall, MemoryRoom
 
         wings_count = await self.db.scalar(
-            select(func.count()).select_from(MemoryWing).where(
+            select(func.count())
+            .select_from(MemoryWing)
+            .where(
                 MemoryWing.agent_id == self.agent_id,
             )
         )
         rooms_count = await self.db.scalar(
-            select(func.count()).select_from(MemoryRoom)
-            .join(MemoryHall).join(MemoryWing)
+            select(func.count())
+            .select_from(MemoryRoom)
+            .join(MemoryHall)
+            .join(MemoryWing)
             .where(MemoryWing.agent_id == self.agent_id)
         )
 

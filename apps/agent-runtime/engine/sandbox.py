@@ -35,7 +35,9 @@ class SandboxPolicy:
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS
-    allowed_domains: list[str] = field(default_factory=lambda: list(WHITELISTED_DOMAINS))
+    allowed_domains: list[str] = field(
+        default_factory=lambda: list(WHITELISTED_DOMAINS)
+    )
     allow_all_domains: bool = False
 
 
@@ -64,21 +66,27 @@ class ExecutionSandbox:
             return True
         elapsed = time.monotonic() - self.start_time
         if elapsed > self.policy.timeout_seconds:
-            self.violations.append(SandboxViolation(
-                violation_type="timeout",
-                message="Execution exceeded {}s timeout (elapsed: {:.1f}s)".format(
-                    self.policy.timeout_seconds, elapsed
-                ),
-            ))
+            self.violations.append(
+                SandboxViolation(
+                    violation_type="timeout",
+                    message="Execution exceeded {}s timeout (elapsed: {:.1f}s)".format(
+                        self.policy.timeout_seconds, elapsed
+                    ),
+                )
+            )
             return False
         return True
 
     def check_tool_call(self) -> bool:
         if self.tool_call_count >= self.policy.max_tool_calls:
-            self.violations.append(SandboxViolation(
-                violation_type="tool_limit",
-                message="Exceeded max tool calls ({})".format(self.policy.max_tool_calls),
-            ))
+            self.violations.append(
+                SandboxViolation(
+                    violation_type="tool_limit",
+                    message="Exceeded max tool calls ({})".format(
+                        self.policy.max_tool_calls
+                    ),
+                )
+            )
             return False
         self.tool_call_count += 1
         return True
@@ -86,10 +94,14 @@ class ExecutionSandbox:
     def check_output_size(self, new_output: str) -> bool:
         self.total_output_chars += len(new_output)
         if self.total_output_chars > self.policy.max_output_chars:
-            self.violations.append(SandboxViolation(
-                violation_type="output_limit",
-                message="Output exceeded {} chars".format(self.policy.max_output_chars),
-            ))
+            self.violations.append(
+                SandboxViolation(
+                    violation_type="output_limit",
+                    message="Output exceeded {} chars".format(
+                        self.policy.max_output_chars
+                    ),
+                )
+            )
             return False
         return True
 
@@ -101,10 +113,12 @@ class ExecutionSandbox:
         for allowed in self.policy.allowed_domains:
             if host == allowed or host.endswith("." + allowed):
                 return True
-        self.violations.append(SandboxViolation(
-            violation_type="network_policy",
-            message="Domain '{}' not in allowlist".format(host),
-        ))
+        self.violations.append(
+            SandboxViolation(
+                violation_type="network_policy",
+                message="Domain '{}' not in allowlist".format(host),
+            )
+        )
         return False
 
     def add_domain(self, domain: str) -> None:

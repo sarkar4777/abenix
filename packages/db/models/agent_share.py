@@ -2,6 +2,7 @@
 
 Permission levels: view (read-only), execute (run), edit (modify).
 """
+
 from __future__ import annotations
 
 import enum

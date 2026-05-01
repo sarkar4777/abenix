@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 from models.execution import Execution, ExecutionStatus
 from models.tenant import Tenant, TenantPlan
 from models.usage import RecordType, UsageRecord
+from models.user import User  # noqa: F401  used in forward-ref annotations
 
 from app.core.stripe import get_daily_limit
 from app.core.ws_manager import ws_manager
@@ -72,14 +73,14 @@ async def check_limit(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID | None = None,
 ) -> tuple[bool, str]:
-    result = await db.execute(
-        select(Tenant).where(Tenant.id == tenant_id)
-    )
+    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = result.scalar_one_or_none()
     if not tenant:
         return False, "Tenant not found"
 
-    plan_key = tenant.plan.value if isinstance(tenant.plan, TenantPlan) else str(tenant.plan)
+    plan_key = (
+        tenant.plan.value if isinstance(tenant.plan, TenantPlan) else str(tenant.plan)
+    )
     daily_limit = get_daily_limit(plan_key)
 
     if daily_limit == -1:
@@ -98,7 +99,10 @@ async def check_limit(
     today_count = count_result.scalar() or 0
 
     if today_count >= daily_limit:
-        return False, f"Daily execution limit reached ({daily_limit}/{plan_key} plan). Upgrade for more."
+        return (
+            False,
+            f"Daily execution limit reached ({daily_limit}/{plan_key} plan). Upgrade for more.",
+        )
 
     usage_pct = today_count / daily_limit * 100
     if user_id and usage_pct >= 80:
@@ -145,7 +149,9 @@ async def check_user_quota(user: "User") -> str | None:
     return None
 
 
-async def update_user_usage(db: "AsyncSession", user: "User", input_tokens: int, output_tokens: int, cost: float) -> None:
+async def update_user_usage(
+    db: "AsyncSession", user: "User", input_tokens: int, output_tokens: int, cost: float
+) -> None:
     """Update user's monthly usage counters after an execution."""
     total_tokens = (input_tokens or 0) + (output_tokens or 0)
     user.tokens_used_this_month = (user.tokens_used_this_month or 0) + total_tokens
@@ -170,14 +176,13 @@ async def get_usage_stats(
     )
     today_executions = today_exec_result.scalar() or 0
 
-    result = await db.execute(
-        select(Tenant).where(Tenant.id == tenant_id)
-    )
+    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = result.scalar_one_or_none()
     plan_key = tenant.plan.value if tenant else "free"
     daily_limit = get_daily_limit(plan_key)
 
     from datetime import timedelta
+
     period_start = now - timedelta(days=days)
 
     total_exec_result = await db.execute(

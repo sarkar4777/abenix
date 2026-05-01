@@ -75,7 +75,9 @@ class TavilySearchTool(BaseTool):
                 continue
             try:
                 return await self._call_provider(
-                    provider_name, url, api_key,
+                    provider_name,
+                    url,
+                    api_key,
                     query=query,
                     max_results=max_results,
                     search_depth=search_depth,
@@ -117,8 +119,15 @@ class TavilySearchTool(BaseTool):
         async with httpx.AsyncClient(timeout=30) as client:
             if provider == "tavily":
                 return await self._tavily(
-                    client, url, api_key, query, max_results,
-                    search_depth, topic, time_range, include_answer,
+                    client,
+                    url,
+                    api_key,
+                    query,
+                    max_results,
+                    search_depth,
+                    topic,
+                    time_range,
+                    include_answer,
                 )
             if provider == "brave":
                 return await self._brave(client, url, api_key, query, max_results)
@@ -160,7 +169,11 @@ class TavilySearchTool(BaseTool):
 
         return self._format_results(
             results=[
-                {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("content", "")}
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("url", ""),
+                    "snippet": r.get("content", ""),
+                }
                 for r in results
             ],
             answer=answer,
@@ -168,8 +181,12 @@ class TavilySearchTool(BaseTool):
         )
 
     async def _brave(
-        self, client: httpx.AsyncClient, url: str, api_key: str,
-        query: str, max_results: int,
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        api_key: str,
+        query: str,
+        max_results: int,
     ) -> ToolResult:
         resp = await client.get(
             url,
@@ -182,19 +199,32 @@ class TavilySearchTool(BaseTool):
         web = data.get("web", {}).get("results", [])
         return self._format_results(
             results=[
-                {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("description", "")}
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("url", ""),
+                    "snippet": r.get("description", ""),
+                }
                 for r in web
             ],
             provider="Brave",
         )
 
     async def _serpapi(
-        self, client: httpx.AsyncClient, url: str, api_key: str,
-        query: str, max_results: int,
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        api_key: str,
+        query: str,
+        max_results: int,
     ) -> ToolResult:
         resp = await client.get(
             url,
-            params={"q": query, "api_key": api_key, "num": max_results, "engine": "google"},
+            params={
+                "q": query,
+                "api_key": api_key,
+                "num": max_results,
+                "engine": "google",
+            },
         )
         resp.raise_for_status()
         data = resp.json()
@@ -202,15 +232,23 @@ class TavilySearchTool(BaseTool):
         organic = data.get("organic_results", [])
         return self._format_results(
             results=[
-                {"title": r.get("title", ""), "url": r.get("link", ""), "snippet": r.get("snippet", "")}
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("link", ""),
+                    "snippet": r.get("snippet", ""),
+                }
                 for r in organic
             ],
             provider="SerpAPI",
         )
 
     async def _serper(
-        self, client: httpx.AsyncClient, url: str, api_key: str,
-        query: str, max_results: int,
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        api_key: str,
+        query: str,
+        max_results: int,
     ) -> ToolResult:
         resp = await client.post(
             url,
@@ -223,7 +261,11 @@ class TavilySearchTool(BaseTool):
         organic = data.get("organic", [])
         return self._format_results(
             results=[
-                {"title": r.get("title", ""), "url": r.get("link", ""), "snippet": r.get("snippet", "")}
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("link", ""),
+                    "snippet": r.get("snippet", ""),
+                }
                 for r in organic
             ],
             provider="Serper",
@@ -237,11 +279,13 @@ class TavilySearchTool(BaseTool):
             results = []
             with DDGS() as ddgs:
                 for r in ddgs.text(query, max_results=max_results):
-                    results.append({
-                        "title": r.get("title", ""),
-                        "url": r.get("href", ""),
-                        "snippet": r.get("body", ""),
-                    })
+                    results.append(
+                        {
+                            "title": r.get("title", ""),
+                            "url": r.get("href", ""),
+                            "snippet": r.get("body", ""),
+                        }
+                    )
 
             if not results:
                 return ToolResult(content=f"No results found for: {query}")

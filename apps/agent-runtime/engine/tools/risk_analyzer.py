@@ -24,8 +24,12 @@ class RiskAnalyzerTool(BaseTool):
             "analysis_type": {
                 "type": "string",
                 "enum": [
-                    "monte_carlo", "sensitivity", "scenario", "risk_matrix",
-                    "var", "expected_value",
+                    "monte_carlo",
+                    "sensitivity",
+                    "scenario",
+                    "risk_matrix",
+                    "var",
+                    "expected_value",
                 ],
                 "description": "Type of risk analysis to perform",
             },
@@ -76,7 +80,9 @@ class RiskAnalyzerTool(BaseTool):
         if not variables:
             return {"error": "variables dict is required with distribution params"}
         if not formula:
-            return {"error": "formula is required (use variable names, e.g. 'revenue - costs')"}
+            return {
+                "error": "formula is required (use variable names, e.g. 'revenue - costs')"
+            }
 
         if seed is not None:
             random.seed(seed)
@@ -98,7 +104,9 @@ class RiskAnalyzerTool(BaseTool):
                 low = dist.get("min", 0)
                 mode = dist.get("mode", 0.5)
                 high = dist.get("max", 1)
-                samples[var_name] = [random.triangular(low, high, mode) for _ in range(n)]
+                samples[var_name] = [
+                    random.triangular(low, high, mode) for _ in range(n)
+                ]
             elif dist_type == "lognormal":
                 mean = dist.get("mean", 0)
                 std = dist.get("std", 1)
@@ -149,7 +157,10 @@ class RiskAnalyzerTool(BaseTool):
             "probability_negative": round(prob_negative * 100, 1),
             "histogram": histogram,
             "confidence_interval_90": [percentiles["p5"], percentiles["p95"]],
-            "confidence_interval_95": [percentiles.get("p2.5", percentiles["p1"]), percentiles.get("p97.5", percentiles["p99"])],
+            "confidence_interval_95": [
+                percentiles.get("p2.5", percentiles["p1"]),
+                percentiles.get("p97.5", percentiles["p99"]),
+            ],
         }
 
     def _sensitivity(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -176,17 +187,28 @@ class RiskAnalyzerTool(BaseTool):
             high_result = self._eval_formula(formula, high_vars)
 
             swing = abs(high_result - low_result)
-            sensitivities.append({
-                "variable": var_name,
-                "base_value": round(base_val, 4),
-                "low_value": round(low_val, 4),
-                "high_value": round(high_val, 4),
-                "result_at_low": round(low_result, 2),
-                "result_at_high": round(high_result, 2),
-                "result_at_base": round(base_result, 2),
-                "swing": round(swing, 2),
-                "elasticity": round((high_result - low_result) / (2 * base_result) / (variation_pct / 100), 4) if base_result != 0 else 0,
-            })
+            sensitivities.append(
+                {
+                    "variable": var_name,
+                    "base_value": round(base_val, 4),
+                    "low_value": round(low_val, 4),
+                    "high_value": round(high_val, 4),
+                    "result_at_low": round(low_result, 2),
+                    "result_at_high": round(high_result, 2),
+                    "result_at_base": round(base_result, 2),
+                    "swing": round(swing, 2),
+                    "elasticity": (
+                        round(
+                            (high_result - low_result)
+                            / (2 * base_result)
+                            / (variation_pct / 100),
+                            4,
+                        )
+                        if base_result != 0
+                        else 0
+                    ),
+                }
+            )
 
         sensitivities.sort(key=lambda x: x["swing"], reverse=True)
 
@@ -210,13 +232,15 @@ class RiskAnalyzerTool(BaseTool):
         for name, values in scenarios.items():
             result = self._eval_formula(formula, values)
             prob = probabilities.get(name, 1 / len(scenarios))
-            results.append({
-                "scenario": name,
-                "inputs": values,
-                "result": round(result, 2),
-                "probability": prob,
-                "weighted_result": round(result * prob, 2),
-            })
+            results.append(
+                {
+                    "scenario": name,
+                    "inputs": values,
+                    "result": round(result, 2),
+                    "probability": prob,
+                    "weighted_result": round(result * prob, 2),
+                }
+            )
 
         expected = sum(r["weighted_result"] for r in results)
         result_values = [r["result"] for r in results]
@@ -234,7 +258,9 @@ class RiskAnalyzerTool(BaseTool):
         risks = params.get("risks", [])
 
         if not risks:
-            return {"error": "risks array is required [{name, likelihood, impact, ...}]"}
+            return {
+                "error": "risks array is required [{name, likelihood, impact, ...}]"
+            }
 
         scored = []
         for risk in risks:
@@ -252,15 +278,17 @@ class RiskAnalyzerTool(BaseTool):
             else:
                 level = "low"
 
-            scored.append({
-                "name": name,
-                "likelihood": likelihood,
-                "impact": impact,
-                "risk_score": score,
-                "risk_level": level,
-                "mitigation": risk.get("mitigation", ""),
-                "category": risk.get("category", ""),
-            })
+            scored.append(
+                {
+                    "name": name,
+                    "likelihood": likelihood,
+                    "impact": impact,
+                    "risk_score": score,
+                    "risk_level": level,
+                    "mitigation": risk.get("mitigation", ""),
+                    "category": risk.get("category", ""),
+                }
+            )
 
         scored.sort(key=lambda x: x["risk_score"], reverse=True)
 
@@ -275,7 +303,9 @@ class RiskAnalyzerTool(BaseTool):
             "risks": scored,
             "summary": summary,
             "total_risks": len(scored),
-            "average_score": round(sum(r["risk_score"] for r in scored) / len(scored), 1),
+            "average_score": round(
+                sum(r["risk_score"] for r in scored) / len(scored), 1
+            ),
             "highest_risk": scored[0]["name"] if scored else None,
         }
 
@@ -300,7 +330,9 @@ class RiskAnalyzerTool(BaseTool):
         for cl in confidence_levels:
             idx = int(n * (1 - cl))
             var_return = returns_sorted[max(0, idx)]
-            var_dollar = abs(var_return) * portfolio_value * math.sqrt(holding_period_days)
+            var_dollar = (
+                abs(var_return) * portfolio_value * math.sqrt(holding_period_days)
+            )
             var_results[f"{int(cl * 100)}%"] = {
                 "var_return": round(var_return * 100, 4),
                 "var_dollar": round(var_dollar, 2),
@@ -326,24 +358,29 @@ class RiskAnalyzerTool(BaseTool):
         total_prob = sum(o.get("probability", 0) for o in outcomes)
         if abs(total_prob - 1.0) > 0.01:
             for o in outcomes:
-                o["probability"] = o.get("probability", 0) / total_prob if total_prob > 0 else 0
+                o["probability"] = (
+                    o.get("probability", 0) / total_prob if total_prob > 0 else 0
+                )
 
         ev = sum(o.get("value", 0) * o.get("probability", 0) for o in outcomes)
 
         variance = sum(
-            o.get("probability", 0) * (o.get("value", 0) - ev) ** 2
-            for o in outcomes
+            o.get("probability", 0) * (o.get("value", 0) - ev) ** 2 for o in outcomes
         )
         std = math.sqrt(variance)
 
         detailed = []
         for o in outcomes:
-            detailed.append({
-                "name": o.get("name", ""),
-                "value": o.get("value", 0),
-                "probability": round(o.get("probability", 0), 4),
-                "weighted_value": round(o.get("value", 0) * o.get("probability", 0), 2),
-            })
+            detailed.append(
+                {
+                    "name": o.get("name", ""),
+                    "value": o.get("value", 0),
+                    "probability": round(o.get("probability", 0), 4),
+                    "weighted_value": round(
+                        o.get("value", 0) * o.get("probability", 0), 2
+                    ),
+                }
+            )
 
         return {
             "expected_value": round(ev, 2),
@@ -368,7 +405,9 @@ class RiskAnalyzerTool(BaseTool):
         safe_dict.update(variables)
         return float(eval(formula, safe_dict))
 
-    def _build_histogram(self, values: list[float], bins: int = 20) -> list[dict[str, Any]]:
+    def _build_histogram(
+        self, values: list[float], bins: int = 20
+    ) -> list[dict[str, Any]]:
         if not values:
             return []
         lo = values[0]

@@ -1,4 +1,5 @@
 """Headless browser automation via Playwright."""
+
 from __future__ import annotations
 
 import os
@@ -42,7 +43,10 @@ class BrowserAutomationTool(BaseTool):
                 "enum": ["get_text", "get_html", "screenshot", "click_and_get"],
                 "default": "get_text",
             },
-            "url": {"type": "string", "description": "Target URL (must pass the allow-list)."},
+            "url": {
+                "type": "string",
+                "description": "Target URL (must pass the allow-list).",
+            },
             "wait_for_selector": {
                 "type": "string",
                 "description": "Optional CSS selector to wait for before extracting.",
@@ -51,9 +55,17 @@ class BrowserAutomationTool(BaseTool):
                 "type": "string",
                 "description": "click_and_get only — the CSS selector to click first.",
             },
-            "timeout_ms": {"type": "integer", "default": 15000, "minimum": 1000, "maximum": 60000},
+            "timeout_ms": {
+                "type": "integer",
+                "default": 15000,
+                "minimum": 1000,
+                "maximum": 60000,
+            },
             "max_chars": {
-                "type": "integer", "default": 6000, "minimum": 100, "maximum": 50000,
+                "type": "integer",
+                "default": 6000,
+                "minimum": 100,
+                "maximum": 50000,
                 "description": "Cap text/HTML output to keep token cost sane.",
             },
         },
@@ -71,7 +83,9 @@ class BrowserAutomationTool(BaseTool):
         if not url:
             return ToolResult(content="url is required", is_error=True)
         if not url.startswith(("http://", "https://")):
-            return ToolResult(content="url must start with http:// or https://", is_error=True)
+            return ToolResult(
+                content="url must start with http:// or https://", is_error=True
+            )
 
         ok, host = _domain_allowed(url)
         if not ok:
@@ -105,8 +119,10 @@ class BrowserAutomationTool(BaseTool):
                 page.set_default_timeout(timeout)
                 await page.goto(url, wait_until="networkidle")
                 if wait_sel:
-                    try: await page.wait_for_selector(wait_sel, timeout=timeout)
-                    except Exception: pass
+                    try:
+                        await page.wait_for_selector(wait_sel, timeout=timeout)
+                    except Exception:
+                        pass
                 if op == "click_and_get" and click_sel:
                     try:
                         await page.click(click_sel, timeout=timeout)
@@ -117,6 +133,7 @@ class BrowserAutomationTool(BaseTool):
                 if op == "screenshot":
                     img_bytes = await page.screenshot(type="png", full_page=False)
                     import base64
+
                     b64 = base64.b64encode(img_bytes).decode()
                     await browser.close()
                     return ToolResult(
@@ -128,7 +145,8 @@ class BrowserAutomationTool(BaseTool):
                     html = await page.content()
                     await browser.close()
                     return ToolResult(
-                        content=html[:max_chars] + ("…(truncated)" if len(html) > max_chars else ""),
+                        content=html[:max_chars]
+                        + ("…(truncated)" if len(html) > max_chars else ""),
                         metadata={"url": url, "host": host, "full_length": len(html)},
                     )
 
@@ -137,7 +155,8 @@ class BrowserAutomationTool(BaseTool):
                 await browser.close()
                 text = text.strip()
                 return ToolResult(
-                    content=text[:max_chars] + ("…(truncated)" if len(text) > max_chars else ""),
+                    content=text[:max_chars]
+                    + ("…(truncated)" if len(text) > max_chars else ""),
                     metadata={"url": url, "host": host, "full_length": len(text)},
                 )
         except Exception as e:

@@ -1,10 +1,9 @@
 """Tests for circuit breaker logic."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from engine.circuit_breaker import (
-    CircuitBreaker,
     CircuitBreakerConfig,
     CircuitState,
     ResilientToolRegistry,
@@ -71,7 +70,9 @@ class TestResilientToolRegistry:
         from engine.tools.base import ToolResult
 
         fallback_tool = MagicMock()
-        fallback_tool.execute = AsyncMock(return_value=ToolResult(content="fallback result"))
+        fallback_tool.execute = AsyncMock(
+            return_value=ToolResult(content="fallback result")
+        )
 
         mock_registry = MagicMock()
         mock_registry.get.return_value = fallback_tool
@@ -107,7 +108,9 @@ class TestResilientToolRegistry:
         from engine.tools.base import ToolResult
 
         mock_tool = MagicMock()
-        mock_tool.execute = AsyncMock(return_value=ToolResult(content="error", is_error=True))
+        mock_tool.execute = AsyncMock(
+            return_value=ToolResult(content="error", is_error=True)
+        )
 
         mock_registry = MagicMock()
         mock_registry.get.return_value = mock_tool
@@ -117,7 +120,7 @@ class TestResilientToolRegistry:
         mock_cb.record_failure = AsyncMock()
 
         registry = ResilientToolRegistry(mock_registry, mock_cb)
-        result = await registry.execute_tool("failing_tool", {})
+        await registry.execute_tool("failing_tool", {})
 
         mock_cb.record_failure.assert_called_once_with("failing_tool")
 

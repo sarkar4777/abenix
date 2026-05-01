@@ -1,11 +1,16 @@
 """Zoom MeetingAdapter stub."""
+
 from __future__ import annotations
 
 import os
 from typing import AsyncIterator
 
 from engine.tools.meeting_adapter import (
-    AudioFrame, ChatMessage, JoinRequest, JoinResult, MeetingAdapter,
+    AudioFrame,
+    ChatMessage,
+    JoinRequest,
+    JoinResult,
+    MeetingAdapter,
 )
 
 
@@ -39,6 +44,7 @@ class ZoomAdapter(MeetingAdapter):
         async def _empty():
             if False:
                 yield  # type: ignore[unreachable]
+
         return _empty()
 
     async def post_chat(self, text: str) -> None:
@@ -48,6 +54,7 @@ class ZoomAdapter(MeetingAdapter):
         async def _empty():
             if False:
                 yield  # type: ignore[unreachable]
+
         return _empty()
 
     async def list_participants(self) -> list[str]:

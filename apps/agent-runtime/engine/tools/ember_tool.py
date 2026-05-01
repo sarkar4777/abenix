@@ -54,7 +54,13 @@ class EmberClimateTool(BaseTool):
         "properties": {
             "data_type": {
                 "type": "string",
-                "enum": ["carbon_price", "carbon_intensity", "electricity_generation", "power_price", "electricity_demand"],
+                "enum": [
+                    "carbon_price",
+                    "carbon_intensity",
+                    "electricity_generation",
+                    "power_price",
+                    "electricity_demand",
+                ],
                 "description": (
                     "Type of data. 'carbon_price' is a compatibility alias that "
                     "returns carbon INTENSITY (gCO2/kWh) — Ember doesn't serve "
@@ -104,10 +110,10 @@ class EmberClimateTool(BaseTool):
             return ToolResult(content="Error: data_type is required", is_error=True)
 
         handlers = {
-            "carbon_price": self._carbon_intensity,           # back-compat alias
+            "carbon_price": self._carbon_intensity,  # back-compat alias
             "carbon_intensity": self._carbon_intensity,
             "electricity_generation": self._electricity_generation,
-            "power_price": self._electricity_demand,          # back-compat alias
+            "power_price": self._electricity_demand,  # back-compat alias
             "electricity_demand": self._electricity_demand,
         }
         handler = handlers.get(data_type)
@@ -146,7 +152,11 @@ class EmberClimateTool(BaseTool):
         return f"{year}-01", f"{year}-12"
 
     async def _carbon_intensity(
-        self, country: str, year: int | None, resolution: str, api_key: str,
+        self,
+        country: str,
+        year: int | None,
+        resolution: str,
+        api_key: str,
     ) -> ToolResult:
         params: dict[str, Any] = {"entity_code": country}
         start, end = self._date_range(year, resolution)
@@ -164,8 +174,10 @@ class EmberClimateTool(BaseTool):
 
         if not records:
             return ToolResult(
-                content=preface + f"No carbon-intensity {resolution} data for {country}"
-                + (f" in {year}" if year else "") + ".",
+                content=preface
+                + f"No carbon-intensity {resolution} data for {country}"
+                + (f" in {year}" if year else "")
+                + ".",
             )
 
         lines = [
@@ -185,7 +197,9 @@ class EmberClimateTool(BaseTool):
         if intensities:
             lines.append("")
             lines.append(f"Average: {sum(intensities) / len(intensities):.1f} gCO2/kWh")
-            lines.append(f"Min / Max: {min(intensities):.1f} / {max(intensities):.1f} gCO2/kWh")
+            lines.append(
+                f"Min / Max: {min(intensities):.1f} / {max(intensities):.1f} gCO2/kWh"
+            )
 
         return ToolResult(
             content="\n".join(lines),
@@ -198,7 +212,11 @@ class EmberClimateTool(BaseTool):
         )
 
     async def _electricity_generation(
-        self, country: str, year: int | None, resolution: str, api_key: str,
+        self,
+        country: str,
+        year: int | None,
+        resolution: str,
+        api_key: str,
     ) -> ToolResult:
         params: dict[str, Any] = {"entity_code": country}
         start, end = self._date_range(year, resolution)
@@ -210,7 +228,8 @@ class EmberClimateTool(BaseTool):
         if not records:
             return ToolResult(
                 content=f"No electricity-generation {resolution} data for {country}"
-                + (f" in {year}" if year else "") + ".",
+                + (f" in {year}" if year else "")
+                + ".",
             )
 
         # Group by generation source. `series` is the source (Bioenergy, Coal, ...)
@@ -249,7 +268,11 @@ class EmberClimateTool(BaseTool):
         )
 
     async def _electricity_demand(
-        self, country: str, year: int | None, resolution: str, api_key: str,
+        self,
+        country: str,
+        year: int | None,
+        resolution: str,
+        api_key: str,
     ) -> ToolResult:
         params: dict[str, Any] = {"entity_code": country}
         start, end = self._date_range(year, resolution)
@@ -266,8 +289,10 @@ class EmberClimateTool(BaseTool):
 
         if not records:
             return ToolResult(
-                content=preface + f"No electricity-demand {resolution} data for {country}"
-                + (f" in {year}" if year else "") + ".",
+                content=preface
+                + f"No electricity-demand {resolution} data for {country}"
+                + (f" in {year}" if year else "")
+                + ".",
             )
 
         lines = [

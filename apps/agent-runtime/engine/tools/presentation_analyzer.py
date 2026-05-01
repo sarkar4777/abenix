@@ -53,10 +53,14 @@ class PresentationAnalyzerTool(BaseTool):
             return ToolResult(content=f"File not found: {file_path}", is_error=True)
 
         if path.suffix.lower() not in (".pptx",):
-            return ToolResult(content=f"Unsupported format: {path.suffix}. Only .pptx is supported.", is_error=True)
+            return ToolResult(
+                content=f"Unsupported format: {path.suffix}. Only .pptx is supported.",
+                is_error=True,
+            )
 
         try:
             from pptx import Presentation
+
             prs = Presentation(str(path))
 
             if operation == "overview":
@@ -75,14 +79,18 @@ class PresentationAnalyzerTool(BaseTool):
                 result = self._overview(prs, path)
 
             output = json.dumps(result, indent=2, default=str)
-            return ToolResult(content=output, metadata={"file": str(path), "operation": operation})
+            return ToolResult(
+                content=output, metadata={"file": str(path), "operation": operation}
+            )
         except ImportError:
             return ToolResult(
                 content="python-pptx library is required. Install with: pip install python-pptx",
                 is_error=True,
             )
         except Exception as e:
-            return ToolResult(content=f"Presentation analysis error: {e}", is_error=True)
+            return ToolResult(
+                content=f"Presentation analysis error: {e}", is_error=True
+            )
 
     def _overview(self, prs: Any, path: Path) -> dict[str, Any]:
         slides_info = []
@@ -118,17 +126,19 @@ class PresentationAnalyzerTool(BaseTool):
             if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
                 notes = slide.notes_slide.notes_text_frame.text.strip()
 
-            slides_info.append({
-                "slide": i,
-                "title": slide_text[0] if slide_text else "(no title)",
-                "text_preview": text_content[:200],
-                "word_count": len(text_content.split()),
-                "images": image_count,
-                "tables": table_count,
-                "has_chart": has_chart,
-                "has_notes": bool(notes),
-                "layout": slide.slide_layout.name if slide.slide_layout else "",
-            })
+            slides_info.append(
+                {
+                    "slide": i,
+                    "title": slide_text[0] if slide_text else "(no title)",
+                    "text_preview": text_content[:200],
+                    "word_count": len(text_content.split()),
+                    "images": image_count,
+                    "tables": table_count,
+                    "has_chart": has_chart,
+                    "has_notes": bool(notes),
+                    "layout": slide.slide_layout.name if slide.slide_layout else "",
+                }
+            )
 
         return {
             "file": str(path),
@@ -145,7 +155,9 @@ class PresentationAnalyzerTool(BaseTool):
 
     def _slide_detail(self, prs: Any, slide_num: int) -> dict[str, Any]:
         if slide_num < 1 or slide_num > len(prs.slides):
-            return {"error": f"Slide {slide_num} not found. Total slides: {len(prs.slides)}"}
+            return {
+                "error": f"Slide {slide_num} not found. Total slides: {len(prs.slides)}"
+            }
 
         slide = prs.slides[slide_num - 1]
         shapes = []
@@ -166,11 +178,17 @@ class PresentationAnalyzerTool(BaseTool):
                 paragraphs = []
                 for para in shape.text_frame.paragraphs:
                     if para.text.strip():
-                        paragraphs.append({
-                            "text": para.text,
-                            "level": para.level,
-                            "bold": any(run.font.bold for run in para.runs if run.font.bold is not None),
-                        })
+                        paragraphs.append(
+                            {
+                                "text": para.text,
+                                "level": para.level,
+                                "bold": any(
+                                    run.font.bold
+                                    for run in para.runs
+                                    if run.font.bold is not None
+                                ),
+                            }
+                        )
                 shape_info["text"] = paragraphs
 
             if shape.has_table:
@@ -206,12 +224,16 @@ class PresentationAnalyzerTool(BaseTool):
                     for para in shape.text_frame.paragraphs:
                         if para.text.strip():
                             text_parts.append(para.text.strip())
-            slides_text.append({
-                "slide": i,
-                "text": "\n".join(text_parts),
-            })
+            slides_text.append(
+                {
+                    "slide": i,
+                    "text": "\n".join(text_parts),
+                }
+            )
 
-        full_text = "\n\n".join(f"--- Slide {s['slide']} ---\n{s['text']}" for s in slides_text if s["text"])
+        full_text = "\n\n".join(
+            f"--- Slide {s['slide']} ---\n{s['text']}" for s in slides_text if s["text"]
+        )
         return {
             "total_slides": len(prs.slides),
             "slides_with_text": sum(1 for s in slides_text if s["text"]),
@@ -238,12 +260,14 @@ class PresentationAnalyzerTool(BaseTool):
                     rows = []
                     for row in table.rows:
                         rows.append([cell.text for cell in row.cells])
-                    tables.append({
-                        "slide": i,
-                        "rows": len(rows),
-                        "columns": len(rows[0]) if rows else 0,
-                        "data": rows,
-                    })
+                    tables.append(
+                        {
+                            "slide": i,
+                            "rows": len(rows),
+                            "columns": len(rows[0]) if rows else 0,
+                            "data": rows,
+                        }
+                    )
 
         return {"table_count": len(tables), "tables": tables}
 
@@ -257,10 +281,16 @@ class PresentationAnalyzerTool(BaseTool):
                 if shape.has_text_frame:
                     for para in shape.text_frame.paragraphs:
                         if term.lower() in para.text.lower():
-                            matches.append({
-                                "slide": i,
-                                "shape": shape.name,
-                                "text": para.text,
-                            })
+                            matches.append(
+                                {
+                                    "slide": i,
+                                    "shape": shape.name,
+                                    "text": para.text,
+                                }
+                            )
 
-        return {"search_term": term, "match_count": len(matches), "matches": matches[:100]}
+        return {
+            "search_term": term,
+            "match_count": len(matches),
+            "matches": matches[:100],
+        }

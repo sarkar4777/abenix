@@ -1,4 +1,5 @@
 """Database Query Tool — Execute read-only SQL against enterprise databases."""
+
 from __future__ import annotations
 
 import re
@@ -6,10 +7,19 @@ from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
-
 # Only allow read-only SQL
 ALLOWED_PREFIXES = ("select", "with", "explain", "show", "describe")
-FORBIDDEN_KEYWORDS = ("insert", "update", "delete", "drop", "alter", "create", "truncate", "grant", "revoke")
+FORBIDDEN_KEYWORDS = (
+    "insert",
+    "update",
+    "delete",
+    "drop",
+    "alter",
+    "create",
+    "truncate",
+    "grant",
+    "revoke",
+)
 
 
 class DatabaseQueryTool(BaseTool):
@@ -45,18 +55,21 @@ class DatabaseQueryTool(BaseTool):
 
     def __init__(self, default_connection: str = ""):
         import os
+
         # Fallback: if no default provided, use the platform's own database
         # (with asyncpg -> psycopg2 conversion for sync drivers used by SQL tools)
         env_url = os.environ.get("DATABASE_URL", "")
         # Convert async driver URLs to sync for psycopg2-based tools
-        env_url = env_url.replace("+asyncpg", "").replace("postgresql+asyncpg", "postgresql")
+        env_url = env_url.replace("+asyncpg", "").replace(
+            "postgresql+asyncpg", "postgresql"
+        )
         self._default_conn = default_connection or env_url
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         query = arguments.get("query", "").strip()
         conn_str = arguments.get("connection_string", "") or self._default_conn
         max_rows = min(arguments.get("max_rows", 1000), 10_000)
-        params = arguments.get("params", {})
+        arguments.get("params", {})
 
         if not query:
             return ToolResult(content="Error: query is required", is_error=True)
@@ -97,12 +110,19 @@ class DatabaseQueryTool(BaseTool):
                 ssl_mode = None
                 if "?ssl=" in clean_conn or "&ssl=" in clean_conn:
                     from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+
                     parsed = urlparse(clean_conn)
                     q = dict(parse_qsl(parsed.query))
                     raw_ssl = q.pop("ssl", "") or q.pop("sslmode", "")
                     if raw_ssl in ("disable", "off", "false", "0", ""):
                         ssl_mode = False
-                    elif raw_ssl in ("require", "verify-ca", "verify-full", "on", "true"):
+                    elif raw_ssl in (
+                        "require",
+                        "verify-ca",
+                        "verify-full",
+                        "on",
+                        "true",
+                    ):
                         ssl_mode = True
                     clean_conn = urlunparse(parsed._replace(query=urlencode(q)))
                 connect_kwargs = {"timeout": 30}
@@ -122,19 +142,27 @@ class DatabaseQueryTool(BaseTool):
 
                     # Convert non-serializable types
                     import json
+
                     for row in data:
                         for k, v in row.items():
-                            if not isinstance(v, (str, int, float, bool, type(None), list, dict)):
+                            if not isinstance(
+                                v, (str, int, float, bool, type(None), list, dict)
+                            ):
                                 row[k] = str(v)
 
-                    return ToolResult(content=json.dumps({
-                        "status": "success",
-                        "columns": columns,
-                        "row_count": len(data),
-                        "rows": data[:50],  # First 50 rows inline
-                        "total_available": len(data),
-                        "truncated": len(data) > 50,
-                    }, default=str))
+                    return ToolResult(
+                        content=json.dumps(
+                            {
+                                "status": "success",
+                                "columns": columns,
+                                "row_count": len(data),
+                                "rows": data[:50],  # First 50 rows inline
+                                "total_available": len(data),
+                                "truncated": len(data) > 50,
+                            },
+                            default=str,
+                        )
+                    )
                 finally:
                     await conn.close()
             else:
@@ -144,6 +172,11 @@ class DatabaseQueryTool(BaseTool):
                 )
 
         except ImportError:
-            return ToolResult(content="Error: asyncpg not installed. Install with: pip install asyncpg", is_error=True)
+            return ToolResult(
+                content="Error: asyncpg not installed. Install with: pip install asyncpg",
+                is_error=True,
+            )
         except Exception as e:
-            return ToolResult(content=f"Database query error: {str(e)[:500]}", is_error=True)
+            return ToolResult(
+                content=f"Database query error: {str(e)[:500]}", is_error=True
+            )

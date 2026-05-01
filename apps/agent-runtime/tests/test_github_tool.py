@@ -12,7 +12,6 @@ import pytest
 
 from engine.tools.github_tool import GitHubTool
 
-
 # ── Helpers ───────────────────────────────────────────────────────
 
 
@@ -73,13 +72,16 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "get_repo",
-                "owner": "owner",
-                "repo": "abenix",
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "get_repo",
+                    "owner": "owner",
+                    "repo": "abenix",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -101,14 +103,17 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "list_files",
-                "owner": "owner",
-                "repo": "abenix",
-                "branch": "main",
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "list_files",
+                    "owner": "owner",
+                    "repo": "abenix",
+                    "branch": "main",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -131,14 +136,17 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "read_file",
-                "owner": "owner",
-                "repo": "abenix",
-                "path": "README.md",
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "read_file",
+                    "owner": "owner",
+                    "repo": "abenix",
+                    "path": "README.md",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -171,14 +179,17 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "search_code",
-                "owner": "owner",
-                "repo": "abenix",
-                "query": "PipelineExecutor",
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "search_code",
+                    "owner": "owner",
+                    "repo": "abenix",
+                    "query": "PipelineExecutor",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -187,9 +198,7 @@ class TestGitHubTool:
         assert parsed["items"][0]["path"] == "src/engine.py"
 
     @pytest.mark.asyncio
-    async def test_list_issues_with_state_filter(
-        self, tool: GitHubTool
-    ) -> None:
+    async def test_list_issues_with_state_filter(self, tool: GitHubTool) -> None:
         """list_issues returns issues filtered by state."""
         api_data = [
             {
@@ -216,14 +225,17 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "list_issues",
-                "owner": "owner",
-                "repo": "abenix",
-                "state": "open",
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "list_issues",
+                    "owner": "owner",
+                    "repo": "abenix",
+                    "state": "open",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -252,13 +264,16 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "list_pull_requests",
-                "owner": "owner",
-                "repo": "abenix",
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "list_pull_requests",
+                    "owner": "owner",
+                    "repo": "abenix",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -293,14 +308,17 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "get_commits",
-                "owner": "owner",
-                "repo": "abenix",
-                "per_page": 5,
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "get_commits",
+                    "owner": "owner",
+                    "repo": "abenix",
+                    "per_page": 5,
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -315,13 +333,16 @@ class TestGitHubTool:
 
         mock_cm = _build_mock_client(mock_response(api_data))
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "get_languages",
-                "owner": "owner",
-                "repo": "abenix",
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "get_languages",
+                    "owner": "owner",
+                    "repo": "abenix",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -335,11 +356,13 @@ class TestGitHubTool:
         """When GITHUB_TOKEN is not set, the tool returns an error."""
         with patch.dict(os.environ, {"GITHUB_TOKEN": ""}, clear=False):
             tool = GitHubTool()
-            result = await tool.execute({
-                "operation": "get_repo",
-                "owner": "owner",
-                "repo": "abenix",
-            })
+            result = await tool.execute(
+                {
+                    "operation": "get_repo",
+                    "owner": "owner",
+                    "repo": "abenix",
+                }
+            )
 
         assert result.is_error
         assert "GITHUB_TOKEN" in result.content
@@ -347,18 +370,21 @@ class TestGitHubTool:
     @pytest.mark.asyncio
     async def test_api_error_returns_error(self, tool: GitHubTool) -> None:
         """A 404 API response returns a proper error."""
-        error_response = mock_response(
-            {"message": "Not Found"}, status_code=404
-        )
+        error_response = mock_response({"message": "Not Found"}, status_code=404)
         mock_cm = _build_mock_client(error_response)
 
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), \
-             patch("httpx.AsyncClient", return_value=mock_cm):
-            result = await tool.execute({
-                "operation": "get_repo",
-                "owner": "owner",
-                "repo": "nonexistent",
-            })
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-token-123"}), patch(
+            "httpx.AsyncClient", return_value=mock_cm
+        ):
+            result = await tool.execute(
+                {
+                    "operation": "get_repo",
+                    "owner": "owner",
+                    "repo": "nonexistent",
+                }
+            )
 
         assert result.is_error
-        assert "error" in result.content.lower() or "not found" in result.content.lower()
+        assert (
+            "error" in result.content.lower() or "not found" in result.content.lower()
+        )

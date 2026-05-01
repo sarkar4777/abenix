@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -19,10 +18,10 @@ class CircuitState(str, Enum):
 
 @dataclass
 class CircuitBreakerConfig:
-    failure_threshold: int = 5       # Failures before opening
-    recovery_timeout: float = 60.0   # Seconds before trying half-open
-    half_open_max_calls: int = 2     # Max calls in half-open state
-    success_threshold: int = 2       # Successes in half-open to close
+    failure_threshold: int = 5  # Failures before opening
+    recovery_timeout: float = 60.0  # Seconds before trying half-open
+    half_open_max_calls: int = 2  # Max calls in half-open state
+    success_threshold: int = 2  # Successes in half-open to close
 
 
 def _circuit_key(tool_name: str) -> str:
@@ -147,7 +146,12 @@ class CircuitBreaker:
 class ResilientToolRegistry:
     """Wraps ToolRegistry with circuit breaker protection."""
 
-    def __init__(self, registry: Any, circuit_breaker: CircuitBreaker, fallbacks: dict[str, str] | None = None):
+    def __init__(
+        self,
+        registry: Any,
+        circuit_breaker: CircuitBreaker,
+        fallbacks: dict[str, str] | None = None,
+    ):
         self._registry = registry
         self._cb = circuit_breaker
         self._fallbacks = fallbacks or {}  # tool_name -> fallback_tool_name
@@ -166,6 +170,7 @@ class ResilientToolRegistry:
                     return result
 
             from engine.tools.base import ToolResult
+
             return ToolResult(
                 content=f"Tool '{tool_name}' is temporarily unavailable (circuit open). Please try again later.",
                 is_error=True,
@@ -175,6 +180,7 @@ class ResilientToolRegistry:
         tool = self._registry.get(tool_name)
         if not tool:
             from engine.tools.base import ToolResult
+
             return ToolResult(content=f"Tool '{tool_name}' not found.", is_error=True)
 
         try:
@@ -187,4 +193,5 @@ class ResilientToolRegistry:
         except Exception as e:
             await self._cb.record_failure(tool_name)
             from engine.tools.base import ToolResult
+
             return ToolResult(content=f"Tool execution failed: {e}", is_error=True)

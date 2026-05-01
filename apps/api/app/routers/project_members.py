@@ -1,4 +1,5 @@
 """Per-project membership grants."""
+
 from __future__ import annotations
 
 import sys
@@ -16,7 +17,8 @@ from app.core.deps import get_current_user, get_db
 from app.core.permissions import is_admin
 from app.core.responses import error, success
 from app.services.project_access import (
-    assert_project_role, list_project_members,
+    assert_project_role,
+    list_project_members,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -70,26 +72,35 @@ async def add_member(
     p = await db.get(KnowledgeProject, project_id)
     if p is None or p.tenant_id != user.tenant_id:
         return error("Project not found", 404)
-    if not (is_admin(user) or await assert_project_role(
-        db, user_id=user.id, project_id=project_id,
-        minimum_role=ProjectRole.ADMIN,
-    )):
+    if not (
+        is_admin(user)
+        or await assert_project_role(
+            db,
+            user_id=user.id,
+            project_id=project_id,
+            minimum_role=ProjectRole.ADMIN,
+        )
+    ):
         return error("Forbidden — project ADMIN required", 403)
 
     recipient = await db.get(User, body.user_id)
     if recipient is None or recipient.tenant_id != user.tenant_id:
         return error("User not found in this tenant", 404)
 
-    existing = (await db.execute(
-        select(ProjectMember).where(
-            ProjectMember.project_id == project_id,
-            ProjectMember.user_id == body.user_id,
+    existing = (
+        await db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == body.user_id,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if existing is None:
         existing = ProjectMember(
-            project_id=project_id, user_id=body.user_id,
-            role=body.role, granted_by=user.id,
+            project_id=project_id,
+            user_id=body.user_id,
+            role=body.role,
+            granted_by=user.id,
         )
         db.add(existing)
     else:
@@ -110,10 +121,15 @@ async def remove_member(
     p = await db.get(KnowledgeProject, project_id)
     if p is None or p.tenant_id != user.tenant_id:
         return error("Project not found", 404)
-    if not (is_admin(user) or await assert_project_role(
-        db, user_id=user.id, project_id=project_id,
-        minimum_role=ProjectRole.ADMIN,
-    )):
+    if not (
+        is_admin(user)
+        or await assert_project_role(
+            db,
+            user_id=user.id,
+            project_id=project_id,
+            minimum_role=ProjectRole.ADMIN,
+        )
+    ):
         return error("Forbidden — project ADMIN required", 403)
 
     # Refuse to remove the project creator if they're the only ADMIN —
@@ -121,7 +137,8 @@ async def remove_member(
     # still recover, but UI should warn first.
     if p.created_by == user_id:
         admin_count = sum(
-            1 for m in await list_project_members(db, project_id=project_id)
+            1
+            for m in await list_project_members(db, project_id=project_id)
             if m.role == ProjectRole.ADMIN
         )
         if admin_count <= 1:
@@ -130,12 +147,14 @@ async def remove_member(
                 409,
             )
 
-    target = (await db.execute(
-        select(ProjectMember).where(
-            ProjectMember.project_id == project_id,
-            ProjectMember.user_id == user_id,
+    target = (
+        await db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if target is None:
         return error("Member not found", 404)
     await db.delete(target)

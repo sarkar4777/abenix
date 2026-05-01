@@ -49,7 +49,9 @@ TOKEN_ENCRYPT_KEY = os.environ.get("MCP_TOKEN_KEY", "abenix-mcp-default-key-32b!
 def _encrypt_token(token: str) -> str:
     """Simple XOR obfuscation for stored OAuth tokens."""
     key = hashlib.sha256(TOKEN_ENCRYPT_KEY.encode()).digest()
-    encrypted = bytes(a ^ b for a, b in zip(token.encode(), key * (len(token) // len(key) + 1)))
+    encrypted = bytes(
+        a ^ b for a, b in zip(token.encode(), key * (len(token) // len(key) + 1))
+    )
     return base64.b64encode(encrypted).decode()
 
 
@@ -70,7 +72,9 @@ def _serialize_connection(c: UserMCPConnection) -> dict[str, Any]:
         "discovered_tools": c.discovered_tools,
         "health_status": c.health_status,
         "is_enabled": c.is_enabled,
-        "last_health_check": c.last_health_check.isoformat() if c.last_health_check else None,
+        "last_health_check": (
+            c.last_health_check.isoformat() if c.last_health_check else None
+        ),
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "oauth2_configured": bool(c.oauth2_client_id),
         "oauth2_connected": bool(c.oauth2_access_token_enc),
@@ -120,7 +124,9 @@ async def list_connections(
         UserMCPConnection.user_id == user.id,
     )
     if search:
-        count_base = count_base.where(UserMCPConnection.server_name.ilike(f"%{search}%"))
+        count_base = count_base.where(
+            UserMCPConnection.server_name.ilike(f"%{search}%")
+        )
     count_query = select(func.count()).select_from(count_base.subquery())
     total = await db.scalar(count_query) or 0
 
@@ -208,7 +214,13 @@ async def create_connection(
     await db.commit()
     await db.refresh(conn)
 
-    await log_action(db, user.tenant_id, user.id, "mcp.connected", {"server_name": body.server_name, "server_url": body.server_url})
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "mcp.connected",
+        {"server_name": body.server_name, "server_url": body.server_url},
+    )
     await db.commit()
 
     return success(_serialize_connection(conn), status_code=201)
@@ -343,12 +355,14 @@ async def discover_tools(
     await db.commit()
     await db.refresh(conn)
 
-    return success({
-        "connection_id": str(connection_id),
-        "server_name": conn.server_name,
-        "tools": discovered,
-        "tools_count": len(discovered),
-    })
+    return success(
+        {
+            "connection_id": str(connection_id),
+            "server_name": conn.server_name,
+            "tools": discovered,
+            "tools_count": len(discovered),
+        }
+    )
 
 
 @router.post("/discover")
@@ -373,7 +387,12 @@ async def discover_url(
         try:
             resources_raw = await client.list_resources()
             resources = [
-                {"uri": r.uri, "name": r.name, "description": r.description, "mime_type": r.mime_type}
+                {
+                    "uri": r.uri,
+                    "name": r.name,
+                    "description": r.description,
+                    "mime_type": r.mime_type,
+                }
                 for r in resources_raw
             ]
         except Exception:
@@ -404,15 +423,17 @@ async def discover_url(
         for t in tools
     ]
 
-    return success({
-        "server_info": client.server_info,
-        "tools": discovered_tools,
-        "resources": resources,
-        "prompts": prompts,
-        "tools_count": len(discovered_tools),
-        "resources_count": len(resources),
-        "prompts_count": len(prompts),
-    })
+    return success(
+        {
+            "server_info": client.server_info,
+            "tools": discovered_tools,
+            "resources": resources,
+            "prompts": prompts,
+            "tools_count": len(discovered_tools),
+            "resources_count": len(resources),
+            "prompts_count": len(prompts),
+        }
+    )
 
 
 @router.post("/connections/{connection_id}/health")
@@ -447,11 +468,13 @@ async def check_health(
     conn.last_health_check = datetime.now(timezone.utc)
     await db.commit()
 
-    return success({
-        "connection_id": str(connection_id),
-        "healthy": healthy,
-        "checked_at": conn.last_health_check.isoformat(),
-    })
+    return success(
+        {
+            "connection_id": str(connection_id),
+            "healthy": healthy,
+            "checked_at": conn.last_health_check.isoformat(),
+        }
+    )
 
 
 @router.get("/connections/{connection_id}/resources")
@@ -488,7 +511,12 @@ async def list_resources(
         await client.close()
 
     data = [
-        {"uri": r.uri, "name": r.name, "description": r.description, "mime_type": r.mime_type}
+        {
+            "uri": r.uri,
+            "name": r.name,
+            "description": r.description,
+            "mime_type": r.mime_type,
+        }
         for r in resources
     ]
     return success(data, meta={"count": len(data)})
@@ -528,12 +556,14 @@ async def read_resource(
     finally:
         await client.close()
 
-    return success({
-        "uri": content.uri,
-        "mime_type": content.mime_type,
-        "text": content.text,
-        "has_blob": content.blob is not None,
-    })
+    return success(
+        {
+            "uri": content.uri,
+            "mime_type": content.mime_type,
+            "text": content.text,
+            "has_blob": content.blob is not None,
+        }
+    )
 
 
 @router.get("/connections/{connection_id}/prompts")
@@ -638,9 +668,11 @@ async def oauth2_start(
         return error("OAuth2 authorization_url and client_id must be configured", 400)
 
     code_verifier = secrets.token_urlsafe(64)
-    code_challenge = base64.urlsafe_b64encode(
-        hashlib.sha256(code_verifier.encode()).digest()
-    ).rstrip(b"=").decode()
+    code_challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
+        .rstrip(b"=")
+        .decode()
+    )
     state = secrets.token_urlsafe(32)
 
     from urllib.parse import urlencode
@@ -656,11 +688,13 @@ async def oauth2_start(
     }
     auth_url = f"{conn.oauth2_authorization_url}?{urlencode(params)}"
 
-    return success({
-        "authorization_url": auth_url,
-        "state": state,
-        "code_verifier": code_verifier,
-    })
+    return success(
+        {
+            "authorization_url": auth_url,
+            "state": state,
+            "code_verifier": code_verifier,
+        }
+    )
 
 
 @router.post("/oauth2/callback")
@@ -690,7 +724,9 @@ async def oauth2_callback(
         "code": body.code,
         "code_verifier": body.code_verifier,
         "client_id": conn.oauth2_client_id,
-        "redirect_uri": conn.auth_config.get("redirect_uri", "") if conn.auth_config else "",
+        "redirect_uri": (
+            conn.auth_config.get("redirect_uri", "") if conn.auth_config else ""
+        ),
     }
 
     try:
@@ -710,24 +746,39 @@ async def oauth2_callback(
         conn.oauth2_refresh_token_enc = _encrypt_token(refresh_token)
     if expires_in:
         from datetime import timedelta
-        conn.oauth2_token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
+        conn.oauth2_token_expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=expires_in
+        )
 
     conn.auth_config = {**(conn.auth_config or {}), "access_token": access_token}
 
     await db.commit()
     await db.refresh(conn)
 
-    await log_action(db, user.tenant_id, user.id, "mcp.oauth2_connected", {
-        "connection_id": body.connection_id,
-        "server_name": conn.server_name,
-    })
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "mcp.oauth2_connected",
+        {
+            "connection_id": body.connection_id,
+            "server_name": conn.server_name,
+        },
+    )
     await db.commit()
 
-    return success({
-        "connection_id": body.connection_id,
-        "connected": True,
-        "expires_at": conn.oauth2_token_expires_at.isoformat() if conn.oauth2_token_expires_at else None,
-    })
+    return success(
+        {
+            "connection_id": body.connection_id,
+            "connected": True,
+            "expires_at": (
+                conn.oauth2_token_expires_at.isoformat()
+                if conn.oauth2_token_expires_at
+                else None
+            ),
+        }
+    )
 
 
 @router.get("/agents/{agent_id}/tools")
@@ -816,7 +867,9 @@ async def detach_tool(
 
     await db.delete(tool)
     await db.commit()
-    return success({"agent_id": str(agent_id), "tool_name": body.tool_name, "detached": True})
+    return success(
+        {"agent_id": str(agent_id), "tool_name": body.tool_name, "detached": True}
+    )
 
 
 @router.get("/registry")
@@ -885,10 +938,16 @@ async def install_from_registry(
     await db.commit()
     await db.refresh(conn)
 
-    await log_action(db, user.tenant_id, user.id, "mcp.installed_from_registry", {
-        "registry_id": body.registry_id,
-        "server_url": entry.server_url,
-    })
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "mcp.installed_from_registry",
+        {
+            "registry_id": body.registry_id,
+            "server_url": entry.server_url,
+        },
+    )
     await db.commit()
 
     return success(_serialize_connection(conn), status_code=201)
@@ -994,7 +1053,9 @@ async def sync_registry(
     synced = 0
     for entry in curated:
         existing = await db.execute(
-            select(MCPRegistryCache).where(MCPRegistryCache.registry_id == entry["registry_id"])
+            select(MCPRegistryCache).where(
+                MCPRegistryCache.registry_id == entry["registry_id"]
+            )
         )
         record = existing.scalar_one_or_none()
         if record:

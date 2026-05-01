@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import uuid
@@ -62,7 +61,10 @@ class KnowledgeStoreTool(BaseTool):
         if not content:
             return ToolResult(content="Error: content is required", is_error=True)
         if not self.kb_ids:
-            return ToolResult(content="Error: no knowledge base configured for this agent", is_error=True)
+            return ToolResult(
+                content="Error: no knowledge base configured for this agent",
+                is_error=True,
+            )
 
         kb_id = self.kb_ids[0]  # Use the first attached KB
         doc_id = str(uuid.uuid4())
@@ -82,12 +84,21 @@ class KnowledgeStoreTool(BaseTool):
 
             embeddings = await self._embed_chunks(chunks)
             if embeddings:
-                stored = await self._store_vectors(kb_id, doc_id, title, chunks, embeddings, metadata)
+                stored = await self._store_vectors(
+                    kb_id, doc_id, title, chunks, embeddings, metadata
+                )
                 results["vector_indexed"] = True
                 results["vectors_stored"] = stored
-                logger.info("knowledge_store: indexed %d vectors for doc %s in kb %s", stored, doc_id, kb_id)
+                logger.info(
+                    "knowledge_store: indexed %d vectors for doc %s in kb %s",
+                    stored,
+                    doc_id,
+                    kb_id,
+                )
             else:
-                results["vector_error"] = "No embeddings generated (check OPENAI_API_KEY)"
+                results["vector_error"] = (
+                    "No embeddings generated (check OPENAI_API_KEY)"
+                )
 
         except Exception as e:
             logger.warning("knowledge_store vector indexing failed: %s", e)
@@ -102,7 +113,9 @@ class KnowledgeStoreTool(BaseTool):
                     cognify_doc = {
                         "id": doc_id,
                         "filename": title,
-                        "chunks": chunks if 'chunks' in dir() else self._chunk_text(content),
+                        "chunks": (
+                            chunks if "chunks" in dir() else self._chunk_text(content)
+                        ),
                     }
 
                     cognify_result = await run_cognify(
@@ -115,11 +128,17 @@ class KnowledgeStoreTool(BaseTool):
                     )
 
                     results["cognify_status"] = cognify_result.status
-                    results["entities_extracted"] = cognify_result.entities_after_resolution
-                    results["relationships_written"] = cognify_result.relationships_written
+                    results["entities_extracted"] = (
+                        cognify_result.entities_after_resolution
+                    )
+                    results["relationships_written"] = (
+                        cognify_result.relationships_written
+                    )
                     logger.info(
                         "knowledge_store: cognified doc %s — %d entities, %d relationships",
-                        doc_id, cognify_result.entities_after_resolution, cognify_result.relationships_written,
+                        doc_id,
+                        cognify_result.entities_after_resolution,
+                        cognify_result.relationships_written,
                     )
                 else:
                     results["cognify_status"] = "skipped"
@@ -133,10 +152,14 @@ class KnowledgeStoreTool(BaseTool):
         status = "stored" if results["vector_indexed"] else "partial"
         summary_parts = [f"Content '{title}' {status} in knowledge base {kb_id}."]
         summary_parts.append(f"Document ID: {doc_id}")
-        summary_parts.append(f"Content length: {len(content)} characters, {results.get('chunks', 0)} chunks")
+        summary_parts.append(
+            f"Content length: {len(content)} characters, {results.get('chunks', 0)} chunks"
+        )
 
         if results["vector_indexed"]:
-            summary_parts.append(f"Vector store: {results.get('vectors_stored', 0)} embeddings indexed")
+            summary_parts.append(
+                f"Vector store: {results.get('vectors_stored', 0)} embeddings indexed"
+            )
         elif results.get("vector_error"):
             summary_parts.append(f"Vector store: failed — {results['vector_error']}")
 
@@ -155,7 +178,9 @@ class KnowledgeStoreTool(BaseTool):
         )
 
     @staticmethod
-    def _chunk_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> list[str]:
+    def _chunk_text(
+        text: str, chunk_size: int = 1000, chunk_overlap: int = 200
+    ) -> list[str]:
         """Chunk text using simple sliding window (no langchain dependency)."""
         chunks = []
         start = 0
@@ -176,11 +201,12 @@ class KnowledgeStoreTool(BaseTool):
 
         try:
             from openai import OpenAI
+
             client = OpenAI(api_key=api_key)
             embeddings = []
             batch_size = 100
             for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i + batch_size]
+                batch = chunks[i : i + batch_size]
                 response = client.embeddings.create(
                     model="text-embedding-3-small",
                     input=batch,
@@ -193,8 +219,11 @@ class KnowledgeStoreTool(BaseTool):
 
     @staticmethod
     async def _store_vectors(
-        kb_id: str, doc_id: str, title: str,
-        chunks: list[str], embeddings: list[list[float]],
+        kb_id: str,
+        doc_id: str,
+        title: str,
+        chunks: list[str],
+        embeddings: list[list[float]],
         metadata: dict[str, Any] | None = None,
     ) -> int:
         """Store vectors in Pinecone."""
@@ -216,15 +245,17 @@ class KnowledgeStoreTool(BaseTool):
                 }
                 if metadata:
                     vec_meta.update({k: str(v)[:200] for k, v in metadata.items()})
-                vectors.append({
-                    "id": f"{doc_id}_{i}",
-                    "values": emb,
-                    "metadata": vec_meta,
-                })
+                vectors.append(
+                    {
+                        "id": f"{doc_id}_{i}",
+                        "values": emb,
+                        "metadata": vec_meta,
+                    }
+                )
 
             # Upsert in batches of 100
             for i in range(0, len(vectors), 100):
-                index.upsert(vectors=vectors[i:i + 100], namespace=kb_id)
+                index.upsert(vectors=vectors[i : i + 100], namespace=kb_id)
 
             return len(vectors)
         except Exception as e:

@@ -73,7 +73,10 @@ class MemoryStoreTool(BaseTool):
 
             import sys
             from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
+
+            sys.path.insert(
+                0, str(Path(__file__).resolve().parents[3] / "packages" / "db")
+            )
             from models.agent_memory import AgentMemory, MemoryType
 
             async with AsyncSession(engine, expire_on_commit=False) as db:
@@ -108,7 +111,12 @@ class MemoryStoreTool(BaseTool):
                 # Also store in MemPalace hierarchy (enhanced memory)
                 try:
                     from engine.memory.palace import MemoryPalace
-                    palace = MemoryPalace(db=db, agent_id=uuid_mod.UUID(self._agent_id), tenant_id=uuid_mod.UUID(self._tenant_id))
+
+                    palace = MemoryPalace(
+                        db=db,
+                        agent_id=uuid_mod.UUID(self._agent_id),
+                        tenant_id=uuid_mod.UUID(self._tenant_id),
+                    )
                     await palace.store(
                         content=value,
                         key=key,

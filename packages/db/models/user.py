@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Enum, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,12 +32,8 @@ class User(UUIDMixin, TenantMixin, TimestampMixin, Base):
         Enum(UserRole, name="user_role"), default=UserRole.USER
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    stripe_connect_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
-    stripe_connect_onboarded: Mapped[bool] = mapped_column(
-        Boolean, default=False
-    )
+    stripe_connect_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stripe_connect_onboarded: Mapped[bool] = mapped_column(Boolean, default=False)
     notification_settings: Mapped[dict | None] = mapped_column(
         JSONB, nullable=True, default=dict
     )
@@ -50,9 +46,7 @@ class User(UUIDMixin, TenantMixin, TimestampMixin, Base):
     cost_monthly_limit: Mapped[float | None] = mapped_column(
         Numeric(10, 2), nullable=True, default=None
     )
-    cost_used_this_month: Mapped[float] = mapped_column(
-        Numeric(10, 4), default=0
-    )
+    cost_used_this_month: Mapped[float] = mapped_column(Numeric(10, 4), default=0)
     quota_reset_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

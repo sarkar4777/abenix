@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import asyncio
-import json
-import hashlib
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from engine.cache.exact_cache import ExactCache, TTL_SECONDS, TEMP_THRESHOLD, _cache_key
+from engine.cache.exact_cache import ExactCache, _cache_key
 from engine.cache.prompt_optimizer import PromptCacheOptimizer
-from engine.cache.orchestrator import CacheOrchestrator, CacheResult, _extract_last_user_text
-
+from engine.cache.orchestrator import (
+    CacheOrchestrator,
+    _extract_last_user_text,
+)
 
 # ── ExactCache ────────────────────────────────────────────────
 
@@ -49,16 +47,24 @@ SAMPLE_RESPONSE = {"content": "Hi there!", "model": "claude-sonnet-4-5-20250929"
 
 @pytest.mark.asyncio
 async def test_exact_cache_miss(exact_cache: ExactCache) -> None:
-    result = await exact_cache.get("claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.3)
+    result = await exact_cache.get(
+        "claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.3
+    )
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_exact_cache_hit(exact_cache: ExactCache) -> None:
     await exact_cache.set(
-        "claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.3, SAMPLE_RESPONSE
+        "claude-sonnet-4-5-20250929",
+        SAMPLE_MESSAGES,
+        SAMPLE_TOOLS,
+        0.3,
+        SAMPLE_RESPONSE,
     )
-    result = await exact_cache.get("claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.3)
+    result = await exact_cache.get(
+        "claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.3
+    )
     assert result is not None
     assert result["content"] == "Hi there!"
 
@@ -66,19 +72,31 @@ async def test_exact_cache_hit(exact_cache: ExactCache) -> None:
 @pytest.mark.asyncio
 async def test_exact_cache_skips_high_temperature(exact_cache: ExactCache) -> None:
     await exact_cache.set(
-        "claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.8, SAMPLE_RESPONSE
+        "claude-sonnet-4-5-20250929",
+        SAMPLE_MESSAGES,
+        SAMPLE_TOOLS,
+        0.8,
+        SAMPLE_RESPONSE,
     )
-    result = await exact_cache.get("claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.8)
+    result = await exact_cache.get(
+        "claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.8
+    )
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_exact_cache_different_messages_miss(exact_cache: ExactCache) -> None:
     await exact_cache.set(
-        "claude-sonnet-4-5-20250929", SAMPLE_MESSAGES, SAMPLE_TOOLS, 0.3, SAMPLE_RESPONSE
+        "claude-sonnet-4-5-20250929",
+        SAMPLE_MESSAGES,
+        SAMPLE_TOOLS,
+        0.3,
+        SAMPLE_RESPONSE,
     )
     different = [{"role": "user", "content": "Goodbye"}]
-    result = await exact_cache.get("claude-sonnet-4-5-20250929", different, SAMPLE_TOOLS, 0.3)
+    result = await exact_cache.get(
+        "claude-sonnet-4-5-20250929", different, SAMPLE_TOOLS, 0.3
+    )
     assert result is None
 
 

@@ -4,12 +4,11 @@ import hashlib
 import secrets
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -121,12 +120,17 @@ async def update_api_key(
         key.scopes = body["scopes"]
     if "expires_at" in body:
         from datetime import datetime
-        key.expires_at = datetime.fromisoformat(body["expires_at"]) if body["expires_at"] else None
+
+        key.expires_at = (
+            datetime.fromisoformat(body["expires_at"]) if body["expires_at"] else None
+        )
 
     await db.commit()
-    return success({
-        "id": str(key.id),
-        "name": key.name,
-        "key_prefix": key.key_prefix,
-        "scopes": key.scopes,
-    })
+    return success(
+        {
+            "id": str(key.id),
+            "name": key.name,
+            "key_prefix": key.key_prefix,
+            "scopes": key.scopes,
+        }
+    )

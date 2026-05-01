@@ -7,7 +7,6 @@ import io
 import json
 import logging
 import os
-import sys
 import traceback
 from typing import Any
 
@@ -19,59 +18,128 @@ MAX_EXECUTION_TIME = 30  # Increased from 10s for complex operations
 MAX_OUTPUT_SIZE = 100_000
 EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
 
-CORE_MODULES = frozenset({
-    # Standard library — math & numbers
-    "math", "statistics", "decimal", "fractions", "cmath",
-    # Standard library — date & time
-    "datetime", "calendar", "time", "zoneinfo",
-    # Standard library — text processing
-    "json", "csv", "re", "string", "textwrap", "html", "xml",
-    # Standard library — data structures & functional
-    "collections", "itertools", "functools", "operator", "copy",
-    "dataclasses", "typing", "enum", "abc",
-    # Standard library — encoding & hashing
-    "hashlib", "base64", "binascii", "struct", "codecs",
-    # Standard library — I/O & formatting
-    "io", "pprint", "difflib",
-    # Standard library — misc utilities
-    "random", "uuid", "array", "bisect", "heapq",
-    "contextlib", "warnings",
-})
+CORE_MODULES = frozenset(
+    {
+        # Standard library — math & numbers
+        "math",
+        "statistics",
+        "decimal",
+        "fractions",
+        "cmath",
+        # Standard library — date & time
+        "datetime",
+        "calendar",
+        "time",
+        "zoneinfo",
+        # Standard library — text processing
+        "json",
+        "csv",
+        "re",
+        "string",
+        "textwrap",
+        "html",
+        "xml",
+        # Standard library — data structures & functional
+        "collections",
+        "itertools",
+        "functools",
+        "operator",
+        "copy",
+        "dataclasses",
+        "typing",
+        "enum",
+        "abc",
+        # Standard library — encoding & hashing
+        "hashlib",
+        "base64",
+        "binascii",
+        "struct",
+        "codecs",
+        # Standard library — I/O & formatting
+        "io",
+        "pprint",
+        "difflib",
+        # Standard library — misc utilities
+        "random",
+        "uuid",
+        "array",
+        "bisect",
+        "heapq",
+        "contextlib",
+        "warnings",
+    }
+)
 
-EXTENDED_MODULES = frozenset({
-    # Data science
-    "pandas", "numpy", "scipy",
-    # Excel / spreadsheets
-    "openpyxl", "xlrd", "xlsxwriter",
-    # PDF generation
-    "reportlab", "fpdf",
-    # Charting & visualization (non-interactive backends)
-    "matplotlib", "seaborn", "plotly",
-    # HTML / XML parsing
-    "bs4", "lxml",
-    # Image processing
-    "PIL", "pillow",
-    # Scientific / ML (read-only, no training)
-    "sklearn", "scikit_learn",
-    # PowerPoint
-    "pptx",
-    # Tabular display
-    "tabulate", "prettytable",
-    # Compression
-    "zipfile", "gzip", "tarfile",
-})
+EXTENDED_MODULES = frozenset(
+    {
+        # Data science
+        "pandas",
+        "numpy",
+        "scipy",
+        # Excel / spreadsheets
+        "openpyxl",
+        "xlrd",
+        "xlsxwriter",
+        # PDF generation
+        "reportlab",
+        "fpdf",
+        # Charting & visualization (non-interactive backends)
+        "matplotlib",
+        "seaborn",
+        "plotly",
+        # HTML / XML parsing
+        "bs4",
+        "lxml",
+        # Image processing
+        "PIL",
+        "pillow",
+        # Scientific / ML (read-only, no training)
+        "sklearn",
+        "scikit_learn",
+        # PowerPoint
+        "pptx",
+        # Tabular display
+        "tabulate",
+        "prettytable",
+        # Compression
+        "zipfile",
+        "gzip",
+        "tarfile",
+    }
+)
 
 # Combined allowed set for the validator
 ALLOWED_MODULES = CORE_MODULES | EXTENDED_MODULES
 
-FORBIDDEN_NAMES = frozenset({
-    "exec", "eval", "compile", "input",
-    "breakpoint", "exit", "quit", "globals", "locals",
-    "setattr", "delattr", "__builtins__",
-    "subprocess", "os", "sys", "shutil", "pathlib",
-    "importlib", "ctypes", "socket", "http",
-    "aiohttp", "urllib", "requests", "httpx",
-})
+FORBIDDEN_NAMES = frozenset(
+    {
+        "exec",
+        "eval",
+        "compile",
+        "input",
+        "breakpoint",
+        "exit",
+        "quit",
+        "globals",
+        "locals",
+        "setattr",
+        "delattr",
+        "__builtins__",
+        "subprocess",
+        "os",
+        "sys",
+        "shutil",
+        "pathlib",
+        "importlib",
+        "ctypes",
+        "socket",
+        "http",
+        "aiohttp",
+        "urllib",
+        "requests",
+        "httpx",
+    }
+)
 # Note: "open" is not forbidden — a sandboxed _safe_open is provided
 # that only allows writes to EXPORT_DIR.
 # Note: "getattr" allowed for pandas/numpy attribute access.
@@ -107,20 +175,48 @@ class _CodeValidator(ast.NodeVisitor):
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__") and node.attr.endswith("__"):
-            safe_dunders = ("__init__", "__str__", "__repr__", "__len__",
-                           "__getitem__", "__setitem__", "__iter__", "__next__",
-                           "__enter__", "__exit__", "__contains__", "__eq__",
-                           "__lt__", "__gt__", "__le__", "__ge__", "__ne__",
-                           "__hash__", "__bool__", "__call__", "__name__",
-                           "__class__", "__dict__", "__doc__", "__module__",
-                           "__add__", "__sub__", "__mul__", "__truediv__",
-                           "__floordiv__", "__mod__", "__pow__")
+            safe_dunders = (
+                "__init__",
+                "__str__",
+                "__repr__",
+                "__len__",
+                "__getitem__",
+                "__setitem__",
+                "__iter__",
+                "__next__",
+                "__enter__",
+                "__exit__",
+                "__contains__",
+                "__eq__",
+                "__lt__",
+                "__gt__",
+                "__le__",
+                "__ge__",
+                "__ne__",
+                "__hash__",
+                "__bool__",
+                "__call__",
+                "__name__",
+                "__class__",
+                "__dict__",
+                "__doc__",
+                "__module__",
+                "__add__",
+                "__sub__",
+                "__mul__",
+                "__truediv__",
+                "__floordiv__",
+                "__mod__",
+                "__pow__",
+            )
             if node.attr not in safe_dunders:
                 self.errors.append(f"Access to dunder '{node.attr}' is not allowed")
         self.generic_visit(node)
 
 
-def _validate_code(code: str, allowed_modules: frozenset[str] | set[str] = ALLOWED_MODULES) -> list[str]:
+def _validate_code(
+    code: str, allowed_modules: frozenset[str] | set[str] = ALLOWED_MODULES
+) -> list[str]:
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
@@ -187,15 +283,24 @@ class CodeExecutorTool(BaseTool):
         # Handle extra_modules — LLM safety validation for user-requested packages
         session_allowed = set(ALLOWED_MODULES)
         if extra_modules and isinstance(extra_modules, list):
-            new_modules = [m.strip() for m in extra_modules if isinstance(m, str) and m.strip()]
+            new_modules = [
+                m.strip() for m in extra_modules if isinstance(m, str) and m.strip()
+            ]
             # Filter out already-allowed and always-forbidden modules
-            to_validate = [m for m in new_modules if m not in session_allowed and m not in FORBIDDEN_NAMES]
+            to_validate = [
+                m
+                for m in new_modules
+                if m not in session_allowed and m not in FORBIDDEN_NAMES
+            ]
             if to_validate:
                 validated = await self._validate_extra_modules(to_validate, code)
                 if validated.get("rejected"):
                     return ToolResult(
-                        content=f"Module safety review failed:\n" +
-                                "\n".join(f"  - {m}: {r}" for m, r in zip(to_validate, validated.get("reasons", []))),
+                        content="Module safety review failed:\n"
+                        + "\n".join(
+                            f"  - {m}: {r}"
+                            for m, r in zip(to_validate, validated.get("reasons", []))
+                        ),
                         is_error=True,
                     )
                 session_allowed.update(validated.get("approved", []))
@@ -203,7 +308,8 @@ class CodeExecutorTool(BaseTool):
         errors = _validate_code(code, allowed_modules=session_allowed)
         if errors:
             return ToolResult(
-                content=f"Code validation failed:\n" + "\n".join(f"  - {e}" for e in errors),
+                content="Code validation failed:\n"
+                + "\n".join(f"  - {e}" for e in errors),
                 is_error=True,
             )
 
@@ -220,7 +326,9 @@ class CodeExecutorTool(BaseTool):
         def _safe_import(name: str, *args: Any, **kwargs: Any) -> Any:
             top = name.split(".")[0]
             if top not in session_allowed:
-                raise ImportError(f"Import not allowed: {name}. Use extra_modules to request it.")
+                raise ImportError(
+                    f"Import not allowed: {name}. Use extra_modules to request it."
+                )
             return __import__(name, *args, **kwargs)
 
         # Sandboxed file I/O — only allows writing inside EXPORT_DIR
@@ -228,10 +336,18 @@ class CodeExecutorTool(BaseTool):
         _export_dir_resolved = os.path.realpath(EXPORT_DIR)
 
         def _safe_open(filepath: str, mode: str = "r", **kwargs: Any) -> Any:
-            resolved = os.path.realpath(os.path.join(_export_dir_resolved, os.path.basename(filepath)))
+            resolved = os.path.realpath(
+                os.path.join(_export_dir_resolved, os.path.basename(filepath))
+            )
             if not resolved.startswith(_export_dir_resolved):
-                raise PermissionError(f"File access restricted to export directory. Use just a filename, e.g. open('output.xlsx', 'wb')")
-            return __builtins__["open"](resolved, mode, **kwargs) if isinstance(__builtins__, dict) else open(resolved, mode, **kwargs)
+                raise PermissionError(
+                    "File access restricted to export directory. Use just a filename, e.g. open('output.xlsx', 'wb')"
+                )
+            return (
+                __builtins__["open"](resolved, mode, **kwargs)
+                if isinstance(__builtins__, dict)
+                else open(resolved, mode, **kwargs)
+            )
 
         def _save_export(filename: str, data: bytes | str) -> str:
             """Convenience: save binary or text data to the export directory. Returns the full path."""
@@ -243,7 +359,9 @@ class CodeExecutorTool(BaseTool):
 
         safe_builtins = {
             "__import__": _safe_import,
-            "print": lambda *args, **kwargs: print(*args, file=stdout_capture, **kwargs),
+            "print": lambda *args, **kwargs: print(
+                *args, file=stdout_capture, **kwargs
+            ),
             "open": _safe_open,
             "save_export": _save_export,
             "len": len,
@@ -333,8 +451,20 @@ class CodeExecutorTool(BaseTool):
                 last_expr = None
                 if tree.body and isinstance(tree.body[-1], ast.Expr):
                     last_expr = tree.body.pop()
-                    exec(compile(ast.Module(body=tree.body, type_ignores=[]), "<sandbox>", "exec"), safe_globals)
-                    result_value = eval(compile(ast.Expression(body=last_expr.value), "<sandbox>", "eval"), safe_globals)
+                    exec(
+                        compile(
+                            ast.Module(body=tree.body, type_ignores=[]),
+                            "<sandbox>",
+                            "exec",
+                        ),
+                        safe_globals,
+                    )
+                    result_value = eval(
+                        compile(
+                            ast.Expression(body=last_expr.value), "<sandbox>", "eval"
+                        ),
+                        safe_globals,
+                    )
                 else:
                     exec(compile(tree, "<sandbox>", "exec"), safe_globals)
             except Exception as e:
@@ -354,7 +484,9 @@ class CodeExecutorTool(BaseTool):
             e = exec_exception[0]
             tb = traceback.format_exception(type(e), e, e.__traceback__)
             lines = "".join(tb).split("\n")
-            relevant = [l for l in lines if not l.startswith("  File") or "<sandbox>" in l]
+            relevant = [
+                ln for ln in lines if not ln.startswith("  File") or "<sandbox>" in ln
+            ]
             return ToolResult(
                 content=f"Execution error: {type(e).__name__}: {e}\n\n{''.join(relevant[-5:])}",
                 is_error=True,
@@ -362,7 +494,10 @@ class CodeExecutorTool(BaseTool):
 
         output = stdout_capture.getvalue()
         if len(output) > MAX_OUTPUT_SIZE:
-            output = output[:MAX_OUTPUT_SIZE] + f"\n[Truncated at {MAX_OUTPUT_SIZE} characters]"
+            output = (
+                output[:MAX_OUTPUT_SIZE]
+                + f"\n[Truncated at {MAX_OUTPUT_SIZE} characters]"
+            )
 
         parts = []
         if output:
@@ -378,23 +513,51 @@ class CodeExecutorTool(BaseTool):
 
         return ToolResult(
             content=content,
-            metadata={"has_output": bool(output), "has_result": result_value is not None},
+            metadata={
+                "has_output": bool(output),
+                "has_result": result_value is not None,
+            },
         )
 
-    async def _validate_extra_modules(self, modules: list[str], code: str) -> dict[str, Any]:
+    async def _validate_extra_modules(
+        self, modules: list[str], code: str
+    ) -> dict[str, Any]:
         """Use LLM to validate whether requested extra modules are safe to allow.
 
         Returns {"approved": [...], "rejected": [...], "reasons": [...]}
         """
         # Hard-reject modules that are always dangerous
         always_reject = {
-            "subprocess", "os", "sys", "shutil", "pathlib", "importlib",
-            "ctypes", "socket", "http", "urllib", "requests", "httpx",
-            "aiohttp", "asyncio", "multiprocessing", "threading",
-            "signal", "pty", "fcntl", "resource", "grp", "pwd",
-            "pickle", "shelve", "marshal",  # deserialization attacks
-            "code", "codeop", "compileall",  # code execution
-            "webbrowser", "antigravity",  # unexpected side effects
+            "subprocess",
+            "os",
+            "sys",
+            "shutil",
+            "pathlib",
+            "importlib",
+            "ctypes",
+            "socket",
+            "http",
+            "urllib",
+            "requests",
+            "httpx",
+            "aiohttp",
+            "asyncio",
+            "multiprocessing",
+            "threading",
+            "signal",
+            "pty",
+            "fcntl",
+            "resource",
+            "grp",
+            "pwd",
+            "pickle",
+            "shelve",
+            "marshal",  # deserialization attacks
+            "code",
+            "codeop",
+            "compileall",  # code execution
+            "webbrowser",
+            "antigravity",  # unexpected side effects
         }
 
         approved: list[str] = []
@@ -407,7 +570,9 @@ class CodeExecutorTool(BaseTool):
             top = mod.split(".")[0]
             if top in always_reject or top in FORBIDDEN_NAMES:
                 rejected.append(mod)
-                reasons.append(f"Module '{mod}' provides system/network access and is not permitted")
+                reasons.append(
+                    f"Module '{mod}' provides system/network access and is not permitted"
+                )
             else:
                 needs_llm_review.append(mod)
 
@@ -417,6 +582,7 @@ class CodeExecutorTool(BaseTool):
         # LLM safety review for non-obvious modules
         try:
             from engine.llm_router import LLMRouter
+
             llm = LLMRouter()
 
             review_prompt = f"""You are a security reviewer for a sandboxed Python code executor.
@@ -454,7 +620,7 @@ Respond with JSON ONLY:
 
             text = resp.content.strip()
             if "{" in text:
-                result = json.loads(text[text.index("{"):text.rindex("}") + 1])
+                result = json.loads(text[text.index("{") : text.rindex("}") + 1])
                 for decision in result.get("decisions", []):
                     mod = decision.get("module", "")
                     if mod not in needs_llm_review:
@@ -463,26 +629,34 @@ Respond with JSON ONLY:
                         approved.append(mod)
                     else:
                         rejected.append(mod)
-                        reasons.append(f"{mod}: {decision.get('reason', 'Rejected by safety review')}")
+                        reasons.append(
+                            f"{mod}: {decision.get('reason', 'Rejected by safety review')}"
+                        )
 
                 # Any modules not in the LLM response default to rejected
                 reviewed = {d.get("module") for d in result.get("decisions", [])}
                 for mod in needs_llm_review:
                     if mod not in reviewed:
                         rejected.append(mod)
-                        reasons.append(f"{mod}: Not reviewed — defaulting to reject for safety")
+                        reasons.append(
+                            f"{mod}: Not reviewed — defaulting to reject for safety"
+                        )
             else:
                 # LLM didn't return valid JSON — reject all
                 for mod in needs_llm_review:
                     rejected.append(mod)
-                    reasons.append(f"{mod}: Safety review failed — could not parse LLM response")
+                    reasons.append(
+                        f"{mod}: Safety review failed — could not parse LLM response"
+                    )
 
         except Exception as e:
             logger.warning("Extra module LLM validation failed: %s", e)
             # On LLM failure, reject all extra modules for safety
             for mod in needs_llm_review:
                 rejected.append(mod)
-                reasons.append(f"{mod}: Safety review unavailable — defaulting to reject")
+                reasons.append(
+                    f"{mod}: Safety review unavailable — defaulting to reject"
+                )
 
         return {
             "approved": approved,

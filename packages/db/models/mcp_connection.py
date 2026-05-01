@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,9 +10,7 @@ from models.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 class UserMCPConnection(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "user_mcp_connections"
-    __table_args__ = (
-        Index("ix_mcp_conn_tenant_user", "tenant_id", "user_id"),
-    )
+    __table_args__ = (Index("ix_mcp_conn_tenant_user", "tenant_id", "user_id"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), index=True
@@ -29,7 +27,9 @@ class UserMCPConnection(UUIDMixin, TenantMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     oauth2_client_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    oauth2_authorization_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    oauth2_authorization_url: Mapped[str | None] = mapped_column(
+        String(1000), nullable=True
+    )
     oauth2_token_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     oauth2_access_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     oauth2_refresh_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -57,9 +57,7 @@ class AgentMCPTool(UUIDMixin, Base):
     tool_name: Mapped[str] = mapped_column(String(255))
     tool_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
-    max_calls_per_execution: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )
+    max_calls_per_execution: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     agent: Mapped["Agent"] = relationship(back_populates="mcp_tools")
     mcp_connection: Mapped["UserMCPConnection"] = relationship(
@@ -75,9 +73,7 @@ class MCPRegistryCache(UUIDMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="")
     server_url: Mapped[str] = mapped_column(String(1000))
     auth_type: Mapped[str] = mapped_column(String(50), default="none")
-    categories: Mapped[list[str] | None] = mapped_column(
-        ARRAY(Text), nullable=True
-    )
+    categories: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     tools_count: Mapped[int] = mapped_column(Integer, default=0)
     popularity_score: Mapped[float] = mapped_column(Integer, default=0)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)

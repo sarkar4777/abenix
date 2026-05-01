@@ -1,4 +1,5 @@
 """Meeting lifecycle routes."""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import desc, select, update
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -52,8 +53,13 @@ def _meeting_dict(m: Meeting) -> dict[str, Any]:
 
 
 async def _notify_execution_failure(
-    *, tenant_id: Any, user_id: Any, execution_id: Any,
-    agent_id: Any = None, error: str = "", meeting_id: str | None = None,
+    *,
+    tenant_id: Any,
+    user_id: Any,
+    execution_id: Any,
+    agent_id: Any = None,
+    error: str = "",
+    meeting_id: str | None = None,
 ) -> None:
     """Persist + push an execution_failed notification."""
     try:
@@ -87,11 +93,14 @@ async def _notify_execution_failure(
         # Real-time push
         try:
             await ws_manager.send_to_user(
-                user_id, "notification",
+                user_id,
+                "notification",
                 {
                     "id": str(n.id),
                     "type": "execution_failed",
-                    "title": title, "message": msg, "link": link,
+                    "title": title,
+                    "message": msg,
+                    "link": link,
                     "metadata": metadata,
                     "created_at": n.created_at.isoformat() if n.created_at else None,
                 },
@@ -133,7 +142,9 @@ async def create_meeting(
     scheduled_at = None
     if scheduled_raw:
         try:
-            scheduled_at = datetime.fromisoformat(str(scheduled_raw).replace("Z", "+00:00"))
+            scheduled_at = datetime.fromisoformat(
+                str(scheduled_raw).replace("Z", "+00:00")
+            )
         except Exception:
             pass
 
@@ -190,17 +201,22 @@ async def mint_livekit_token(
     url = os.environ.get("LIVEKIT_URL", "").strip()
     if not (api_key and api_secret and url):
         return error("LiveKit server not configured on this deployment", 400)
-    browser_url = (os.environ.get("LIVEKIT_PUBLIC_URL", "").strip()
-                   or _browser_url_from_internal(url))
+    browser_url = os.environ.get(
+        "LIVEKIT_PUBLIC_URL", ""
+    ).strip() or _browser_url_from_internal(url)
     try:
         from livekit import api
     except ImportError:
         return error("livekit SDK not installed on server", 500)
     grant = api.VideoGrants(
-        room_join=True, room=room,
-        can_publish=True, can_subscribe=True, can_publish_data=True,
+        room_join=True,
+        room=room,
+        can_publish=True,
+        can_subscribe=True,
+        can_publish_data=True,
     )
     from datetime import timedelta
+
     token = (
         api.AccessToken(api_key, api_secret)
         .with_identity(f"user-{user.id}")
@@ -212,31 +228,41 @@ async def mint_livekit_token(
     # Build a one-click LiveKit Meet deep-link that auto-fills both fields.
     # https://meet.livekit.io/custom?liveKitUrl=<url>&token=<jwt>
     from urllib.parse import quote as _q
+
     deep_link = (
         f"https://meet.livekit.io/custom?liveKitUrl={_q(browser_url, safe='')}"
         f"&token={_q(token, safe='')}"
     )
-    return success({
-        "url": url,
-        "browser_url": browser_url,
-        "token": token,
-        "identity": f"user-{user.id}",
-        "deep_link": deep_link,
-    })
+    return success(
+        {
+            "url": url,
+            "browser_url": browser_url,
+            "token": token,
+            "identity": f"user-{user.id}",
+            "deep_link": deep_link,
+        }
+    )
 
 
 def _browser_url_from_internal(url: str) -> str:
     """Translate pod-internal LiveKit URLs to host-browser-reachable ones."""
     try:
         from urllib.parse import urlparse, urlunparse
+
         u = urlparse(url)
         host = (u.hostname or "").lower()
-        DEV_HOSTS = {"host.minikube.internal", "host.docker.internal", "kubernetes.docker.internal"}
+        DEV_HOSTS = {
+            "host.minikube.internal",
+            "host.docker.internal",
+            "kubernetes.docker.internal",
+        }
         if host in DEV_HOSTS or ("." not in host and host not in {"localhost"}):
             new_netloc = "localhost"
             if u.port:
                 new_netloc = f"localhost:{u.port}"
-            return urlunparse((u.scheme, new_netloc, u.path, u.params, u.query, u.fragment))
+            return urlunparse(
+                (u.scheme, new_netloc, u.path, u.params, u.query, u.fragment)
+            )
         return url
     except Exception:
         return url
@@ -266,24 +292,30 @@ async def get_meeting(
                 pass
     # Always include db-persisted deferrals so the history view survives Redis eviction
     q = await db.execute(
-        select(MeetingDeferral).where(MeetingDeferral.meeting_id == m.id).order_by(MeetingDeferral.created_at)
+        select(MeetingDeferral)
+        .where(MeetingDeferral.meeting_id == m.id)
+        .order_by(MeetingDeferral.created_at)
     )
     for d in q.scalars().all():
-        deferrals.append({
-            "id": str(d.id),
-            "question": d.question,
-            "context": d.context,
-            "answer": d.answer,
-            "status": d.status,
-            "created_at": d.created_at.isoformat() if d.created_at else None,
-            "answered_at": d.answered_at.isoformat() if d.answered_at else None,
-        })
-    return success({
-        **_meeting_dict(m),
-        "transcript": transcript,
-        "decisions": decisions,
-        "deferrals": deferrals,
-    })
+        deferrals.append(
+            {
+                "id": str(d.id),
+                "question": d.question,
+                "context": d.context,
+                "answer": d.answer,
+                "status": d.status,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "answered_at": d.answered_at.isoformat() if d.answered_at else None,
+            }
+        )
+    return success(
+        {
+            **_meeting_dict(m),
+            "transcript": transcript,
+            "decisions": decisions,
+            "deferrals": deferrals,
+        }
+    )
 
 
 @router.put("/{meeting_id}/authorize")
@@ -298,7 +330,9 @@ async def authorize_meeting(
         return error("not found", 404)
     scope_allow = [s.strip() for s in (body.get("scope_allow") or []) if str(s).strip()]
     scope_defer = [s.strip() for s in (body.get("scope_defer") or []) if str(s).strip()]
-    persona_scopes = [s.strip() for s in (body.get("persona_scopes") or ["self"]) if str(s).strip()]
+    persona_scopes = [
+        s.strip() for s in (body.get("persona_scopes") or ["self"]) if str(s).strip()
+    ]
     m.scope_allow = scope_allow
     m.scope_defer = scope_defer
     m.persona_scopes = persona_scopes
@@ -351,7 +385,8 @@ async def start_meeting(
         return error(f"meeting not startable in status '{m.status}'", 400)
     if not (m.scope_allow is not None):
         return error(
-            "Authorize the bot with a topic allow-list before starting.", 400,
+            "Authorize the bot with a topic allow-list before starting.",
+            400,
         )
     m.status = MeetingStatus.LIVE.value
     m.started_at = datetime.now(timezone.utc)
@@ -418,11 +453,13 @@ async def redispatch_bot(
                 pass
 
     asyncio.create_task(_run_meeting_agent(m, user, body or {}))
-    return success({
-        **_meeting_dict(m),
-        "redispatched": True,
-        "message": "Bot agent re-dispatched. New decisions will appear in the log shortly.",
-    })
+    return success(
+        {
+            **_meeting_dict(m),
+            "redispatched": True,
+            "message": "Bot agent re-dispatched. New decisions will appear in the log shortly.",
+        }
+    )
 
 
 @router.post("/{meeting_id}/inject-turn")
@@ -448,6 +485,7 @@ async def inject_turn(
         return error("redis unavailable", 500)
     try:
         import time as _t
+
         entry = {
             "participant": speaker,
             "text": text,
@@ -519,7 +557,7 @@ async def stream_meeting(
 async def _sse_events(meeting_id: str):
     r = await _redis()
     if r is None:
-        yield f"event: error\ndata: redis_unavailable\n\n"
+        yield "event: error\ndata: redis_unavailable\n\n"
         return
     pubsub = r.pubsub()
     channel = f"meeting:{meeting_id}:events"
@@ -544,7 +582,7 @@ async def _sse_events(meeting_id: str):
                     etype = payload.get("type", "event")
                     yield f"event: {etype}\ndata: {data}\n\n"
             if time.monotonic() - last_keepalive > 15:
-                yield f": keepalive\n\n"
+                yield ": keepalive\n\n"
                 last_keepalive = time.monotonic()
     finally:
         try:
@@ -565,19 +603,23 @@ async def list_deferrals(
     if not m:
         return error("not found", 404)
     q = await db.execute(
-        select(MeetingDeferral).where(MeetingDeferral.meeting_id == m.id).order_by(MeetingDeferral.created_at)
+        select(MeetingDeferral)
+        .where(MeetingDeferral.meeting_id == m.id)
+        .order_by(MeetingDeferral.created_at)
     )
     out = []
     for d in q.scalars().all():
-        out.append({
-            "id": str(d.id),
-            "question": d.question,
-            "context": d.context,
-            "answer": d.answer,
-            "status": d.status,
-            "created_at": d.created_at.isoformat() if d.created_at else None,
-            "answered_at": d.answered_at.isoformat() if d.answered_at else None,
-        })
+        out.append(
+            {
+                "id": str(d.id),
+                "question": d.question,
+                "context": d.context,
+                "answer": d.answer,
+                "status": d.status,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "answered_at": d.answered_at.isoformat() if d.answered_at else None,
+            }
+        )
     return success(out)
 
 
@@ -621,12 +663,17 @@ async def answer_deferral(
     except Exception:
         did = uuid.uuid4()
     # Try to find an existing pending row; if not, insert one so history is preserved.
-    existing = (await db.execute(
-        select(MeetingDeferral).where(MeetingDeferral.id == did)
-    )).scalars().first()
+    existing = (
+        (await db.execute(select(MeetingDeferral).where(MeetingDeferral.id == did)))
+        .scalars()
+        .first()
+    )
     if existing is None:
         existing = MeetingDeferral(
-            id=did, tenant_id=user.tenant_id, meeting_id=m.id, user_id=user.id,
+            id=did,
+            tenant_id=user.tenant_id,
+            meeting_id=m.id,
+            user_id=user.id,
             question=body.get("question") or "(see live transcript)",
             context=body.get("context"),
         )
@@ -653,11 +700,14 @@ async def _load(meeting_id: str, user: User, db: AsyncSession) -> Meeting | None
 async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
     """Run the Meeting Representative agent in-process for this meeting."""
     import logging as _logging
+
     log = _logging.getLogger(__name__)
 
     # Lazy imports to avoid import-time loops
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
+    sys.path.insert(
+        0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+    )
     try:
         from sqlalchemy import select as _sel
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -673,7 +723,9 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
 
     db_url = os.environ.get("DATABASE_URL", "").strip()
     if not db_url:
-        await sessmod.append_decision(str(m.id), "leave", "Bot startup failed: no DATABASE_URL")
+        await sessmod.append_decision(
+            str(m.id), "leave", "Bot startup failed: no DATABASE_URL"
+        )
         return
 
     # Open our own sessionmaker — the FastAPI request-scoped one is gone
@@ -682,21 +734,34 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
         engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=2)
         Session = async_sessionmaker(engine, expire_on_commit=False)
     except Exception as e:
-        await sessmod.append_decision(str(m.id), "leave", f"Bot startup: DB engine failed ({e})")
+        await sessmod.append_decision(
+            str(m.id), "leave", f"Bot startup: DB engine failed ({e})"
+        )
         return
 
     agent = None
     try:
         async with Session() as db2:
             if m.agent_id:
-                agent = (await db2.execute(_sel(Agent).where(Agent.id == m.agent_id))).scalars().first()
+                agent = (
+                    (await db2.execute(_sel(Agent).where(Agent.id == m.agent_id)))
+                    .scalars()
+                    .first()
+                )
             if not agent:
-                agent = (await db2.execute(
-                    _sel(Agent).where(Agent.slug == "meeting-representative")
-                )).scalars().first()
+                agent = (
+                    (
+                        await db2.execute(
+                            _sel(Agent).where(Agent.slug == "meeting-representative")
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
             if not agent:
                 await sessmod.append_decision(
-                    str(m.id), "leave",
+                    str(m.id),
+                    "leave",
                     "Bot startup failed: no agent found. Run packages/db/seeds/seed_agents.py to install the OOB Meeting Representative.",
                 )
                 return
@@ -710,9 +775,12 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
 
             # Persist an Execution row so the UI's executions view sees this
             execution = Execution(
-                tenant_id=user.tenant_id, agent_id=agent.id, user_id=user.id,
+                tenant_id=user.tenant_id,
+                agent_id=agent.id,
+                user_id=user.id,
                 input_message=f"meeting_id={m.id}",
-                status=ExecutionStatus.RUNNING, model_used=model,
+                status=ExecutionStatus.RUNNING,
+                model_used=model,
             )
             db2.add(execution)
             await db2.commit()
@@ -725,7 +793,8 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
         return
 
     await sessmod.append_decision(
-        str(m.id), "join",
+        str(m.id),
+        "join",
         f"Bot dispatched: agent={agent.name}, tools={len(tool_names)}",
         detail={"execution_id": execution_id, "model": model},
     )
@@ -762,7 +831,8 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
                     name = d.get("name", "?")
                     args_preview = json.dumps(d.get("arguments") or {})[:120]
                     await sessmod.append_decision(
-                        str(m.id), "answer",
+                        str(m.id),
+                        "answer",
                         f"→ {name}({args_preview})",
                         detail={"tool": name, "args": d.get("arguments")},
                     )
@@ -773,27 +843,37 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
                     content = str(d.get("content") or d.get("result") or "")[:200]
                     if is_err:
                         await sessmod.append_decision(
-                            str(m.id), "leave",
+                            str(m.id),
+                            "leave",
                             f"✗ {name} failed: {content}",
                             detail={"tool": name, "is_error": True, "result": content},
                         )
                     else:
                         await sessmod.append_decision(
-                            str(m.id), "answer",
+                            str(m.id),
+                            "answer",
                             f"✓ {name} → {content[:120]}",
                             detail={"tool": name, "result": content},
                         )
                 elif evt.event == "error":
-                    em = evt.data if isinstance(evt.data, dict) else {"message": str(evt.data)}
+                    em = (
+                        evt.data
+                        if isinstance(evt.data, dict)
+                        else {"message": str(evt.data)}
+                    )
                     await sessmod.append_decision(
-                        str(m.id), "leave", f"Agent error: {str(em.get('message') or em)[:200]}",
+                        str(m.id),
+                        "leave",
+                        f"Agent error: {str(em.get('message') or em)[:200]}",
                     )
                 elif evt.event == "done":
                     d = evt.data if isinstance(evt.data, dict) else {}
                     out = (d.get("output") or "")[:200]
                     if out:
                         await sessmod.append_decision(
-                            str(m.id), "leave", f"Agent finished. Final output: {out}",
+                            str(m.id),
+                            "leave",
+                            f"Agent finished. Final output: {out}",
                         )
             except Exception as _e:
                 # Don't let logging break the agent
@@ -815,8 +895,11 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
             # Fire an in-app notification so the user doesn't have to
             # monitor the dashboard — they hear about failures actively.
             await _notify_execution_failure(
-                tenant_id=m.tenant_id, user_id=user.id, execution_id=execution.id,
-                agent_id=m.agent_id, error=str(e)[:500],
+                tenant_id=m.tenant_id,
+                user_id=user.id,
+                execution_id=execution.id,
+                agent_id=m.agent_id,
+                error=str(e)[:500],
                 meeting_id=str(m.id),
             )
         except Exception:

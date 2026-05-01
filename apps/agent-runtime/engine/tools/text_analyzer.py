@@ -10,20 +10,116 @@ from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
-STOP_WORDS = frozenset({
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
-    "being", "have", "has", "had", "do", "does", "did", "will", "would",
-    "could", "should", "may", "might", "shall", "can", "this", "that",
-    "these", "those", "it", "its", "i", "you", "he", "she", "we", "they",
-    "me", "him", "her", "us", "them", "my", "your", "his", "our", "their",
-    "not", "no", "nor", "if", "then", "else", "when", "where", "how",
-    "what", "which", "who", "whom", "all", "each", "every", "both",
-    "few", "more", "most", "other", "some", "such", "than", "too", "very",
-    "just", "about", "above", "after", "again", "also", "any", "because",
-    "before", "between", "during", "into", "only", "over", "same", "so",
-    "through", "under", "until", "up", "while", "as",
-})
+STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "i",
+        "you",
+        "he",
+        "she",
+        "we",
+        "they",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "my",
+        "your",
+        "his",
+        "our",
+        "their",
+        "not",
+        "no",
+        "nor",
+        "if",
+        "then",
+        "else",
+        "when",
+        "where",
+        "how",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "all",
+        "each",
+        "every",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "than",
+        "too",
+        "very",
+        "just",
+        "about",
+        "above",
+        "after",
+        "again",
+        "also",
+        "any",
+        "because",
+        "before",
+        "between",
+        "during",
+        "into",
+        "only",
+        "over",
+        "same",
+        "so",
+        "through",
+        "under",
+        "until",
+        "up",
+        "while",
+        "as",
+    }
+)
 
 
 class TextAnalyzerTool(BaseTool):
@@ -48,8 +144,14 @@ class TextAnalyzerTool(BaseTool):
             "operation": {
                 "type": "string",
                 "enum": [
-                    "keywords", "statistics", "readability", "compare",
-                    "entities", "sections", "ngrams", "sentiment_words",
+                    "keywords",
+                    "statistics",
+                    "readability",
+                    "compare",
+                    "entities",
+                    "sections",
+                    "ngrams",
+                    "sentiment_words",
                 ],
                 "description": "Analysis operation to perform",
                 "default": "statistics",
@@ -70,6 +172,7 @@ class TextAnalyzerTool(BaseTool):
         # Coerce non-string text (from upstream node outputs) to a string
         if not isinstance(text, str):
             import json as _j
+
             text = _j.dumps(text, default=str)
 
         if not text.strip():
@@ -146,9 +249,17 @@ class TextAnalyzerTool(BaseTool):
             "sentence_count": len(sentences),
             "paragraph_count": len(paragraphs),
             "unique_words": len(unique_words),
-            "vocabulary_richness": round(len(unique_words) / len(words), 4) if words else 0,
-            "avg_word_length": round(sum(word_lengths) / len(word_lengths), 1) if word_lengths else 0,
-            "avg_sentence_length": round(sum(sentence_lengths) / len(sentence_lengths), 1) if sentence_lengths else 0,
+            "vocabulary_richness": (
+                round(len(unique_words) / len(words), 4) if words else 0
+            ),
+            "avg_word_length": (
+                round(sum(word_lengths) / len(word_lengths), 1) if word_lengths else 0
+            ),
+            "avg_sentence_length": (
+                round(sum(sentence_lengths) / len(sentence_lengths), 1)
+                if sentence_lengths
+                else 0
+            ),
             "longest_sentence_words": max(sentence_lengths) if sentence_lengths else 0,
             "shortest_sentence_words": min(sentence_lengths) if sentence_lengths else 0,
         }
@@ -172,7 +283,11 @@ class TextAnalyzerTool(BaseTool):
         flesch_reading = 206.835 - 1.015 * asl - 84.6 * asw
         flesch_kincaid = 0.39 * asl + 11.8 * asw - 15.59
         gunning_fog = 0.4 * (asl + 100 * complex_words / word_count)
-        coleman_liau = 0.0588 * (len("".join(words)) / word_count * 100) - 0.296 * (sentence_count / word_count * 100) - 15.8
+        coleman_liau = (
+            0.0588 * (len("".join(words)) / word_count * 100)
+            - 0.296 * (sentence_count / word_count * 100)
+            - 15.8
+        )
 
         if flesch_reading >= 90:
             level = "Very Easy (5th grade)"
@@ -234,8 +349,8 @@ class TextAnalyzerTool(BaseTool):
         counter2 = Counter(self._tokenize(second_text))
         all_words = set(counter1.keys()) | set(counter2.keys())
         dot = sum(counter1.get(w, 0) * counter2.get(w, 0) for w in all_words)
-        mag1 = math.sqrt(sum(v ** 2 for v in counter1.values()))
-        mag2 = math.sqrt(sum(v ** 2 for v in counter2.values()))
+        mag1 = math.sqrt(sum(v**2 for v in counter1.values()))
+        mag2 = math.sqrt(sum(v**2 for v in counter2.values()))
         cosine = dot / (mag1 * mag2) if mag1 and mag2 else 0
 
         stats1 = self._statistics(text, {})
@@ -247,7 +362,11 @@ class TextAnalyzerTool(BaseTool):
             "common_words": len(common),
             "unique_to_first": len(only_first),
             "unique_to_second": len(only_second),
-            "top_common": sorted(common, key=lambda w: counter1.get(w, 0) + counter2.get(w, 0), reverse=True)[:20],
+            "top_common": sorted(
+                common,
+                key=lambda w: counter1.get(w, 0) + counter2.get(w, 0),
+                reverse=True,
+            )[:20],
             "top_unique_first": list(only_first)[:10],
             "top_unique_second": list(only_second)[:10],
             "length_comparison": {
@@ -275,11 +394,15 @@ class TextAnalyzerTool(BaseTool):
         org_pattern = r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Inc|LLC|Ltd|Corp|Corporation|Company|Co|Group|Partners|Bank|University|Institute)\.?)"
         entities["organizations"] = list(set(re.findall(org_pattern, text)))[:20]
 
-        location_indicators = r"(?:in|at|from|near|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
+        location_indicators = (
+            r"(?:in|at|from|near|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
+        )
         entities["locations"] = list(set(re.findall(location_indicators, text)))[:20]
 
         date_pattern = r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b"
-        entities["dates"] = list(set(re.findall(date_pattern, text, re.IGNORECASE)))[:20]
+        entities["dates"] = list(set(re.findall(date_pattern, text, re.IGNORECASE)))[
+            :20
+        ]
 
         money_pattern = r"\$[\d,]+(?:\.\d{2})?"
         entities["money"] = list(set(re.findall(money_pattern, text)))[:20]
@@ -315,7 +438,9 @@ class TextAnalyzerTool(BaseTool):
             if is_heading:
                 if current:
                     current["end_line"] = i
-                    current["word_count"] = len(self._tokenize(current.get("_content", "")))
+                    current["word_count"] = len(
+                        self._tokenize(current.get("_content", ""))
+                    )
                     del current["_content"]
                     sections.append(current)
 
@@ -344,7 +469,7 @@ class TextAnalyzerTool(BaseTool):
         for n in [2, 3]:
             grams = []
             for i in range(len(words) - n + 1):
-                grams.append(" ".join(words[i:i + n]))
+                grams.append(" ".join(words[i : i + n]))
             counter = Counter(grams)
             result[f"{n}-grams"] = [
                 {"phrase": phrase, "count": count}
@@ -356,18 +481,62 @@ class TextAnalyzerTool(BaseTool):
 
     def _sentiment_words(self, text: str, args: dict[str, Any]) -> dict[str, Any]:
         positive = {
-            "good", "great", "excellent", "positive", "strong", "favorable",
-            "advantage", "benefit", "opportunity", "growth", "profit", "gain",
-            "success", "improve", "increase", "efficient", "effective",
-            "innovative", "reliable", "secure", "stable", "superior",
-            "optimal", "robust", "significant", "substantial", "promising",
+            "good",
+            "great",
+            "excellent",
+            "positive",
+            "strong",
+            "favorable",
+            "advantage",
+            "benefit",
+            "opportunity",
+            "growth",
+            "profit",
+            "gain",
+            "success",
+            "improve",
+            "increase",
+            "efficient",
+            "effective",
+            "innovative",
+            "reliable",
+            "secure",
+            "stable",
+            "superior",
+            "optimal",
+            "robust",
+            "significant",
+            "substantial",
+            "promising",
         }
         negative = {
-            "bad", "poor", "negative", "weak", "unfavorable", "risk",
-            "loss", "decline", "decrease", "failure", "problem", "issue",
-            "concern", "threat", "danger", "liability", "penalty",
-            "deteriorate", "volatile", "uncertain", "default", "breach",
-            "terminate", "damage", "adverse", "limited", "insufficient",
+            "bad",
+            "poor",
+            "negative",
+            "weak",
+            "unfavorable",
+            "risk",
+            "loss",
+            "decline",
+            "decrease",
+            "failure",
+            "problem",
+            "issue",
+            "concern",
+            "threat",
+            "danger",
+            "liability",
+            "penalty",
+            "deteriorate",
+            "volatile",
+            "uncertain",
+            "default",
+            "breach",
+            "terminate",
+            "damage",
+            "adverse",
+            "limited",
+            "insufficient",
         }
 
         words = self._tokenize(text)

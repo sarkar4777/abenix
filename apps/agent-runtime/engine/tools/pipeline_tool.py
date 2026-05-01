@@ -44,7 +44,11 @@ class PipelineAgentTool(BaseTool):
         self._timeout_seconds = timeout_seconds
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        from engine.pipeline import PipelineExecutor, parse_pipeline_nodes, serialize_pipeline_result
+        from engine.pipeline import (
+            PipelineExecutor,
+            parse_pipeline_nodes,
+            serialize_pipeline_result,
+        )
 
         context = arguments.get("context", {})
         message = arguments.get("message", "")

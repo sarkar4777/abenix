@@ -1,4 +1,5 @@
 """Agent Triggers — event-based (webhook) and scheduled (cron) execution."""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +17,7 @@ from app.core.responses import error, success
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.agent import Agent, AgentStatus, AgentType
@@ -28,6 +30,7 @@ router = APIRouter(prefix="/api/triggers", tags=["triggers"])
 def _next_cron_run(cron_expr: str) -> datetime | None:
     """Calculate next run time from a cron expression using croniter."""
     from app.core.scheduler import next_cron_run
+
     return next_cron_run(cron_expr)
 
 
@@ -42,7 +45,9 @@ async def create_trigger(
     trigger_type = body.get("trigger_type", "webhook")
     name = body.get("name", "")
     # Validate default_context is dict if provided
-    if body.get("default_context") is not None and not isinstance(body.get("default_context"), dict):
+    if body.get("default_context") is not None and not isinstance(
+        body.get("default_context"), dict
+    ):
         return error("default_context must be a JSON object", 400)
 
     if not agent_id:
@@ -68,7 +73,9 @@ async def create_trigger(
         created_by=user.id,
         trigger_type=trigger_type,
         name=name or f"{agent.name} trigger",
-        default_message=body.get("default_message", f"Triggered execution of {agent.name}"),
+        default_message=body.get(
+            "default_message", f"Triggered execution of {agent.name}"
+        ),
         default_context=body.get("default_context"),
         is_active=True,
     )
@@ -78,6 +85,7 @@ async def create_trigger(
     elif trigger_type == "schedule":
         cron_expr = body.get("cron_expression", "0 * * * *")  # Default: hourly
         from app.core.scheduler import is_valid_cron
+
         if not is_valid_cron(cron_expr):
             return error(f"Invalid cron expression: {cron_expr}", 400)
         trigger.cron_expression = cron_expr
@@ -103,7 +111,9 @@ async def create_trigger(
         result_data["webhook_token"] = trigger.webhook_token
     elif trigger_type == "schedule":
         result_data["cron_expression"] = trigger.cron_expression
-        result_data["next_run_at"] = trigger.next_run_at.isoformat() if trigger.next_run_at else None
+        result_data["next_run_at"] = (
+            trigger.next_run_at.isoformat() if trigger.next_run_at else None
+        )
 
     return success(result_data, status_code=201)
 
@@ -160,7 +170,9 @@ async def list_triggers(
             "trigger_type": t.trigger_type,
             "name": t.name,
             "is_active": t.is_active,
-            "webhook_url": f"/api/triggers/webhook/{t.webhook_token}" if t.webhook_token else None,
+            "webhook_url": (
+                f"/api/triggers/webhook/{t.webhook_token}" if t.webhook_token else None
+            ),
             "webhook_token": t.webhook_token,
             "cron_expression": t.cron_expression,
             "next_run_at": t.next_run_at.isoformat() if t.next_run_at else None,
@@ -249,9 +261,15 @@ async def receive_webhook(
     except Exception:
         payload = {}
 
-    message = payload.get("message", trigger.default_message or "Webhook triggered execution")
-    default_ctx = trigger.default_context if isinstance(trigger.default_context, dict) else {}
-    payload_ctx = payload.get("context", {}) if isinstance(payload.get("context"), dict) else {}
+    message = payload.get(
+        "message", trigger.default_message or "Webhook triggered execution"
+    )
+    default_ctx = (
+        trigger.default_context if isinstance(trigger.default_context, dict) else {}
+    )
+    payload_ctx = (
+        payload.get("context", {}) if isinstance(payload.get("context"), dict) else {}
+    )
     context = {**default_ctx, **payload_ctx}
 
     # Get the agent
@@ -262,20 +280,28 @@ async def receive_webhook(
 
     # Get the user who created the trigger (for execution context)
     from models.user import User as UserModel
-    user_result = await db.execute(select(UserModel).where(UserModel.id == trigger.created_by))
+
+    user_result = await db.execute(
+        select(UserModel).where(UserModel.id == trigger.created_by)
+    )
     trigger_user = user_result.scalar_one_or_none()
     if not trigger_user:
         return error("Trigger owner not found", 400)
 
     # Create execution (non-streaming, returns immediately with execution_id)
     from models.execution import Execution, ExecutionStatus
+
     execution = Execution(
         tenant_id=trigger.tenant_id,
         agent_id=trigger.agent_id,
         user_id=trigger.created_by,
         input_message=message,
         status=ExecutionStatus.RUNNING,
-        model_used=agent.model_config_.get("model", "claude-sonnet-4-5-20250929") if agent.model_config_ else "claude-sonnet-4-5-20250929",
+        model_used=(
+            agent.model_config_.get("model", "claude-sonnet-4-5-20250929")
+            if agent.model_config_
+            else "claude-sonnet-4-5-20250929"
+        ),
     )
     db.add(execution)
 
@@ -298,18 +324,22 @@ async def receive_webhook(
         )
     )
 
-    return success({
-        "execution_id": str(execution.id),
-        "agent_id": str(trigger.agent_id),
-        "agent_name": agent.name,
-        "status": "running",
-        "message": message,
-        "trigger_id": str(trigger.id),
-    }, status_code=202)
+    return success(
+        {
+            "execution_id": str(execution.id),
+            "agent_id": str(trigger.agent_id),
+            "agent_name": agent.name,
+            "status": "running",
+            "message": message,
+            "trigger_id": str(trigger.id),
+        },
+        status_code=202,
+    )
 
 
 def _get_db_url() -> str:
     from app.core.config import settings
+
     return str(settings.database_url).replace("+asyncpg", "")
 
 
@@ -326,7 +356,6 @@ async def _execute_triggered_agent(
     try:
         from engine.llm_router import LLMRouter
         from engine.agent_executor import AgentExecutor, build_tool_registry
-        from app.core.config import settings
 
         model_cfg = agent.model_config_ or {}
         tool_names = model_cfg.get("tools", [])
@@ -358,14 +387,21 @@ async def _execute_triggered_agent(
 
         # Update execution in database
         import asyncpg
-        conn = await asyncpg.connect(f"postgresql://{db_url.split('://', 1)[1]}" if "://" in db_url else db_url)
+
+        conn = await asyncpg.connect(
+            f"postgresql://{db_url.split('://', 1)[1]}" if "://" in db_url else db_url
+        )
         try:
             await conn.execute(
                 "UPDATE executions SET status = 'COMPLETED', output_message = $1, "
                 "input_tokens = $2, output_tokens = $3, cost = $4, duration_ms = $5, "
                 "completed_at = now() WHERE id = $6::uuid",
-                result.output[:10000], result.input_tokens, result.output_tokens,
-                float(result.cost), result.duration_ms, execution_id,
+                result.output[:10000],
+                result.input_tokens,
+                result.output_tokens,
+                float(result.cost),
+                result.duration_ms,
+                execution_id,
             )
             # Update trigger status
             await conn.execute(
@@ -382,10 +418,16 @@ async def _execute_triggered_agent(
         # would silently keep accumulating failures forever.
         try:
             import asyncpg
-            conn = await asyncpg.connect(f"postgresql://{db_url.split('://', 1)[1]}" if "://" in db_url else db_url)
+
+            conn = await asyncpg.connect(
+                f"postgresql://{db_url.split('://', 1)[1]}"
+                if "://" in db_url
+                else db_url
+            )
             await conn.execute(
                 "UPDATE executions SET status = 'FAILED', error_message = $1, completed_at = now() WHERE id = $2::uuid",
-                str(e)[:1000], execution_id,
+                str(e)[:1000],
+                execution_id,
             )
             await conn.execute(
                 "UPDATE agent_triggers SET last_status = 'failed' WHERE id = $1::uuid",
@@ -406,6 +448,7 @@ async def _execute_triggered_agent(
                 from models.notification import Notification, NotificationType
                 from app.core.deps import async_session
                 from app.core.ws_manager import ws_manager
+
                 async with async_session() as ndb:
                     n = Notification(
                         tenant_id=row["tenant_id"],
@@ -413,7 +456,7 @@ async def _execute_triggered_agent(
                         type=NotificationType.EXECUTION_FAILED,
                         title="Scheduled trigger failed",
                         message=f"Trigger {trigger_id[:8]} failed: {str(e)[:400]}",
-                        link=f"/triggers",
+                        link="/triggers",
                         metadata_={
                             "execution_id": execution_id,
                             "trigger_id": trigger_id,
@@ -424,7 +467,8 @@ async def _execute_triggered_agent(
                     await ndb.commit()
                 try:
                     await ws_manager.send_to_user(
-                        row["created_by"], "notification",
+                        row["created_by"],
+                        "notification",
                         {
                             "type": "execution_failed",
                             "title": "Scheduled trigger failed",

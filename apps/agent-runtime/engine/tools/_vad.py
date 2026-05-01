@@ -1,4 +1,5 @@
 """Simple energy-based Voice Activity Detection for streaming STT."""
+
 from __future__ import annotations
 
 import array
@@ -10,15 +11,15 @@ from typing import List
 class StreamingVAD:
     sample_rate: int = 16_000
     frame_ms: int = 30
-    speech_ratio: float = 2.5          # ~3 dB above noise floor = speech
-    hangover_ms: int = 600             # be more patient between words
+    speech_ratio: float = 2.5  # ~3 dB above noise floor = speech
+    hangover_ms: int = 600  # be more patient between words
     min_utterance_ms: int = 250
     max_utterance_ms: int = 15_000
-    min_speech_floor: float = 80.0     # absolute energy floor below which
-                                        # we treat as silence regardless of
-                                        # noise_floor ratio (catches very
-                                        # quiet rooms where everything reads
-                                        # as "above noise floor")
+    min_speech_floor: float = 80.0  # absolute energy floor below which
+    # we treat as silence regardless of
+    # noise_floor ratio (catches very
+    # quiet rooms where everything reads
+    # as "above noise floor")
 
     # internal
     _frame_bytes: int = field(init=False, default=0)
@@ -58,7 +59,9 @@ class StreamingVAD:
                     self._buffer.clear()
                 self._buffer.extend(frame)
                 self._last_speech_ms = self._clock_ms
-                if len(self._buffer) >= int(self.sample_rate * 2 * self.max_utterance_ms / 1000):
+                if len(self._buffer) >= int(
+                    self.sample_rate * 2 * self.max_utterance_ms / 1000
+                ):
                     utt = bytes(self._buffer)
                     self._buffer.clear()
                     self._in_speech = False
@@ -70,14 +73,18 @@ class StreamingVAD:
                     self._buffer.extend(frame)  # include hangover tail
                     if self._clock_ms - self._last_speech_ms >= self.hangover_ms:
                         self._in_speech = False
-                        if len(self._buffer) >= int(self.sample_rate * 2 * self.min_utterance_ms / 1000):
+                        if len(self._buffer) >= int(
+                            self.sample_rate * 2 * self.min_utterance_ms / 1000
+                        ):
                             finalized.append(bytes(self._buffer))
                         self._buffer.clear()
         return finalized
 
     def flush(self) -> bytes:
         """Return any in-progress speech buffer, clear state. Call at end-of-window."""
-        if len(self._buffer) >= int(self.sample_rate * 2 * self.min_utterance_ms / 1000):
+        if len(self._buffer) >= int(
+            self.sample_rate * 2 * self.min_utterance_ms / 1000
+        ):
             out = bytes(self._buffer)
         else:
             out = b""

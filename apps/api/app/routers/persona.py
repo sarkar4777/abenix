@@ -1,19 +1,18 @@
 """Persona feed — the UI's hook for adding ring-fenced data to the KB."""
+
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, delete as sa_delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -29,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/persona", tags=["persona"])
 
 # Persona chunks live in their own Pinecone namespace per tenant.
-_CHUNK_SIZE = 1200   # characters; ~300 tokens
+_CHUNK_SIZE = 1200  # characters; ~300 tokens
 _CHUNK_OVERLAP = 150
 
 
@@ -66,7 +65,11 @@ async def list_scopes(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    q = select(PersonaItem.persona_scope).where(PersonaItem.user_id == user.id).distinct()
+    q = (
+        select(PersonaItem.persona_scope)
+        .where(PersonaItem.user_id == user.id)
+        .distinct()
+    )
     rows = (await db.execute(q)).scalars().all()
     scopes = sorted({s for s in rows if s})
     if "self" not in scopes:
@@ -135,7 +138,8 @@ async def add_note(
         user_id=str(user.id),
         item_id=str(p.id),
         persona_scope=scope,
-        title=title, filename="note",
+        title=title,
+        filename="note",
         chunks=chunks,
     )
     p.chunk_count = len(ids)
@@ -189,7 +193,8 @@ async def upload_file(
         user_id=str(user.id),
         item_id=str(p.id),
         persona_scope=scope,
-        title=title, filename=file.filename or "upload",
+        title=title,
+        filename=file.filename or "upload",
         chunks=chunks,
     )
     p.chunk_count = len(ids)
@@ -204,15 +209,19 @@ async def get_voice(
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
     """Return the caller's voice-clone state."""
-    return success({
-        "voice_id": user.voice_id,
-        "voice_provider": user.voice_provider,
-        "voice_consent_at": (
-            user.voice_consent_at.isoformat() if user.voice_consent_at else None
-        ),
-        "has_clone": bool(user.voice_id and user.voice_consent_at),
-        "elevenlabs_configured": bool(os.environ.get("ELEVENLABS_API_KEY", "").strip()),
-    })
+    return success(
+        {
+            "voice_id": user.voice_id,
+            "voice_provider": user.voice_provider,
+            "voice_consent_at": (
+                user.voice_consent_at.isoformat() if user.voice_consent_at else None
+            ),
+            "has_clone": bool(user.voice_id and user.voice_consent_at),
+            "elevenlabs_configured": bool(
+                os.environ.get("ELEVENLABS_API_KEY", "").strip()
+            ),
+        }
+    )
 
 
 @router.post("/voice/consent")
@@ -225,13 +234,16 @@ async def record_voice_consent(
     if not body.get("agree"):
         return error("Must agree to consent text", 400)
     from datetime import datetime as _dt, timezone as _tz
+
     user.voice_consent_at = _dt.now(_tz.utc)
     await db.commit()
-    return success({
-        "voice_consent_at": user.voice_consent_at.isoformat(),
-        "voice_id": user.voice_id,
-        "voice_provider": user.voice_provider,
-    })
+    return success(
+        {
+            "voice_consent_at": user.voice_consent_at.isoformat(),
+            "voice_id": user.voice_id,
+            "voice_provider": user.voice_provider,
+        }
+    )
 
 
 @router.post("/voice/revoke")
@@ -250,15 +262,18 @@ async def revoke_voice(
     provider_deleted = False
     if old_voice_id and old_provider == "elevenlabs":
         from engine.tools._voice_clone import elevenlabs_delete_voice  # type: ignore
+
         try:
             provider_deleted = await elevenlabs_delete_voice(voice_id=old_voice_id)
         except Exception:
             pass
-    return success({
-        "revoked": True,
-        "provider_deleted": provider_deleted,
-        "old_voice_id": old_voice_id,
-    })
+    return success(
+        {
+            "revoked": True,
+            "provider_deleted": provider_deleted,
+            "old_voice_id": old_voice_id,
+        }
+    )
 
 
 @router.post("/voice/upload")
@@ -282,6 +297,7 @@ async def upload_voice_clip(
     if len(raw) > 50 * 1024 * 1024:
         return error("reference clip must be <= 50 MB", 400)
     from engine.tools._voice_clone import elevenlabs_clone_voice  # type: ignore
+
     try:
         voice_id = await elevenlabs_clone_voice(
             name=(name or f"Abenix-{user.id}")[:60],
@@ -296,6 +312,7 @@ async def upload_voice_clip(
         # commonly "paid_plan_required" for free-tier ElevenLabs accounts.
         try:
             import json as _json
+
             packed = _json.loads(str(e))
             pe = packed.get("provider_error") or {}
             msg = pe.get("message") or "voice clone provider rejected the upload"
@@ -303,7 +320,11 @@ async def upload_voice_clip(
             sc = packed.get("status_code") or 502
             # Map the common upgrade-required case to 402 so the UI can
             # render an actionable message instead of "internal error".
-            if "instant_voice_cloning" in str(code) or "paid_plan" in str(code) or sc == 401:
+            if (
+                "instant_voice_cloning" in str(code)
+                or "paid_plan" in str(code)
+                or sc == 401
+            ):
                 return error(
                     f"ElevenLabs: {msg} (your account plan does not include voice cloning).",
                     402,
@@ -319,15 +340,17 @@ async def upload_voice_clip(
     user.voice_provider = "elevenlabs"
     # consent remains NULL until the user explicitly calls /voice/consent
     await db.commit()
-    return success({
-        "voice_id": voice_id,
-        "voice_provider": "elevenlabs",
-        "consent_required": True,
-        "message": (
-            "Voice cloned. The bot CANNOT use it until you record consent "
-            "via POST /api/persona/voice/consent."
-        ),
-    })
+    return success(
+        {
+            "voice_id": voice_id,
+            "voice_provider": "elevenlabs",
+            "consent_required": True,
+            "message": (
+                "Voice cloned. The bot CANNOT use it until you record consent "
+                "via POST /api/persona/voice/consent."
+            ),
+        }
+    )
 
 
 @router.post("/meeting-context")
@@ -367,7 +390,8 @@ async def add_meeting_context(
         user_id=str(user.id),
         item_id=str(p.id),
         persona_scope=scope,
-        title=title, filename=f"meeting:{meeting_id}",
+        title=title,
+        filename=f"meeting:{meeting_id}",
         chunks=chunks,
     )
     p.chunk_count = len(ids)
@@ -406,6 +430,7 @@ def _extract_text(filename: str, raw: bytes) -> str:
         try:
             from pypdf import PdfReader
             from io import BytesIO
+
             reader = PdfReader(BytesIO(raw))
             return "\n".join(page.extract_text() or "" for page in reader.pages)
         except Exception as e:
@@ -416,8 +441,14 @@ def _extract_text(filename: str, raw: bytes) -> str:
 
 
 async def _pinecone_upsert_chunks(
-    *, tenant_id: str, user_id: str, item_id: str, persona_scope: str,
-    title: str, filename: str, chunks: list[str],
+    *,
+    tenant_id: str,
+    user_id: str,
+    item_id: str,
+    persona_scope: str,
+    title: str,
+    filename: str,
+    chunks: list[str],
 ) -> list[str]:
     if not chunks:
         return []
@@ -425,7 +456,9 @@ async def _pinecone_upsert_chunks(
     pinecone_key = os.environ.get("PINECONE_API_KEY", "").strip()
     index_name = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
     if not (api_key and pinecone_key):
-        logger.warning("persona upsert skipped — missing OPENAI_API_KEY or PINECONE_API_KEY")
+        logger.warning(
+            "persona upsert skipped — missing OPENAI_API_KEY or PINECONE_API_KEY"
+        )
         return []
     try:
         from openai import AsyncOpenAI
@@ -447,7 +480,8 @@ async def _pinecone_upsert_chunks(
 
     try:
         resp = await client.embeddings.create(
-            model="text-embedding-3-small", input=chunks,
+            model="text-embedding-3-small",
+            input=chunks,
         )
         vectors = [d.embedding for d in resp.data]
     except Exception as e:
@@ -460,20 +494,22 @@ async def _pinecone_upsert_chunks(
     for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
         pid = f"{item_id}:{i}"
         ids.append(pid)
-        to_upsert.append({
-            "id": pid,
-            "values": vec,
-            "metadata": {
-                "text": chunk,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "persona_scope": persona_scope,
-                "item_id": item_id,
-                "title": title[:200],
-                "filename": filename[:300],
-                "chunk_index": i,
-            },
-        })
+        to_upsert.append(
+            {
+                "id": pid,
+                "values": vec,
+                "metadata": {
+                    "text": chunk,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "persona_scope": persona_scope,
+                    "item_id": item_id,
+                    "title": title[:200],
+                    "filename": filename[:300],
+                    "chunk_index": i,
+                },
+            }
+        )
     try:
         index.upsert(vectors=to_upsert, namespace=ns)
     except Exception as e:

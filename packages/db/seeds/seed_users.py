@@ -1,4 +1,5 @@
 """Seed default user accounts and service API keys for development."""
+
 import asyncio
 import hashlib
 import os
@@ -8,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from models.tenant import Tenant, TenantPlan
@@ -45,13 +46,16 @@ ACCOUNTS = [
 def _hash_password(password: str) -> str:
     """Hash password with bcrypt."""
     import bcrypt
+
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 async def seed_users():
     async with async_session() as db:
         # Find or create the shared tenant
-        result = await db.execute(select(Tenant).where(Tenant.name == SHARED_TENANT_NAME))
+        result = await db.execute(
+            select(Tenant).where(Tenant.name == SHARED_TENANT_NAME)
+        )
         shared_tenant = result.scalar_one_or_none()
 
         if not shared_tenant:
@@ -63,14 +67,20 @@ async def seed_users():
             )
             db.add(shared_tenant)
             await db.flush()
-            print(f"  Created shared tenant: {SHARED_TENANT_NAME} (plan=business, unlimited)")
+            print(
+                f"  Created shared tenant: {SHARED_TENANT_NAME} (plan=business, unlimited)"
+            )
         else:
             # Upgrade existing tenant to business if on free plan
             if shared_tenant.plan == TenantPlan.FREE:
                 shared_tenant.plan = TenantPlan.BUSINESS
-                print(f"  Upgraded shared tenant to business plan (unlimited executions)")
+                print(
+                    "  Upgraded shared tenant to business plan (unlimited executions)"
+                )
             else:
-                print(f"  Shared tenant exists: {SHARED_TENANT_NAME} ({shared_tenant.id})")
+                print(
+                    f"  Shared tenant exists: {SHARED_TENANT_NAME} ({shared_tenant.id})"
+                )
 
         for acct in ACCOUNTS:
             result = await db.execute(select(User).where(User.email == acct["email"]))
@@ -94,7 +104,9 @@ async def seed_users():
                 is_active=True,
             )
             db.add(user)
-            print(f"  Created: {acct['email']} / {acct['password']} ({acct['role'].value})")
+            print(
+                f"  Created: {acct['email']} / {acct['password']} ({acct['role'].value})"
+            )
 
         # These keys let the example app and Saudi Tourism call the Abenix API.
         # Read from .env file directly (env vars may not be set on Windows).
@@ -107,7 +119,9 @@ async def seed_users():
                     k, _, v = line.partition("=")
                     env_vals[k.strip()] = v.strip()
 
-        admin_result = await db.execute(select(User).where(User.email == "admin@abenix.dev"))
+        admin_result = await db.execute(
+            select(User).where(User.email == "admin@abenix.dev")
+        )
         admin_user = admin_result.scalar_one_or_none()
         if admin_user:
             SERVICE_KEYS = [
@@ -121,7 +135,9 @@ async def seed_users():
                 },
             ]
             for svc in SERVICE_KEYS:
-                raw_key = os.environ.get(svc["env_var"], "") or env_vals.get(svc["env_var"], "")
+                raw_key = os.environ.get(svc["env_var"], "") or env_vals.get(
+                    svc["env_var"], ""
+                )
                 if not raw_key:
                     continue
                 key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
@@ -143,7 +159,14 @@ async def seed_users():
                     key_hash=key_hash,
                     key_prefix=prefix,
                     is_active=True,
-                    scopes={"allowed_actions": ["execute", "list", "delegate", "can_delegate"]},
+                    scopes={
+                        "allowed_actions": [
+                            "execute",
+                            "list",
+                            "delegate",
+                            "can_delegate",
+                        ]
+                    },
                 )
                 db.add(api_key)
                 print(f"  Created API key: {svc['name']} ({prefix})")

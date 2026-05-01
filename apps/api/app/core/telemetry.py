@@ -124,7 +124,13 @@ tool_calls_total = Counter(
 )
 
 
-def setup_telemetry(app: FastAPI, *, otel_enabled: bool = False, otel_exporter: str = "stdout", otel_endpoint: str = "http://localhost:4317") -> None:
+def setup_telemetry(
+    app: FastAPI,
+    *,
+    otel_enabled: bool = False,
+    otel_exporter: str = "stdout",
+    otel_endpoint: str = "http://localhost:4317",
+) -> None:
     if not otel_enabled:
         return
 
@@ -137,17 +143,25 @@ def setup_telemetry(app: FastAPI, *, otel_enabled: bool = False, otel_exporter: 
         provider = TracerProvider(resource=resource)
 
         if otel_exporter == "otlp":
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                OTLPSpanExporter,
+            )
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
             exporter = OTLPSpanExporter(endpoint=otel_endpoint, insecure=True)
             provider.add_span_processor(BatchSpanProcessor(exporter))
         else:
-            from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
+            from opentelemetry.sdk.trace.export import (
+                ConsoleSpanExporter,
+                SimpleSpanProcessor,
+            )
+
             provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
 
         trace.set_tracer_provider(provider)
 
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
         FastAPIInstrumentor.instrument_app(app)
         logger.info("OpenTelemetry tracing enabled (exporter=%s)", otel_exporter)
     except ImportError:
@@ -157,6 +171,7 @@ def setup_telemetry(app: FastAPI, *, otel_enabled: bool = False, otel_exporter: 
 def get_tracer(name: str):
     try:
         from opentelemetry import trace
+
         return trace.get_tracer(name)
     except ImportError:
         return None
@@ -165,12 +180,9 @@ def get_tracer(name: str):
 def get_trace_headers() -> dict[str, str]:
     """Extract current trace context as HTTP headers for propagation to downstream services."""
     try:
-        from opentelemetry import context, trace
-        from opentelemetry.trace.propagation import get_current_span
-        from opentelemetry.propagators import textmap
+        from opentelemetry.propagate import inject
 
         headers: dict[str, str] = {}
-        from opentelemetry.propagate import inject
         inject(headers)
         return headers
     except ImportError:

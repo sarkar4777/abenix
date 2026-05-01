@@ -31,7 +31,7 @@ def _strip_json_fences(text: str) -> str:
         # Remove opening fence (with optional language tag)
         text = re.sub(r"^```(?:json)?\s*\n?", "", text)
     if text.endswith("```"):
-        text = text[: -3].rstrip()
+        text = text[:-3].rstrip()
     return text.strip()
 
 
@@ -42,29 +42,27 @@ def _schema_to_description(schema: dict[str, Any], indent: int = 0) -> str:
 
     for key, value in schema.items():
         if isinstance(value, str):
-            lines.append(f"{prefix}\"{key}\": <{value}>")
+            lines.append(f'{prefix}"{key}": <{value}>')
         elif isinstance(value, list):
             if value and isinstance(value[0], dict):
-                lines.append(f"{prefix}\"{key}\": [")
+                lines.append(f'{prefix}"{key}": [')
                 lines.append(_schema_to_description(value[0], indent + 1))
                 lines.append(f"{prefix}]")
             elif value and isinstance(value[0], str):
-                lines.append(f"{prefix}\"{key}\": [<{value[0]}>]")
+                lines.append(f'{prefix}"{key}": [<{value[0]}>]')
             else:
-                lines.append(f"{prefix}\"{key}\": [...]")
+                lines.append(f'{prefix}"{key}": [...]')
         elif isinstance(value, dict):
-            lines.append(f"{prefix}\"{key}\": {{")
+            lines.append(f'{prefix}"{key}": {{')
             lines.append(_schema_to_description(value, indent + 1))
             lines.append(f"{prefix}}}")
         else:
-            lines.append(f"{prefix}\"{key}\": <{type(value).__name__}>")
+            lines.append(f'{prefix}"{key}": <{type(value).__name__}>')
 
     return "\n".join(lines)
 
 
-def _validate_structure(
-    extracted: Any, schema: dict[str, Any]
-) -> list[str]:
+def _validate_structure(extracted: Any, schema: dict[str, Any]) -> list[str]:
     """Light structural validation: check top-level keys exist."""
     warnings: list[str] = []
     if not isinstance(extracted, dict):
@@ -77,7 +75,9 @@ def _validate_structure(
     actual_keys = set(extracted.keys())
     missing = expected_keys - actual_keys
     if missing:
-        warnings.append(f"Schema keys missing from output: {', '.join(sorted(missing))}")
+        warnings.append(
+            f"Schema keys missing from output: {', '.join(sorted(missing))}"
+        )
     return warnings
 
 
@@ -103,8 +103,8 @@ class StructuredExtractorTool(BaseTool):
                 "type": "object",
                 "description": (
                     "A JSON object describing the output structure. Example: "
-                    '{\"company_name\": \"string\", \"revenue\": \"number\", '
-                    '\"employees\": [{\"name\": \"string\", \"role\": \"string\"}]}'
+                    '{"company_name": "string", "revenue": "number", '
+                    '"employees": [{"name": "string", "role": "string"}]}'
                 ),
             },
             "instructions": {
@@ -138,9 +138,7 @@ class StructuredExtractorTool(BaseTool):
         max_tokens = int(arguments.get("max_tokens", 8000))
 
         if not text:
-            return ToolResult(
-                content="Error: 'text' is required", is_error=True
-            )
+            return ToolResult(content="Error: 'text' is required", is_error=True)
         if not schema or not isinstance(schema, dict):
             return ToolResult(
                 content="Error: 'schema' is required and must be a JSON object",
@@ -152,9 +150,7 @@ class StructuredExtractorTool(BaseTool):
         # Enforce character ceiling
         if len(text) > _MAX_INPUT_CHARS:
             text = text[:_MAX_INPUT_CHARS]
-            warnings.append(
-                f"Input text truncated to {_MAX_INPUT_CHARS} characters"
-            )
+            warnings.append(f"Input text truncated to {_MAX_INPUT_CHARS} characters")
 
         schema_desc = _schema_to_description(schema)
         user_prompt_parts = [
@@ -198,9 +194,7 @@ class StructuredExtractorTool(BaseTool):
             )
         except Exception as exc:
             logger.exception("structured_extractor LLM call failed")
-            return ToolResult(
-                content=f"Error: LLM call failed: {exc}", is_error=True
-            )
+            return ToolResult(content=f"Error: LLM call failed: {exc}", is_error=True)
 
         raw_content = response.content
         cleaned = _strip_json_fences(raw_content)
@@ -215,22 +209,26 @@ class StructuredExtractorTool(BaseTool):
                     extracted = json.loads(match.group(0))
                 except json.JSONDecodeError:
                     return ToolResult(
-                        content=json.dumps({
-                            "error": "LLM returned invalid JSON",
-                            "parse_error": str(exc),
-                            "raw_response": raw_content[:2000],
-                            "model": model,
-                        }),
+                        content=json.dumps(
+                            {
+                                "error": "LLM returned invalid JSON",
+                                "parse_error": str(exc),
+                                "raw_response": raw_content[:2000],
+                                "model": model,
+                            }
+                        ),
                         is_error=True,
                     )
             else:
                 return ToolResult(
-                    content=json.dumps({
-                        "error": "LLM returned invalid JSON",
-                        "parse_error": str(exc),
-                        "raw_response": raw_content[:2000],
-                        "model": model,
-                    }),
+                    content=json.dumps(
+                        {
+                            "error": "LLM returned invalid JSON",
+                            "parse_error": str(exc),
+                            "raw_response": raw_content[:2000],
+                            "model": model,
+                        }
+                    ),
                     is_error=True,
                 )
 
@@ -266,9 +264,7 @@ class StructuredExtractorTool(BaseTool):
     # helpers
 
     @staticmethod
-    def _estimate_confidence(
-        extracted: Any, schema: dict[str, Any]
-    ) -> float:
+    def _estimate_confidence(extracted: Any, schema: dict[str, Any]) -> float:
         """Return a 0-1 confidence score based on how many schema keys"""
         if not isinstance(extracted, dict):
             return 0.0

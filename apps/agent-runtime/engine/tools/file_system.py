@@ -1,8 +1,8 @@
 """File System Tool — recursive directory traversal, glob patterns, file reading."""
+
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -67,11 +67,15 @@ class FileSystemTool(BaseTool):
         elif operation == "stat":
             return await self._stat(path)
         else:
-            return ToolResult(content=f"Error: Unknown operation: {operation}", is_error=True)
+            return ToolResult(
+                content=f"Error: Unknown operation: {operation}", is_error=True
+            )
 
     async def _list_recursive(self, path: Path, max_files: int) -> ToolResult:
         if not path.is_dir():
-            return ToolResult(content=f"Error: {path} is not a directory", is_error=True)
+            return ToolResult(
+                content=f"Error: {path} is not a directory", is_error=True
+            )
 
         files = []
         try:
@@ -81,16 +85,20 @@ class FileSystemTool(BaseTool):
                 if item.is_file():
                     try:
                         stat = item.stat()
-                        files.append({
-                            "path": str(item.relative_to(path)),
-                            "size_bytes": stat.st_size,
-                            "extension": item.suffix,
-                            "name": item.name,
-                        })
+                        files.append(
+                            {
+                                "path": str(item.relative_to(path)),
+                                "size_bytes": stat.st_size,
+                                "extension": item.suffix,
+                                "name": item.name,
+                            }
+                        )
                     except (PermissionError, OSError):
                         continue
         except PermissionError:
-            return ToolResult(content=f"Error: Permission denied for {path}", is_error=True)
+            return ToolResult(
+                content=f"Error: Permission denied for {path}", is_error=True
+            )
 
         # Categorize by extension
         extensions = {}
@@ -98,45 +106,65 @@ class FileSystemTool(BaseTool):
             ext = f["extension"] or "(none)"
             extensions[ext] = extensions.get(ext, 0) + 1
 
-        return ToolResult(content=json.dumps({
-            "status": "success",
-            "directory": str(path),
-            "total_files": len(files),
-            "truncated": len(files) >= max_files,
-            "by_extension": dict(sorted(extensions.items(), key=lambda x: -x[1])),
-            "files": files,
-        }))
+        return ToolResult(
+            content=json.dumps(
+                {
+                    "status": "success",
+                    "directory": str(path),
+                    "total_files": len(files),
+                    "truncated": len(files) >= max_files,
+                    "by_extension": dict(
+                        sorted(extensions.items(), key=lambda x: -x[1])
+                    ),
+                    "files": files,
+                }
+            )
+        )
 
     async def _read_file(self, path: Path, max_size_kb: int) -> ToolResult:
         if not path.is_file():
-            return ToolResult(content=f"Error: {path} not found or not a file", is_error=True)
+            return ToolResult(
+                content=f"Error: {path} not found or not a file", is_error=True
+            )
 
         size = path.stat().st_size
         if size > max_size_kb * 1024:
-            return ToolResult(content=json.dumps({
-                "status": "truncated",
-                "path": str(path),
-                "size_bytes": size,
-                "message": f"File exceeds {max_size_kb}KB limit. Reading first {max_size_kb}KB.",
-                "content": path.read_bytes()[:max_size_kb * 1024].decode("utf-8", errors="replace"),
-            }))
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "truncated",
+                        "path": str(path),
+                        "size_bytes": size,
+                        "message": f"File exceeds {max_size_kb}KB limit. Reading first {max_size_kb}KB.",
+                        "content": path.read_bytes()[: max_size_kb * 1024].decode(
+                            "utf-8", errors="replace"
+                        ),
+                    }
+                )
+            )
 
         try:
             content = path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             content = path.read_bytes().decode("utf-8", errors="replace")
 
-        return ToolResult(content=json.dumps({
-            "status": "success",
-            "path": str(path),
-            "size_bytes": size,
-            "extension": path.suffix,
-            "content": content,
-        }))
+        return ToolResult(
+            content=json.dumps(
+                {
+                    "status": "success",
+                    "path": str(path),
+                    "size_bytes": size,
+                    "extension": path.suffix,
+                    "content": content,
+                }
+            )
+        )
 
     async def _glob(self, path: Path, pattern: str, max_files: int) -> ToolResult:
         if not path.is_dir():
-            return ToolResult(content=f"Error: {path} is not a directory", is_error=True)
+            return ToolResult(
+                content=f"Error: {path} is not a directory", is_error=True
+            )
 
         matches = []
         for item in sorted(path.glob(pattern)):
@@ -144,21 +172,27 @@ class FileSystemTool(BaseTool):
                 break
             if item.is_file():
                 try:
-                    matches.append({
-                        "path": str(item.relative_to(path)),
-                        "size_bytes": item.stat().st_size,
-                        "extension": item.suffix,
-                    })
+                    matches.append(
+                        {
+                            "path": str(item.relative_to(path)),
+                            "size_bytes": item.stat().st_size,
+                            "extension": item.suffix,
+                        }
+                    )
                 except (PermissionError, OSError):
                     continue
 
-        return ToolResult(content=json.dumps({
-            "status": "success",
-            "directory": str(path),
-            "pattern": pattern,
-            "matches": len(matches),
-            "files": matches,
-        }))
+        return ToolResult(
+            content=json.dumps(
+                {
+                    "status": "success",
+                    "directory": str(path),
+                    "pattern": pattern,
+                    "matches": len(matches),
+                    "files": matches,
+                }
+            )
+        )
 
     async def _stat(self, path: Path) -> ToolResult:
         if not path.exists():
@@ -166,12 +200,17 @@ class FileSystemTool(BaseTool):
 
         stat = path.stat()
         from datetime import datetime
-        return ToolResult(content=json.dumps({
-            "status": "success",
-            "path": str(path),
-            "type": "directory" if path.is_dir() else "file",
-            "size_bytes": stat.st_size,
-            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            "created": datetime.fromtimestamp(stat.st_ctime).isoformat(),
-            "is_symlink": path.is_symlink(),
-        }))
+
+        return ToolResult(
+            content=json.dumps(
+                {
+                    "status": "success",
+                    "path": str(path),
+                    "type": "directory" if path.is_dir() else "file",
+                    "size_bytes": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "created": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                    "is_symlink": path.is_symlink(),
+                }
+            )
+        )

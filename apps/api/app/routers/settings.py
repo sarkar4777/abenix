@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import sys
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -131,7 +129,11 @@ async def update_notifications(
 
 
 _AUDIT_NOISE_KEYS = {
-    "integrity_hash", "new_value", "old_value", "tenant_id", "user_id",
+    "integrity_hash",
+    "new_value",
+    "old_value",
+    "tenant_id",
+    "user_id",
 }
 
 
@@ -214,12 +216,15 @@ async def get_retention(
     tenant = result.scalar_one_or_none()
     settings_data = (tenant.settings or {}).get("retention", {}) if tenant else {}
     from app.core.retention import parse_retention_settings
+
     policy = parse_retention_settings(settings_data)
-    return success({
-        "execution_retention_days": policy.execution_retention_days,
-        "message_retention_days": policy.message_retention_days,
-        "audit_log_retention_days": policy.audit_log_retention_days,
-    })
+    return success(
+        {
+            "execution_retention_days": policy.execution_retention_days,
+            "message_retention_days": policy.message_retention_days,
+            "audit_log_retention_days": policy.audit_log_retention_days,
+        }
+    )
 
 
 @router.put("/retention")
@@ -252,7 +257,11 @@ async def get_dlp_settings(
     """Get tenant DLP (Data Loss Prevention) settings."""
     result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
     tenant = result.scalar_one_or_none()
-    dlp_settings = (tenant.settings or {}).get("dlp", {"mode": "detect", "enabled": False}) if tenant else {}
+    dlp_settings = (
+        (tenant.settings or {}).get("dlp", {"mode": "detect", "enabled": False})
+        if tenant
+        else {}
+    )
     return success(dlp_settings)
 
 
@@ -284,6 +293,7 @@ async def update_dlp_settings(
 # Tenant-scoped Redis overrides for the sandboxed_job tool. Falls back to
 # host env vars when not set. Keys live at sandbox:settings:<tenant_id>.
 
+
 def _sandbox_key(tenant_id: str) -> str:
     return f"sandbox:settings:{tenant_id}"
 
@@ -295,9 +305,23 @@ async def get_sandbox_settings(user: User = Depends(get_current_user)) -> JSONRe
     import redis.asyncio as aioredis
     from app.core.config import settings as app_settings
 
-    env_enabled  = _os.environ.get("SANDBOXED_JOB_ENABLED", "").lower() in ("1","true","yes")
-    env_network  = _os.environ.get("SANDBOXED_JOB_ALLOW_NETWORK", "").lower() in ("1","true","yes")
-    env_images   = sorted({i.strip() for i in _os.environ.get("SANDBOXED_JOB_ALLOWED_IMAGES", "").split(",") if i.strip()})
+    env_enabled = _os.environ.get("SANDBOXED_JOB_ENABLED", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    env_network = _os.environ.get("SANDBOXED_JOB_ALLOW_NETWORK", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    env_images = sorted(
+        {
+            i.strip()
+            for i in _os.environ.get("SANDBOXED_JOB_ALLOWED_IMAGES", "").split(",")
+            if i.strip()
+        }
+    )
 
     overrides: dict = {}
     try:
@@ -312,24 +336,40 @@ async def get_sandbox_settings(user: User = Depends(get_current_user)) -> JSONRe
         v = overrides.get(k)
         if v is None or v == "":
             return None
-        return v.strip().lower() in ("1","true","yes")
+        return v.strip().lower() in ("1", "true", "yes")
 
     images_override = overrides.get("allowed_images")
-    images_list = sorted({i.strip() for i in (images_override or "").split(",") if i.strip()}) if images_override else None
+    images_list = (
+        sorted({i.strip() for i in (images_override or "").split(",") if i.strip()})
+        if images_override
+        else None
+    )
 
-    enabled = _ov_bool("enabled");          enabled = enabled if enabled is not None else env_enabled
-    allow_n = _ov_bool("allow_network");    allow_n = allow_n if allow_n is not None else env_network
-    images  = images_list if images_list is not None else env_images
+    enabled = _ov_bool("enabled")
+    enabled = enabled if enabled is not None else env_enabled
+    allow_n = _ov_bool("allow_network")
+    allow_n = allow_n if allow_n is not None else env_network
+    images = images_list if images_list is not None else env_images
 
-    return success({
-        "effective": {"enabled": enabled, "allow_network": allow_n, "allowed_images": images},
-        "env_defaults": {"enabled": env_enabled, "allow_network": env_network, "allowed_images": env_images},
-        "tenant_overrides": {
-            "enabled": _ov_bool("enabled"),
-            "allow_network": _ov_bool("allow_network"),
-            "allowed_images": images_list,
-        },
-    })
+    return success(
+        {
+            "effective": {
+                "enabled": enabled,
+                "allow_network": allow_n,
+                "allowed_images": images,
+            },
+            "env_defaults": {
+                "enabled": env_enabled,
+                "allow_network": env_network,
+                "allowed_images": env_images,
+            },
+            "tenant_overrides": {
+                "enabled": _ov_bool("enabled"),
+                "allow_network": _ov_bool("allow_network"),
+                "allowed_images": images_list,
+            },
+        }
+    )
 
 
 @router.put("/sandbox")
@@ -349,17 +389,22 @@ async def set_sandbox_settings(
 
     if "enabled" in body:
         v = body["enabled"]
-        if v is None: fields_to_del.append("enabled")
-        else: fields_to_set["enabled"] = "true" if bool(v) else "false"
+        if v is None:
+            fields_to_del.append("enabled")
+        else:
+            fields_to_set["enabled"] = "true" if bool(v) else "false"
 
     if "allow_network" in body:
         v = body["allow_network"]
-        if v is None: fields_to_del.append("allow_network")
-        else: fields_to_set["allow_network"] = "true" if bool(v) else "false"
+        if v is None:
+            fields_to_del.append("allow_network")
+        else:
+            fields_to_set["allow_network"] = "true" if bool(v) else "false"
 
     if "allowed_images" in body:
         v = body["allowed_images"]
-        if v is None: fields_to_del.append("allowed_images")
+        if v is None:
+            fields_to_del.append("allowed_images")
         elif isinstance(v, list):
             cleaned = sorted({str(i).strip() for i in v if str(i).strip()})
             fields_to_set["allowed_images"] = ",".join(cleaned)
@@ -386,6 +431,7 @@ async def set_sandbox_settings(
 # are admin-only because they affect outbound notifications for the
 # whole tenant.
 
+
 @router.get("/tenant")
 async def get_tenant_settings(
     user: User = Depends(get_current_user),
@@ -395,15 +441,19 @@ async def get_tenant_settings(
     tenant = t_q.scalars().first()
     if tenant is None:
         return error("tenant not found", 404)
-    return success({
-        "tenant_id": str(tenant.id),
-        "name": tenant.name,
-        "slug": tenant.slug,
-        "slack_webhook_url": getattr(tenant, "slack_webhook_url", None) or "",
-        "slack_webhook_url_source": (
-            "tenant" if getattr(tenant, "slack_webhook_url", None) else "env_fallback"
-        ),
-    })
+    return success(
+        {
+            "tenant_id": str(tenant.id),
+            "name": tenant.name,
+            "slug": tenant.slug,
+            "slack_webhook_url": getattr(tenant, "slack_webhook_url", None) or "",
+            "slack_webhook_url_source": (
+                "tenant"
+                if getattr(tenant, "slack_webhook_url", None)
+                else "env_fallback"
+            ),
+        }
+    )
 
 
 @router.put("/tenant")
@@ -431,13 +481,15 @@ async def update_tenant_settings(
                 return error("slack_webhook_url too long (max 500 chars)", 400)
         tenant.slack_webhook_url = url
 
-    db.add(ActivityLog(
-        tenant_id=user.tenant_id,
-        user_id=user.id,
-        action="tenant_settings_updated",
-        details={"fields": list(body.keys())},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent", "")[:255],
-    ))
+    db.add(
+        ActivityLog(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            action="tenant_settings_updated",
+            details={"fields": list(body.keys())},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent", "")[:255],
+        )
+    )
     await db.commit()
     return await get_tenant_settings(user, db)

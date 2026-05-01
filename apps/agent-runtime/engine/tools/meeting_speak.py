@@ -1,4 +1,5 @@
 """Meeting speak tool — TTS + publish into the meeting audio track."""
+
 from __future__ import annotations
 
 import asyncio
@@ -79,7 +80,9 @@ class MeetingSpeakTool(BaseTool):
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         meeting_id = (arguments.get("meeting_id") or "").strip()
         text = (arguments.get("text") or "").strip()
-        voice = (arguments.get("voice") or os.environ.get("OPENAI_TTS_VOICE", "alloy")).strip()
+        voice = (
+            arguments.get("voice") or os.environ.get("OPENAI_TTS_VOICE", "alloy")
+        ).strip()
         voice_id = (arguments.get("voice_id") or "").strip()
         mirror = bool(arguments.get("mirror_to_chat", True))
 
@@ -94,7 +97,8 @@ class MeetingSpeakTool(BaseTool):
         if await sessmod.is_killed(meeting_id):
             return ToolResult(
                 content="Kill-switch active — refusing to speak.",
-                is_error=True, metadata={"killed": True},
+                is_error=True,
+                metadata={"killed": True},
             )
 
         # Provider selection + consent gate
@@ -133,7 +137,8 @@ class MeetingSpeakTool(BaseTool):
                     if await sessmod.is_killed(meeting_id):
                         logger.info(
                             "meeting_speak: kill detected mid-playback at %d/%d bytes",
-                            pos, total,
+                            pos,
+                            total,
                         )
                         break
                     block = pcm[pos : pos + chunk]
@@ -150,19 +155,26 @@ class MeetingSpeakTool(BaseTool):
                 logger.debug("post_chat mirror failed: %s", e)
 
         await sessmod.append_decision(
-            meeting_id, "answer",
+            meeting_id,
+            "answer",
             f"Bot spoke: {text[:140]}",
             detail={
-                "provider": provider, "voice": voice, "voice_id": voice_id[:10] if voice_id else "",
-                "tts_ok": spoke_ok, "mirror": mirror, "cloned_fallback": cloned_fallback,
+                "provider": provider,
+                "voice": voice,
+                "voice_id": voice_id[:10] if voice_id else "",
+                "tts_ok": spoke_ok,
+                "mirror": mirror,
+                "cloned_fallback": cloned_fallback,
             },
         )
         return ToolResult(
             content=f"ok: spoken={spoke_ok}, provider={provider}"
-                    + (", cloned_fallback=true" if cloned_fallback else ""),
+            + (", cloned_fallback=true" if cloned_fallback else ""),
             metadata={
-                "spoken": spoke_ok, "chars": len(text),
-                "provider": provider, "cloned_fallback": cloned_fallback,
+                "spoken": spoke_ok,
+                "chars": len(text),
+                "provider": provider,
+                "cloned_fallback": cloned_fallback,
             },
         )
 
@@ -216,11 +228,17 @@ async def _consent_ok(voice_id: str, user_id: str) -> bool:
 
 
 async def _synthesize(
-    provider: str, text: str, *, voice: str, voice_id: str,
+    provider: str,
+    text: str,
+    *,
+    voice: str,
+    voice_id: str,
 ) -> bytes:
     if not text:
         return b""
-    cache_key = hashlib.sha256(f"{provider}|{voice}|{voice_id}|{text}".encode()).hexdigest()
+    cache_key = hashlib.sha256(
+        f"{provider}|{voice}|{voice_id}|{text}".encode()
+    ).hexdigest()
     now = time.time()
     for k in [k for k, (t, _) in _TTS_CACHE.items() if now - t > _TTS_CACHE_TTL]:
         _TTS_CACHE.pop(k, None)
@@ -230,8 +248,11 @@ async def _synthesize(
     pcm = b""
     if provider == "elevenlabs" and voice_id:
         from engine.tools._voice_clone import elevenlabs_tts_pcm
+
         pcm = await elevenlabs_tts_pcm(
-            voice_id=voice_id, text=text, sample_rate=16_000,
+            voice_id=voice_id,
+            text=text,
+            sample_rate=16_000,
         )
     if not pcm:
         # openai path (used as primary and as fallback)
@@ -251,7 +272,10 @@ async def _openai_tts_pcm(text: str, *, voice: str) -> bytes:
         return b""
     try:
         resp = await client.audio.speech.create(
-            model="tts-1", voice=voice, input=text, response_format="pcm",
+            model="tts-1",
+            voice=voice,
+            input=text,
+            response_format="pcm",
         )
         raw = await resp.aread() if hasattr(resp, "aread") else resp.read()
     except Exception as e:
@@ -264,6 +288,7 @@ def _resample_s16(pcm: bytes, *, rate_in: int, rate_out: int) -> bytes:
     if rate_in == rate_out or not pcm:
         return pcm
     import array
+
     samples = array.array("h")
     samples.frombytes(pcm)
     ratio = rate_out / rate_in

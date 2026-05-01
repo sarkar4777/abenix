@@ -11,13 +11,13 @@ import pytest
 
 from engine.tools.agent_step import AgentStepTool
 
-
 # ── Mock data classes ─────────────────────────────────────────────
 
 
 @dataclass
 class MockExecutionResult:
     """Mimics engine.agent_executor.ExecutionResult."""
+
     output: str = "Mock agent response"
     input_tokens: int = 150
     output_tokens: int = 200
@@ -46,20 +46,24 @@ class TestAgentStepTool:
         """Basic agent execution returns a response from the mocked executor."""
         mock_result = MockExecutionResult(output="The answer is 42.")
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, \
-             patch("engine.agent_executor.build_tool_registry") as mock_build, \
-             patch("engine.llm_router.LLMRouter"), \
-             patch("engine.sandbox.ExecutionSandbox"), \
-             patch("engine.sandbox.SandboxPolicy"):
+        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
+            "engine.agent_executor.build_tool_registry"
+        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
+            "engine.sandbox.ExecutionSandbox"
+        ), patch(
+            "engine.sandbox.SandboxPolicy"
+        ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
             MockExecutor.return_value = mock_instance
             mock_build.return_value = MagicMock()
 
-            result = await tool.execute({
-                "input_message": "What is the meaning of life?",
-                "system_prompt": "You are a helpful assistant.",
-            })
+            result = await tool.execute(
+                {
+                    "input_message": "What is the meaning of life?",
+                    "system_prompt": "You are a helpful assistant.",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -70,46 +74,52 @@ class TestAgentStepTool:
         """Verify build_tool_registry is called with the provided tools list."""
         mock_result = MockExecutionResult()
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, \
-             patch("engine.agent_executor.build_tool_registry") as mock_build, \
-             patch("engine.llm_router.LLMRouter"), \
-             patch("engine.sandbox.ExecutionSandbox"), \
-             patch("engine.sandbox.SandboxPolicy"):
+        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
+            "engine.agent_executor.build_tool_registry"
+        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
+            "engine.sandbox.ExecutionSandbox"
+        ), patch(
+            "engine.sandbox.SandboxPolicy"
+        ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
             MockExecutor.return_value = mock_instance
             mock_build.return_value = MagicMock()
 
-            await tool.execute({
-                "input_message": "Search for something",
-                "system_prompt": "You are a researcher.",
-                "tools": ["web_search", "calculator"],
-            })
+            await tool.execute(
+                {
+                    "input_message": "Search for something",
+                    "system_prompt": "You are a researcher.",
+                    "tools": ["web_search", "calculator"],
+                }
+            )
 
         mock_build.assert_called_once_with(["web_search", "calculator"])
 
     @pytest.mark.asyncio
-    async def test_agent_respects_max_iterations(
-        self, tool: AgentStepTool
-    ) -> None:
+    async def test_agent_respects_max_iterations(self, tool: AgentStepTool) -> None:
         """Verify max_iterations is forwarded to the executor."""
         mock_result = MockExecutionResult()
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, \
-             patch("engine.agent_executor.build_tool_registry") as mock_build, \
-             patch("engine.llm_router.LLMRouter"), \
-             patch("engine.sandbox.ExecutionSandbox"), \
-             patch("engine.sandbox.SandboxPolicy"):
+        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
+            "engine.agent_executor.build_tool_registry"
+        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
+            "engine.sandbox.ExecutionSandbox"
+        ), patch(
+            "engine.sandbox.SandboxPolicy"
+        ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
             MockExecutor.return_value = mock_instance
             mock_build.return_value = MagicMock()
 
-            await tool.execute({
-                "input_message": "Analyze this data",
-                "system_prompt": "You are an analyst.",
-                "max_iterations": 5,
-            })
+            await tool.execute(
+                {
+                    "input_message": "Analyze this data",
+                    "system_prompt": "You are an analyst.",
+                    "max_iterations": 5,
+                }
+            )
 
         # Check that AgentExecutor was created with max_iterations=5
         call_kwargs = MockExecutor.call_args
@@ -120,60 +130,66 @@ class TestAgentStepTool:
         """Verify model is forwarded to the executor."""
         mock_result = MockExecutionResult(model="claude-opus-4-20250514")
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, \
-             patch("engine.agent_executor.build_tool_registry") as mock_build, \
-             patch("engine.llm_router.LLMRouter"), \
-             patch("engine.sandbox.ExecutionSandbox"), \
-             patch("engine.sandbox.SandboxPolicy"):
+        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
+            "engine.agent_executor.build_tool_registry"
+        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
+            "engine.sandbox.ExecutionSandbox"
+        ), patch(
+            "engine.sandbox.SandboxPolicy"
+        ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
             MockExecutor.return_value = mock_instance
             mock_build.return_value = MagicMock()
 
-            await tool.execute({
-                "input_message": "Complex reasoning task",
-                "system_prompt": "You are a deep thinker.",
-                "model": "claude-opus-4-20250514",
-            })
+            await tool.execute(
+                {
+                    "input_message": "Complex reasoning task",
+                    "system_prompt": "You are a deep thinker.",
+                    "model": "claude-opus-4-20250514",
+                }
+            )
 
         call_kwargs = MockExecutor.call_args
         assert call_kwargs.kwargs.get("model") == "claude-opus-4-20250514"
 
     @pytest.mark.asyncio
-    async def test_agent_custom_temperature(
-        self, tool: AgentStepTool
-    ) -> None:
+    async def test_agent_custom_temperature(self, tool: AgentStepTool) -> None:
         """Verify temperature is forwarded to the executor."""
         mock_result = MockExecutionResult()
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, \
-             patch("engine.agent_executor.build_tool_registry") as mock_build, \
-             patch("engine.llm_router.LLMRouter"), \
-             patch("engine.sandbox.ExecutionSandbox"), \
-             patch("engine.sandbox.SandboxPolicy"):
+        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
+            "engine.agent_executor.build_tool_registry"
+        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
+            "engine.sandbox.ExecutionSandbox"
+        ), patch(
+            "engine.sandbox.SandboxPolicy"
+        ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
             MockExecutor.return_value = mock_instance
             mock_build.return_value = MagicMock()
 
-            await tool.execute({
-                "input_message": "Be creative",
-                "system_prompt": "You are a creative writer.",
-                "temperature": 1.5,
-            })
+            await tool.execute(
+                {
+                    "input_message": "Be creative",
+                    "system_prompt": "You are a creative writer.",
+                    "temperature": 1.5,
+                }
+            )
 
         call_kwargs = MockExecutor.call_args
         assert call_kwargs.kwargs.get("temperature") == 1.5
 
     @pytest.mark.asyncio
-    async def test_missing_input_message_error(
-        self, tool: AgentStepTool
-    ) -> None:
+    async def test_missing_input_message_error(self, tool: AgentStepTool) -> None:
         """Missing or empty input_message should return an error."""
-        result = await tool.execute({
-            "input_message": "",
-            "system_prompt": "You are a helper.",
-        })
+        result = await tool.execute(
+            {
+                "input_message": "",
+                "system_prompt": "You are a helper.",
+            }
+        )
 
         assert result.is_error
         assert "input_message" in result.content.lower()
@@ -181,11 +197,13 @@ class TestAgentStepTool:
     @pytest.mark.asyncio
     async def test_agent_timeout(self, tool: AgentStepTool) -> None:
         """AgentExecutor raising TimeoutError should return an error result."""
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, \
-             patch("engine.agent_executor.build_tool_registry") as mock_build, \
-             patch("engine.llm_router.LLMRouter"), \
-             patch("engine.sandbox.ExecutionSandbox"), \
-             patch("engine.sandbox.SandboxPolicy"):
+        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
+            "engine.agent_executor.build_tool_registry"
+        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
+            "engine.sandbox.ExecutionSandbox"
+        ), patch(
+            "engine.sandbox.SandboxPolicy"
+        ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(
                 side_effect=TimeoutError("Agent execution timed out")
@@ -193,18 +211,20 @@ class TestAgentStepTool:
             MockExecutor.return_value = mock_instance
             mock_build.return_value = MagicMock()
 
-            result = await tool.execute({
-                "input_message": "This will take too long",
-                "system_prompt": "You are slow.",
-            })
+            result = await tool.execute(
+                {
+                    "input_message": "This will take too long",
+                    "system_prompt": "You are slow.",
+                }
+            )
 
         assert result.is_error
-        assert "failed" in result.content.lower() or "timed out" in result.content.lower()
+        assert (
+            "failed" in result.content.lower() or "timed out" in result.content.lower()
+        )
 
     @pytest.mark.asyncio
-    async def test_agent_output_includes_metadata(
-        self, tool: AgentStepTool
-    ) -> None:
+    async def test_agent_output_includes_metadata(self, tool: AgentStepTool) -> None:
         """Output includes token counts, cost, and other metadata."""
         mock_result = MockExecutionResult(
             output="Analysis complete.",
@@ -217,20 +237,24 @@ class TestAgentStepTool:
             node_traces=[MagicMock(), MagicMock(), MagicMock()],
         )
 
-        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, \
-             patch("engine.agent_executor.build_tool_registry") as mock_build, \
-             patch("engine.llm_router.LLMRouter"), \
-             patch("engine.sandbox.ExecutionSandbox"), \
-             patch("engine.sandbox.SandboxPolicy"):
+        with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
+            "engine.agent_executor.build_tool_registry"
+        ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
+            "engine.sandbox.ExecutionSandbox"
+        ), patch(
+            "engine.sandbox.SandboxPolicy"
+        ):
             mock_instance = AsyncMock()
             mock_instance.invoke = AsyncMock(return_value=mock_result)
             MockExecutor.return_value = mock_instance
             mock_build.return_value = MagicMock()
 
-            result = await tool.execute({
-                "input_message": "Analyze the data",
-                "system_prompt": "You are a data analyst.",
-            })
+            result = await tool.execute(
+                {
+                    "input_message": "Analyze the data",
+                    "system_prompt": "You are a data analyst.",
+                }
+            )
 
         assert not result.is_error
         parsed = json.loads(result.content)

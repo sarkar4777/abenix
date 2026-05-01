@@ -1,4 +1,5 @@
 """Defer-to-human tool — the single most important safety rail."""
+
 from __future__ import annotations
 
 import asyncio
@@ -34,11 +35,15 @@ class DeferToHumanTool(BaseTool):
             "meeting_id": {"type": "string"},
             "question": {"type": "string", "minLength": 5, "maxLength": 1000},
             "context": {
-                "type": "string", "default": "",
+                "type": "string",
+                "default": "",
                 "description": "Why the agent is deferring (for the user's inbox).",
             },
             "hold_seconds": {
-                "type": "integer", "default": 30, "minimum": 5, "maximum": 180,
+                "type": "integer",
+                "default": 30,
+                "minimum": 5,
+                "maximum": 180,
                 "description": "How long to wait for the user's reply before returning the fallback.",
             },
             "fallback": {
@@ -51,8 +56,11 @@ class DeferToHumanTool(BaseTool):
     }
 
     def __init__(
-        self, *,
-        execution_id: str = "", tenant_id: str = "", user_id: str = "",
+        self,
+        *,
+        execution_id: str = "",
+        tenant_id: str = "",
+        user_id: str = "",
     ):
         self._execution_id = execution_id
         self._tenant_id = tenant_id
@@ -63,9 +71,13 @@ class DeferToHumanTool(BaseTool):
         question = (arguments.get("question") or "").strip()
         context = (arguments.get("context") or "").strip()
         hold_seconds = int(arguments.get("hold_seconds", 30))
-        fallback = (arguments.get("fallback") or "Let me check and come back to you.").strip()
+        fallback = (
+            arguments.get("fallback") or "Let me check and come back to you."
+        ).strip()
         if not meeting_id or not question:
-            return ToolResult(content="meeting_id and question are required", is_error=True)
+            return ToolResult(
+                content="meeting_id and question are required", is_error=True
+            )
 
         deferral_id = str(uuid.uuid4())
         entry = {
@@ -104,9 +116,14 @@ class DeferToHumanTool(BaseTool):
             await _fire_webhook(entry)
 
             await sessmod.append_decision(
-                meeting_id, "defer",
+                meeting_id,
+                "defer",
                 f"Deferred to human: {question[:160]}",
-                detail={"deferral_id": deferral_id, "context": context, "hold_seconds": hold_seconds},
+                detail={
+                    "deferral_id": deferral_id,
+                    "context": context,
+                    "hold_seconds": hold_seconds,
+                },
             )
 
             # 3. Subscribe + wait for answer
@@ -168,7 +185,8 @@ async def _wait_for_answer(r: Any, channel: str, hold_seconds: int) -> str | Non
             remaining = deadline - time.monotonic()
             try:
                 msg = await asyncio.wait_for(
-                    pubsub.get_message(ignore_subscribe_messages=True), timeout=min(remaining, 1.0),
+                    pubsub.get_message(ignore_subscribe_messages=True),
+                    timeout=min(remaining, 1.0),
                 )
             except asyncio.TimeoutError:
                 continue

@@ -136,12 +136,11 @@ def construct_webhook_event(
 ) -> stripe.Event | dict:
     if is_mock_mode() or not STRIPE_WEBHOOK_SECRET:
         import json
+
         data = json.loads(payload)
         return data
 
-    return stripe.Webhook.construct_event(
-        payload, sig_header, STRIPE_WEBHOOK_SECRET
-    )
+    return stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
 
 
 async def create_connect_account(
@@ -229,12 +228,10 @@ async def get_connect_balance(account_id: str) -> dict:
     balance = stripe.Balance.retrieve(stripe_account=account_id)
     return {
         "available": [
-            {"amount": b.amount, "currency": b.currency}
-            for b in balance.available
+            {"amount": b.amount, "currency": b.currency} for b in balance.available
         ],
         "pending": [
-            {"amount": b.amount, "currency": b.currency}
-            for b in balance.pending
+            {"amount": b.amount, "currency": b.currency} for b in balance.pending
         ],
         "mode": "live",
     }
@@ -263,15 +260,17 @@ async def create_marketplace_checkout(
 
     params: dict = {
         "mode": "subscription",
-        "line_items": [{
-            "price_data": {
-                "currency": "usd",
-                "unit_amount": price_cents,
-                "recurring": {"interval": "month"},
-                "product_data": {"name": "Agent: {}".format(agent_name)},
-            },
-            "quantity": 1,
-        }],
+        "line_items": [
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": price_cents,
+                    "recurring": {"interval": "month"},
+                    "product_data": {"name": "Agent: {}".format(agent_name)},
+                },
+                "quantity": 1,
+            }
+        ],
         "subscription_data": {
             "application_fee_percent": PLATFORM_FEE_PERCENT,
             "transfer_data": {"destination": creator_connect_id},

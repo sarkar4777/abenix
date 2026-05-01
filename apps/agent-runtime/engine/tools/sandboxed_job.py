@@ -1,4 +1,5 @@
 """Sandboxed job — run a one-shot command in an isolated container."""
+
 from __future__ import annotations
 
 import asyncio
@@ -32,24 +33,36 @@ def _allowed_images() -> set[str]:
 def _image_family(image: str) -> str:
     """Map a container image to a coarse family label for Prometheus."""
     img = image.lower()
-    if "python" in img:    return "python"
-    if "node" in img:      return "node"
-    if "golang" in img or img.startswith("go:"): return "go"
-    if "rust" in img:      return "rust"
-    if "ruby" in img:      return "ruby"
-    if "perl" in img:      return "perl"
-    if "java" in img or "temurin" in img or "openjdk" in img: return "java"
+    if "python" in img:
+        return "python"
+    if "node" in img:
+        return "node"
+    if "golang" in img or img.startswith("go:"):
+        return "go"
+    if "rust" in img:
+        return "rust"
+    if "ruby" in img:
+        return "ruby"
+    if "perl" in img:
+        return "perl"
+    if "java" in img or "temurin" in img or "openjdk" in img:
+        return "java"
     return "other"
 
 
 def _emit_sandbox_metrics(
-    *, backend: str, image: str, exit_code: int | None,
-    duration_ms: int | None, timed_out: bool,
+    *,
+    backend: str,
+    image: str,
+    exit_code: int | None,
+    duration_ms: int | None,
+    timed_out: bool,
 ) -> None:
     """Push a sandbox run into the Grafana counters. Outcome bucket:
     `ok` (exit 0), `timeout` (deadline hit), `nonzero` (exit != 0)."""
     try:
         from engine import metrics as _m
+
         family = _image_family(image)
         if timed_out:
             outcome = "timeout"
@@ -57,9 +70,13 @@ def _emit_sandbox_metrics(
             outcome = "ok"
         else:
             outcome = "nonzero"
-        _m.SANDBOX_RUNS.labels(backend=backend, image_family=family, outcome=outcome).inc()
+        _m.SANDBOX_RUNS.labels(
+            backend=backend, image_family=family, outcome=outcome
+        ).inc()
         if duration_ms is not None:
-            _m.SANDBOX_DURATION.labels(backend=backend, image_family=family).observe(duration_ms / 1000.0)
+            _m.SANDBOX_DURATION.labels(backend=backend, image_family=family).observe(
+                duration_ms / 1000.0
+            )
     except Exception:
         pass
 
@@ -85,30 +102,40 @@ class SandboxedJobTool(BaseTool):
             "image": {
                 "type": "string",
                 "description": "Container image (must be in the allow-list). "
-                               "Examples: 'python:3.12-slim', 'alpine:3.20', 'pandoc/core:3.5'.",
+                "Examples: 'python:3.12-slim', 'alpine:3.20', 'pandoc/core:3.5'.",
             },
             "command": {
                 "type": "string",
                 "description": "Shell command to run inside the container.",
             },
             "timeout_seconds": {
-                "type": "integer", "default": 60, "minimum": 5, "maximum": 1800,
+                "type": "integer",
+                "default": 60,
+                "minimum": 5,
+                "maximum": 1800,
             },
             "memory_mb": {
-                "type": "integer", "default": 512, "minimum": 64, "maximum": 8192,
+                "type": "integer",
+                "default": 512,
+                "minimum": 64,
+                "maximum": 8192,
             },
             "cpu_limit": {
-                "type": "number", "default": 1.0, "minimum": 0.1, "maximum": 4.0,
+                "type": "number",
+                "default": 1.0,
+                "minimum": 0.1,
+                "maximum": 4.0,
             },
             "network": {
-                "type": "boolean", "default": False,
+                "type": "boolean",
+                "default": False,
                 "description": "Allow network. Only effective if "
-                               "SANDBOXED_JOB_ALLOW_NETWORK=true on the host.",
+                "SANDBOXED_JOB_ALLOW_NETWORK=true on the host.",
             },
             "env": {
                 "type": "object",
                 "description": "Env vars to set inside the container. Keys must be "
-                               "valid shell identifiers.",
+                "valid shell identifiers.",
             },
             "stdin": {
                 "type": "string",
@@ -117,9 +144,9 @@ class SandboxedJobTool(BaseTool):
             "stdin_bytes_b64": {
                 "type": "string",
                 "description": "Binary stdin payload, base64-encoded. "
-                               "Takes precedence over `stdin`. Used by "
-                               "code_asset to deliver a tar.gz of the "
-                               "asset contents without needing HTTP access.",
+                "Takes precedence over `stdin`. Used by "
+                "code_asset to deliver a tar.gz of the "
+                "asset contents without needing HTTP access.",
             },
         },
         "required": ["image", "command"],
@@ -134,25 +161,44 @@ class SandboxedJobTool(BaseTool):
     async def _resolve_settings(self) -> dict[str, Any]:
         """Merge env defaults with tenant Redis overrides. Tenant wins when set."""
         settings = {
-            "enabled": (os.environ.get("SANDBOXED_JOB_ENABLED", "").lower() in ("1", "true", "yes")),
-            "allow_network": (os.environ.get("SANDBOXED_JOB_ALLOW_NETWORK", "").lower() in ("1", "true", "yes")),
+            "enabled": (
+                os.environ.get("SANDBOXED_JOB_ENABLED", "").lower()
+                in ("1", "true", "yes")
+            ),
+            "allow_network": (
+                os.environ.get("SANDBOXED_JOB_ALLOW_NETWORK", "").lower()
+                in ("1", "true", "yes")
+            ),
             "allowed_images": _allowed_images(),
         }
         if not (self._tenant_id and self._redis_url):
             return settings
         try:
             import redis.asyncio as aioredis
+
             r = aioredis.from_url(self._redis_url, decode_responses=True)
             tk = f"sandbox:settings:{self._tenant_id}"
             raw = await r.hgetall(tk)
             await r.aclose()
             if raw:
                 if "enabled" in raw:
-                    settings["enabled"] = raw["enabled"].strip().lower() in ("1","true","yes")
+                    settings["enabled"] = raw["enabled"].strip().lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                    )
                 if "allow_network" in raw:
-                    settings["allow_network"] = raw["allow_network"].strip().lower() in ("1","true","yes")
+                    settings["allow_network"] = raw[
+                        "allow_network"
+                    ].strip().lower() in ("1", "true", "yes")
                 if "allowed_images" in raw and raw["allowed_images"].strip():
-                    settings["allowed_images"] = sorted({i.strip() for i in raw["allowed_images"].split(",") if i.strip()})
+                    settings["allowed_images"] = sorted(
+                        {
+                            i.strip()
+                            for i in raw["allowed_images"].split(",")
+                            if i.strip()
+                        }
+                    )
         except Exception:
             pass  # Redis blip → fall back to env defaults silently
         return settings
@@ -211,6 +257,7 @@ class SandboxedJobTool(BaseTool):
         raw_b64 = (arguments.get("stdin_bytes_b64") or "").strip()
         if raw_b64:
             import base64 as _b64
+
             try:
                 stdin_b = _b64.b64decode(raw_b64)
             except Exception:
@@ -225,22 +272,38 @@ class SandboxedJobTool(BaseTool):
         if _in_cluster():
             logger.info("sandboxed_job: using kubernetes backend")
             return await _run_k8s(
-                image=image, command=command, timeout=timeout,
-                memory_mb=memory_mb, cpu=cpu, network=want_network,
-                env=env_vars, stdin=stdin_b,
+                image=image,
+                command=command,
+                timeout=timeout,
+                memory_mb=memory_mb,
+                cpu=cpu,
+                network=want_network,
+                env=env_vars,
+                stdin=stdin_b,
             )
         logger.info("sandboxed_job: using docker backend")
         return await _run_docker(
-            image=image, command=command, timeout=timeout,
-            memory_mb=memory_mb, cpu=cpu, network=want_network,
-            env=env_vars, stdin=stdin_b,
+            image=image,
+            command=command,
+            timeout=timeout,
+            memory_mb=memory_mb,
+            cpu=cpu,
+            network=want_network,
+            env=env_vars,
+            stdin=stdin_b,
         )
 
 
 async def _run_docker(
-    *, image: str, command: str, timeout: int,
-    memory_mb: int, cpu: float, network: bool,
-    env: dict[str, str], stdin: bytes,
+    *,
+    image: str,
+    command: str,
+    timeout: int,
+    memory_mb: int,
+    cpu: float,
+    network: bool,
+    env: dict[str, str],
+    stdin: bytes,
 ) -> ToolResult:
     net_arg = [] if network else ["--network", "none"]
     env_args: list[str] = []
@@ -248,15 +311,26 @@ async def _run_docker(
         env_args.extend(["-e", f"{k}={v}"])
 
     argv = [
-        "docker", "run", "--rm", "-i",
+        "docker",
+        "run",
+        "--rm",
+        "-i",
         "--read-only",
-        "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-        "--security-opt", "no-new-privileges",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=64m",
+        "--security-opt",
+        "no-new-privileges",
         "--cap-drop=ALL",
-        "--memory", f"{memory_mb}m",
-        "--cpus", str(cpu),
-        *net_arg, *env_args,
-        image, "sh", "-c", command,
+        "--memory",
+        f"{memory_mb}m",
+        "--cpus",
+        str(cpu),
+        *net_arg,
+        *env_args,
+        image,
+        "sh",
+        "-c",
+        command,
     ]
 
     try:
@@ -280,13 +354,21 @@ async def _run_docker(
     except asyncio.TimeoutError:
         proc.kill()
         _emit_sandbox_metrics(
-            backend="docker", image=image, exit_code=None,
-            duration_ms=timeout * 1000, timed_out=True,
+            backend="docker",
+            image=image,
+            exit_code=None,
+            duration_ms=timeout * 1000,
+            timed_out=True,
         )
         return ToolResult(
             content=f"Container timed out after {timeout}s.",
             is_error=True,
-            metadata={"backend": "docker", "image": image, "exit_code": None, "timed_out": True},
+            metadata={
+                "backend": "docker",
+                "image": image,
+                "exit_code": None,
+                "timed_out": True,
+            },
         )
 
     out = stdout.decode("utf-8", errors="replace")
@@ -294,8 +376,11 @@ async def _run_docker(
     rc = proc.returncode
     body = (out + ("\n[STDERR]\n" + err if err.strip() else ""))[:8000]
     _emit_sandbox_metrics(
-        backend="docker", image=image, exit_code=rc,
-        duration_ms=None, timed_out=False,
+        backend="docker",
+        image=image,
+        exit_code=rc,
+        duration_ms=None,
+        timed_out=False,
     )
     return ToolResult(
         content=(
@@ -306,16 +391,25 @@ async def _run_docker(
         ),
         is_error=rc != 0,
         metadata={
-            "backend": "docker", "image": image, "exit_code": rc,
-            "stdout": out[:4000], "stderr": err[:2000],
+            "backend": "docker",
+            "image": image,
+            "exit_code": rc,
+            "stdout": out[:4000],
+            "stderr": err[:2000],
         },
     )
 
 
 async def _run_k8s(
-    *, image: str, command: str, timeout: int,
-    memory_mb: int, cpu: float, network: bool,
-    env: dict[str, str], stdin: str,
+    *,
+    image: str,
+    command: str,
+    timeout: int,
+    memory_mb: int,
+    cpu: float,
+    network: bool,
+    env: dict[str, str],
+    stdin: str,
 ) -> ToolResult:
     # Local import so the tool loads even when the k8s package isn't installed
     # on a docker-only developer machine.
@@ -330,7 +424,9 @@ async def _run_k8s(
     try:
         config.load_incluster_config()
     except Exception as e:
-        return ToolResult(content=f"Failed to load in-cluster config: {e}", is_error=True)
+        return ToolResult(
+            content=f"Failed to load in-cluster config: {e}", is_error=True
+        )
 
     namespace = os.environ.get("SANDBOXED_JOB_NAMESPACE", "").strip()
     if not namespace:
@@ -363,13 +459,19 @@ async def _run_k8s(
         volume_mounts=[
             client.V1VolumeMount(name="tmp", mount_path="/tmp"),
         ],
-        stdin=bool(stdin), stdin_once=bool(stdin), tty=False,
+        stdin=bool(stdin),
+        stdin_once=bool(stdin),
+        tty=False,
     )
 
     pod_spec_kwargs: dict[str, Any] = dict(
         restart_policy="Never",
         containers=[container],
-        volumes=[client.V1Volume(name="tmp", empty_dir=client.V1EmptyDirVolumeSource(size_limit="64Mi"))],
+        volumes=[
+            client.V1Volume(
+                name="tmp", empty_dir=client.V1EmptyDirVolumeSource(size_limit="64Mi")
+            )
+        ],
         automount_service_account_token=False,
         enable_service_links=False,
     )
@@ -388,15 +490,17 @@ async def _run_k8s(
 
     job = client.V1Job(
         metadata=client.V1ObjectMeta(
-            name=job_name, namespace=namespace,
+            name=job_name,
+            namespace=namespace,
             labels={"app": "sandboxed-job"},
         ),
         spec=client.V1JobSpec(
             template=pod_template,
-            backoff_limit=0,                        # no retries — one shot
-            active_deadline_seconds=timeout,        # hard kill past timeout
-            ttl_seconds_after_finished=120,         # auto-clean after 2 min
-            completions=1, parallelism=1,
+            backoff_limit=0,  # no retries — one shot
+            active_deadline_seconds=timeout,  # hard kill past timeout
+            ttl_seconds_after_finished=120,  # auto-clean after 2 min
+            completions=1,
+            parallelism=1,
         ),
     )
 
@@ -406,7 +510,8 @@ async def _run_k8s(
     def _delete_job() -> None:
         try:
             batch.delete_namespaced_job(
-                name=job_name, namespace=namespace,
+                name=job_name,
+                namespace=namespace,
                 propagation_policy="Background",
             )
         except Exception:
@@ -423,7 +528,8 @@ async def _run_k8s(
     pod_name: str | None = None
     while time.monotonic() < deadline:
         pods = core.list_namespaced_pod(
-            namespace=namespace, label_selector=f"job={job_name}",
+            namespace=namespace,
+            label_selector=f"job={job_name}",
         ).items
         if pods:
             pod_name = pods[0].metadata.name
@@ -437,13 +543,19 @@ async def _run_k8s(
         return ToolResult(
             content=f"k8s pod for job {job_name} never became visible within deadline.",
             is_error=True,
-            metadata={"backend": "kubernetes", "job_name": job_name,
-                       "namespace": namespace, "timed_out": True},
+            metadata={
+                "backend": "kubernetes",
+                "job_name": job_name,
+                "namespace": namespace,
+                "timed_out": True,
+            },
         )
 
     try:
         resp = core.read_namespaced_pod_log(
-            name=pod_name, namespace=namespace, container="worker",
+            name=pod_name,
+            namespace=namespace,
+            container="worker",
             _preload_content=False,
         )
         raw_body = resp.data if hasattr(resp, "data") else resp.read()
@@ -480,8 +592,11 @@ async def _run_k8s(
     # truncated out of existence.
     body = (raw_logs or "")[:262144]
     _emit_sandbox_metrics(
-        backend="kubernetes", image=image, exit_code=exit_code,
-        duration_ms=None, timed_out=timed_out,
+        backend="kubernetes",
+        image=image,
+        exit_code=exit_code,
+        duration_ms=None,
+        timed_out=timed_out,
     )
     return ToolResult(
         content=(
@@ -494,9 +609,13 @@ async def _run_k8s(
         is_error=(exit_code != 0) if exit_code is not None else True,
         metadata={
             "backend": "kubernetes",
-            "job_name": job_name, "pod_name": pod_name,
-            "namespace": namespace, "image": image,
-            "exit_code": exit_code, "phase": phase, "timed_out": timed_out,
+            "job_name": job_name,
+            "pod_name": pod_name,
+            "namespace": namespace,
+            "image": image,
+            "exit_code": exit_code,
+            "phase": phase,
+            "timed_out": timed_out,
             # code_asset extracts its delimited output from this blob, so
             # we let it see up to 256 KB — same cap as `body` above.
             "logs": raw_logs[:262144] if raw_logs else "",

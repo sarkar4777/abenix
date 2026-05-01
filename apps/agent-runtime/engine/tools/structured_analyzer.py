@@ -1,8 +1,8 @@
 """Structured Analyzer Tool — LLM-powered structured data extraction from any conte"""
+
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
@@ -17,7 +17,6 @@ ANALYSIS_PROMPTS = {
 - fix_suggestion: how to fix it
 Also check for: OWASP Top 10, hardcoded API keys/passwords, insecure HTTP, missing input validation.
 Output as JSON array of findings.""",
-
     "code_quality": """Analyze this code for quality metrics:
 - complexity_score: 0-100 (100 = very complex)
 - naming_conventions: consistent/mixed/poor
@@ -27,7 +26,6 @@ Output as JSON array of findings.""",
 - dead_code: any unused functions/variables detected
 - test_friendly: how testable is this code (dependency injection, interfaces, etc.)
 Output as JSON object.""",
-
     "architecture": """Analyze the architecture of this code:
 - patterns: design patterns used (MVC, repository, factory, observer, etc.)
 - layers: identified layers (presentation, business, data)
@@ -37,7 +35,6 @@ Output as JSON object.""",
 - data_models: key data structures/entities
 - external_deps: external libraries and services used
 Output as JSON object.""",
-
     "dependencies": """Extract ALL dependencies from this code:
 - imports: list of imported modules/packages
 - external_libs: third-party libraries with versions if specified
@@ -45,7 +42,6 @@ Output as JSON object.""",
 - circular_risks: potential circular dependency patterns
 - outdated_risk: any deprecated APIs or EOL libraries
 Output as JSON object.""",
-
     "business_context": """Describe what this code DOES in business terms:
 - purpose: one-sentence description of business function
 - domain_entities: business objects managed (customers, orders, invoices, etc.)
@@ -55,7 +51,6 @@ Output as JSON object.""",
 - stakeholders: who uses or is affected by this code
 - failure_impact: what happens to the business if this code fails
 Output as JSON object.""",
-
     "api_surface": """Map the API surface of this code:
 - endpoints: list of exposed routes/methods with HTTP method, path, params
 - input_types: request body/query param schemas
@@ -64,7 +59,6 @@ Output as JSON object.""",
 - rate_limits: any rate limiting mentioned
 - versioning: API version strategy
 Output as JSON object.""",
-
     "test_coverage": """Assess test coverage quality:
 - test_files: identified test files and their targets
 - assertion_types: types of assertions used
@@ -74,7 +68,6 @@ Output as JSON object.""",
 - coverage_estimate: rough percentage estimate
 - gaps: areas likely missing test coverage
 Output as JSON object.""",
-
     "documentation": """Assess documentation quality:
 - docstring_coverage: percentage of functions/classes with docstrings
 - readme_quality: comprehensive/basic/missing
@@ -83,7 +76,6 @@ Output as JSON object.""",
 - type_hints: present/partial/absent
 - changelog: present/absent
 Output as JSON object.""",
-
     "compliance": """Check for compliance-related patterns:
 - licenses: detected license type
 - pii_handling: how personal data is processed/stored
@@ -92,7 +84,6 @@ Output as JSON object.""",
 - encryption: data at rest/in transit encryption
 - access_control: RBAC/ABAC patterns
 Output as JSON object.""",
-
     "performance": """Analyze for performance issues:
 - n_plus_one: potential N+1 query patterns
 - unbounded_loops: loops without limits
@@ -124,9 +115,17 @@ class StructuredAnalyzerTool(BaseTool):
             "analysis_type": {
                 "type": "string",
                 "enum": [
-                    "security_audit", "code_quality", "architecture", "dependencies",
-                    "business_context", "api_surface", "test_coverage", "documentation",
-                    "compliance", "performance", "custom",
+                    "security_audit",
+                    "code_quality",
+                    "architecture",
+                    "dependencies",
+                    "business_context",
+                    "api_surface",
+                    "test_coverage",
+                    "documentation",
+                    "compliance",
+                    "performance",
+                    "custom",
                 ],
                 "description": "Type of analysis to perform",
                 "default": "code_quality",
@@ -166,10 +165,14 @@ class StructuredAnalyzerTool(BaseTool):
             system = "You are an expert analyst. Always respond with valid JSON."
             prompt = f"{custom_prompt}\n\nContent to analyze:\n```\n{content}\n```"
         else:
-            base_prompt = ANALYSIS_PROMPTS.get(analysis_type, ANALYSIS_PROMPTS["code_quality"])
+            base_prompt = ANALYSIS_PROMPTS.get(
+                analysis_type, ANALYSIS_PROMPTS["code_quality"]
+            )
             lang_hint = f" (Language: {language})" if language else ""
             system = f"You are an expert code and document analyst{lang_hint}. Always respond with valid JSON only — no markdown, no explanations, just the JSON object."
-            prompt = f"{base_prompt}\n\nContent to analyze:\n```{language}\n{content}\n```"
+            prompt = (
+                f"{base_prompt}\n\nContent to analyze:\n```{language}\n{content}\n```"
+            )
 
         if output_schema:
             prompt += f"\n\nTarget output schema: {json.dumps(output_schema)}"
@@ -177,6 +180,7 @@ class StructuredAnalyzerTool(BaseTool):
         # Call LLM
         try:
             from engine.llm_router import LLMRouter
+
             router = LLMRouter()
             response = await router.complete(
                 messages=[{"role": "user", "content": prompt}],
@@ -196,23 +200,32 @@ class StructuredAnalyzerTool(BaseTool):
 
             try:
                 parsed = json.loads(text)
-                return ToolResult(content=json.dumps({
-                    "status": "success",
-                    "analysis_type": analysis_type,
-                    "language": language or "auto-detected",
-                    "result": parsed,
-                    "tokens": response.input_tokens + response.output_tokens,
-                    "cost": response.cost,
-                }, default=str))
+                return ToolResult(
+                    content=json.dumps(
+                        {
+                            "status": "success",
+                            "analysis_type": analysis_type,
+                            "language": language or "auto-detected",
+                            "result": parsed,
+                            "tokens": response.input_tokens + response.output_tokens,
+                            "cost": response.cost,
+                        },
+                        default=str,
+                    )
+                )
             except json.JSONDecodeError:
                 # Return raw text if not valid JSON
-                return ToolResult(content=json.dumps({
-                    "status": "success",
-                    "analysis_type": analysis_type,
-                    "result": text,
-                    "format": "text",
-                    "tokens": response.input_tokens + response.output_tokens,
-                }))
+                return ToolResult(
+                    content=json.dumps(
+                        {
+                            "status": "success",
+                            "analysis_type": analysis_type,
+                            "result": text,
+                            "format": "text",
+                            "tokens": response.input_tokens + response.output_tokens,
+                        }
+                    )
+                )
 
         except Exception as e:
             return ToolResult(content=f"Analysis error: {str(e)[:500]}", is_error=True)

@@ -1,4 +1,5 @@
 """Scope gate — cheap pre-check before answering a question in a meeting."""
+
 from __future__ import annotations
 
 import json
@@ -32,34 +33,57 @@ class ScopeGateTool(BaseTool):
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         q = (arguments.get("question") or "").strip().lower()
         sess = sessmod.get(self._execution_id)
-        meeting_id = (arguments.get("meeting_id") or "").strip()
+        (arguments.get("meeting_id") or "").strip()
         if not sess:
             commitment_markers = (
-                "by friday", "by monday", "by tuesday", "by wednesday", "by thursday",
-                "by next", "by end of", "can you commit", "will you ", "promise",
-                "signed off", "approve ", "approved", "sign this", "authorize",
-                "budget", "how much", "contract value", "pricing",
+                "by friday",
+                "by monday",
+                "by tuesday",
+                "by wednesday",
+                "by thursday",
+                "by next",
+                "by end of",
+                "can you commit",
+                "will you ",
+                "promise",
+                "signed off",
+                "approve ",
+                "approved",
+                "sign this",
+                "authorize",
+                "budget",
+                "how much",
+                "contract value",
+                "pricing",
             )
             for m in commitment_markers:
                 if m in q:
                     return ToolResult(
-                        content=json.dumps({
+                        content=json.dumps(
+                            {
+                                "decision": "defer",
+                                "reason": f"no_session_plus_commitment_shape:{m}",
+                            }
+                        ),
+                        metadata={
                             "decision": "defer",
-                            "reason": f"no_session_plus_commitment_shape:{m}",
-                        }),
-                        metadata={"decision": "defer", "matched": m, "no_session": True},
+                            "matched": m,
+                            "no_session": True,
+                        },
                     )
             return ToolResult(
-                content=json.dumps({
-                    "decision": "answer",
-                    "reason": "no_active_session_default_answer",
-                    "hint": (
-                        "No live session context available — the pod may have "
-                        "restarted. Use persona_rag; if nothing relevant, "
-                        "politely say you don't have specifics and offer to "
-                        "follow up."
-                    ),
-                }),
+                content=json.dumps(
+                    {
+                        "decision": "answer",
+                        "reason": "no_active_session_default_answer",
+                        "hint": (
+                            "No live session context available — the pod may have "
+                            "restarted. Use persona_rag; if nothing relevant, "
+                            "politely say you don't have specifics and offer to "
+                            "follow up."
+                        ),
+                    }
+                ),
                 metadata={"decision": "answer", "no_session": True},
             )
 
@@ -75,10 +99,12 @@ class ScopeGateTool(BaseTool):
             tw = set(_tokenize(topic))
             if topic.lower() in q or (tw & q_words):
                 return ToolResult(
-                    content=json.dumps({
-                        "decision": "defer",
-                        "reason": f"topic_in_defer_list:{topic}",
-                    }),
+                    content=json.dumps(
+                        {
+                            "decision": "defer",
+                            "reason": f"topic_in_defer_list:{topic}",
+                        }
+                    ),
                     metadata={"decision": "defer", "matched": topic},
                 )
 
@@ -86,41 +112,62 @@ class ScopeGateTool(BaseTool):
             tw = set(_tokenize(topic))
             if topic.lower() in q or (tw & q_words):
                 return ToolResult(
-                    content=json.dumps({
-                        "decision": "answer",
-                        "reason": f"topic_in_allow_list:{topic}",
-                    }),
+                    content=json.dumps(
+                        {
+                            "decision": "answer",
+                            "reason": f"topic_in_allow_list:{topic}",
+                        }
+                    ),
                     metadata={"decision": "answer", "matched": topic},
                 )
 
         # Commitment-shaped heuristics — ALWAYS defer
         commitment_markers = (
-            "by friday", "by monday", "by tuesday", "by wednesday", "by thursday",
-            "by next", "by end of", "can you commit", "will you ", "promise",
-            "signed off", "approve ", "approved", "sign this", "authorize",
-            "budget", "how much", "contract value", "pricing",
+            "by friday",
+            "by monday",
+            "by tuesday",
+            "by wednesday",
+            "by thursday",
+            "by next",
+            "by end of",
+            "can you commit",
+            "will you ",
+            "promise",
+            "signed off",
+            "approve ",
+            "approved",
+            "sign this",
+            "authorize",
+            "budget",
+            "how much",
+            "contract value",
+            "pricing",
         )
         for m in commitment_markers:
             if m in q:
                 return ToolResult(
-                    content=json.dumps({
-                        "decision": "defer",
-                        "reason": f"commitment_shape:{m}",
-                    }),
+                    content=json.dumps(
+                        {
+                            "decision": "defer",
+                            "reason": f"commitment_shape:{m}",
+                        }
+                    ),
                     metadata={"decision": "defer", "matched": m},
                 )
 
         return ToolResult(
-            content=json.dumps({
-                "decision": "answer",
-                "reason": "no_allow_match_default_answer",
-                "hint": (
-                    "No allow-list topic matched the question, but it's also "
-                    "not a defer-list topic or commitment. Try persona_rag "
-                    "first; if no relevant context found, politely tell the "
-                    "asker you don't have specifics on that topic."
-                ),
-            }),
+            content=json.dumps(
+                {
+                    "decision": "answer",
+                    "reason": "no_allow_match_default_answer",
+                    "hint": (
+                        "No allow-list topic matched the question, but it's also "
+                        "not a defer-list topic or commitment. Try persona_rag "
+                        "first; if no relevant context found, politely tell the "
+                        "asker you don't have specifics on that topic."
+                    ),
+                }
+            ),
             metadata={"decision": "answer"},
         )
 
@@ -129,17 +176,60 @@ class ScopeGateTool(BaseTool):
 # question containing "the" would match every allow-list topic that
 # contains "the".
 _STOP = {
-    "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
-    "be", "been", "of", "on", "in", "to", "for", "with", "your", "my",
-    "our", "you", "i", "we", "this", "that", "these", "those", "what",
-    "where", "when", "who", "why", "how", "do", "does", "did", "can",
-    "could", "should", "would", "tell", "me", "us", "about",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "of",
+    "on",
+    "in",
+    "to",
+    "for",
+    "with",
+    "your",
+    "my",
+    "our",
+    "you",
+    "i",
+    "we",
+    "this",
+    "that",
+    "these",
+    "those",
+    "what",
+    "where",
+    "when",
+    "who",
+    "why",
+    "how",
+    "do",
+    "does",
+    "did",
+    "can",
+    "could",
+    "should",
+    "would",
+    "tell",
+    "me",
+    "us",
+    "about",
 }
+
 
 def _tokenize(text: str) -> list[str]:
     """Split into lowercase content words, dropping stop-words + tokens"""
     import re
+
     return [
-        w for w in re.findall(r"[a-z][a-z0-9]+", text.lower())
+        w
+        for w in re.findall(r"[a-z][a-z0-9]+", text.lower())
         if len(w) >= 3 and w not in _STOP
     ]

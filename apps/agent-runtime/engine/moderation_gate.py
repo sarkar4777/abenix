@@ -1,4 +1,5 @@
 """Policy gate — non-bypassable content moderation wired into AgentExecutor."""
+
 from __future__ import annotations
 
 import logging
@@ -6,8 +7,12 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from engine.moderation_client import (
-    ACTION_ALLOW, ACTION_BLOCK, ACTION_FLAG, ACTION_REDACT,
-    ModerationDecision, content_hash, evaluate,
+    ACTION_ALLOW,
+    ACTION_BLOCK,
+    ACTION_REDACT,
+    ModerationDecision,
+    content_hash,
+    evaluate,
 )
 
 logger = logging.getLogger(__name__)
@@ -16,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GateConfig:
     """Snapshot of a tenant's ModerationPolicy — passed to the executor."""
+
     policy_id: str = ""
     tenant_id: str = ""
     user_id: str = ""
@@ -37,6 +43,7 @@ class GateConfig:
 
 class ModerationBlocked(Exception):
     """Raised by the gate when a BLOCK action is returned."""
+
     def __init__(self, decision: ModerationDecision, source: str, content_preview: str):
         self.decision = decision
         self.source = source
@@ -101,9 +108,7 @@ async def check(
             logger.warning("moderation event_sink failed: %s", e)
 
     if decision.action == ACTION_BLOCK:
-        raise ModerationBlocked(
-            decision, source=source, content_preview=content[:500]
-        )
+        raise ModerationBlocked(decision, source=source, content_preview=content[:500])
     if decision.action == ACTION_REDACT and decision.redacted_content is not None:
         return decision.redacted_content, decision
     # FLAG passes through unchanged; sink + dashboards do the rest.

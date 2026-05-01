@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-from dataclasses import dataclass, field
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 import redis.asyncio as aioredis
 
-from engine.cache.exact_cache import ExactCache, _cache_key, TTL_SECONDS, TEMP_THRESHOLD
+from engine.cache.exact_cache import ExactCache, _cache_key, TTL_SECONDS
 from engine.cache.orchestrator import (
     CacheOrchestrator,
     CacheResult,
@@ -77,10 +74,32 @@ async def clean_exact_cache(exact_cache, redis_client):
 MSG_HELLO = [{"role": "user", "content": "Hello, world!"}]
 MSG_GOODBYE = [{"role": "user", "content": "Goodbye, world!"}]
 MSG_SIMILAR = [{"role": "user", "content": "Hello world"}]
-TOOLS_CALC = [{"name": "calculator", "description": "Math calculator", "input_schema": {"type": "object"}}]
-TOOLS_SEARCH = [{"name": "web_search", "description": "Search the web", "input_schema": {"type": "object"}}]
-RESPONSE_A = {"content": "Hi there!", "model": "claude-sonnet-4-5-20250929", "input_tokens": 10, "output_tokens": 5}
-RESPONSE_B = {"content": "Hello again!", "model": "claude-sonnet-4-5-20250929", "input_tokens": 12, "output_tokens": 7}
+TOOLS_CALC = [
+    {
+        "name": "calculator",
+        "description": "Math calculator",
+        "input_schema": {"type": "object"},
+    }
+]
+TOOLS_SEARCH = [
+    {
+        "name": "web_search",
+        "description": "Search the web",
+        "input_schema": {"type": "object"},
+    }
+]
+RESPONSE_A = {
+    "content": "Hi there!",
+    "model": "claude-sonnet-4-5-20250929",
+    "input_tokens": 10,
+    "output_tokens": 5,
+}
+RESPONSE_B = {
+    "content": "Hello again!",
+    "model": "claude-sonnet-4-5-20250929",
+    "input_tokens": 12,
+    "output_tokens": 7,
+}
 
 
 # 1. ExactCache integration with real Redis
@@ -93,7 +112,9 @@ async def test_exact_cache_roundtrip(clean_exact_cache):
     result = await cache.get("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3)
     assert result is None
 
-    await cache.set("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A)
+    await cache.set(
+        "claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A
+    )
     result = await cache.get("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3)
     assert result is not None
     assert result["content"] == "Hi there!"
@@ -105,7 +126,9 @@ async def test_exact_cache_roundtrip(clean_exact_cache):
 @pytest.mark.asyncio
 async def test_exact_cache_different_model_misses(clean_exact_cache):
     cache = clean_exact_cache
-    await cache.set("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A)
+    await cache.set(
+        "claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A
+    )
     result = await cache.get("gpt-4o", MSG_HELLO, TOOLS_CALC, 0.3)
     assert result is None
 
@@ -114,7 +137,9 @@ async def test_exact_cache_different_model_misses(clean_exact_cache):
 @pytest.mark.asyncio
 async def test_exact_cache_different_messages_misses(clean_exact_cache):
     cache = clean_exact_cache
-    await cache.set("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A)
+    await cache.set(
+        "claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A
+    )
     result = await cache.get("claude-sonnet-4-5-20250929", MSG_GOODBYE, TOOLS_CALC, 0.3)
     assert result is None
 
@@ -123,7 +148,9 @@ async def test_exact_cache_different_messages_misses(clean_exact_cache):
 @pytest.mark.asyncio
 async def test_exact_cache_different_tools_misses(clean_exact_cache):
     cache = clean_exact_cache
-    await cache.set("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A)
+    await cache.set(
+        "claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A
+    )
     result = await cache.get("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_SEARCH, 0.3)
     assert result is None
 
@@ -132,7 +159,9 @@ async def test_exact_cache_different_tools_misses(clean_exact_cache):
 @pytest.mark.asyncio
 async def test_exact_cache_different_temperature_misses(clean_exact_cache):
     cache = clean_exact_cache
-    await cache.set("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A)
+    await cache.set(
+        "claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.3, RESPONSE_A
+    )
     result = await cache.get("claude-sonnet-4-5-20250929", MSG_HELLO, TOOLS_CALC, 0.4)
     assert result is None
 
@@ -197,13 +226,29 @@ async def test_exact_cache_complex_messages(clean_exact_cache):
     cache = clean_exact_cache
     messages = [
         {"role": "user", "content": "What is 2+2?"},
-        {"role": "assistant", "content": [
-            {"type": "text", "text": "Let me calculate."},
-            {"type": "tool_use", "id": "t1", "name": "calculator", "input": {"expr": "2+2"}},
-        ]},
-        {"role": "user", "content": [
-            {"type": "tool_result", "tool_use_id": "t1", "content": "4", "is_error": False}
-        ]},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Let me calculate."},
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "calculator",
+                    "input": {"expr": "2+2"},
+                },
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": "4",
+                    "is_error": False,
+                }
+            ],
+        },
     ]
     await cache.set("claude-sonnet-4-5-20250929", messages, TOOLS_CALC, 0.3, RESPONSE_A)
     result = await cache.get("claude-sonnet-4-5-20250929", messages, TOOLS_CALC, 0.3)
@@ -513,7 +558,9 @@ async def test_prometheus_counters_increment():
         enable_prompt=False,
     )
     try:
-        msgs_full_miss = [{"role": "user", "content": "prom-fullmiss-" + str(time.time())}]
+        msgs_full_miss = [
+            {"role": "user", "content": "prom-fullmiss-" + str(time.time())}
+        ]
         await orch2.check(
             model="gpt-4o",
             messages=msgs_full_miss,
@@ -540,7 +587,10 @@ async def test_agent_executor_cache_hit_returns_immediately():
         return_value=CacheResult(
             hit=True,
             layer="exact",
-            response={"content": "cached answer", "model": "claude-sonnet-4-5-20250929"},
+            response={
+                "content": "cached answer",
+                "model": "claude-sonnet-4-5-20250929",
+            },
         )
     )
     mock_cache.prompt_optimizer = None
@@ -565,7 +615,7 @@ async def test_agent_executor_cache_hit_returns_immediately():
 
 @pytest.mark.asyncio
 async def test_agent_executor_cache_miss_calls_llm_and_stores():
-    from engine.agent_executor import AgentExecutor, ExecutionResult
+    from engine.agent_executor import AgentExecutor
     from engine.llm_router import LLMResponse
     from engine.tools.base import ToolRegistry
 
@@ -583,9 +633,7 @@ async def test_agent_executor_cache_miss_calls_llm_and_stores():
 
     registry = ToolRegistry()
     mock_cache = AsyncMock()
-    mock_cache.check = AsyncMock(
-        return_value=CacheResult(hit=False, layer="none")
-    )
+    mock_cache.check = AsyncMock(return_value=CacheResult(hit=False, layer="none"))
     mock_cache.store = AsyncMock()
     mock_cache.prompt_optimizer = None
 
@@ -612,7 +660,7 @@ async def test_agent_executor_cache_miss_calls_llm_and_stores():
 
 @pytest.mark.asyncio
 async def test_agent_executor_no_cache_still_works():
-    from engine.agent_executor import AgentExecutor, ExecutionResult
+    from engine.agent_executor import AgentExecutor
     from engine.llm_router import LLMResponse
     from engine.tools.base import ToolRegistry
 
@@ -642,7 +690,7 @@ async def test_agent_executor_no_cache_still_works():
 
 @pytest.mark.asyncio
 async def test_agent_executor_stream_cache_hit():
-    from engine.agent_executor import AgentExecutor, ExecutionEvent
+    from engine.agent_executor import AgentExecutor
     from engine.tools.base import ToolRegistry
 
     mock_router = AsyncMock()
@@ -651,7 +699,10 @@ async def test_agent_executor_stream_cache_hit():
         return_value=CacheResult(
             hit=True,
             layer="semantic",
-            response={"content": "cached stream", "model": "claude-sonnet-4-5-20250929"},
+            response={
+                "content": "cached stream",
+                "model": "claude-sonnet-4-5-20250929",
+            },
         )
     )
     mock_cache.prompt_optimizer = None
@@ -696,9 +747,7 @@ async def test_agent_executor_prompt_optimization_applied():
     mock_router.complete = AsyncMock(return_value=mock_response)
 
     mock_cache = AsyncMock()
-    mock_cache.check = AsyncMock(
-        return_value=CacheResult(hit=False, layer="prompt")
-    )
+    mock_cache.check = AsyncMock(return_value=CacheResult(hit=False, layer="prompt"))
     mock_cache.store = AsyncMock()
     mock_cache.prompt_optimizer = PromptCacheOptimizer()
 
@@ -706,6 +755,7 @@ async def test_agent_executor_prompt_optimization_applied():
         name = "dummy"
         description = "dummy"
         input_schema = {"type": "object"}
+
         async def execute(self, args):
             return ToolResult(content="ok")
 
@@ -722,7 +772,7 @@ async def test_agent_executor_prompt_optimization_applied():
         agent_id="test-agent",
     )
 
-    result = await executor.invoke("test prompt optimization")
+    await executor.invoke("test prompt optimization")
 
     call_kwargs = mock_router.complete.call_args.kwargs
     system_val = call_kwargs["system"]

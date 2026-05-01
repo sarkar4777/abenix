@@ -1,4 +1,5 @@
 """Queue-backend abstraction — Celery (default) or NATS JetStream."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,13 +7,14 @@ import json
 import logging
 import os
 import uuid
-from typing import Any, AsyncIterator, Optional
+from typing import AsyncIterator, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class QueueBackend:
     """Abstract base — two subclasses live below."""
+
     async def submit(self, queue_name: str, payload: dict) -> str: ...
     async def status(self, task_id: str) -> dict: ...
     async def stream(self, queue_name: str) -> AsyncIterator[dict]: ...
@@ -25,6 +27,7 @@ class CeleryBackend(QueueBackend):
     def __init__(self) -> None:
         try:
             from worker.celery_app import celery_app, execute_agent_task  # type: ignore
+
             self.celery_app = celery_app
             self._execute = execute_agent_task
         except Exception as e:
@@ -64,6 +67,7 @@ class NATSBackend(QueueBackend):
     def __init__(self) -> None:
         try:
             import nats  # type: ignore
+
             self._nats = nats
         except ImportError as e:
             logger.warning("nats-py not installed; NATSBackend unavailable: %s", e)
@@ -103,8 +107,11 @@ class NATSBackend(QueueBackend):
         # JetStream isn't a K/V store — status lives in the DB execution row.
         # Callers should query the executions table directly; we return
         # UNKNOWN here so the interface stays consistent.
-        return {"state": "UNKNOWN", "result": None,
-                "note": "Use the executions endpoint for NATS-backed status"}
+        return {
+            "state": "UNKNOWN",
+            "result": None,
+            "note": "Use the executions endpoint for NATS-backed status",
+        }
 
     async def stream(self, queue_name: str) -> AsyncIterator[dict]:
         await self._ensure()
@@ -132,8 +139,10 @@ class NATSBackend(QueueBackend):
                         logger.exception("NATS stream decode failed: %s", e)
                         await msg.nak()
         finally:
-            try: await psub.unsubscribe()
-            except Exception: pass
+            try:
+                await psub.unsubscribe()
+            except Exception:
+                pass
 
 
 _backend: Optional[QueueBackend] = None
@@ -150,7 +159,9 @@ def get_queue_backend() -> QueueBackend:
     if requested == "nats":
         candidate = NATSBackend()
         if candidate._nats is None:
-            logger.warning("QUEUE_BACKEND=nats but nats-py missing — falling back to Celery")
+            logger.warning(
+                "QUEUE_BACKEND=nats but nats-py missing — falling back to Celery"
+            )
             _backend = CeleryBackend()
         else:
             logger.info("Using NATS JetStream queue backend")

@@ -1,4 +1,5 @@
 """Semantic diff between two pieces of text or two structured objects."""
+
 from __future__ import annotations
 
 import difflib
@@ -33,10 +34,15 @@ def _diff_text(a: str, b: str, label_a: str, label_b: str) -> dict[str, Any]:
                 removed.extend(a_para[i1 + (j2 - j1) : i2])
             elif (j2 - j1) > (i2 - i1):
                 added.extend(b_para[j1 + (i2 - i1) : j2])
-    udiff = list(difflib.unified_diff(
-        a.splitlines(), b.splitlines(),
-        fromfile=label_a, tofile=label_b, lineterm="",
-    ))
+    udiff = list(
+        difflib.unified_diff(
+            a.splitlines(),
+            b.splitlines(),
+            fromfile=label_a,
+            tofile=label_b,
+            lineterm="",
+        )
+    )
     return {
         "kind": "text",
         "added_paragraphs": added,
@@ -49,7 +55,7 @@ def _diff_text(a: str, b: str, label_a: str, label_b: str) -> dict[str, Any]:
 
 def _diff_json(a: Any, b: Any, path: str = "") -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    if type(a) != type(b):
+    if type(a) is not type(b):
         out.append({"op": "type_changed", "path": path or "/", "before": a, "after": b})
         return out
     if isinstance(a, dict):
@@ -57,7 +63,7 @@ def _diff_json(a: Any, b: Any, path: str = "") -> list[dict[str, Any]]:
         for k in sorted(a_keys - b_keys):
             out.append({"op": "removed", "path": f"{path}/{k}", "before": a[k]})
         for k in sorted(b_keys - a_keys):
-            out.append({"op": "added",   "path": f"{path}/{k}", "after": b[k]})
+            out.append({"op": "added", "path": f"{path}/{k}", "after": b[k]})
         for k in sorted(a_keys & b_keys):
             out.extend(_diff_json(a[k], b[k], f"{path}/{k}"))
     elif isinstance(a, list):
@@ -66,7 +72,7 @@ def _diff_json(a: Any, b: Any, path: str = "") -> list[dict[str, Any]]:
         for i in range(len(b), len(a)):
             out.append({"op": "removed", "path": f"{path}[{i}]", "before": a[i]})
         for i in range(len(a), len(b)):
-            out.append({"op": "added",   "path": f"{path}[{i}]", "after": b[i]})
+            out.append({"op": "added", "path": f"{path}[{i}]", "after": b[i]})
     elif a != b:
         out.append({"op": "changed", "path": path or "/", "before": a, "after": b})
     return out
@@ -102,11 +108,19 @@ class SemanticDiffTool(BaseTool):
         if mode == "json":
             # Accept either dict/list or a JSON string.
             if isinstance(left, str):
-                try: left = json.loads(left)
-                except Exception as e: return ToolResult(content=f"left is not valid JSON: {e}", is_error=True)
+                try:
+                    left = json.loads(left)
+                except Exception as e:
+                    return ToolResult(
+                        content=f"left is not valid JSON: {e}", is_error=True
+                    )
             if isinstance(right, str):
-                try: right = json.loads(right)
-                except Exception as e: return ToolResult(content=f"right is not valid JSON: {e}", is_error=True)
+                try:
+                    right = json.loads(right)
+                except Exception as e:
+                    return ToolResult(
+                        content=f"right is not valid JSON: {e}", is_error=True
+                    )
             ops = _diff_json(left, right)
             adds = [o for o in ops if o["op"] == "added"]
             rems = [o for o in ops if o["op"] == "removed"]
@@ -125,13 +139,21 @@ class SemanticDiffTool(BaseTool):
                     lines.append(
                         f"  ~ {o['path']}: {json.dumps(o['before'])[:80]} -> {json.dumps(o['after'])[:80]}"
                     )
-            return ToolResult(content="\n".join(lines), metadata={"ops": ops, "kind": "json"})
+            return ToolResult(
+                content="\n".join(lines), metadata={"ops": ops, "kind": "json"}
+            )
 
         # text
         if not isinstance(left, str) or not isinstance(right, str):
-            return ToolResult(content="text mode needs left/right as strings", is_error=True)
-        result = _diff_text(left, right, arguments.get("label_left", "v1"),
-                                       arguments.get("label_right", "v2"))
+            return ToolResult(
+                content="text mode needs left/right as strings", is_error=True
+            )
+        result = _diff_text(
+            left,
+            right,
+            arguments.get("label_left", "v1"),
+            arguments.get("label_right", "v2"),
+        )
         lines = [
             f"Semantic text diff — similarity {result['similarity_ratio']:.2%}",
             f"  + {len(result['added_paragraphs'])} paragraph(s) added",

@@ -102,7 +102,9 @@ class CsvAnalyzerTool(BaseTool):
             if file_path:
                 path = Path(file_path)
                 if not path.exists():
-                    return ToolResult(content=f"File not found: {file_path}", is_error=True)
+                    return ToolResult(
+                        content=f"File not found: {file_path}", is_error=True
+                    )
                 csv_text = path.read_text(encoding="utf-8", errors="replace")
 
             rows, headers = self._parse_csv(csv_text)
@@ -134,12 +136,18 @@ class CsvAnalyzerTool(BaseTool):
             elif operation == "frequency":
                 result = self._frequency(rows, headers, arguments.get("columns"))
             else:
-                return ToolResult(content=f"Unknown operation: {operation}", is_error=True)
+                return ToolResult(
+                    content=f"Unknown operation: {operation}", is_error=True
+                )
 
             output = json.dumps(result, indent=2, default=str)
             return ToolResult(
                 content=output,
-                metadata={"operation": operation, "total_rows": len(rows), "columns": headers},
+                metadata={
+                    "operation": operation,
+                    "total_rows": len(rows),
+                    "columns": headers,
+                },
             )
         except Exception as e:
             return ToolResult(content=f"Analysis error: {e}", is_error=True)
@@ -159,7 +167,9 @@ class CsvAnalyzerTool(BaseTool):
         except (ValueError, TypeError):
             return None
 
-    def _get_numeric_columns(self, rows: list[dict[str, str]], headers: list[str]) -> list[str]:
+    def _get_numeric_columns(
+        self, rows: list[dict[str, str]], headers: list[str]
+    ) -> list[str]:
         numeric: list[str] = []
         for col in headers:
             values = [self._to_float(r.get(col, "")) for r in rows[:20]]
@@ -255,7 +265,9 @@ class CsvAnalyzerTool(BaseTool):
         limit = args.get("limit", 50)
 
         if not sort_by or sort_by not in headers:
-            return {"error": f"sort_by column '{sort_by}' not found. Available: {headers}"}
+            return {
+                "error": f"sort_by column '{sort_by}' not found. Available: {headers}"
+            }
 
         def sort_key(row: dict[str, str]) -> tuple[int, float | str]:
             val = row.get(sort_by, "")
@@ -279,7 +291,9 @@ class CsvAnalyzerTool(BaseTool):
         value_cols = args.get("columns") or self._get_numeric_columns(rows, headers)
 
         if not group_col or group_col not in headers:
-            return {"error": f"group_column '{group_col}' not found. Available: {headers}"}
+            return {
+                "error": f"group_column '{group_col}' not found. Available: {headers}"
+            }
 
         groups: dict[str, list[dict[str, str]]] = defaultdict(list)
         for row in rows:
@@ -377,7 +391,9 @@ class CsvAnalyzerTool(BaseTool):
             outliers = []
             for idx, val in nums:
                 if val < lower or val > upper:
-                    outliers.append({"row": idx, "value": val, "bounds": [lower, upper]})
+                    outliers.append(
+                        {"row": idx, "value": val, "bounds": [lower, upper]}
+                    )
             if outliers:
                 result[col] = outliers
 
@@ -400,7 +416,9 @@ class CsvAnalyzerTool(BaseTool):
                 "sample_values": list(set(v for v in values if v.strip()))[:5],
             }
 
-        duplicates = total - len(set(tuple(r.get(h, "") for h in headers) for r in rows))
+        duplicates = total - len(
+            set(tuple(r.get(h, "") for h in headers) for r in rows)
+        )
 
         return {
             "total_rows": total,
@@ -426,7 +444,9 @@ class CsvAnalyzerTool(BaseTool):
         result: dict[str, list[str]] = {}
         for col in cols:
             if col in headers:
-                vals = sorted(set(r.get(col, "") for r in rows if r.get(col, "").strip()))
+                vals = sorted(
+                    set(r.get(col, "") for r in rows if r.get(col, "").strip())
+                )
                 result[col] = vals[:100]
         return {"unique_values": result}
 

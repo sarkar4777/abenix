@@ -1,4 +1,5 @@
 """Admin scaling API — /api/admin/scaling/*"""
+
 from __future__ import annotations
 
 import logging
@@ -7,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.responses import JSONResponse
-from sqlalchemy import func as sqlfunc, select, update
+from sqlalchemy import func as sqlfunc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
@@ -101,7 +102,9 @@ def _serialize_agent_scale(a: Agent) -> dict[str, Any]:
         "slug": a.slug,
         "category": a.category,
         "status": a.status.value if hasattr(a.status, "value") else str(a.status),
-        "agent_type": a.agent_type.value if hasattr(a.agent_type, "value") else str(a.agent_type),
+        "agent_type": (
+            a.agent_type.value if hasattr(a.agent_type, "value") else str(a.agent_type)
+        ),
         "runtime_pool": a.runtime_pool or "default",
         "dedicated_mode": bool(getattr(a, "dedicated_mode", False)),
         "effective_pool": (
@@ -113,8 +116,12 @@ def _serialize_agent_scale(a: Agent) -> dict[str, Any]:
         "max_replicas": a.max_replicas,
         "concurrency_per_replica": a.concurrency_per_replica,
         "rate_limit_qps": a.rate_limit_qps,
-        "daily_budget_usd": float(a.daily_budget_usd) if a.daily_budget_usd is not None else None,
-        "daily_cost_limit": float(a.daily_cost_limit) if a.daily_cost_limit is not None else None,
+        "daily_budget_usd": (
+            float(a.daily_budget_usd) if a.daily_budget_usd is not None else None
+        ),
+        "daily_cost_limit": (
+            float(a.daily_cost_limit) if a.daily_cost_limit is not None else None
+        ),
         "model": (a.model_config_ or {}).get("model"),
     }
 
@@ -130,21 +137,27 @@ async def list_pools(
 
     # Count agents per pool (across all tenants) so admins see the whole fleet
     counts = {}
-    for (pool, n) in (await db.execute(
-        select(Agent.runtime_pool, sqlfunc.count(Agent.id)).group_by(Agent.runtime_pool)
-    )).all():
+    for pool, n in (
+        await db.execute(
+            select(Agent.runtime_pool, sqlfunc.count(Agent.id)).group_by(
+                Agent.runtime_pool
+            )
+        )
+    ).all():
         counts[pool or "default"] = n
 
     # 24-hour execution counts per pool (join via agents)
     since = datetime.now(timezone.utc) - timedelta(hours=24)
     exec_counts: dict[str, int] = {}
     try:
-        rows = (await db.execute(
-            select(Agent.runtime_pool, sqlfunc.count(Execution.id))
-            .join(Execution, Execution.agent_id == Agent.id)
-            .where(Execution.created_at >= since)
-            .group_by(Agent.runtime_pool)
-        )).all()
+        rows = (
+            await db.execute(
+                select(Agent.runtime_pool, sqlfunc.count(Execution.id))
+                .join(Execution, Execution.agent_id == Agent.id)
+                .where(Execution.created_at >= since)
+                .group_by(Agent.runtime_pool)
+            )
+        ).all()
         for pool, n in rows:
             exec_counts[pool or "default"] = int(n)
     except Exception:
@@ -153,11 +166,13 @@ async def list_pools(
 
     out = []
     for p in POOLS:
-        out.append({
-            **p,
-            "agent_count": counts.get(p["key"], 0),
-            "executions_24h": exec_counts.get(p["key"], 0),
-        })
+        out.append(
+            {
+                **p,
+                "agent_count": counts.get(p["key"], 0),
+                "executions_24h": exec_counts.get(p["key"], 0),
+            }
+        )
     return success({"pools": out})
 
 
@@ -186,7 +201,9 @@ async def update_agent_scale(
 ) -> JSONResponse:
     """Update scaling knobs on an agent."""
     _ensure_admin(user)
-    a = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    a = (
+        await db.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
 
@@ -200,7 +217,7 @@ async def update_agent_scale(
         updates["runtime_pool"] = pool
         if pool == "inline":
             updates.setdefault("min_replicas", 0)
-            updates.setdefault("max_replicas", 1)      # respect bounds
+            updates.setdefault("max_replicas", 1)  # respect bounds
             updates.setdefault("concurrency_per_replica", 1)
 
     # Integer fields with bounds — keep values sane so nobody can
@@ -261,7 +278,10 @@ async def update_agent_scale(
 
     logger.info(
         "[admin.scaling] %s updated agent %s (slug=%s): %s",
-        user.email, a.id, a.slug, {k: str(v)[:50] for k, v in updates.items()},
+        user.email,
+        a.id,
+        a.slug,
+        {k: str(v)[:50] for k, v in updates.items()},
     )
     return success(_serialize_agent_scale(a))
 
@@ -275,13 +295,17 @@ async def pause_agent(
     """Quick pause — sets status=archived so the runtime will refuse
     executions (but the row stays for audit/unpause)."""
     _ensure_admin(user)
-    a = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    a = (
+        await db.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
     a.status = AgentStatus.ARCHIVED
     await db.commit()
     await db.refresh(a)
-    logger.warning("[admin.scaling] PAUSED %s (slug=%s) by %s", a.id, a.slug, user.email)
+    logger.warning(
+        "[admin.scaling] PAUSED %s (slug=%s) by %s", a.id, a.slug, user.email
+    )
     return success({"id": str(a.id), "status": a.status.value})
 
 
@@ -292,7 +316,9 @@ async def resume_agent(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     _ensure_admin(user)
-    a = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    a = (
+        await db.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
     a.status = AgentStatus.ACTIVE
@@ -311,7 +337,9 @@ async def set_dedicated_mode(
 ) -> JSONResponse:
     """Toggle per-agent dedicated pod scaling."""
     _ensure_admin(user)
-    a = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    a = (
+        await db.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
     enabled = bool(body.get("enabled", False))
@@ -320,7 +348,10 @@ async def set_dedicated_mode(
     await db.refresh(a)
     logger.info(
         "[admin.scaling] dedicated_mode=%s on agent %s (slug=%s) by %s",
-        enabled, a.id, a.slug, user.email,
+        enabled,
+        a.id,
+        a.slug,
+        user.email,
     )
     return success(_serialize_agent_scale(a))
 
@@ -333,23 +364,30 @@ async def cost_projection(
 ) -> JSONResponse:
     """Project hourly + daily + monthly cost for this agent based on"""
     _ensure_admin(user)
-    a = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    a = (
+        await db.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
     if not a:
         return error("Agent not found", 404)
 
     since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
-    rows = (await db.execute(
-        select(Execution)
-        .where(Execution.agent_id == a.id, Execution.created_at >= since_24h)
-        .order_by(Execution.created_at.desc())
-        .limit(500)
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(Execution)
+                .where(Execution.agent_id == a.id, Execution.created_at >= since_24h)
+                .order_by(Execution.created_at.desc())
+                .limit(500)
+            )
+        )
+        .scalars()
+        .all()
+    )
     runs_24h = len(rows)
     total_cost = sum(float(r.cost_usd or 0) for r in rows)
     avg_cost_per_run = total_cost / runs_24h if runs_24h > 0 else 0.0
     avg_duration_ms = (
-        sum(int(r.duration_ms or 0) for r in rows) / runs_24h
-        if runs_24h > 0 else 0.0
+        sum(int(r.duration_ms or 0) for r in rows) / runs_24h if runs_24h > 0 else 0.0
     )
 
     runs_per_hour = runs_24h / 24.0 if runs_24h else 0.0
@@ -375,28 +413,30 @@ async def cost_projection(
             "total_usd_per_month": round(per_h * 24 * 30, 2),
         }
 
-    return success({
-        "agent_id": str(a.id),
-        "telemetry_24h": {
-            "runs": runs_24h,
-            "total_cost_usd": round(total_cost, 4),
-            "avg_cost_per_run_usd": round(avg_cost_per_run, 4),
-            "avg_duration_ms": round(avg_duration_ms, 0),
-            "runs_per_hour": round(runs_per_hour, 2),
-        },
-        "scenarios": {
-            "shared":    _scenario(avg_replicas_shared),
-            "dedicated": _scenario(avg_replicas_dedicated),
-            "peak":      _scenario(peak_replicas),
-        },
-        "current": "dedicated" if getattr(a, "dedicated_mode", False) else "shared",
-        "notes": [
-            "Infra cost uses a $0.012/hour per-pod baseline; tune in code or per-cluster billing.",
-            "Token cost is the trailing 24h average per run × current run-rate.",
-            "Shared mode credits this agent ~5% of a pool replica (multi-tenant amortisation).",
-            "Dedicated mode pins min_replicas pods; peak shows the max_replicas worst case.",
-        ],
-    })
+    return success(
+        {
+            "agent_id": str(a.id),
+            "telemetry_24h": {
+                "runs": runs_24h,
+                "total_cost_usd": round(total_cost, 4),
+                "avg_cost_per_run_usd": round(avg_cost_per_run, 4),
+                "avg_duration_ms": round(avg_duration_ms, 0),
+                "runs_per_hour": round(runs_per_hour, 2),
+            },
+            "scenarios": {
+                "shared": _scenario(avg_replicas_shared),
+                "dedicated": _scenario(avg_replicas_dedicated),
+                "peak": _scenario(peak_replicas),
+            },
+            "current": "dedicated" if getattr(a, "dedicated_mode", False) else "shared",
+            "notes": [
+                "Infra cost uses a $0.012/hour per-pod baseline; tune in code or per-cluster billing.",
+                "Token cost is the trailing 24h average per run × current run-rate.",
+                "Shared mode credits this agent ~5% of a pool replica (multi-tenant amortisation).",
+                "Dedicated mode pins min_replicas pods; peak shows the max_replicas worst case.",
+            ],
+        }
+    )
 
 
 @router.get("/tenants/{tenant_id}/spend")
@@ -409,35 +449,50 @@ async def tenant_spend(
     aggregated across all their agents. Drives the P4 budget alert."""
     _ensure_admin(user)
 
-    start_day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_day = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     start_month = start_day.replace(day=1)
 
     # Cost column may not exist in older deployments — guard gracefully
     try:
-        today = (await db.execute(
-            select(sqlfunc.coalesce(sqlfunc.sum(Execution.cost_usd), 0))
-            .join(Agent, Agent.id == Execution.agent_id)
-            .where(Agent.tenant_id == tenant_id, Execution.created_at >= start_day)
-        )).scalar() or 0.0
-        month = (await db.execute(
-            select(sqlfunc.coalesce(sqlfunc.sum(Execution.cost_usd), 0))
-            .join(Agent, Agent.id == Execution.agent_id)
-            .where(Agent.tenant_id == tenant_id, Execution.created_at >= start_month)
-        )).scalar() or 0.0
+        today = (
+            await db.execute(
+                select(sqlfunc.coalesce(sqlfunc.sum(Execution.cost_usd), 0))
+                .join(Agent, Agent.id == Execution.agent_id)
+                .where(Agent.tenant_id == tenant_id, Execution.created_at >= start_day)
+            )
+        ).scalar() or 0.0
+        month = (
+            await db.execute(
+                select(sqlfunc.coalesce(sqlfunc.sum(Execution.cost_usd), 0))
+                .join(Agent, Agent.id == Execution.agent_id)
+                .where(
+                    Agent.tenant_id == tenant_id, Execution.created_at >= start_month
+                )
+            )
+        ).scalar() or 0.0
     except Exception as e:
         logger.debug("tenant_spend cost columns not available: %s", e)
         today, month = 0.0, 0.0
 
     # Sum of configured daily budgets across this tenant's agents
-    budgets = (await db.execute(
-        select(sqlfunc.coalesce(sqlfunc.sum(Agent.daily_budget_usd), 0))
-        .where(Agent.tenant_id == tenant_id, Agent.daily_budget_usd.is_not(None))
-    )).scalar() or 0.0
+    budgets = (
+        await db.execute(
+            select(sqlfunc.coalesce(sqlfunc.sum(Agent.daily_budget_usd), 0)).where(
+                Agent.tenant_id == tenant_id, Agent.daily_budget_usd.is_not(None)
+            )
+        )
+    ).scalar() or 0.0
 
-    return success({
-        "tenant_id": tenant_id,
-        "today_usd": float(today),
-        "month_usd": float(month),
-        "daily_budget_usd": float(budgets),
-        "budget_utilization_pct": (float(today) / float(budgets) * 100.0) if float(budgets) > 0 else None,
-    })
+    return success(
+        {
+            "tenant_id": tenant_id,
+            "today_usd": float(today),
+            "month_usd": float(month),
+            "daily_budget_usd": float(budgets),
+            "budget_utilization_pct": (
+                (float(today) / float(budgets) * 100.0) if float(budgets) > 0 else None
+            ),
+        }
+    )

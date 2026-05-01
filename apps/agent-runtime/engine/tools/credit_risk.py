@@ -94,7 +94,9 @@ class CreditRiskTool(BaseTool):
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 # 1. Resolve company name -> ticker
                 ticker, resolved_name = await self._resolve_ticker(
-                    client, api_key, company_name,
+                    client,
+                    api_key,
+                    company_name,
                 )
                 if ticker is None:
                     return ToolResult(
@@ -105,15 +107,24 @@ class CreditRiskTool(BaseTool):
                 # 2. Fetch data in parallel based on operation
                 if operation == "financial_ratios":
                     report = await self._ratios_report(
-                        client, api_key, ticker, resolved_name,
+                        client,
+                        api_key,
+                        ticker,
+                        resolved_name,
                     )
                 elif operation == "quick_score":
                     report = await self._quick_score_report(
-                        client, api_key, ticker, resolved_name,
+                        client,
+                        api_key,
+                        ticker,
+                        resolved_name,
                     )
                 else:
                     report = await self._full_assessment(
-                        client, api_key, ticker, resolved_name,
+                        client,
+                        api_key,
+                        ticker,
+                        resolved_name,
                     )
 
                 return ToolResult(
@@ -157,7 +168,10 @@ class CreditRiskTool(BaseTool):
     ) -> tuple[str | None, str]:
         """Return ``(ticker, company_name)`` or ``(None, "")``."""
         results = await self._fmp_get(
-            client, "/search", api_key, {"query": query, "limit": "5"},
+            client,
+            "/search",
+            api_key,
+            {"query": query, "limit": "5"},
         )
         if not results:
             return None, ""
@@ -174,7 +188,10 @@ class CreditRiskTool(BaseTool):
         return best.get("symbol"), best.get("name", query)
 
     async def _fetch_rating(
-        self, client: httpx.AsyncClient, api_key: str, ticker: str,
+        self,
+        client: httpx.AsyncClient,
+        api_key: str,
+        ticker: str,
     ) -> dict[str, Any]:
         data = await self._fmp_get(client, f"/rating/{ticker}", api_key)
         if isinstance(data, list) and data:
@@ -182,30 +199,48 @@ class CreditRiskTool(BaseTool):
         return {}
 
     async def _fetch_ratios(
-        self, client: httpx.AsyncClient, api_key: str, ticker: str,
+        self,
+        client: httpx.AsyncClient,
+        api_key: str,
+        ticker: str,
     ) -> dict[str, Any]:
         data = await self._fmp_get(
-            client, f"/ratios/{ticker}", api_key, {"limit": "1"},
+            client,
+            f"/ratios/{ticker}",
+            api_key,
+            {"limit": "1"},
         )
         if isinstance(data, list) and data:
             return data[0]
         return {}
 
     async def _fetch_balance_sheet(
-        self, client: httpx.AsyncClient, api_key: str, ticker: str,
+        self,
+        client: httpx.AsyncClient,
+        api_key: str,
+        ticker: str,
     ) -> dict[str, Any]:
         data = await self._fmp_get(
-            client, f"/balance-sheet-statement/{ticker}", api_key, {"limit": "1"},
+            client,
+            f"/balance-sheet-statement/{ticker}",
+            api_key,
+            {"limit": "1"},
         )
         if isinstance(data, list) and data:
             return data[0]
         return {}
 
     async def _fetch_income_statement(
-        self, client: httpx.AsyncClient, api_key: str, ticker: str,
+        self,
+        client: httpx.AsyncClient,
+        api_key: str,
+        ticker: str,
     ) -> dict[str, Any]:
         data = await self._fmp_get(
-            client, f"/income-statement/{ticker}", api_key, {"limit": "1"},
+            client,
+            f"/income-statement/{ticker}",
+            api_key,
+            {"limit": "1"},
         )
         if isinstance(data, list) and data:
             return data[0]
@@ -239,13 +274,18 @@ class CreditRiskTool(BaseTool):
         x4 = _safe_div(market_cap, total_liabilities)
         x5 = _safe_div(revenue, total_assets)
 
-        components = {"x1_wc_ta": x1, "x2_re_ta": x2, "x3_ebit_ta": x3,
-                       "x4_mktcap_tl": x4, "x5_rev_ta": x5}
+        components = {
+            "x1_wc_ta": x1,
+            "x2_re_ta": x2,
+            "x3_ebit_ta": x3,
+            "x4_mktcap_tl": x4,
+            "x5_rev_ta": x5,
+        }
 
         z_score: float | None = None
         if all(v is not None for v in (x1, x2, x3, x4, x5)):
             z_score = (
-                1.2 * x1    # type: ignore[operator]
+                1.2 * x1  # type: ignore[operator]
                 + 1.4 * x2  # type: ignore[operator]
                 + 3.3 * x3  # type: ignore[operator]
                 + 0.6 * x4  # type: ignore[operator]
@@ -286,23 +326,31 @@ class CreditRiskTool(BaseTool):
 
         # Fetch all four endpoints concurrently
         import asyncio
+
         rating_coro = self._fetch_rating(client, api_key, ticker)
         ratios_coro = self._fetch_ratios(client, api_key, ticker)
         bs_coro = self._fetch_balance_sheet(client, api_key, ticker)
         inc_coro = self._fetch_income_statement(client, api_key, ticker)
 
         rating, ratios, bs, inc = await asyncio.gather(
-            rating_coro, ratios_coro, bs_coro, inc_coro,
+            rating_coro,
+            ratios_coro,
+            bs_coro,
+            inc_coro,
         )
 
         # Market cap from balance-sheet + rating data
-        market_cap = bs.get("marketCap") or rating.get("ratingDetailsDCFRecommendation") or None
+        market_cap = (
+            bs.get("marketCap") or rating.get("ratingDetailsDCFRecommendation") or None
+        )
         # FMP /rating has marketCap on the profile; fall back to enterprise estimate
         # A more reliable source: try the profile endpoint if needed
         if market_cap is None:
             try:
                 profile = await self._fmp_get(
-                    client, f"/profile/{ticker}", api_key,
+                    client,
+                    f"/profile/{ticker}",
+                    api_key,
                 )
                 if isinstance(profile, list) and profile:
                     market_cap = profile[0].get("mktCap")
@@ -318,7 +366,9 @@ class CreditRiskTool(BaseTool):
         if not sector:
             try:
                 profile = await self._fmp_get(
-                    client, f"/profile/{ticker}", api_key,
+                    client,
+                    f"/profile/{ticker}",
+                    api_key,
                 )
                 if isinstance(profile, list) and profile:
                     sector = profile[0].get("sector", "")
@@ -334,7 +384,11 @@ class CreditRiskTool(BaseTool):
 
         # Risk summary text
         risk_summary = self._build_risk_summary(
-            company_name, ticker, z_data, rating, key_ratios,
+            company_name,
+            ticker,
+            z_data,
+            rating,
+            key_ratios,
         )
 
         return {
@@ -371,7 +425,9 @@ class CreditRiskTool(BaseTool):
         market_cap: float | None = None
         try:
             profile = await self._fmp_get(
-                client, f"/profile/{ticker}", api_key,
+                client,
+                f"/profile/{ticker}",
+                api_key,
             )
             if isinstance(profile, list) and profile:
                 market_cap = profile[0].get("mktCap")
@@ -415,8 +471,9 @@ class CreditRiskTool(BaseTool):
             "debt_equity": _fmt(ratios.get("debtEquityRatio")),
             "current_ratio": _fmt(ratios.get("currentRatio")),
             "interest_coverage": _fmt(ratios.get("interestCoverage")),
-            "net_debt_to_ebitda": _fmt(ratios.get("netDebtToEBITDA")
-                                       or ratios.get("debtRatio")),
+            "net_debt_to_ebitda": _fmt(
+                ratios.get("netDebtToEBITDA") or ratios.get("debtRatio")
+            ),
             "roe": _fmt(ratios.get("returnOnEquity")),
         }
 
@@ -447,9 +504,7 @@ class CreditRiskTool(BaseTool):
             )
 
         if pd is not None:
-            parts.append(
-                f"Estimated probability of default: {pd:.1f}%."
-            )
+            parts.append(f"Estimated probability of default: {pd:.1f}%.")
 
         fmp_rec = rating.get("ratingRecommendation")
         fmp_score = rating.get("ratingScore")

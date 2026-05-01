@@ -1,4 +1,5 @@
 """Agent Comment model — threaded comments on agents for team collaboration."""
+
 from __future__ import annotations
 
 import uuid

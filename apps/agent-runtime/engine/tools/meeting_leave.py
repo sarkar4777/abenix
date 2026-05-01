@@ -1,4 +1,5 @@
 """Leave the meeting cleanly: post farewell, disconnect, drop session."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -19,12 +20,14 @@ class MeetingLeaveTool(BaseTool):
         "properties": {
             "meeting_id": {"type": "string"},
             "farewell": {
-                "type": "string", "default": "Thanks everyone — I'll send a summary afterwards.",
+                "type": "string",
+                "default": "Thanks everyone — I'll send a summary afterwards.",
                 "maxLength": 400,
             },
             "post_farewell": {"type": "boolean", "default": True},
             "summary": {
-                "type": "string", "default": "",
+                "type": "string",
+                "default": "",
                 "description": "Optional one-paragraph summary persisted to the decision log.",
             },
         },
@@ -47,9 +50,7 @@ class MeetingLeaveTool(BaseTool):
 
         if arguments.get("post_farewell", True):
             try:
-                await sess.adapter.post_chat(
-                    (arguments.get("farewell") or "").strip()
-                )
+                await sess.adapter.post_chat((arguments.get("farewell") or "").strip())
             except Exception:
                 pass
 
@@ -61,7 +62,8 @@ class MeetingLeaveTool(BaseTool):
         sess.status = "closed"
         await sessmod.publish_session(sess)
         await sessmod.append_decision(
-            meeting_id, "leave",
+            meeting_id,
+            "leave",
             f"Bot left meeting — {(arguments.get('summary') or 'no summary provided')[:200]}",
             detail={"summary": arguments.get("summary") or ""},
         )

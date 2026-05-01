@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 from urllib.parse import urlparse
 
@@ -67,7 +66,9 @@ class HttpClientTool(BaseTool):
 
         parsed = urlparse(url)
         if parsed.scheme not in ("https", "http"):
-            return ToolResult(content="Error: only HTTP/HTTPS URLs are supported", is_error=True)
+            return ToolResult(
+                content="Error: only HTTP/HTTPS URLs are supported", is_error=True
+            )
 
         if not parsed.hostname:
             return ToolResult(content="Error: invalid URL", is_error=True)
@@ -107,7 +108,11 @@ class HttpClientTool(BaseTool):
                             content_type = resp.content_type or ""
 
                             if status in (429, 503) and attempt < max_retries:
-                                retry_after = int(resp.headers.get("Retry-After", str(2 ** (attempt + 1))))
+                                retry_after = int(
+                                    resp.headers.get(
+                                        "Retry-After", str(2 ** (attempt + 1))
+                                    )
+                                )
                                 await _asyncio.sleep(min(retry_after, 60))
                                 continue
 
@@ -116,7 +121,10 @@ class HttpClientTool(BaseTool):
                             else:
                                 text = await resp.text()
                                 if len(text) > 500_000:
-                                    text = text[:500_000] + "\n[Truncated at 500,000 characters]"
+                                    text = (
+                                        text[:500_000]
+                                        + "\n[Truncated at 500,000 characters]"
+                                    )
                                 resp_body = text
                             break
                     except Exception as e:
@@ -124,14 +132,26 @@ class HttpClientTool(BaseTool):
                         if attempt < max_retries:
                             await _asyncio.sleep(2 ** (attempt + 1))
                         else:
-                            return ToolResult(content=f"HTTP request failed after {max_retries + 1} attempts: {last_error}", is_error=True)
+                            return ToolResult(
+                                content=f"HTTP request failed after {max_retries + 1} attempts: {last_error}",
+                                is_error=True,
+                            )
 
             result = {
                 "status": status,
-                "headers": {k: v for k, v in resp_headers.items() if k.lower() in (
-                    "content-type", "content-length", "date", "x-ratelimit-remaining",
-                    "x-ratelimit-limit", "retry-after",
-                )},
+                "headers": {
+                    k: v
+                    for k, v in resp_headers.items()
+                    if k.lower()
+                    in (
+                        "content-type",
+                        "content-length",
+                        "date",
+                        "x-ratelimit-remaining",
+                        "x-ratelimit-limit",
+                        "retry-after",
+                    )
+                },
                 "body": resp_body,
             }
 

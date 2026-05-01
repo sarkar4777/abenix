@@ -18,8 +18,7 @@ class BaseTool(ABC):
     input_schema: dict[str, Any]
 
     @abstractmethod
-    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        ...
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult: ...
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,7 +54,10 @@ class _DefaultedTool(BaseTool):
         # (from upload-time discovery), inline it so the LLM knows the
         # exact shape to produce.
         if asset_input_schema and "input" in props:
-            props["input"] = {**asset_input_schema, "description": props["input"].get("description", "")}
+            props["input"] = {
+                **asset_input_schema,
+                "description": props["input"].get("description", ""),
+            }
         self.input_schema = {
             **(inner.input_schema or {}),
             "properties": props,
@@ -106,4 +108,6 @@ class ToolRegistry:
             asset_schema = (asset_schemas.get(name) or {}).get("input_schema")
             if not defaults and not asset_schema:
                 continue
-            self._tools[name] = _DefaultedTool(tool, defaults=defaults, asset_input_schema=asset_schema)
+            self._tools[name] = _DefaultedTool(
+                tool, defaults=defaults, asset_input_schema=asset_schema
+            )

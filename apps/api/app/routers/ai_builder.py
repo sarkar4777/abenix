@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -25,39 +24,55 @@ from models.user import User
 
 router = APIRouter(prefix="/api/ai", tags=["ai-builder"])
 
+
 def _load_tool_catalog() -> list[tuple[str, str]]:
     """Dynamically load tool descriptions from all tool classes."""
-    import importlib, os
-    tools_dir = Path(__file__).resolve().parents[4] / "apps" / "agent-runtime" / "engine" / "tools"
-    skip = {'__init__', 'base', 'pipeline_tool'}
+    import importlib
+    import os
+
+    tools_dir = (
+        Path(__file__).resolve().parents[4]
+        / "apps"
+        / "agent-runtime"
+        / "engine"
+        / "tools"
+    )
+    skip = {"__init__", "base", "pipeline_tool"}
     catalog: list[tuple[str, str]] = []
 
     for f in sorted(os.listdir(tools_dir)):
-        if not f.endswith('.py') or f.replace('.py', '') in skip:
+        if not f.endswith(".py") or f.replace(".py", "") in skip:
             continue
         try:
-            mod = importlib.import_module(f'engine.tools.{f[:-3]}')
+            mod = importlib.import_module(f"engine.tools.{f[:-3]}")
             for attr_name in dir(mod):
                 cls = getattr(mod, attr_name)
-                if isinstance(cls, type) and hasattr(cls, 'name') and hasattr(cls, 'input_schema') and hasattr(cls, 'description'):
-                    name = cls.name if isinstance(cls.name, str) else ''
+                if (
+                    isinstance(cls, type)
+                    and hasattr(cls, "name")
+                    and hasattr(cls, "input_schema")
+                    and hasattr(cls, "description")
+                ):
+                    name = cls.name if isinstance(cls.name, str) else ""
                     if not name:
                         continue
-                    desc = cls.description if isinstance(cls.description, str) else ''
-                    schema = cls.input_schema if isinstance(cls.input_schema, dict) else {}
-                    props = schema.get('properties', {})
-                    req = schema.get('required', [])
+                    desc = cls.description if isinstance(cls.description, str) else ""
+                    schema = (
+                        cls.input_schema if isinstance(cls.input_schema, dict) else {}
+                    )
+                    props = schema.get("properties", {})
+                    req = schema.get("required", [])
                     params = []
                     for pn, pi in props.items():
-                        r = 'required' if pn in req else 'optional'
+                        r = "required" if pn in req else "optional"
                         type_str = pi.get("type", "any")
                         # Include enum/allowed values so the AI knows exact capabilities
-                        if 'enum' in pi:
+                        if "enum" in pi:
                             type_str = f'enum[{"|".join(str(v) for v in pi["enum"])}]'
                         param_desc = pi.get("description", "")[:120]
-                        params.append(f'{pn} ({type_str}, {r}): {param_desc}')
-                    param_str = '; '.join(params) if params else 'none'
-                    catalog.append((name, f'{desc[:300]}. Params: {param_str}'))
+                        params.append(f"{pn} ({type_str}, {r}): {param_desc}")
+                    param_str = "; ".join(params) if params else "none"
+                    catalog.append((name, f"{desc[:300]}. Params: {param_str}"))
         except Exception:
             continue
 
@@ -67,12 +82,14 @@ def _load_tool_catalog() -> list[tuple[str, str]]:
     # tool" / "energy contracts" / etc.
     existing = {n for n, _ in catalog}
     schema_tools = [
-        ("portfolio_energy_contracts",
-         "Schema-driven portfolio tool for PPA / gas / tolling energy contracts. "
-         "Loads its schema from portfolio_schemas table at runtime. Operations: "
-         "list_records, get_summary, filter_by_status, filter_by_counterparty, "
-         "aggregate_exposure. Params: action (enum[list|summary|filter|aggregate], "
-         "required); filters (object, optional)."),
+        (
+            "portfolio_energy_contracts",
+            "Schema-driven portfolio tool for PPA / gas / tolling energy contracts. "
+            "Loads its schema from portfolio_schemas table at runtime. Operations: "
+            "list_records, get_summary, filter_by_status, filter_by_counterparty, "
+            "aggregate_exposure. Params: action (enum[list|summary|filter|aggregate], "
+            "required); filters (object, optional).",
+        ),
     ]
     for name, desc in schema_tools:
         if name not in existing:
@@ -82,35 +99,111 @@ def _load_tool_catalog() -> list[tuple[str, str]]:
 
 
 _FALLBACK_TOOLS = [
-    ("calculator", "Evaluate math expressions. Input: {expression: string}. Output: numeric result."),
-    ("web_search", "Search the internet. Input: {query: string, max_results?: int}. Output: search results with titles, URLs, snippets."),
-    ("llm_call", "Call an LLM for text generation. Input: {prompt: string, model?: string}. Output: {response: string, tokens, cost}."),
-    ("llm_route", "AI-powered classification. Input: {prompt: string, branches: string[], context?: string}. Output: {route: string, confidence: float}."),
-    ("code_executor", "Run sandboxed Python code. Input: {code: string, variables?: object}. Output: stdout + result variable."),
-    ("file_reader", "Read PDF, DOCX, CSV, TXT files. Input: {file_path: string}. Output: extracted text content."),
-    ("document_extractor", "Extract structured data from documents. Input: {text or file_path, extract_type: tables|key_values|sections|entities|all}. Output: structured JSON."),
-    ("csv_analyzer", "Analyze CSV data with statistics. Input: {file_path: string, query?: string}. Output: analysis results."),
-    ("json_transformer", "Query/filter/transform JSON. Input: {input_json, operation, field_name?, field_value?}. Output: transformed JSON."),
-    ("text_analyzer", "Analyze text: keywords, readability, sentiment. Input: {text: string, analyses: string[]}. Output: analysis results."),
-    ("http_client", "Make HTTP API calls. Input: {url, method, headers?, body?}. Output: response body + status."),
-    ("email_sender", "Send email via SMTP. Input: {to, subject, body, html?}. Output: success/failure."),
-    ("data_merger", "Merge multiple data sources. Input: {sources: object[], mode: flat|nested|compare}. Output: merged data."),
-    ("financial_calculator", "DCF, NPV, IRR, LCOE calculations. Input: {calculation_type, parameters}. Output: financial results."),
-    ("risk_analyzer", "Monte Carlo, VaR, sensitivity analysis. Input: {analysis_type, parameters}. Output: risk metrics."),
-    ("current_time", "Get current date/time in any timezone. Input: {timezone?: string}. Output: formatted datetime."),
-    ("human_approval", "Pause for human approval. Input: {action, details, risk_level}. Output: approved/rejected."),
-    ("structured_analyzer", "LLM-powered analysis of any content. Input: {custom_prompt, output_format?}. Output: structured JSON."),
-    ("regex_extractor", "Extract patterns from text. Input: {text, patterns: object}. Output: matches."),
-    ("database_query", "Query PostgreSQL. Input: {query: string, params?: object}. Output: rows."),
-    ("github_tool", "Interact with GitHub repos. Input: {action, owner, repo, ...}. Output: API response."),
-    ("time_series_analyzer", "Statistical analysis of time-series. Input: {data: number[], operation: statistics|anomaly_detection|forecast}. Output: analysis."),
-    ("pii_redactor", "Detect/mask PII in text. Input: {text, strategy: mask|remove|detect_only}. Output: redacted text."),
-    ("unit_converter", "Convert between units. Input: {value, from_unit, to_unit}. Output: converted value."),
-    ("market_data", "Get stock/forex/commodity data. Input: {symbol, data_type}. Output: market data."),
+    (
+        "calculator",
+        "Evaluate math expressions. Input: {expression: string}. Output: numeric result.",
+    ),
+    (
+        "web_search",
+        "Search the internet. Input: {query: string, max_results?: int}. Output: search results with titles, URLs, snippets.",
+    ),
+    (
+        "llm_call",
+        "Call an LLM for text generation. Input: {prompt: string, model?: string}. Output: {response: string, tokens, cost}.",
+    ),
+    (
+        "llm_route",
+        "AI-powered classification. Input: {prompt: string, branches: string[], context?: string}. Output: {route: string, confidence: float}.",
+    ),
+    (
+        "code_executor",
+        "Run sandboxed Python code. Input: {code: string, variables?: object}. Output: stdout + result variable.",
+    ),
+    (
+        "file_reader",
+        "Read PDF, DOCX, CSV, TXT files. Input: {file_path: string}. Output: extracted text content.",
+    ),
+    (
+        "document_extractor",
+        "Extract structured data from documents. Input: {text or file_path, extract_type: tables|key_values|sections|entities|all}. Output: structured JSON.",
+    ),
+    (
+        "csv_analyzer",
+        "Analyze CSV data with statistics. Input: {file_path: string, query?: string}. Output: analysis results.",
+    ),
+    (
+        "json_transformer",
+        "Query/filter/transform JSON. Input: {input_json, operation, field_name?, field_value?}. Output: transformed JSON.",
+    ),
+    (
+        "text_analyzer",
+        "Analyze text: keywords, readability, sentiment. Input: {text: string, analyses: string[]}. Output: analysis results.",
+    ),
+    (
+        "http_client",
+        "Make HTTP API calls. Input: {url, method, headers?, body?}. Output: response body + status.",
+    ),
+    (
+        "email_sender",
+        "Send email via SMTP. Input: {to, subject, body, html?}. Output: success/failure.",
+    ),
+    (
+        "data_merger",
+        "Merge multiple data sources. Input: {sources: object[], mode: flat|nested|compare}. Output: merged data.",
+    ),
+    (
+        "financial_calculator",
+        "DCF, NPV, IRR, LCOE calculations. Input: {calculation_type, parameters}. Output: financial results.",
+    ),
+    (
+        "risk_analyzer",
+        "Monte Carlo, VaR, sensitivity analysis. Input: {analysis_type, parameters}. Output: risk metrics.",
+    ),
+    (
+        "current_time",
+        "Get current date/time in any timezone. Input: {timezone?: string}. Output: formatted datetime.",
+    ),
+    (
+        "human_approval",
+        "Pause for human approval. Input: {action, details, risk_level}. Output: approved/rejected.",
+    ),
+    (
+        "structured_analyzer",
+        "LLM-powered analysis of any content. Input: {custom_prompt, output_format?}. Output: structured JSON.",
+    ),
+    (
+        "regex_extractor",
+        "Extract patterns from text. Input: {text, patterns: object}. Output: matches.",
+    ),
+    (
+        "database_query",
+        "Query PostgreSQL. Input: {query: string, params?: object}. Output: rows.",
+    ),
+    (
+        "github_tool",
+        "Interact with GitHub repos. Input: {action, owner, repo, ...}. Output: API response.",
+    ),
+    (
+        "time_series_analyzer",
+        "Statistical analysis of time-series. Input: {data: number[], operation: statistics|anomaly_detection|forecast}. Output: analysis.",
+    ),
+    (
+        "pii_redactor",
+        "Detect/mask PII in text. Input: {text, strategy: mask|remove|detect_only}. Output: redacted text.",
+    ),
+    (
+        "unit_converter",
+        "Convert between units. Input: {value, from_unit, to_unit}. Output: converted value.",
+    ),
+    (
+        "market_data",
+        "Get stock/forex/commodity data. Input: {symbol, data_type}. Output: market data.",
+    ),
 ]
 
 # Lazy-loaded complete tool catalog (populated on first use)
 _TOOL_CATALOG: list[tuple[str, str]] | None = None
+
 
 def _get_tools() -> list[tuple[str, str]]:
     global _TOOL_CATALOG
@@ -182,18 +275,24 @@ EXAMPLE PIPELINE (parallel branches fan-in via data_merger):
   NOTE: without the `combine` node, `report` only receives `trends`'s output — `forecast` is silently lost. ALWAYS insert a data_merger (or __merge__) whenever 2+ nodes fan in to one node.
 """
 
+
 async def _get_mcp_registry(db: Any = None) -> str:
     """Dynamically load MCP registry from database (not hardcoded)."""
     try:
         if db:
             from models.mcp_connection import MCPRegistryCache
+
             result = await db.execute(select(MCPRegistryCache))
             entries = result.scalars().all()
             if entries:
                 lines = ["AVAILABLE MCP INTEGRATIONS (external service connectors):"]
                 for e in entries:
-                    lines.append(f"- {e.registry_id}: {e.name} — {e.description} ({e.tools_count} tools, {e.auth_type})")
-                lines.append("\nIf the user's request involves a third-party service, suggest relevant MCP servers.")
+                    lines.append(
+                        f"- {e.registry_id}: {e.name} — {e.description} ({e.tools_count} tools, {e.auth_type})"
+                    )
+                lines.append(
+                    "\nIf the user's request involves a third-party service, suggest relevant MCP servers."
+                )
                 return "\n".join(lines)
     except Exception:
         pass
@@ -207,16 +306,21 @@ async def _get_existing_agents_context(db: Any, tenant_id: str) -> str:
     try:
         from models.agent import Agent, AgentType
         from sqlalchemy import or_ as sql_or
+
         # Include OOB agents (shared across tenants) alongside this tenant's own.
         result = await db.execute(
-            select(Agent).where(
+            select(Agent)
+            .where(
                 sql_or(Agent.tenant_id == tenant_id, Agent.agent_type == AgentType.OOB),
-            ).limit(30)
+            )
+            .limit(30)
         )
         agents = result.scalars().all()
         if not agents:
             return ""
-        lines = ["EXISTING AGENTS/PIPELINES IN YOUR WORKSPACE (you can reference these patterns — use same tool names, same template style):"]
+        lines = [
+            "EXISTING AGENTS/PIPELINES IN YOUR WORKSPACE (you can reference these patterns — use same tool names, same template style):"
+        ]
         for a in agents:
             cfg = a.model_config_ or {}
             mode = cfg.get("mode", "agent")
@@ -239,11 +343,15 @@ async def _get_code_assets_context(db: Any, tenant_id: str) -> str:
     """List the tenant's ready code assets so the AI builder can pick them"""
     try:
         from models.code_asset import CodeAsset, CodeAssetStatus
+
         result = await db.execute(
-            select(CodeAsset).where(
+            select(CodeAsset)
+            .where(
                 CodeAsset.tenant_id == tenant_id,
                 CodeAsset.status == CodeAssetStatus.READY,
-            ).order_by(CodeAsset.created_at.desc()).limit(30)
+            )
+            .order_by(CodeAsset.created_at.desc())
+            .limit(30)
         )
         assets = result.scalars().all()
         if not assets:
@@ -277,9 +385,9 @@ async def _get_code_assets_context(db: Any, tenant_id: str) -> str:
             )
         lines.append("")
         lines.append(
-            "When a user says things like \"my Go preprocessor\", \"the Java tokenizer\", "
-            "or \"use my summarizer step\", match by name/language/description above "
-            "and emit `code_asset_id=\"<that uuid>\"` in the generated system prompt."
+            'When a user says things like "my Go preprocessor", "the Java tokenizer", '
+            'or "use my summarizer step", match by name/language/description above '
+            'and emit `code_asset_id="<that uuid>"` in the generated system prompt.'
         )
         return "\n".join(lines)
     except Exception:
@@ -289,12 +397,17 @@ async def _get_code_assets_context(db: Any, tenant_id: str) -> str:
 async def _get_pipeline_examples_context() -> str:
     """Load sample pipeline YAML patterns for reference."""
     try:
-        seeds_dir = Path(__file__).resolve().parents[4] / "packages" / "db" / "seeds" / "agents"
+        seeds_dir = (
+            Path(__file__).resolve().parents[4] / "packages" / "db" / "seeds" / "agents"
+        )
         if not seeds_dir.exists():
             return ""
 
         import yaml
-        lines = ["REFERENCE PIPELINE PATTERNS (from seed agents — mimic these exactly for tool names, template syntax, depends_on wiring):"]
+
+        lines = [
+            "REFERENCE PIPELINE PATTERNS (from seed agents — mimic these exactly for tool names, template syntax, depends_on wiring):"
+        ]
         count = 0
         expanded_shown = False
         for f in sorted(seeds_dir.glob("*.yaml")):
@@ -311,15 +424,24 @@ async def _get_pipeline_examples_context() -> str:
                 )
                 if len(nodes) > 8:
                     node_summary += f" ... +{len(nodes) - 8} more"
-                tools_used = sorted({n.get("tool_name", "") for n in nodes if n.get("tool_name")})
-                input_vars = [v.get("name") for v in (data.get("input_variables") or []) if isinstance(v, dict)]
+                tools_used = sorted(
+                    {n.get("tool_name", "") for n in nodes if n.get("tool_name")}
+                )
+                input_vars = [
+                    v.get("name")
+                    for v in (data.get("input_variables") or [])
+                    if isinstance(v, dict)
+                ]
                 lines.append(
                     f"- {data.get('name', f.stem)} ({len(nodes)} nodes): {node_summary}"
                 )
-                lines.append(f"  Tools: {', '.join(tools_used)}  |  Input vars: {', '.join(input_vars) or 'none'}")
+                lines.append(
+                    f"  Tools: {', '.join(tools_used)}  |  Input vars: {', '.join(input_vars) or 'none'}"
+                )
                 # Expand the FIRST example fully so the AI sees real arguments.
                 if not expanded_shown and nodes:
                     import json as _json
+
                     sample_nodes = []
                     for n in nodes[:3]:
                         simple = {
@@ -344,22 +466,40 @@ async def _get_pipeline_examples_context() -> str:
 async def _get_sandbox_policy(tenant_id: str) -> dict[str, Any]:
     """Resolve effective sandbox settings for a tenant: Redis override ∪ env."""
     import os as _os
-    env_enabled = _os.environ.get("SANDBOXED_JOB_ENABLED", "").lower() in ("1","true","yes")
-    env_network = _os.environ.get("SANDBOXED_JOB_ALLOW_NETWORK", "").lower() in ("1","true","yes")
-    env_images = sorted({i.strip() for i in _os.environ.get("SANDBOXED_JOB_ALLOWED_IMAGES", "").split(",") if i.strip()})
+
+    env_enabled = _os.environ.get("SANDBOXED_JOB_ENABLED", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    env_network = _os.environ.get("SANDBOXED_JOB_ALLOW_NETWORK", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    env_images = sorted(
+        {
+            i.strip()
+            for i in _os.environ.get("SANDBOXED_JOB_ALLOWED_IMAGES", "").split(",")
+            if i.strip()
+        }
+    )
     enabled, allow_net, images = env_enabled, env_network, env_images
     try:
         import redis.asyncio as aioredis
+
         r = aioredis.from_url(str(settings.redis_url), decode_responses=True)
         raw = await r.hgetall(f"sandbox:settings:{tenant_id}")
         await r.aclose()
         if raw:
             if "enabled" in raw:
-                enabled = raw["enabled"].strip().lower() in ("1","true","yes")
+                enabled = raw["enabled"].strip().lower() in ("1", "true", "yes")
             if "allow_network" in raw:
-                allow_net = raw["allow_network"].strip().lower() in ("1","true","yes")
+                allow_net = raw["allow_network"].strip().lower() in ("1", "true", "yes")
             if "allowed_images" in raw and raw["allowed_images"].strip():
-                images = sorted({i.strip() for i in raw["allowed_images"].split(",") if i.strip()})
+                images = sorted(
+                    {i.strip() for i in raw["allowed_images"].split(",") if i.strip()}
+                )
     except Exception:
         pass
     return {"enabled": enabled, "allow_network": allow_net, "allowed_images": images}
@@ -381,8 +521,16 @@ async def _get_sandbox_policy_context(tenant_id: str) -> str:
             "║  • Otherwise prefer `code_executor` for in-process Python.   ║\n"
             "╚══════════════════════════════════════════════════════════════╝\n"
         )
-    img_line = ", ".join(p["allowed_images"]) if p["allowed_images"] else "(none — sandboxed_job will reject every call)"
-    net_line = "ON — pipeline nodes may set `network: true`" if p["allow_network"] else "OFF — do NOT set network:true on any sandboxed_job node; jobs are isolated from the internet"
+    img_line = (
+        ", ".join(p["allowed_images"])
+        if p["allowed_images"]
+        else "(none — sandboxed_job will reject every call)"
+    )
+    net_line = (
+        "ON — pipeline nodes may set `network: true`"
+        if p["allow_network"]
+        else "OFF — do NOT set network:true on any sandboxed_job node; jobs are isolated from the internet"
+    )
     return (
         "SANDBOX POLICY FOR THIS TENANT:\n"
         f"  • sandboxed_job is enabled.\n"
@@ -406,6 +554,7 @@ async def _get_saved_tools_context(db: Any, tenant_id: str) -> str:
     """Load approved custom tools from the tool library (not hardcoded)."""
     try:
         from models.saved_tool import SavedTool
+
         result = await db.execute(
             select(SavedTool).where(
                 SavedTool.tenant_id == tenant_id,
@@ -476,16 +625,22 @@ async def build_agent(
     """Use an LLM to generate an agent or pipeline config from a natural language description."""
     try:
         from engine.llm_router import LLMRouter
+
         llm = LLMRouter()
     except Exception as e:
         return error(f"LLM not available: {e}", 500)
 
-    tools_list = "\n".join(f"- {name}: {desc}" for name, desc in await _get_tools_filtered(str(user.tenant_id)))
+    tools_list = "\n".join(
+        f"- {name}: {desc}"
+        for name, desc in await _get_tools_filtered(str(user.tenant_id))
+    )
 
     # Dynamic context — loaded from database, not hardcoded
     mcp_context = await _get_mcp_registry(db)
     saved_tools_context = await _get_saved_tools_context(db, str(user.tenant_id))
-    existing_agents_context = await _get_existing_agents_context(db, str(user.tenant_id))
+    existing_agents_context = await _get_existing_agents_context(
+        db, str(user.tenant_id)
+    )
     code_assets_context = await _get_code_assets_context(db, str(user.tenant_id))
     pipeline_examples_context = await _get_pipeline_examples_context()
     sandbox_policy_context = await _get_sandbox_policy_context(str(user.tenant_id))
@@ -623,7 +778,9 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
        Orphan nodes will be removed.
 ════════════════════════════════════════════════════════════════════════════"""
 
-    user_msg = f"Build an agent/pipeline for: {body.description}\nRequested mode: {body.mode}"
+    user_msg = (
+        f"Build an agent/pipeline for: {body.description}\nRequested mode: {body.mode}"
+    )
 
     try:
         response = await llm.complete(
@@ -649,6 +806,7 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
         # even when it uses it in a node, which the judge then flags as
         # "undeclared". Deterministic fix before validators run.
         from engine.ai_builder_loop import normalize_config
+
         config = normalize_config(config)
 
         # Validate required fields
@@ -658,7 +816,13 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
                 return error(f"Missing field: {field}", 500)
 
         # Validate tools exist — generate dynamic tools for unknown ones
-        valid_tools = {t[0] for t in _get_tools()} | {"__switch__", "__merge__", "wait", "state_get", "state_set"}
+        valid_tools = {t[0] for t in _get_tools()} | {
+            "__switch__",
+            "__merge__",
+            "wait",
+            "state_get",
+            "state_set",
+        }
         invalid = [t for t in config.get("tools", []) if t not in valid_tools]
         dynamic_tools: list[dict[str, Any]] = []
 
@@ -666,7 +830,12 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
             # Try to generate dynamic tools for unknown tool names
             # Use the AI's rich custom_tools descriptions when available
             from engine.tools.dynamic_tool import generate_dynamic_tool
-            custom_tools_meta = {ct["name"]: ct for ct in config.get("custom_tools", []) if isinstance(ct, dict)}
+
+            custom_tools_meta = {
+                ct["name"]: ct
+                for ct in config.get("custom_tools", [])
+                if isinstance(ct, dict)
+            }
             for tool_name in invalid:
                 try:
                     ct = custom_tools_meta.get(tool_name)
@@ -676,29 +845,46 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
                             f'{p["name"]} ({p.get("type", "string")}): {p.get("description", "")}'
                             for p in ct.get("parameters", [])
                         )
-                        desc = f'{ct["description"]}. Parameters: {param_hints}' if param_hints else ct["description"]
+                        desc = (
+                            f'{ct["description"]}. Parameters: {param_hints}'
+                            if param_hints
+                            else ct["description"]
+                        )
                     else:
                         desc = f"A tool called '{tool_name}' that performs: {tool_name.replace('_', ' ')}"
                     dyn_tool = await generate_dynamic_tool(desc, tool_name)
                     if dyn_tool:
-                        tool_params = [
-                            {"name": p["name"], "type": p.get("type", "string"),
-                             "required": p.get("required", False), "description": p.get("description", "")}
-                            for p in dyn_tool.input_schema.get("properties", {}).values()
-                        ] if isinstance(dyn_tool.input_schema.get("properties"), dict) else []
-                        dynamic_tools.append({
-                            "name": dyn_tool.name,
-                            "description": dyn_tool.description,
-                            "code": dyn_tool._code,
-                            "parameters": tool_params,
-                            "input_schema": dyn_tool.input_schema,
-                            "generated": True,
-                        })
+                        tool_params = (
+                            [
+                                {
+                                    "name": p["name"],
+                                    "type": p.get("type", "string"),
+                                    "required": p.get("required", False),
+                                    "description": p.get("description", ""),
+                                }
+                                for p in dyn_tool.input_schema.get(
+                                    "properties", {}
+                                ).values()
+                            ]
+                            if isinstance(dyn_tool.input_schema.get("properties"), dict)
+                            else []
+                        )
+                        dynamic_tools.append(
+                            {
+                                "name": dyn_tool.name,
+                                "description": dyn_tool.description,
+                                "code": dyn_tool._code,
+                                "parameters": tool_params,
+                                "input_schema": dyn_tool.input_schema,
+                                "generated": True,
+                            }
+                        )
                         valid_tools.add(tool_name)
 
                         # Auto-save to tool library for persistence and reuse
                         try:
                             from models.saved_tool import SavedTool
+
                             existing = await db.execute(
                                 select(SavedTool).where(
                                     SavedTool.tenant_id == user.tenant_id,
@@ -714,8 +900,13 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
                                     input_schema=dyn_tool.input_schema,
                                     created_by=user.id,
                                     status="approved",  # AI-generated as part of build — auto-approve
-                                    permissions={"network": False, "filesystem_read": False,
-                                                 "filesystem_write": False, "third_party": [], "env_vars": []},
+                                    permissions={
+                                        "network": False,
+                                        "filesystem_read": False,
+                                        "filesystem_write": False,
+                                        "third_party": [],
+                                        "env_vars": [],
+                                    },
                                 )
                                 db.add(saved)
                                 await db.flush()
@@ -733,14 +924,20 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
             nodes = config["pipeline_config"].get("nodes", [])
             node_ids = {n["id"] for n in nodes}
             for node in nodes:
-                node["depends_on"] = [d for d in node.get("depends_on", []) if d in node_ids]
+                node["depends_on"] = [
+                    d for d in node.get("depends_on", []) if d in node_ids
+                ]
                 if node.get("tool_name") not in valid_tools:
-                    issues.append(f"Node {node['id']}: unknown tool {node.get('tool_name')}")
+                    issues.append(
+                        f"Node {node['id']}: unknown tool {node.get('tool_name')}"
+                    )
                     node["tool_name"] = "llm_call"
             # Ensure edges reference valid nodes
             edges = config["pipeline_config"].get("edges", [])
             config["pipeline_config"]["edges"] = [
-                e for e in edges if e.get("source") in node_ids and e.get("target") in node_ids
+                e
+                for e in edges
+                if e.get("source") in node_ids and e.get("target") in node_ids
             ]
 
         # Pass 2: LLM validation — verify the generated config makes sense
@@ -754,11 +951,15 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
             # Check all nodes have at least one connection
             connected = set()
             for e in config.get("pipeline_config", {}).get("edges", []):
-                connected.add(e.get("source")); connected.add(e.get("target"))
+                connected.add(e.get("source"))
+                connected.add(e.get("target"))
             for n in nodes:
                 for d in n.get("depends_on", []):
-                    connected.add(d); connected.add(n["id"])
-            orphans = [n["id"] for n in nodes if n["id"] not in connected and len(nodes) > 1]
+                    connected.add(d)
+                    connected.add(n["id"])
+            orphans = [
+                n["id"] for n in nodes if n["id"] not in connected and len(nodes) > 1
+            ]
             if orphans:
                 validation_issues.append(f"Orphan nodes (not connected): {orphans}")
         if not config.get("example_prompts"):
@@ -796,7 +997,9 @@ Respond ONLY with JSON: {{"score": 1-10, "issues": ["issue1", "issue2"], "sugges
             )
             review_text = review_resp.content.strip()
             if "{" in review_text:
-                review_json = json.loads(review_text[review_text.index("{"):review_text.rindex("}") + 1])
+                review_json = json.loads(
+                    review_text[review_text.index("{") : review_text.rindex("}") + 1]
+                )
                 config["review_score"] = review_json.get("score", 0)
                 validation_issues.extend(review_json.get("issues", []))
                 config["suggestions"] = review_json.get("suggestions", [])
@@ -812,16 +1015,21 @@ Respond ONLY with JSON: {{"score": 1-10, "issues": ["issue1", "issue2"], "sugges
 
                 nodes_cfg = (config.get("pipeline_config") or {}).get("nodes") or []
                 input_var_names = {
-                    v.get("name") for v in (config.get("input_variables") or [])
+                    v.get("name")
+                    for v in (config.get("input_variables") or [])
                     if isinstance(v, dict) and v.get("name")
                 }
                 registry = build_tool_registry(config.get("tools", []) or [])
-                t1 = validate_pipeline(nodes_cfg, registry, available_context_keys=input_var_names)
+                t1 = validate_pipeline(
+                    nodes_cfg, registry, available_context_keys=input_var_names
+                )
                 t2 = validate_semantic(nodes_cfg, registry, tier1=t1)
                 concrete_errors = (t1.errors or []) + (t2.errors or [])
                 if concrete_errors:
                     repair_info["attempted"] = True
-                    repair_info["original_errors"] = [e.to_dict() for e in concrete_errors[:12]]
+                    repair_info["original_errors"] = [
+                        e.to_dict() for e in concrete_errors[:12]
+                    ]
                     err_lines = "\n".join(
                         f"  - {e.node_id or '(pipeline)'}/{e.field or ''}: {e.message}"
                         for e in concrete_errors[:15]
@@ -850,36 +1058,52 @@ Respond ONLY with JSON: {{"score": 1-10, "issues": ["issue1", "issue2"], "sugges
                             max_tokens=8192,
                         )
                         repaired = _parse_builder_json(
-                            repair_resp.content, getattr(repair_resp, "stop_reason", None),
+                            repair_resp.content,
+                            getattr(repair_resp, "stop_reason", None),
                         )
-                        if isinstance(repaired, dict) and repaired.get("name") and repaired.get("tools"):
+                        if (
+                            isinstance(repaired, dict)
+                            and repaired.get("name")
+                            and repaired.get("tools")
+                        ):
                             # Re-run validators on the repaired config to record residual errors.
-                            r_nodes = (repaired.get("pipeline_config") or {}).get("nodes") or []
+                            r_nodes = (repaired.get("pipeline_config") or {}).get(
+                                "nodes"
+                            ) or []
                             r_inputs = {
-                                v.get("name") for v in (repaired.get("input_variables") or [])
+                                v.get("name")
+                                for v in (repaired.get("input_variables") or [])
                                 if isinstance(v, dict) and v.get("name")
                             }
                             r_reg = build_tool_registry(repaired.get("tools", []) or [])
-                            r_t1 = validate_pipeline(r_nodes, r_reg, available_context_keys=r_inputs)
+                            r_t1 = validate_pipeline(
+                                r_nodes, r_reg, available_context_keys=r_inputs
+                            )
                             r_t2 = validate_semantic(r_nodes, r_reg, tier1=r_t1)
                             residual = (r_t1.errors or []) + (r_t2.errors or [])
-                            repair_info["residual_errors"] = [e.to_dict() for e in residual[:10]]
-                            repair_info["fixed_count"] = len(concrete_errors) - len(residual)
+                            repair_info["residual_errors"] = [
+                                e.to_dict() for e in residual[:10]
+                            ]
+                            repair_info["fixed_count"] = len(concrete_errors) - len(
+                                residual
+                            )
                             config = repaired
                     except Exception as e:
                         repair_info["error"] = str(e)[:200]
             except Exception:
                 pass  # Auto-repair is best-effort.
 
-        return success({
-            **config,
-            "generated_by": "ai",
-            "model_used": response.model,
-            "generation_cost": response.cost,
-            "validation_issues": validation_issues + issues,
-            "dynamic_tools": dynamic_tools,
-            "auto_repair": repair_info,
-        })
+        return success(
+            {
+                **config,
+                "generated_by": "ai",
+                "model_used": response.model,
+                "generation_cost": response.cost,
+                "validation_issues": validation_issues + issues,
+                "dynamic_tools": dynamic_tools,
+                "auto_repair": repair_info,
+            }
+        )
 
     except Exception as e:
         return error(f"Generation failed: {e}", 500)
@@ -896,40 +1120,51 @@ async def generate_tool_endpoint(
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
     """Generate a custom dynamic tool from a description with adversarial review."""
-    from engine.tools.dynamic_tool import generate_dynamic_tool, validate_code, _adversarial_review
+    from engine.tools.dynamic_tool import (
+        generate_dynamic_tool,
+        _adversarial_review,
+    )
 
     try:
         from engine.llm_router import LLMRouter
+
         llm = LLMRouter()
     except Exception as e:
         return error(f"LLM not available: {e}", 500)
 
-    tool_name = body.tool_name or ("custom_" + body.description[:20].lower().replace(" ", "_"))
+    tool_name = body.tool_name or (
+        "custom_" + body.description[:20].lower().replace(" ", "_")
+    )
     tool_name = "".join(c for c in tool_name if c.isalnum() or c == "_")
 
     # Generate the tool
     dyn_tool = await generate_dynamic_tool(body.description, tool_name)
     if not dyn_tool:
-        return error("Failed to generate tool — code validation or adversarial review blocked it", 400)
+        return error(
+            "Failed to generate tool — code validation or adversarial review blocked it",
+            400,
+        )
 
     # Run adversarial review for transparency
     review = await _adversarial_review(llm, dyn_tool._code, body.description, [])
 
-    return success({
-        "name": dyn_tool.name,
-        "description": dyn_tool.description,
-        "code": dyn_tool._code,
-        "parameters": list(dyn_tool.input_schema.get("properties", {}).keys()),
-        "input_schema": dyn_tool.input_schema,
-        "review": {
-            "safe": review.get("safe", True),
-            "score": review.get("score", 0),
-            "issues": review.get("issues", []),
-            "blocked": review.get("blocked", False),
-            "assessment": review.get("review", ""),
-        },
-        "ast_validation": "passed",
-    })
+    return success(
+        {
+            "name": dyn_tool.name,
+            "description": dyn_tool.description,
+            "code": dyn_tool._code,
+            "parameters": list(dyn_tool.input_schema.get("properties", {}).keys()),
+            "input_schema": dyn_tool.input_schema,
+            "review": {
+                "safe": review.get("safe", True),
+                "score": review.get("score", 0),
+                "issues": review.get("issues", []),
+                "blocked": review.get("blocked", False),
+                "assessment": review.get("review", ""),
+            },
+            "ast_validation": "passed",
+        }
+    )
 
 
 async def _generate_config_core(
@@ -941,10 +1176,15 @@ async def _generate_config_core(
     user: "User",
 ) -> dict[str, Any]:
     """Minimal re-implementation of build_agent's core generation for the loop."""
-    tools_list = "\n".join(f"- {name}: {desc}" for name, desc in await _get_tools_filtered(str(user.tenant_id)))
+    tools_list = "\n".join(
+        f"- {name}: {desc}"
+        for name, desc in await _get_tools_filtered(str(user.tenant_id))
+    )
     mcp_context = await _get_mcp_registry(db)
     saved_tools_context = await _get_saved_tools_context(db, str(user.tenant_id))
-    existing_agents_context = await _get_existing_agents_context(db, str(user.tenant_id))
+    existing_agents_context = await _get_existing_agents_context(
+        db, str(user.tenant_id)
+    )
     code_assets_context = await _get_code_assets_context(db, str(user.tenant_id))
     pipeline_examples_context = await _get_pipeline_examples_context()
     sandbox_policy_context = await _get_sandbox_policy_context(str(user.tenant_id))
@@ -997,7 +1237,10 @@ GUARDRAILS (hard rules — validator will reject the config and ask you to fix):
         max_tokens=8192,
     )
     from engine.ai_builder_loop import normalize_config
-    return normalize_config(_parse_builder_json(resp.content, getattr(resp, "stop_reason", None)))
+
+    return normalize_config(
+        _parse_builder_json(resp.content, getattr(resp, "stop_reason", None))
+    )
 
 
 async def _validate_config_core(config: dict[str, Any]) -> dict[str, Any]:
@@ -1012,18 +1255,44 @@ async def _validate_config_core(config: dict[str, Any]) -> dict[str, Any]:
         registry = build_tool_registry(tool_names)
     except Exception as e:
         return {
-            "tier1": {"valid": False, "errors": [{"node_id": "", "field": "tools",
-                      "message": f"Failed to build tool registry: {e}", "severity": "error", "suggestion": ""}],
-                      "warnings": []},
-            "tier2": {"errors": [], "warnings": [], "suggestions": [],
-                      "cost_estimate_usd": 0.0, "node_cost_breakdown": {}, "unused_nodes": []},
+            "tier1": {
+                "valid": False,
+                "errors": [
+                    {
+                        "node_id": "",
+                        "field": "tools",
+                        "message": f"Failed to build tool registry: {e}",
+                        "severity": "error",
+                        "suggestion": "",
+                    }
+                ],
+                "warnings": [],
+            },
+            "tier2": {
+                "errors": [],
+                "warnings": [],
+                "suggestions": [],
+                "cost_estimate_usd": 0.0,
+                "node_cost_breakdown": {},
+                "unused_nodes": [],
+            },
         }
     t1 = validate_pipeline(nodes, registry) if nodes else None
     t2 = validate_semantic(nodes, registry, tier1=t1) if nodes else None
     return {
         "tier1": t1.to_dict() if t1 else {"valid": True, "errors": [], "warnings": []},
-        "tier2": t2.to_dict() if t2 else {"errors": [], "warnings": [], "suggestions": [],
-                                           "cost_estimate_usd": 0.0, "node_cost_breakdown": {}, "unused_nodes": []},
+        "tier2": (
+            t2.to_dict()
+            if t2
+            else {
+                "errors": [],
+                "warnings": [],
+                "suggestions": [],
+                "cost_estimate_usd": 0.0,
+                "node_cost_breakdown": {},
+                "unused_nodes": [],
+            }
+        ),
     }
 
 
@@ -1050,7 +1319,9 @@ async def build_iterative(
     try:
         llm = LLMRouter()
     except Exception as e:
-        return JSONResponse({"success": False, "error": f"LLM not available: {e}"}, status_code=500)
+        return JSONResponse(
+            {"success": False, "error": f"LLM not available: {e}"}, status_code=500
+        )
 
     async def generator_fn(desc: str, mode: str, repair: str) -> dict[str, Any]:
         return await _generate_config_core(desc, mode, repair, llm, db, user)
@@ -1060,6 +1331,7 @@ async def build_iterative(
 
     async def critic_fn(config: dict[str, Any], judge_summary: str) -> dict[str, Any]:
         from engine.ai_builder_loop import _critic
+
         return await _critic(llm, body.description, config, judge_summary)
 
     async def execute_fn(config: dict[str, Any]) -> dict[str, Any]:
@@ -1101,13 +1373,22 @@ async def build_iterative(
             try:
                 result = await executor.execute(nodes, {"message": sample})
             except Exception as e:
-                return {"ok": False, "error": f"executor.execute raised: {type(e).__name__}: {e}"[:500]}
+                return {
+                    "ok": False,
+                    "error": f"executor.execute raised: {type(e).__name__}: {e}"[:500],
+                }
             status = getattr(result, "status", "")
             if status not in ("completed", "partial"):
-                return {"ok": False, "error": f"pipeline status={status}; failed_nodes={getattr(result,'failed_nodes',[])}"}
-            return {"ok": True, "status": status,
-                    "execution_path": getattr(result, "execution_path", []),
-                    "failed_nodes": getattr(result, "failed_nodes", [])}
+                return {
+                    "ok": False,
+                    "error": f"pipeline status={status}; failed_nodes={getattr(result,'failed_nodes',[])}",
+                }
+            return {
+                "ok": True,
+                "status": status,
+                "execution_path": getattr(result, "execution_path", []),
+                "failed_nodes": getattr(result, "failed_nodes", []),
+            }
         except Exception as e:
             return {"ok": False, "error": f"unexpected: {type(e).__name__}: {e}"[:500]}
 
@@ -1150,7 +1431,9 @@ async def simulate_meeting(
     import sys as _sys
     from pathlib import Path as _Path
 
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
+    _sys.path.insert(
+        0, str(_Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+    )
     try:
         from engine.tools.scope_gate import ScopeGateTool  # type: ignore
         from engine.tools import _meeting_session as sessmod  # type: ignore
@@ -1170,9 +1453,13 @@ async def simulate_meeting(
     blockers: list[str] = []
     tools_set = set(tools_declared)
     if "meeting_join" not in tools_set:
-        blockers.append("missing meeting_join — the agent cannot participate in any meeting")
+        blockers.append(
+            "missing meeting_join — the agent cannot participate in any meeting"
+        )
     if "meeting_listen" not in tools_set and "meeting_speak" not in tools_set:
-        blockers.append("missing both meeting_listen and meeting_speak — this isn't a meeting agent")
+        blockers.append(
+            "missing both meeting_listen and meeting_speak — this isn't a meeting agent"
+        )
     if "scope_gate" not in tools_set:
         warnings.append(
             "missing scope_gate — the agent will rely on LLM judgement to stay in bounds, "
@@ -1193,7 +1480,9 @@ async def simulate_meeting(
     if "consent" not in sp and "announce" not in sp:
         warnings.append("system prompt never mentions consent disclosure — add a rule")
     if "commit" not in sp and "commitment" not in sp:
-        warnings.append("system prompt never mentions commitments — add a defer-for-commitments rule")
+        warnings.append(
+            "system prompt never mentions commitments — add a defer-for-commitments rule"
+        )
 
     # Per-turn dry-run: register a fake session so scope_gate can read allow/defer
     fake_exec = f"sim-{_json.dumps(sorted(scope_allow + scope_defer))[:40]}"
@@ -1221,12 +1510,14 @@ async def simulate_meeting(
                 continue
             r = await gate.execute({"meeting_id": "sim-meeting", "question": q})
             payload = _json.loads(r.content) if r.content else {}
-            decisions.append({
-                "speaker": turn.get("speaker", "?"),
-                "question": q,
-                "decision": payload.get("decision"),
-                "reason": payload.get("reason"),
-            })
+            decisions.append(
+                {
+                    "speaker": turn.get("speaker", "?"),
+                    "question": q,
+                    "decision": payload.get("decision"),
+                    "reason": payload.get("reason"),
+                }
+            )
     finally:
         sessmod.drop(fake_exec)
 
@@ -1235,13 +1526,15 @@ async def simulate_meeting(
         if d.get("decision") in counts:
             counts[d["decision"]] += 1
 
-    return JSONResponse({
-        "success": True,
-        "data": {
-            "decisions": decisions,
-            "counts": counts,
-            "blockers": blockers,
-            "warnings": warnings,
-            "ready_to_deploy": len(blockers) == 0,
-        },
-    })
+    return JSONResponse(
+        {
+            "success": True,
+            "data": {
+                "decisions": decisions,
+                "counts": counts,
+                "blockers": blockers,
+                "warnings": warnings,
+                "ready_to_deploy": len(blockers) == 0,
+            },
+        }
+    )

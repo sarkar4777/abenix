@@ -109,6 +109,7 @@ async def list_pending_approvals(
     """List all pending HITL approval requests for the tenant."""
     # Import here to avoid circular dependency with agent-runtime
     import importlib
+
     try:
         hitl = importlib.import_module("engine.tools.human_approval")
         approvals = await hitl.list_pending_approvals(str(user.tenant_id))
@@ -116,6 +117,7 @@ async def list_pending_approvals(
         # Agent runtime not on path — use Redis directly
         import redis.asyncio as aioredis
         from app.core.config import settings as app_cfg
+
         r = aioredis.from_url(app_cfg.redis_url, decode_responses=True)
         members = await r.smembers(f"hitl:pending:{user.tenant_id}")
         await r.aclose()
@@ -149,20 +151,24 @@ async def approve_execution_gate(
 
     r = aioredis.from_url(app_cfg.redis_url, decode_responses=True)
     approval_key = f"hitl:approval:{execution_id}:{gate_id}"
-    result = json.dumps({
-        "decision": body.decision,
-        "reviewer": user.full_name or user.email,
-        "comment": body.comment,
-        "decided_at": __import__("time").time(),
-    })
+    result = json.dumps(
+        {
+            "decision": body.decision,
+            "reviewer": user.full_name or user.email,
+            "comment": body.comment,
+            "decided_at": __import__("time").time(),
+        }
+    )
     await r.set(approval_key, result, ex=7200)
     await r.aclose()
 
-    return success({
-        "execution_id": str(execution_id),
-        "gate_id": gate_id,
-        "decision": body.decision,
-    })
+    return success(
+        {
+            "execution_id": str(execution_id),
+            "gate_id": gate_id,
+            "decision": body.decision,
+        }
+    )
 
 
 @router.get("/{execution_id}/stream", response_model=None)
@@ -228,12 +234,18 @@ async def _assemble_dag_snapshot(
     # Node results from the execution row. Pipeline runs populate this;
     # single-agent runs leave it empty and we synthesise a one-node
     # graph so the UI can still render *something* useful.
-    node_results = (execution.node_results or {}) if hasattr(execution, "node_results") else {}
+    node_results = (
+        (execution.node_results or {}) if hasattr(execution, "node_results") else {}
+    )
     live_node_statuses = live.get("node_statuses") or {}
 
     nodes: list[dict] = []
     edges: list[dict] = []
-    pipeline_nodes = (agent_mc or {}).get("pipeline_config", {}).get("nodes", []) if mode == "pipeline" else []
+    pipeline_nodes = (
+        (agent_mc or {}).get("pipeline_config", {}).get("nodes", [])
+        if mode == "pipeline"
+        else []
+    )
 
     if pipeline_nodes:
         # Build one Node per declared pipeline step.
@@ -241,11 +253,7 @@ async def _assemble_dag_snapshot(
             nid = n.get("id")
             nr = node_results.get(nid) or {}
             # Prefer live status, then result status, then pending.
-            status = (
-                live_node_statuses.get(nid)
-                or nr.get("status")
-                or "pending"
-            )
+            status = live_node_statuses.get(nid) or nr.get("status") or "pending"
             node_out = nr.get("output") if isinstance(nr, dict) else None
             cost = None
             tokens_in = None
@@ -254,60 +262,92 @@ async def _assemble_dag_snapshot(
                 cost = node_out.get("cost")
                 tokens_in = node_out.get("input_tokens")
                 tokens_out = node_out.get("output_tokens")
-            nodes.append({
-                "id": nid,
-                "label": n.get("label") or nid,
-                "tool_name": n.get("tool_name") or (n.get("type") == "structured" and "__structured__" or n.get("tool") or ""),
-                "agent_slug": n.get("agent_slug"),
-                "status": status,
-                "started_at": nr.get("started_at") if isinstance(nr, dict) else None,
-                "completed_at": nr.get("completed_at") if isinstance(nr, dict) else None,
-                "duration_ms": (nr.get("duration_ms") if isinstance(nr, dict) else None),
-                "input": n.get("arguments") or {},
-                "output": node_out,
-                "cost": cost,
-                "tokens_in": tokens_in,
-                "tokens_out": tokens_out,
-                "tool_calls": nr.get("tool_calls") if isinstance(nr, dict) else None,
-                "error": nr.get("error") if isinstance(nr, dict) else None,
-            })
+            nodes.append(
+                {
+                    "id": nid,
+                    "label": n.get("label") or nid,
+                    "tool_name": n.get("tool_name")
+                    or (
+                        n.get("type") == "structured"
+                        and "__structured__"
+                        or n.get("tool")
+                        or ""
+                    ),
+                    "agent_slug": n.get("agent_slug"),
+                    "status": status,
+                    "started_at": (
+                        nr.get("started_at") if isinstance(nr, dict) else None
+                    ),
+                    "completed_at": (
+                        nr.get("completed_at") if isinstance(nr, dict) else None
+                    ),
+                    "duration_ms": (
+                        nr.get("duration_ms") if isinstance(nr, dict) else None
+                    ),
+                    "input": n.get("arguments") or {},
+                    "output": node_out,
+                    "cost": cost,
+                    "tokens_in": tokens_in,
+                    "tokens_out": tokens_out,
+                    "tool_calls": (
+                        nr.get("tool_calls") if isinstance(nr, dict) else None
+                    ),
+                    "error": nr.get("error") if isinstance(nr, dict) else None,
+                }
+            )
         # Edges = declared depends_on plus template-inferred refs (same
         # rule the engine applies at execution time). Simple first
         # pass: use declared depends_on only — the engine already
         # expanded template refs into depends_on at parse time.
         for n in pipeline_nodes:
-            for dep in (n.get("depends_on") or []):
+            for dep in n.get("depends_on") or []:
                 edges.append({"from": dep, "to": n.get("id"), "field": None})
     else:
         # Iterative-agent mode: one synthetic node representing the
         # whole run, tool_calls populate the chain. The UI renders it
         # as a linear trace.
         tool_calls = execution.tool_calls or []
-        nodes.append({
-            "id": "agent",
-            "label": agent_name or "Agent",
-            "tool_name": "agent",
-            "agent_slug": None,
-            "status": live.get("status") or (execution.status.value if hasattr(execution.status, "value") else str(execution.status)).lower(),
-            "started_at": execution.started_at.isoformat() if execution.started_at else None,
-            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
-            "duration_ms": execution.duration_ms,
-            "input": {"message": execution.input_message},
-            "output": execution.output_message,
-            "cost": float(execution.cost) if execution.cost is not None else None,
-            "tokens_in": execution.input_tokens,
-            "tokens_out": execution.output_tokens,
-            "tool_calls": tool_calls,
-            "error": execution.error_message,
-        })
+        nodes.append(
+            {
+                "id": "agent",
+                "label": agent_name or "Agent",
+                "tool_name": "agent",
+                "agent_slug": None,
+                "status": live.get("status")
+                or (
+                    execution.status.value
+                    if hasattr(execution.status, "value")
+                    else str(execution.status)
+                ).lower(),
+                "started_at": (
+                    execution.started_at.isoformat() if execution.started_at else None
+                ),
+                "completed_at": (
+                    execution.completed_at.isoformat()
+                    if execution.completed_at
+                    else None
+                ),
+                "duration_ms": execution.duration_ms,
+                "input": {"message": execution.input_message},
+                "output": execution.output_message,
+                "cost": float(execution.cost) if execution.cost is not None else None,
+                "tokens_in": execution.input_tokens,
+                "tokens_out": execution.output_tokens,
+                "tool_calls": tool_calls,
+                "error": execution.error_message,
+            }
+        )
 
     total = len(nodes) or 1
     completed = sum(1 for n in nodes if n["status"] == "completed")
     status_raw = live.get("status") or (
-        execution.status.value if hasattr(execution.status, "value")
+        execution.status.value
+        if hasattr(execution.status, "value")
         else str(execution.status)
     )
-    status = status_raw.lower() if isinstance(status_raw, str) else str(status_raw).lower()
+    status = (
+        status_raw.lower() if isinstance(status_raw, str) else str(status_raw).lower()
+    )
 
     return {
         "execution_id": str(execution_id),
@@ -315,12 +355,18 @@ async def _assemble_dag_snapshot(
         "agent_name": agent_name,
         "mode": mode,
         "status": status,
-        "started_at": execution.started_at.isoformat() if execution.started_at else None,
-        "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+        "started_at": (
+            execution.started_at.isoformat() if execution.started_at else None
+        ),
+        "completed_at": (
+            execution.completed_at.isoformat() if execution.completed_at else None
+        ),
         "current_node_id": live.get("current_step") or None,
         "progress": {"completed": completed, "total": total},
-        "cost_so_far": float(execution.cost) if execution.cost is not None else (
-            float(live.get("cost") or 0) if live else 0.0
+        "cost_so_far": (
+            float(execution.cost)
+            if execution.cost is not None
+            else (float(live.get("cost") or 0) if live else 0.0)
         ),
         "tokens": {
             "in": int(execution.input_tokens or 0),
@@ -335,7 +381,9 @@ async def _assemble_dag_snapshot(
 async def watch_execution(
     execution_id: uuid.UUID,
     request: Request,
-    token: str | None = Query(None, description="Bearer token fallback (EventSource can't set headers)"),
+    token: str | None = Query(
+        None, description="Bearer token fallback (EventSource can't set headers)"
+    ),
     authorization: str | None = Header(None),
     x_api_key: str | None = Header(None),
     db: AsyncSession = Depends(get_db),
@@ -394,7 +442,10 @@ async def watch_execution(
                 last_emit = now
                 snap = await _assemble_dag_snapshot(execution_id, db)
                 yield f"event: snapshot\ndata: {json.dumps(snap, default=str)}\n\n".encode()
-                if ev in ("done", "error") or snap.get("status") in ("completed", "failed"):
+                if ev in ("done", "error") or snap.get("status") in (
+                    "completed",
+                    "failed",
+                ):
                     yield b"event: end\ndata: {}\n\n"
                     return
         except asyncio.CancelledError:
@@ -449,7 +500,9 @@ async def list_executions(
     agent_id: uuid.UUID | None = Query(None),
     status: str | None = Query(None),
     search: str = Query("", max_length=255, description="Search in input message"),
-    sort: str = Query("newest", description="Sort: newest, oldest, cost_high, cost_low, duration"),
+    sort: str = Query(
+        "newest", description="Sort: newest, oldest, cost_high, cost_low, duration"
+    ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> JSONResponse:
@@ -477,12 +530,20 @@ async def list_executions(
         base_where.append(Execution.agent_id == agent_id)
     if search:
         base_where.append(Execution.input_message.ilike(f"%{search}%"))
-    completed_count = (await db.execute(
-        select(func.count(Execution.id)).where(*base_where, Execution.status == ExecutionStatus.COMPLETED)
-    )).scalar() or 0
-    failed_count = (await db.execute(
-        select(func.count(Execution.id)).where(*base_where, Execution.status == ExecutionStatus.FAILED)
-    )).scalar() or 0
+    completed_count = (
+        await db.execute(
+            select(func.count(Execution.id)).where(
+                *base_where, Execution.status == ExecutionStatus.COMPLETED
+            )
+        )
+    ).scalar() or 0
+    failed_count = (
+        await db.execute(
+            select(func.count(Execution.id)).where(
+                *base_where, Execution.status == ExecutionStatus.FAILED
+            )
+        )
+    ).scalar() or 0
 
     # Join with Agent to get agent_name
     joined_query = (
@@ -522,7 +583,16 @@ async def list_executions(
         serialized["agent_name"] = agent_name
         data.append(serialized)
 
-    return success(data, meta={"total": total, "completed": completed_count, "failed": failed_count, "limit": limit, "offset": offset})
+    return success(
+        data,
+        meta={
+            "total": total,
+            "completed": completed_count,
+            "failed": failed_count,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
 
 
 @router.delete("/{execution_id}")
@@ -569,13 +639,19 @@ async def get_execution_replay(
         return error("Execution not found", 404)
 
     trace = getattr(execution, "execution_trace", None) or {}
-    return success({
-        "execution": _serialize_execution(execution),
-        "trace": trace,
-        "steps": trace.get("steps", []),
-        "total_steps": len(trace.get("steps", [])),
-        "confidence_score": float(execution.confidence_score) if hasattr(execution, "confidence_score") and execution.confidence_score else None,
-    })
+    return success(
+        {
+            "execution": _serialize_execution(execution),
+            "trace": trace,
+            "steps": trace.get("steps", []),
+            "total_steps": len(trace.get("steps", [])),
+            "confidence_score": (
+                float(execution.confidence_score)
+                if hasattr(execution, "confidence_score") and execution.confidence_score
+                else None
+            ),
+        }
+    )
 
 
 @router.get("/{execution_id}/children")
@@ -589,10 +665,12 @@ async def get_child_executions(
         return success([])
 
     result = await db.execute(
-        select(Execution).where(
+        select(Execution)
+        .where(
             Execution.parent_execution_id == execution_id,
             Execution.tenant_id == user.tenant_id,
-        ).order_by(Execution.created_at)
+        )
+        .order_by(Execution.created_at)
     )
     children = result.scalars().all()
     return success([_serialize_execution(e) for e in children])
@@ -622,9 +700,13 @@ def _serialize_execution(e: Execution) -> dict:
     }
     # New fields from migration e5f6a7b8c9d0
     if hasattr(e, "confidence_score"):
-        data["confidence_score"] = float(e.confidence_score) if e.confidence_score else None
+        data["confidence_score"] = (
+            float(e.confidence_score) if e.confidence_score else None
+        )
     if hasattr(e, "parent_execution_id"):
-        data["parent_execution_id"] = str(e.parent_execution_id) if e.parent_execution_id else None
+        data["parent_execution_id"] = (
+            str(e.parent_execution_id) if e.parent_execution_id else None
+        )
     if hasattr(e, "retry_count"):
         data["retry_count"] = e.retry_count
     return data

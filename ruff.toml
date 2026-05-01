@@ -1,0 +1,11 @@
+target-version = "py312"
+line-length = 88
+
+[lint]
+# Default ruff selection (E, F) plus a few useful Pyflakes rules.
+# E402 (module-level import not at top) is intentionally NOT selected here
+# because the API codebase relies on `sys.path.insert(...)` runtime path
+# wiring before importing from `packages/db`. This is a structural pattern,
+# not a style oversight, and rewriting it would be churn for no benefit.
+select = ["E", "F", "W"]
+ignore = ["E402", "E501"]

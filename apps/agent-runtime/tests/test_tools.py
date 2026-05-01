@@ -6,7 +6,7 @@ import tempfile
 
 import pytest
 
-from engine.tools.base import ToolRegistry, ToolResult
+from engine.tools.base import ToolRegistry
 from engine.tools.calculator import CalculatorTool
 from engine.tools.current_time import CurrentTimeTool
 from engine.tools.file_reader import FileReaderTool

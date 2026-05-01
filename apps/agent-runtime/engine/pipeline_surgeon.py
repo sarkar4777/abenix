@@ -21,6 +21,7 @@ Important: we never mutate the live agent record here.  This module
 returns a proposal record that the API persists into
 `pipeline_patch_proposals` with status='pending'.
 """
+
 from __future__ import annotations
 
 import copy
@@ -116,7 +117,9 @@ The patch MUST be valid against the DSL above.
 """
 
 
-def _validate_patch(dsl_before: dict[str, Any], patch_ops: list[dict[str, Any]]) -> dict[str, Any]:
+def _validate_patch(
+    dsl_before: dict[str, Any], patch_ops: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Apply a JSON-Patch and validate the resulting DSL.  Returns the
     patched DSL.  Raises ValueError on any invalidity."""
     try:
@@ -179,7 +182,9 @@ async def propose_patch(
         max_tokens=2_000,
         force_json=True,
     )
-    text = (raw.get("text") or "").strip() if isinstance(raw, dict) else str(raw).strip()
+    text = (
+        (raw.get("text") or "").strip() if isinstance(raw, dict) else str(raw).strip()
+    )
 
     # Cope with code fences and trailing prose.
     text = text.strip("` \n\t")
@@ -189,7 +194,7 @@ async def propose_patch(
     end = text.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("surgeon returned non-JSON output")
-    payload = json.loads(text[start:end + 1])
+    payload = json.loads(text[start : end + 1])
 
     title = str(payload.get("title", "")).strip()[:240]
     rationale = str(payload.get("rationale", "")).strip()[:4000]

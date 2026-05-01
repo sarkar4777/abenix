@@ -1,6 +1,5 @@
 """Tests for cost guardrails and prediction."""
 
-import pytest
 from engine.cost_guardrails import CostPrediction, predict_cost, MODEL_PRICING
 
 

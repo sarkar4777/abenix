@@ -1,4 +1,5 @@
 """Generate Mermaid diagram source from structured data."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -27,9 +28,14 @@ class MermaidDiagramTool(BaseTool):
                 "enum": ["flowchart", "sequence", "pie", "gantt"],
                 "default": "flowchart",
             },
-            "title": {"type": "string", "description": "Optional title above the diagram."},
+            "title": {
+                "type": "string",
+                "description": "Optional title above the diagram.",
+            },
             "direction": {
-                "type": "string", "enum": ["TD", "LR", "BT", "RL"], "default": "LR",
+                "type": "string",
+                "enum": ["TD", "LR", "BT", "RL"],
+                "default": "LR",
                 "description": "Flowchart direction (top-down, left-right, ...).",
             },
             "nodes": {
@@ -74,7 +80,9 @@ class MermaidDiagramTool(BaseTool):
             elif kind == "gantt":
                 src = self._gantt(arguments, title)
             else:
-                return ToolResult(content=f"Unknown diagram_type: {kind}", is_error=True)
+                return ToolResult(
+                    content=f"Unknown diagram_type: {kind}", is_error=True
+                )
         except ValueError as e:
             return ToolResult(content=str(e), is_error=True)
 
@@ -84,7 +92,11 @@ class MermaidDiagramTool(BaseTool):
 
         return ToolResult(
             content=block,
-            metadata={"diagram_type": kind, "source": src, "lines": src.count("\n") + 1},
+            metadata={
+                "diagram_type": kind,
+                "source": src,
+                "lines": src.count("\n") + 1,
+            },
         )
 
     def _flowchart(self, args: dict[str, Any]) -> str:
@@ -95,17 +107,17 @@ class MermaidDiagramTool(BaseTool):
             raise ValueError("flowchart requires nodes[]")
         lines = [f"flowchart {direction}"]
         shape_map = {
-            "round":   ("(", ")"),
+            "round": ("(", ")"),
             "stadium": ("([", "])"),
             "cylinder": ("[(", ")]"),
             "diamond": ("{", "}"),
-            "rect":    ("[", "]"),
+            "rect": ("[", "]"),
         }
         for n in nodes:
             nid = _slug(n.get("id") or n.get("label") or "n")
             label = str(n.get("label") or n.get("id") or "").replace('"', "'")
-            l, r = shape_map.get(n.get("shape", "rect"), shape_map["rect"])
-            lines.append(f'  {nid}{l}"{label}"{r}')
+            lb, rb = shape_map.get(n.get("shape", "rect"), shape_map["rect"])
+            lines.append(f'  {nid}{lb}"{label}"{rb}')
         for e in edges:
             src = _slug(e.get("from", ""))
             dst = _slug(e.get("to", ""))
@@ -124,7 +136,8 @@ class MermaidDiagramTool(BaseTool):
             for k in ("from", "to"):
                 a = m.get(k)
                 if a and a not in seen:
-                    actors.append(a); seen.add(a)
+                    actors.append(a)
+                    seen.add(a)
         lines = ["sequenceDiagram"]
         for a in actors:
             lines.append(f"  participant {_slug(a)} as {a}")
@@ -143,7 +156,7 @@ class MermaidDiagramTool(BaseTool):
         slices = args.get("slices") or []
         if not slices:
             raise ValueError("pie requires slices[]")
-        head = f'pie title {title}' if title else "pie"
+        head = f"pie title {title}" if title else "pie"
         lines = [head]
         for s in slices:
             label = str(s.get("label", "")).replace('"', "'")

@@ -4,13 +4,12 @@ import json
 import logging
 import os
 import sys
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +22,13 @@ from app.core.notifications import create_notification
 from app.core.responses import error, success
 from app.core.sanitize import is_safe_url, sanitize_input
 from app.core.ws_manager import ws_manager
-from app.schemas.agents import CreateAgentRequest, ExecuteRequest, PublishAgentRequest, ReviewAgentRequest, UpdateAgentRequest
+from app.schemas.agents import (
+    CreateAgentRequest,
+    ExecuteRequest,
+    PublishAgentRequest,
+    ReviewAgentRequest,
+    UpdateAgentRequest,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
@@ -44,6 +49,7 @@ _cache_orchestrator: Any = None
 
 class _StopDrift(Exception):
     """Sentinel used to short-circuit the drift try-block when the toggle is off."""
+
     pass
 
 
@@ -59,19 +65,22 @@ async def _persist_drift_alerts(
         return
     import uuid as _uuid
     from models.drift_alert import DriftAlert as DriftAlertRow
+
     for a in drift_alerts:
         try:
-            db.add(DriftAlertRow(
-                tenant_id=agent.tenant_id,
-                agent_id=agent.id,
-                execution_id=_uuid.UUID(execution_id) if execution_id else None,
-                severity=a.severity,
-                metric=a.metric_name,
-                baseline_value=a.baseline_value,
-                current_value=a.current_value,
-                deviation_pct=a.deviation_pct,
-                acknowledged=False,
-            ))
+            db.add(
+                DriftAlertRow(
+                    tenant_id=agent.tenant_id,
+                    agent_id=agent.id,
+                    execution_id=_uuid.UUID(execution_id) if execution_id else None,
+                    severity=a.severity,
+                    metric=a.metric_name,
+                    baseline_value=a.baseline_value,
+                    current_value=a.current_value,
+                    deviation_pct=a.deviation_pct,
+                    acknowledged=False,
+                )
+            )
         except Exception:
             continue
     try:
@@ -83,6 +92,7 @@ async def _persist_drift_alerts(
 async def _drift_enabled(agent: Agent | None) -> bool:
     """Three-level toggle (most specific wins):"""
     import os as _os
+
     if agent is not None:
         cfg = agent.model_config_ or {}
         if cfg.get("drift_detection") is False:
@@ -92,6 +102,7 @@ async def _drift_enabled(agent: Agent | None) -> bool:
         try:
             import redis.asyncio as aioredis
             from app.core.config import settings
+
             r = aioredis.from_url(str(settings.redis_url), decode_responses=True)
             raw = await r.get(f"drift:config:enabled:{agent.tenant_id}")
             await r.aclose()
@@ -144,7 +155,9 @@ def _build_effective_system_prompt(
         if max_calls and max_calls > 0:
             parts.append(f"Maximum {max_calls} calls per execution.")
         if tc.get("require_approval"):
-            parts.append("Requires human approval before each call — explain why you need it.")
+            parts.append(
+                "Requires human approval before each call — explain why you need it."
+            )
         defaults = tc.get("parameter_defaults", {})
         if defaults:
             defaults_str = ", ".join(f"{k}={v}" for k, v in defaults.items())
@@ -161,6 +174,7 @@ def _build_effective_system_prompt(
 
 def _slugify(name: str) -> str:
     import re
+
     slug = name.lower().strip()
     slug = re.sub(r"[^\w\s-]", "", slug)
     slug = re.sub(r"[-\s]+", "-", slug)
@@ -175,7 +189,9 @@ def _serialize_agent(a: Agent) -> dict[str, Any]:
     try:
         if getattr(a, "creator", None) is not None:
             creator_email = getattr(a.creator, "email", None)
-            creator_name = getattr(a.creator, "full_name", None) or getattr(a.creator, "name", None)
+            creator_name = getattr(a.creator, "full_name", None) or getattr(
+                a.creator, "name", None
+            )
     except Exception:
         pass
     data = {
@@ -208,9 +224,13 @@ def _serialize_agent(a: Agent) -> dict[str, Any]:
     if hasattr(a, "parent_agent_id"):
         data["parent_agent_id"] = str(a.parent_agent_id) if a.parent_agent_id else None
     if hasattr(a, "per_execution_cost_limit"):
-        data["per_execution_cost_limit"] = float(a.per_execution_cost_limit) if a.per_execution_cost_limit else None
+        data["per_execution_cost_limit"] = (
+            float(a.per_execution_cost_limit) if a.per_execution_cost_limit else None
+        )
     if hasattr(a, "daily_cost_limit"):
-        data["daily_cost_limit"] = float(a.daily_cost_limit) if a.daily_cost_limit else None
+        data["daily_cost_limit"] = (
+            float(a.daily_cost_limit) if a.daily_cost_limit else None
+        )
     return data
 
 
@@ -257,7 +277,9 @@ async def bulk_delete_agents(
 
 @router.get("")
 async def list_agents(
-    search: str = Query("", max_length=255, description="Search by name or description"),
+    search: str = Query(
+        "", max_length=255, description="Search by name or description"
+    ),
     category: str = Query("", description="Filter by category"),
     status: str = Query("", description="Filter by status: active, draft, archived"),
     mode: str = Query("", description="Filter by mode: agent, pipeline"),
@@ -270,12 +292,16 @@ async def list_agents(
 ) -> JSONResponse:
     """List agents visible to the caller."""
     from app.core.permissions import (
-        accessible_resource_ids, is_admin,
+        accessible_resource_ids,
+        is_admin,
     )
+
     if scope == "tenant" and not is_admin(user):
         return error("scope=tenant requires admin role", 403)
     accessible_agent_ids = await accessible_resource_ids(
-        db, user, kind="agent",
+        db,
+        user,
+        kind="agent",
     )
     # Build the visibility predicate:
     # OOB agents + (admin sees tenant-wide) + (member sees own + shared)
@@ -376,18 +402,20 @@ async def export_agent(
     agent = result.scalar_one_or_none()
     if not agent:
         return error("Agent not found", 404)
-    return success({
-        "format": "abenix-template-v1",
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "agent": {
-            "name": agent.name,
-            "description": agent.description,
-            "system_prompt": agent.system_prompt,
-            "model_config": agent.model_config_,
-            "category": agent.category,
-            "icon_url": agent.icon_url,
-        },
-    })
+    return success(
+        {
+            "format": "abenix-template-v1",
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "agent": {
+                "name": agent.name,
+                "description": agent.description,
+                "system_prompt": agent.system_prompt,
+                "model_config": agent.model_config_,
+                "category": agent.category,
+                "icon_url": agent.icon_url,
+            },
+        }
+    )
 
 
 @router.post("/import")
@@ -407,7 +435,10 @@ async def import_agent(
         slug=_slugify(name) + "-" + uuid.uuid4().hex[:6],
         description=template.get("description", ""),
         system_prompt=template.get("system_prompt", ""),
-        model_config_=template.get("model_config", {"model": "claude-sonnet-4-5-20250929", "temperature": 0.7, "tools": []}),
+        model_config_=template.get(
+            "model_config",
+            {"model": "claude-sonnet-4-5-20250929", "temperature": 0.7, "tools": []},
+        ),
         agent_type=AgentType.CUSTOM,
         status=AgentStatus.DRAFT,
         category=template.get("category"),
@@ -416,7 +447,16 @@ async def import_agent(
     db.add(agent)
     await db.commit()
     await db.refresh(agent)
-    await log_action(db, user.tenant_id, user.id, "agent.imported", {"agent_id": str(agent.id), "name": name}, request, resource_type="agent", resource_id=str(agent.id))
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "agent.imported",
+        {"agent_id": str(agent.id), "name": name},
+        request,
+        resource_type="agent",
+        resource_id=str(agent.id),
+    )
     await db.commit()
     return success(_serialize_agent(agent), status_code=201)
 
@@ -483,7 +523,16 @@ async def create_agent(
     await db.commit()
     await db.refresh(agent)
 
-    await log_action(db, user.tenant_id, user.id, "agent.created", {"agent_id": str(agent.id), "name": agent.name}, request, resource_type="agent", resource_id=str(agent.id))
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "agent.created",
+        {"agent_id": str(agent.id), "name": agent.name},
+        request,
+        resource_type="agent",
+        resource_id=str(agent.id),
+    )
     await db.commit()
 
     return success(_serialize_agent(agent), status_code=201)
@@ -519,7 +568,10 @@ async def update_agent(
             )
         )
         if not share_check.scalar_one_or_none():
-            return error("Only the agent creator, admin, or users with edit permission can modify this agent", 403)
+            return error(
+                "Only the agent creator, admin, or users with edit permission can modify this agent",
+                403,
+            )
 
     if body.icon_url is not None and not is_safe_url(body.icon_url):
         return error("Invalid icon URL", 400)
@@ -527,9 +579,12 @@ async def update_agent(
     # Create revision snapshot BEFORE applying changes
     try:
         prev_state = {
-            "name": agent.name, "description": agent.description,
-            "system_prompt": agent.system_prompt, "model_config": agent.model_config_,
-            "category": agent.category, "status": agent.status.value,
+            "name": agent.name,
+            "description": agent.description,
+            "system_prompt": agent.system_prompt,
+            "model_config": agent.model_config_,
+            "category": agent.category,
+            "status": agent.status.value,
         }
         # Get next revision number
         rev_count = await db.execute(
@@ -538,10 +593,14 @@ async def update_agent(
         rev_num = len(rev_count.scalars().all()) + 1
 
         changes = []
-        if body.name is not None and body.name != agent.name: changes.append(f"name: '{agent.name}' → '{body.name}'")
-        if body.system_prompt is not None and body.system_prompt != agent.system_prompt: changes.append("system prompt updated")
-        if body.agent_model_config is not None: changes.append("model config updated")
-        if body.category is not None and body.category != agent.category: changes.append(f"category: {agent.category} → {body.category}")
+        if body.name is not None and body.name != agent.name:
+            changes.append(f"name: '{agent.name}' → '{body.name}'")
+        if body.system_prompt is not None and body.system_prompt != agent.system_prompt:
+            changes.append("system prompt updated")
+        if body.agent_model_config is not None:
+            changes.append("model config updated")
+        if body.category is not None and body.category != agent.category:
+            changes.append(f"category: {agent.category} → {body.category}")
     except Exception:
         rev_num = 1
         prev_state = {}
@@ -574,9 +633,12 @@ async def update_agent(
     # Save revision after changes
     try:
         new_state = {
-            "name": agent.name, "description": agent.description,
-            "system_prompt": agent.system_prompt, "model_config": agent.model_config_,
-            "category": agent.category, "status": agent.status.value,
+            "name": agent.name,
+            "description": agent.description,
+            "system_prompt": agent.system_prompt,
+            "model_config": agent.model_config_,
+            "category": agent.category,
+            "status": agent.status.value,
         }
         revision = AgentRevision(
             id=uuid.uuid4(),
@@ -591,7 +653,6 @@ async def update_agent(
         db.add(revision)
 
         # Notify collaborators (shared users with edit permission)
-        from models.agent_share import AgentShare
         share_result = await db.execute(
             select(AgentShare.shared_with_user_id).where(
                 AgentShare.agent_id == agent_id,
@@ -603,7 +664,9 @@ async def update_agent(
         for collab_id in collab_ids:
             try:
                 await create_notification(
-                    db, tenant_id=user.tenant_id, user_id=collab_id,
+                    db,
+                    tenant_id=user.tenant_id,
+                    user_id=collab_id,
                     type="agent_modified",
                     title=f"Agent updated: {agent.name}",
                     message=f"{user.full_name} modified '{agent.name}': {'; '.join(changes[:3])}",
@@ -626,21 +689,25 @@ async def list_revisions(
 ) -> JSONResponse:
     """List change history for an agent."""
     result = await db.execute(
-        select(AgentRevision).where(AgentRevision.agent_id == agent_id)
-        .order_by(AgentRevision.revision_number.desc()).limit(50)
+        select(AgentRevision)
+        .where(AgentRevision.agent_id == agent_id)
+        .order_by(AgentRevision.revision_number.desc())
+        .limit(50)
     )
     revisions = result.scalars().all()
-    return success([
-        {
-            "id": str(r.id),
-            "revision_number": r.revision_number,
-            "changed_by": str(r.changed_by),
-            "change_type": r.change_type,
-            "diff_summary": r.diff_summary,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in revisions
-    ])
+    return success(
+        [
+            {
+                "id": str(r.id),
+                "revision_number": r.revision_number,
+                "changed_by": str(r.changed_by),
+                "change_type": r.change_type,
+                "diff_summary": r.diff_summary,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in revisions
+        ]
+    )
 
 
 @router.post("/{agent_id}/revisions/{revision_id}/revert")
@@ -652,7 +719,9 @@ async def revert_to_revision(
 ) -> JSONResponse:
     """Revert agent to a previous revision."""
     rev_result = await db.execute(
-        select(AgentRevision).where(AgentRevision.id == revision_id, AgentRevision.agent_id == agent_id)
+        select(AgentRevision).where(
+            AgentRevision.id == revision_id, AgentRevision.agent_id == agent_id
+        )
     )
     revision = rev_result.scalar_one_or_none()
     if not revision or not revision.previous_state:
@@ -665,14 +734,21 @@ async def revert_to_revision(
 
     # Apply previous state
     prev = revision.previous_state
-    if prev.get("name"): agent.name = prev["name"]
-    if prev.get("description") is not None: agent.description = prev["description"]
-    if prev.get("system_prompt") is not None: agent.system_prompt = prev["system_prompt"]
-    if prev.get("model_config") is not None: agent.model_config_ = prev["model_config"]
-    if prev.get("category"): agent.category = prev["category"]
+    if prev.get("name"):
+        agent.name = prev["name"]
+    if prev.get("description") is not None:
+        agent.description = prev["description"]
+    if prev.get("system_prompt") is not None:
+        agent.system_prompt = prev["system_prompt"]
+    if prev.get("model_config") is not None:
+        agent.model_config_ = prev["model_config"]
+    if prev.get("category"):
+        agent.category = prev["category"]
 
     # Create a revert revision
-    rev_count = await db.execute(select(AgentRevision).where(AgentRevision.agent_id == agent_id))
+    rev_count = await db.execute(
+        select(AgentRevision).where(AgentRevision.agent_id == agent_id)
+    )
     new_rev = AgentRevision(
         id=uuid.uuid4(),
         agent_id=agent_id,
@@ -797,7 +873,13 @@ async def publish_agent(
         agent.is_published = False
         await db.commit()
         await db.refresh(agent)
-        await log_action(db, user.tenant_id, user.id, "agent.submitted_for_review", {"agent_id": str(agent.id), "name": agent.name})
+        await log_action(
+            db,
+            user.tenant_id,
+            user.id,
+            "agent.submitted_for_review",
+            {"agent_id": str(agent.id), "name": agent.name},
+        )
         await db.commit()
     else:
         # Tenant or specific-user publish — activate immediately (no marketplace review needed)
@@ -805,7 +887,13 @@ async def publish_agent(
         agent.is_published = visibility != "tenant"  # True for specific-user sharing
         await db.commit()
         await db.refresh(agent)
-        await log_action(db, user.tenant_id, user.id, "agent.published", {"agent_id": str(agent.id), "name": agent.name, "visibility": visibility})
+        await log_action(
+            db,
+            user.tenant_id,
+            user.id,
+            "agent.published",
+            {"agent_id": str(agent.id), "name": agent.name, "visibility": visibility},
+        )
         await db.commit()
 
     return success(_serialize_agent(agent))
@@ -821,9 +909,7 @@ async def review_agent(
     if user.role.value not in ("admin",):
         return error("Admin access required", 403)
 
-    result = await db.execute(
-        select(Agent).where(Agent.id == agent_id)
-    )
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
         return error("Agent not found", 404)
@@ -843,7 +929,13 @@ async def review_agent(
     await db.commit()
     await db.refresh(agent)
 
-    await log_action(db, agent.tenant_id, user.id, "agent.reviewed", {"agent_id": str(agent.id), "action": body.action})
+    await log_action(
+        db,
+        agent.tenant_id,
+        user.id,
+        "agent.reviewed",
+        {"agent_id": str(agent.id), "action": body.action},
+    )
     await db.commit()
 
     return success(_serialize_agent(agent))
@@ -879,24 +971,36 @@ async def validate_agent_smart(
     agent_errors: list[dict] = []
     agent_warnings: list[dict] = []
     if not (agent.system_prompt or "").strip():
-        agent_errors.append({
-            "node_id": "", "field": "system_prompt", "severity": "error",
-            "message": "Agent has no system prompt",
-            "suggestion": "Add a system_prompt describing the agent's role and behavior.",
-        })
+        agent_errors.append(
+            {
+                "node_id": "",
+                "field": "system_prompt",
+                "severity": "error",
+                "message": "Agent has no system prompt",
+                "suggestion": "Add a system_prompt describing the agent's role and behavior.",
+            }
+        )
     if not tool_names:
-        agent_warnings.append({
-            "node_id": "", "field": "model_config.tools", "severity": "warning",
-            "message": "Agent has no tools configured",
-            "suggestion": "Add at least one tool, or confirm this agent only needs the LLM.",
-        })
+        agent_warnings.append(
+            {
+                "node_id": "",
+                "field": "model_config.tools",
+                "severity": "warning",
+                "message": "Agent has no tools configured",
+                "suggestion": "Add at least one tool, or confirm this agent only needs the LLM.",
+            }
+        )
     max_iter = cfg.get("max_iterations", 10)
     if isinstance(max_iter, int) and max_iter > 40:
-        agent_warnings.append({
-            "node_id": "", "field": "model_config.max_iterations", "severity": "warning",
-            "message": f"max_iterations={max_iter} is high — will run slowly and cost a lot",
-            "suggestion": "Consider keeping max_iterations at or below 30 unless there's a clear reason.",
-        })
+        agent_warnings.append(
+            {
+                "node_id": "",
+                "field": "model_config.max_iterations",
+                "severity": "warning",
+                "message": f"max_iterations={max_iter} is high — will run slowly and cost a lot",
+                "suggestion": "Consider keeping max_iterations at or below 30 unless there's a clear reason.",
+            }
+        )
 
     # Pipeline-mode — run Tier 1/2 against the DAG.
     pipeline_cfg = cfg.get("pipeline_config") or {}
@@ -906,7 +1010,8 @@ async def validate_agent_smart(
     # runtime (e.g. {{model_name}}), so the validator should treat them as
     # valid template targets.
     input_var_names = {
-        v.get("name") for v in (cfg.get("input_variables") or [])
+        v.get("name")
+        for v in (cfg.get("input_variables") or [])
         if isinstance(v, dict) and v.get("name")
     }
 
@@ -915,18 +1020,24 @@ async def validate_agent_smart(
     if nodes:
         try:
             from engine.agent_executor import build_tool_registry
+
             tool_registry = build_tool_registry(tool_names)
-            t1 = validate_pipeline(nodes, tool_registry, available_context_keys=input_var_names)
+            t1 = validate_pipeline(
+                nodes, tool_registry, available_context_keys=input_var_names
+            )
             tier1_dict = t1.to_dict()
             t2 = validate_semantic(nodes, tool_registry, tier1=t1)
             tier2_dict = t2.to_dict()
         except Exception as e:
-            agent_warnings.append({
-                "node_id": "", "field": "pipeline_config",
-                "severity": "warning",
-                "message": f"Could not run pipeline validator: {e}",
-                "suggestion": "",
-            })
+            agent_warnings.append(
+                {
+                    "node_id": "",
+                    "field": "pipeline_config",
+                    "severity": "warning",
+                    "message": f"Could not run pipeline validator: {e}",
+                    "suggestion": "",
+                }
+            )
 
     tier3_dict: dict | None = None
     if deep:
@@ -946,24 +1057,36 @@ async def validate_agent_smart(
         )
         tier3_dict = report.to_dict()
 
-    has_errors = bool(agent_errors) or (
-        tier1_dict and not tier1_dict.get("valid", True)
-    ) or (
-        tier2_dict and tier2_dict.get("errors")
+    has_errors = (
+        bool(agent_errors)
+        or (tier1_dict and not tier1_dict.get("valid", True))
+        or (tier2_dict and tier2_dict.get("errors"))
     )
     valid = not has_errors
-    severity = "error" if has_errors else ("warn" if agent_warnings or (tier2_dict and tier2_dict.get("warnings")) else "ok")
-    score = (tier3_dict or {}).get("coherence_score") if tier3_dict else (
-        10 if severity == "ok" else 6 if severity == "warn" else 2
+    severity = (
+        "error"
+        if has_errors
+        else (
+            "warn"
+            if agent_warnings or (tier2_dict and tier2_dict.get("warnings"))
+            else "ok"
+        )
+    )
+    score = (
+        (tier3_dict or {}).get("coherence_score")
+        if tier3_dict
+        else (10 if severity == "ok" else 6 if severity == "warn" else 2)
     )
 
-    return success({
-        "agent": {"errors": agent_errors, "warnings": agent_warnings},
-        "tier1": tier1_dict,
-        "tier2": tier2_dict,
-        "tier3": tier3_dict,
-        "overall": {"valid": valid, "severity": severity, "score": score},
-    })
+    return success(
+        {
+            "agent": {"errors": agent_errors, "warnings": agent_warnings},
+            "tier1": tier1_dict,
+            "tier2": tier2_dict,
+            "tier3": tier3_dict,
+            "overall": {"valid": valid, "severity": severity, "score": score},
+        }
+    )
 
 
 @router.post("/{agent_id}/execute", response_model=None)
@@ -1001,7 +1124,9 @@ async def execute_agent(
                 Agent.id.in_(
                     select(AgentShare.agent_id).where(
                         AgentShare.shared_with_user_id == user.id,
-                        AgentShare.permission.in_([SharePermission.EXECUTE, SharePermission.EDIT]),
+                        AgentShare.permission.in_(
+                            [SharePermission.EXECUTE, SharePermission.EDIT]
+                        ),
                     )
                 ),
             ),
@@ -1032,7 +1157,10 @@ async def execute_agent(
     # DLP: scan input for PII before execution
     try:
         from engine.dlp import enforce_dlp, DLPPolicy
-        dlp_message, dlp_result = enforce_dlp(sanitized_message, DLPPolicy(mode="detect"))
+
+        dlp_message, dlp_result = enforce_dlp(
+            sanitized_message, DLPPolicy(mode="detect")
+        )
         if dlp_result.has_pii:
             # In detect mode: log warning but proceed. In mask/block mode: enforce_dlp handles it.
             sanitized_message = dlp_message
@@ -1062,12 +1190,17 @@ async def execute_agent(
     agent_pool = getattr(agent, "runtime_pool", None) or "default"
     if settings.scaling_exec_remote and agent_pool != "inline":
         try:
-            import sys, os as _os
-            _runtime_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "agent-runtime")
+            import sys
+            import os as _os
+
+            _runtime_path = _os.path.join(
+                _os.path.dirname(__file__), "..", "..", "..", "agent-runtime"
+            )
             _runtime_path = _os.path.abspath(_runtime_path)
             if _runtime_path not in sys.path:
                 sys.path.insert(0, _runtime_path)
             from engine.queue_backend import get_queue_backend  # type: ignore
+
             backend = get_queue_backend()
             payload = {
                 "execution_id": str(execution.id),
@@ -1103,6 +1236,7 @@ async def execute_agent(
             if body.wait:
                 from app.core.execution_bus import subscribe_events
                 import asyncio as _asyncio
+
                 output_text = ""
                 summary: dict[str, Any] = {}
                 errored: str | None = None
@@ -1125,7 +1259,9 @@ async def execute_agent(
                             return
 
                 try:
-                    await _asyncio.wait_for(_collect(), timeout=body.wait_timeout_seconds)
+                    await _asyncio.wait_for(
+                        _collect(), timeout=body.wait_timeout_seconds
+                    )
                 except _asyncio.TimeoutError:
                     errored = f"timed out after {body.wait_timeout_seconds}s"
 
@@ -1137,43 +1273,52 @@ async def execute_agent(
                     if errored.startswith("timed out"):
                         return error(errored, 504)
                     _failed_summary = summary or {"status": "failed", "error": errored}
-                    if isinstance(_failed_summary, dict) and not _failed_summary.get("status"):
+                    if isinstance(_failed_summary, dict) and not _failed_summary.get(
+                        "status"
+                    ):
                         _failed_summary["status"] = "failed"
-                    return success({
+                    return success(
+                        {
+                            "execution_id": str(execution.id),
+                            "task_id": task_id,
+                            "pool": agent_pool,
+                            "mode": "sync_via_queue",
+                            "status": "failed",
+                            "error": errored,
+                            "output": output_text,
+                            "summary": _failed_summary,
+                        }
+                    )
+                # Surface pipeline status from the consumer's done event so
+                # callers see status=completed/failed without a follow-up GET.
+                _qstatus = summary.get("status") if isinstance(summary, dict) else None
+                return success(
+                    {
                         "execution_id": str(execution.id),
                         "task_id": task_id,
                         "pool": agent_pool,
                         "mode": "sync_via_queue",
-                        "status": "failed",
-                        "error": errored,
+                        "status": _qstatus or "completed",
                         "output": output_text,
-                        "summary": _failed_summary,
-                    })
-                # Surface pipeline status from the consumer's done event so
-                # callers see status=completed/failed without a follow-up GET.
-                _qstatus = summary.get("status") if isinstance(summary, dict) else None
-                return success({
+                        "summary": summary,
+                    }
+                )
+
+            return success(
+                {
                     "execution_id": str(execution.id),
                     "task_id": task_id,
                     "pool": agent_pool,
-                    "mode": "sync_via_queue",
-                    "status": _qstatus or "completed",
-                    "output": output_text,
-                    "summary": summary,
-                })
-
-            return success({
-                "execution_id": str(execution.id),
-                "task_id": task_id,
-                "pool": agent_pool,
-                "mode": "async",
-            })
+                    "mode": "async",
+                }
+            )
         except Exception as _enqueue_err:
             # Enqueue failed — don't strand the client. Fall through to
             # the inline path so the request still succeeds (same
             # behaviour as queue_backend's fallback-to-celery design).
             logging.getLogger(__name__).warning(
-                "remote-exec enqueue failed, falling back to inline: %s", _enqueue_err,
+                "remote-exec enqueue failed, falling back to inline: %s",
+                _enqueue_err,
             )
 
     # Pipeline agents use PipelineExecutor instead of AgentExecutor
@@ -1219,8 +1364,17 @@ async def execute_agent(
         "tenant_id": str(user.tenant_id),
         "user_id": str(user.id),
         "agent_name": agent.name,
-        "per_execution_cost_limit": float(agent.per_execution_cost_limit) if hasattr(agent, "per_execution_cost_limit") and agent.per_execution_cost_limit else None,
-        "daily_cost_limit": float(agent.daily_cost_limit) if hasattr(agent, "daily_cost_limit") and agent.daily_cost_limit else None,
+        "per_execution_cost_limit": (
+            float(agent.per_execution_cost_limit)
+            if hasattr(agent, "per_execution_cost_limit")
+            and agent.per_execution_cost_limit
+            else None
+        ),
+        "daily_cost_limit": (
+            float(agent.daily_cost_limit)
+            if hasattr(agent, "daily_cost_limit") and agent.daily_cost_limit
+            else None
+        ),
     }
 
     # Acting subject for RBAC delegation (if API key holder is acting on behalf of an end user)
@@ -1228,7 +1382,10 @@ async def execute_agent(
     if acting_subject:
         _enterprise_ctx["acting_subject"] = acting_subject.to_dict()
         import logging as _log
-        _log.getLogger(__name__).info("Agent execution with acting subject: %s", acting_subject.to_dict())
+
+        _log.getLogger(__name__).info(
+            "Agent execution with acting subject: %s", acting_subject.to_dict()
+        )
 
     # Surface the agent's model_config so tools that need its keys
     # (e.g. atlas_*: model_config.atlas_graphs allow-list) can read it.
@@ -1241,9 +1398,8 @@ async def execute_agent(
     )
 
     from app.services.collection_access import resolve_agent_collections
-    _subj_dict = (
-        acting_subject.to_dict() if acting_subject is not None else None
-    )
+
+    _subj_dict = acting_subject.to_dict() if acting_subject is not None else None
     _collection_ids = await resolve_agent_collections(
         db,
         agent_id=agent.id,
@@ -1315,7 +1471,11 @@ async def _stream_pipeline_execution(
     from app.core.execution_state import publish_state, complete_state, fail_state
 
     from engine.agent_executor import build_tool_registry
-    from engine.pipeline import PipelineExecutor, parse_pipeline_nodes, serialize_pipeline_result
+    from engine.pipeline import (
+        PipelineExecutor,
+        parse_pipeline_nodes,
+        serialize_pipeline_result,
+    )
 
     tool_registry = build_tool_registry(tool_names)
 
@@ -1329,16 +1489,26 @@ async def _stream_pipeline_execution(
         data = json.dumps({"node_id": node_id, "tool_name": tool_name})
         await event_queue.put(f"event: node_start\ndata: {data}\n\n")
         await publish_state(
-            str(execution_id), tenant_id, agent_id, agent_name,
-            "running", current_tool=tool_name, current_step=f"node: {node_id}",
+            str(execution_id),
+            tenant_id,
+            agent_id,
+            agent_name,
+            "running",
+            current_tool=tool_name,
+            current_step=f"node: {node_id}",
             node_statuses=_node_statuses,
-            iteration=_completed_nodes, max_iterations=len(_node_statuses) + 5,
+            iteration=_completed_nodes,
+            max_iterations=len(_node_statuses) + 5,
             metadata={"mode": "pipeline"},
         )
 
     async def on_node_complete(
-        node_id: str, status: str, duration_ms: int, output: Any,
-        error_message: str | None = None, error_type: str | None = None,
+        node_id: str,
+        status: str,
+        duration_ms: int,
+        output: Any,
+        error_message: str | None = None,
+        error_type: str | None = None,
     ) -> None:
         nonlocal _completed_nodes
         _node_statuses[node_id] = status
@@ -1370,8 +1540,12 @@ async def _stream_pipeline_execution(
         data = json.dumps(result_data, default=str)
         await event_queue.put(f"event: node_complete\ndata: {data}\n\n")
         await publish_state(
-            str(execution_id), tenant_id, agent_id, agent_name,
-            "running", current_step=f"completed: {node_id}",
+            str(execution_id),
+            tenant_id,
+            agent_id,
+            agent_name,
+            "running",
+            current_step=f"completed: {node_id}",
             node_statuses=_node_statuses,
             iteration=_completed_nodes,
             metadata={"mode": "pipeline"},
@@ -1395,8 +1569,12 @@ async def _stream_pipeline_execution(
 
     # Publish initial state so pipeline shows in live debug immediately
     await publish_state(
-        str(execution_id), tenant_id, agent_id, agent_name,
-        "running", current_step="starting pipeline",
+        str(execution_id),
+        tenant_id,
+        agent_id,
+        agent_name,
+        "running",
+        current_step="starting pipeline",
         node_statuses=_node_statuses,
         max_iterations=len(pipeline_nodes),
         metadata={"mode": "pipeline"},
@@ -1421,7 +1599,8 @@ async def _stream_pipeline_execution(
                     final_text = result.final_output
                 elif isinstance(result.final_output, dict):
                     final_text = result.final_output.get(
-                        "response", result.final_output.get("content", str(result.final_output))
+                        "response",
+                        result.final_output.get("content", str(result.final_output)),
                     )
                 else:
                     final_text = str(result.final_output)
@@ -1436,7 +1615,7 @@ async def _stream_pipeline_execution(
             _total_out = 0
             _total_cost = 0.0
             for _nid, nr in (result.node_results or {}).items():
-                out = nr.output if hasattr(nr, 'output') else None
+                out = nr.output if hasattr(nr, "output") else None
                 if isinstance(out, dict):
                     _total_in += int(out.get("input_tokens", 0) or 0)
                     _total_out += int(out.get("output_tokens", 0) or 0)
@@ -1451,27 +1630,32 @@ async def _stream_pipeline_execution(
                     except Exception:
                         pass
 
-            done_data = json.dumps({
-                "total_tokens": _total_in + _total_out,
-                "input_tokens": _total_in,
-                "output_tokens": _total_out,
-                "cost": round(_total_cost, 4),
-                "duration_ms": result.total_duration_ms,
-                "model": "pipeline",
-                "pipeline_status": result.status,
-                "execution_path": result.execution_path,
-                "failed_nodes": result.failed_nodes,
-                "node_errors": getattr(result, "node_errors", {}),
-            })
+            done_data = json.dumps(
+                {
+                    "total_tokens": _total_in + _total_out,
+                    "input_tokens": _total_in,
+                    "output_tokens": _total_out,
+                    "cost": round(_total_cost, 4),
+                    "duration_ms": result.total_duration_ms,
+                    "model": "pipeline",
+                    "pipeline_status": result.status,
+                    "execution_path": result.execution_path,
+                    "failed_nodes": result.failed_nodes,
+                    "node_errors": getattr(result, "node_errors", {}),
+                }
+            )
             await event_queue.put(f"event: done\ndata: {done_data}\n\n")
 
         except Exception as e:
             import traceback as _tb
-            err_data = json.dumps({
-                "message": str(e),
-                "type": type(e).__name__,
-                "traceback": _tb.format_exc()[:2000],
-            })
+
+            err_data = json.dumps(
+                {
+                    "message": str(e),
+                    "type": type(e).__name__,
+                    "traceback": _tb.format_exc()[:2000],
+                }
+            )
             await event_queue.put(f"event: error\ndata: {err_data}\n\n")
         finally:
             await event_queue.put(None)
@@ -1499,9 +1683,7 @@ async def _stream_pipeline_execution(
     # Update execution record
     pr = pipeline_result[0]
     if pr:
-        result = await db.execute(
-            select(Execution).where(Execution.id == execution_id)
-        )
+        result = await db.execute(select(Execution).where(Execution.id == execution_id))
         execution = result.scalar_one_or_none()
         if execution:
             execution.status = (
@@ -1536,17 +1718,25 @@ async def _stream_pipeline_execution(
                     try:
                         parsed = json.loads(node_output)
                         if isinstance(parsed, dict):
-                            total_input_tokens += int(parsed.get("input_tokens", 0) or 0)
-                            total_output_tokens += int(parsed.get("output_tokens", 0) or 0)
+                            total_input_tokens += int(
+                                parsed.get("input_tokens", 0) or 0
+                            )
+                            total_output_tokens += int(
+                                parsed.get("output_tokens", 0) or 0
+                            )
                             total_cost += float(parsed.get("cost", 0) or 0)
-                            total_tool_calls += int(parsed.get("tool_calls_count", 0) or 0)
+                            total_tool_calls += int(
+                                parsed.get("tool_calls_count", 0) or 0
+                            )
                     except (json.JSONDecodeError, TypeError, ValueError):
                         pass
 
             execution.input_tokens = total_input_tokens or None
             execution.output_tokens = total_output_tokens or None
             execution.cost = round(total_cost, 6) if total_cost > 0 else None
-            execution.tool_calls = {"total": total_tool_calls} if total_tool_calls > 0 else None
+            execution.tool_calls = (
+                {"total": total_tool_calls} if total_tool_calls > 0 else None
+            )
 
             # Store pipeline data for flight recorder
             execution.node_results = node_results_data
@@ -1579,12 +1769,21 @@ async def _non_stream_pipeline_execution(
 
     try:
         from engine.agent_executor import build_tool_registry
-        from engine.pipeline import PipelineExecutor, parse_pipeline_nodes, serialize_pipeline_result
+        from engine.pipeline import (
+            PipelineExecutor,
+            parse_pipeline_nodes,
+            serialize_pipeline_result,
+        )
 
         # Publish initial running state so it appears in live debug
         await publish_state(
-            str(execution.id), tenant_id, str(execution.agent_id), agent_name,
-            "running", current_step="initializing", metadata={"mode": "pipeline"},
+            str(execution.id),
+            tenant_id,
+            str(execution.agent_id),
+            agent_name,
+            "running",
+            current_step="initializing",
+            metadata={"mode": "pipeline"},
         )
 
         tool_registry = build_tool_registry(tool_names)
@@ -1604,8 +1803,12 @@ async def _non_stream_pipeline_execution(
         node_names = [n.id for n in pipeline_nodes]
         node_statuses = {n: "pending" for n in node_names}
         await publish_state(
-            str(execution.id), tenant_id, str(execution.agent_id), agent_name,
-            "running", current_step="executing pipeline",
+            str(execution.id),
+            tenant_id,
+            str(execution.agent_id),
+            agent_name,
+            "running",
+            current_step="executing pipeline",
             node_statuses=node_statuses,
             max_iterations=len(pipeline_nodes),
             metadata={"mode": "pipeline"},
@@ -1625,11 +1828,14 @@ async def _non_stream_pipeline_execution(
             "query": message,
             "request": message,
         }
-        result = await executor.execute(pipeline_nodes, {**base_context, **(context or {})})
+        result = await executor.execute(
+            pipeline_nodes, {**base_context, **(context or {})}
+        )
     except Exception as e:
         execution.status = ExecutionStatus.FAILED
         execution.error_message = str(e)[:2000]
         from app.core.failure_codes import classify_exception, emit_outcome_metric
+
         execution.failure_code = classify_exception(e)
         execution.completed_at = datetime.now(timezone.utc)
         emit_outcome_metric(outcome="FAILED", failure_code=execution.failure_code)
@@ -1638,21 +1844,23 @@ async def _non_stream_pipeline_execution(
         # Return 200 with a failed-result envelope so callers can drill into
         # the execution by id. Returning 500 swallowed execution_id and made
         # the failed run invisible to clients (and to the dashboard).
-        return success({
-            "execution_id": str(execution.id),
-            "status": "failed",
-            "failure_code": execution.failure_code,
-            "error": str(e)[:2000],
-            "node_results": {},
-            "execution_path": [],
-            "failed_nodes": [],
-            "skipped_nodes": [],
-            "total_duration_ms": 0,
-            "duration_ms": 0,
-            "final_output": None,
-            "output": None,
-            "cost": 0.0,
-        })
+        return success(
+            {
+                "execution_id": str(execution.id),
+                "status": "failed",
+                "failure_code": execution.failure_code,
+                "error": str(e)[:2000],
+                "node_results": {},
+                "execution_path": [],
+                "failed_nodes": [],
+                "skipped_nodes": [],
+                "total_duration_ms": 0,
+                "duration_ms": 0,
+                "final_output": None,
+                "output": None,
+                "cost": 0.0,
+            }
+        )
 
     serialized = serialize_pipeline_result(result)
     execution.status = (
@@ -1687,6 +1895,7 @@ async def _non_stream_pipeline_execution(
     # Drift detection for pipeline executions (gated by env + tenant + agent)
     try:
         from app.core.config import settings
+
         _ag_q = await db.execute(select(Agent).where(Agent.id == execution.agent_id))
         _ag = _ag_q.scalar_one_or_none()
         if _ag and await _drift_enabled(_ag):
@@ -1706,6 +1915,7 @@ async def _non_stream_pipeline_execution(
                     if _nr.get("status") == "failed":
                         _tool_fails += 1
             from engine.drift_detection import DriftDetector
+
             detector = DriftDetector(redis_url=str(settings.redis_url))
             _alerts = await detector.record_execution(
                 agent_id=str(execution.agent_id),
@@ -1752,7 +1962,7 @@ async def _fetch_mcp_connections(
     conn_result = await db.execute(
         select(UserMCPConnection).where(
             UserMCPConnection.id.in_(conn_ids),
-            UserMCPConnection.is_enabled == True,
+            UserMCPConnection.is_enabled,
         )
     )
     connections = {c.id: c for c in conn_result.scalars().all()}
@@ -1820,7 +2030,10 @@ async def _stream_execution(
     # Publish live execution state to Redis
     try:
         from app.core.execution_state import publish_state, complete_state, fail_state
-        await publish_state(str(execution_id), tenant_id, str(agent_id), agent_name, "running")
+
+        await publish_state(
+            str(execution_id), tenant_id, str(agent_id), agent_name, "running"
+        )
     except Exception:
         pass  # Graceful degradation if Redis unavailable
 
@@ -1833,6 +2046,7 @@ async def _stream_execution(
 
     if runtime_mode == "remote":
         from engine.execution_router import stream_agent, ExecutionConfig
+
         exec_config = ExecutionConfig(
             message=message,
             system_prompt=system_prompt,
@@ -1850,15 +2064,20 @@ async def _stream_execution(
         event_source = stream_agent(exec_config)
     else:
         from engine.llm_router import LLMRouter
+
         if mcp_connections:
             from engine.tool_resolver import resolve_tools
             from engine.agent_executor import AgentExecutor
+
             tool_registry, mcp_clients, _sec_ctx = await resolve_tools(
                 tool_names, mcp_connections
             )
         else:
             from engine.agent_executor import AgentExecutor, build_tool_registry
-            tool_registry = build_tool_registry(tool_names, kb_ids=kb_ids, **registry_kwargs)
+
+            tool_registry = build_tool_registry(
+                tool_names, kb_ids=kb_ids, **registry_kwargs
+            )
 
         llm_router = LLMRouter()
 
@@ -1866,24 +2085,34 @@ async def _stream_execution(
         # _stream_execution doesn't get a `user` reference — the caller
         # threads tenant_id + user_id through enterprise_ctx so we can
         # build the gate without a DB round-trip on the user.
-        from app.core.moderation_glue import build_gate_context, persist_events as _mod_persist
+        from app.core.moderation_glue import (
+            build_gate_context,
+            persist_events as _mod_persist,
+        )
+
         _mod_ctx = None
         try:
             _user_id_str = enterprise_ctx.get("user_id") or ""
             if tenant_id and _user_id_str:
                 _mod_ctx = await build_gate_context(
-                    db, uuid.UUID(tenant_id), uuid.UUID(_user_id_str),
+                    db,
+                    uuid.UUID(tenant_id),
+                    uuid.UUID(_user_id_str),
                 )
         except Exception as _mod_exc:
             import logging as _log
-            _log.getLogger(__name__).warning("moderation gate build failed: %s", _mod_exc)
+
+            _log.getLogger(__name__).warning(
+                "moderation gate build failed: %s", _mod_exc
+            )
             _mod_ctx = None
 
         # Resolve asset input_schemas async, BEFORE constructing the
         # executor — the agent_runtime image doesn't ship psycopg2 so
         # this has to be awaited, not called from sync __init__.
         from engine.agent_executor import resolve_asset_schemas as _ras
-        _tool_cfg = model_cfg.get("tool_config") or {}
+
+        _tool_cfg = agent_model_config.get("tool_config") or {}
         _asset_schemas = await _ras(_tool_cfg)
 
         _exec_kwargs = dict(
@@ -1911,6 +2140,7 @@ async def _stream_execution(
         async def _embedded_events():
             async for evt in executor.stream(message):
                 yield {"event": evt.event, "data": evt.data}
+
         event_source = _embedded_events()
 
     try:
@@ -1919,16 +2149,33 @@ async def _stream_execution(
             event_data = event.get("data", {})
 
             if event_type == "token":
-                text = event_data if isinstance(event_data, str) else event_data.get("text", event_data.get("content", ""))
+                text = (
+                    event_data
+                    if isinstance(event_data, str)
+                    else event_data.get("text", event_data.get("content", ""))
+                )
                 full_output += text
                 yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
             elif event_type == "tool_call":
-                all_tool_calls.append(event_data if isinstance(event_data, dict) else {})
+                all_tool_calls.append(
+                    event_data if isinstance(event_data, dict) else {}
+                )
                 yield f"event: tool_call\ndata: {json.dumps(event_data, default=str)}\n\n"
                 # Update live state with current tool
                 try:
-                    tool_name = event_data.get("name", "") if isinstance(event_data, dict) else ""
-                    await publish_state(str(execution_id), tenant_id, str(agent_id), agent_name, "running", tool_name)
+                    tool_name = (
+                        event_data.get("name", "")
+                        if isinstance(event_data, dict)
+                        else ""
+                    )
+                    await publish_state(
+                        str(execution_id),
+                        tenant_id,
+                        str(agent_id),
+                        agent_name,
+                        "running",
+                        tool_name,
+                    )
                 except Exception:
                     pass
             elif event_type == "tool_result":
@@ -1939,7 +2186,11 @@ async def _stream_execution(
                 final_data = event_data if isinstance(event_data, dict) else {}
                 # Calculate confidence score
                 try:
-                    from engine.confidence import ConfidenceFactors, calculate_confidence
+                    from engine.confidence import (
+                        ConfidenceFactors,
+                        calculate_confidence,
+                    )
+
                     failed_tools = sum(1 for tc in all_tool_calls if tc.get("is_error"))
                     factors = ConfidenceFactors(
                         total_tool_calls=len(all_tool_calls),
@@ -1953,7 +2204,11 @@ async def _stream_execution(
                     confidence = None
                 yield f"event: done\ndata: {json.dumps(final_data)}\n\n"
             elif event_type == "error":
-                err_msg = event_data.get("message", str(event_data)) if isinstance(event_data, dict) else str(event_data)
+                err_msg = (
+                    event_data.get("message", str(event_data))
+                    if isinstance(event_data, dict)
+                    else str(event_data)
+                )
                 yield f"event: error\ndata: {json.dumps({'message': err_msg})}\n\n"
 
         # Cleanup MCP clients if embedded mode
@@ -1963,15 +2218,15 @@ async def _stream_execution(
             except Exception:
                 pass
 
-        result = await db.execute(
-            select(Execution).where(Execution.id == execution_id)
-        )
+        result = await db.execute(select(Execution).where(Execution.id == execution_id))
         execution = result.scalar_one_or_none()
         if execution:
             # Persist any moderation events captured during streaming.
             try:
                 if _mod_ctx is not None and _mod_ctx.gate is not None:
-                    await _mod_persist(db, execution.tenant_id, execution.user_id, _mod_ctx)
+                    await _mod_persist(
+                        db, execution.tenant_id, execution.user_id, _mod_ctx
+                    )
             except Exception:
                 pass
 
@@ -1984,9 +2239,12 @@ async def _stream_execution(
             )
             if _mod_blocked:
                 from app.core.failure_codes import emit_outcome_metric
+
                 execution.status = ExecutionStatus.FAILED
                 execution.failure_code = "MODERATION_BLOCKED"
-                execution.error_message = (full_output or "Moderation policy blocked the request")[:2000]
+                execution.error_message = (
+                    full_output or "Moderation policy blocked the request"
+                )[:2000]
                 execution.output_message = full_output
                 execution.input_tokens = final_data.get("input_tokens") or 0
                 execution.output_tokens = final_data.get("output_tokens") or 0
@@ -2024,6 +2282,7 @@ async def _stream_execution(
                 }
 
             from app.core.usage import track_execution, update_user_usage
+
             await track_execution(
                 db,
                 tenant_id=execution.tenant_id,
@@ -2039,7 +2298,13 @@ async def _stream_execution(
             )
             _exec_user = user_result.scalar_one_or_none()
             if _exec_user:
-                await update_user_usage(db, _exec_user, final_data.get("input_tokens", 0) or 0, final_data.get("output_tokens", 0) or 0, float(final_data.get("cost", 0) or 0))
+                await update_user_usage(
+                    db,
+                    _exec_user,
+                    final_data.get("input_tokens", 0) or 0,
+                    final_data.get("output_tokens", 0) or 0,
+                    float(final_data.get("cost", 0) or 0),
+                )
             await db.commit()
 
             # Record drift detection data (gated by env + tenant + per-agent toggle)
@@ -2048,6 +2313,7 @@ async def _stream_execution(
                 _agent_for_drift = _agent_q.scalar_one_or_none()
                 if _agent_for_drift and await _drift_enabled(_agent_for_drift):
                     from engine.drift_detection import DriftDetector
+
                     detector = DriftDetector(redis_url=str(settings.redis_url))
                     _drift_alerts = await detector.record_execution(
                         agent_id=str(agent_id),
@@ -2057,11 +2323,16 @@ async def _stream_execution(
                         cost=float(final_data.get("cost", 0) or 0),
                         confidence=final_data.get("confidence_score", 1.0) or 1.0,
                         output_length=len(full_output),
-                        tool_failures=sum(1 for tc in all_tool_calls if tc.get("is_error")),
+                        tool_failures=sum(
+                            1 for tc in all_tool_calls if tc.get("is_error")
+                        ),
                         total_tool_calls=len(all_tool_calls),
                     )
                     await _persist_drift_alerts(
-                        db, _drift_alerts, _agent_for_drift, str(execution_id),
+                        db,
+                        _drift_alerts,
+                        _agent_for_drift,
+                        str(execution_id),
                     )
             except Exception:
                 pass  # Graceful degradation
@@ -2073,7 +2344,9 @@ async def _stream_execution(
                 pass
 
             await _emit_execution_event(
-                db, execution, "execution_complete",
+                db,
+                execution,
+                "execution_complete",
                 cost=final_data.get("cost"),
                 duration_ms=final_data.get("duration_ms"),
             )
@@ -2081,9 +2354,7 @@ async def _stream_execution(
     except Exception as e:
         yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
 
-        result = await db.execute(
-            select(Execution).where(Execution.id == execution_id)
-        )
+        result = await db.execute(select(Execution).where(Execution.id == execution_id))
         execution = result.scalar_one_or_none()
         if execution:
             execution.status = ExecutionStatus.FAILED
@@ -2098,7 +2369,10 @@ async def _stream_execution(
                 pass
 
             await _emit_execution_event(
-                db, execution, "execution_failed", error_message=str(e),
+                db,
+                execution,
+                "execution_failed",
+                error_message=str(e),
             )
     finally:
         for client in mcp_clients:
@@ -2150,21 +2424,29 @@ async def _non_stream_execution(
     if mcp_connections:
         from engine.tool_resolver import resolve_tools
         from engine.agent_executor import AgentExecutor
+
         tool_registry, mcp_clients, _sec_ctx = await resolve_tools(
             tool_names, mcp_connections
         )
     else:
         from engine.agent_executor import AgentExecutor, build_tool_registry
-        tool_registry = build_tool_registry(tool_names, kb_ids=kb_ids, **registry_kwargs)
+
+        tool_registry = build_tool_registry(
+            tool_names, kb_ids=kb_ids, **registry_kwargs
+        )
 
     # Load tenant moderation policy for the non-streaming path too.
     from app.core.moderation_glue import build_gate_context, persist_events
+
     _mod_ctx2 = await build_gate_context(
-        db, execution.tenant_id, execution.user_id,
+        db,
+        execution.tenant_id,
+        execution.user_id,
     )
 
     # Resolve asset input_schemas async, matching the streaming path.
     from engine.agent_executor import resolve_asset_schemas as _ras
+
     _tc_nonstream = tool_config or {}
     _asset_schemas_ns = await _ras(_tc_nonstream)
 
@@ -2192,7 +2474,10 @@ async def _non_stream_execution(
     # Publish live execution state
     try:
         from app.core.execution_state import publish_state, complete_state, fail_state
-        await publish_state(str(execution.id), tenant_id, str(execution.agent_id), agent_name, "running")
+
+        await publish_state(
+            str(execution.id), tenant_id, str(execution.agent_id), agent_name, "running"
+        )
     except Exception:
         pass
 
@@ -2203,7 +2488,9 @@ async def _non_stream_execution(
         # — regardless of outcome, we record them for audit.
         try:
             if _mod_ctx2.gate is not None:
-                await persist_events(db, execution.tenant_id, execution.user_id, _mod_ctx2)
+                await persist_events(
+                    db, execution.tenant_id, execution.user_id, _mod_ctx2
+                )
         except Exception:
             pass
 
@@ -2211,7 +2498,10 @@ async def _non_stream_execution(
         confidence = None
         try:
             from engine.confidence import ConfidenceFactors, calculate_confidence
-            failed_tools = sum(1 for tc in (result.tool_calls or []) if tc.get("is_error"))
+
+            failed_tools = sum(
+                1 for tc in (result.tool_calls or []) if tc.get("is_error")
+            )
             factors = ConfidenceFactors(
                 total_tool_calls=len(result.tool_calls or []),
                 failed_tool_calls=failed_tools,
@@ -2226,10 +2516,14 @@ async def _non_stream_execution(
         # failure_code so dashboards + alerts can group it cleanly.
         if getattr(result, "moderation_blocked", False):
             from app.core.failure_codes import emit_outcome_metric
+
             execution.status = ExecutionStatus.FAILED
             execution.failure_code = "MODERATION_BLOCKED"
-            execution.error_message = result.output[:2000] if result.output else \
-                f"Moderation policy blocked at {result.moderation_block_source}"
+            execution.error_message = (
+                result.output[:2000]
+                if result.output
+                else f"Moderation policy blocked at {result.moderation_block_source}"
+            )
             execution.output_message = result.output
             execution.input_tokens = result.input_tokens
             execution.output_tokens = result.output_tokens
@@ -2255,7 +2549,9 @@ async def _non_stream_execution(
         if hasattr(execution, "confidence_score") and confidence is not None:
             execution.confidence_score = confidence
         if hasattr(execution, "execution_trace"):
-            node_traces = [t.to_dict() for t in result.node_traces] if result.node_traces else []
+            node_traces = (
+                [t.to_dict() for t in result.node_traces] if result.node_traces else []
+            )
             execution.execution_trace = {
                 "steps": node_traces,
                 "tool_calls": result.tool_calls,
@@ -2263,6 +2559,7 @@ async def _non_stream_execution(
             }
 
         from app.core.usage import track_execution, update_user_usage
+
         await track_execution(
             db,
             tenant_id=execution.tenant_id,
@@ -2278,16 +2575,25 @@ async def _non_stream_execution(
         )
         _exec_user = user_result_q.scalar_one_or_none()
         if _exec_user:
-            await update_user_usage(db, _exec_user, result.input_tokens or 0, result.output_tokens or 0, float(result.cost or 0))
+            await update_user_usage(
+                db,
+                _exec_user,
+                result.input_tokens or 0,
+                result.output_tokens or 0,
+                float(result.cost or 0),
+            )
         await db.commit()
 
         # Drift detection (gated by env + per-agent toggle)
         try:
-            _agent_q = await db.execute(select(Agent).where(Agent.id == execution.agent_id))
+            _agent_q = await db.execute(
+                select(Agent).where(Agent.id == execution.agent_id)
+            )
             _agent_for_drift = _agent_q.scalar_one_or_none()
             if not _agent_for_drift or not await _drift_enabled(_agent_for_drift):
                 raise _StopDrift()
             from engine.drift_detection import DriftDetector
+
             detector = DriftDetector(redis_url=str(settings.redis_url))
             _drift_alerts = await detector.record_execution(
                 agent_id=str(execution.agent_id),
@@ -2297,10 +2603,14 @@ async def _non_stream_execution(
                 cost=float(result.cost or 0),
                 confidence=confidence or 1.0,
                 output_length=len(result.output or ""),
-                tool_failures=sum(1 for tc in (result.tool_calls or []) if tc.get("is_error")),
+                tool_failures=sum(
+                    1 for tc in (result.tool_calls or []) if tc.get("is_error")
+                ),
                 total_tool_calls=len(result.tool_calls or []),
             )
-            await _persist_drift_alerts(db, _drift_alerts, _agent_for_drift, str(execution.id))
+            await _persist_drift_alerts(
+                db, _drift_alerts, _agent_for_drift, str(execution.id)
+            )
         except Exception:
             pass
 
@@ -2311,31 +2621,38 @@ async def _non_stream_execution(
             pass
 
         await _emit_execution_event(
-            db, execution, "execution_complete",
+            db,
+            execution,
+            "execution_complete",
             cost=result.cost,
             duration_ms=result.duration_ms,
         )
 
-        node_traces_out = [t.to_dict() for t in result.node_traces] if result.node_traces else []
+        node_traces_out = (
+            [t.to_dict() for t in result.node_traces] if result.node_traces else []
+        )
 
-        return success({
-            "execution_id": str(execution.id),
-            "output": result.output,
-            "model": result.model,
-            "input_tokens": result.input_tokens,
-            "output_tokens": result.output_tokens,
-            "cost": round(result.cost, 6),
-            "duration_ms": result.duration_ms,
-            "tool_calls": result.tool_calls,
-            "node_traces": node_traces_out,
-            "confidence_score": confidence,
-        })
+        return success(
+            {
+                "execution_id": str(execution.id),
+                "output": result.output,
+                "model": result.model,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "cost": round(result.cost, 6),
+                "duration_ms": result.duration_ms,
+                "tool_calls": result.tool_calls,
+                "node_traces": node_traces_out,
+                "confidence_score": confidence,
+            }
+        )
 
     except Exception as e:
         execution.status = ExecutionStatus.FAILED
         execution.error_message = str(e)[:2000]
         # Classify exception → stable failure_code for dashboards/alerts.
         from app.core.failure_codes import classify_exception, emit_outcome_metric
+
         execution.failure_code = classify_exception(e)
         execution.completed_at = datetime.now(timezone.utc)
         emit_outcome_metric(outcome="FAILED", failure_code=execution.failure_code)
@@ -2347,7 +2664,10 @@ async def _non_stream_execution(
             pass
 
         await _emit_execution_event(
-            db, execution, "execution_failed", error_message=str(e),
+            db,
+            execution,
+            "execution_failed",
+            error_message=str(e),
         )
 
         return error(f"Execution failed: {str(e)}", 500)
@@ -2417,9 +2737,17 @@ async def _emit_execution_event(
     # Deliver webhooks for execution events
     try:
         from app.core.webhooks import deliver_execution_webhook
-        webhook_event = "execution.completed" if event_type == "execution_complete" else "execution.failed"
+
+        webhook_event = (
+            "execution.completed"
+            if event_type == "execution_complete"
+            else "execution.failed"
+        )
         await deliver_execution_webhook(
-            db, str(execution.tenant_id), webhook_event, event_data,
+            db,
+            str(execution.tenant_id),
+            webhook_event,
+            event_data,
         )
     except Exception:
         pass

@@ -5,7 +5,6 @@ from httpx import AsyncClient
 
 from app.core.sanitize import is_safe_url, sanitize_input, strip_html
 
-
 # ── Sanitization unit tests ──────────────────────────────────
 
 
@@ -22,7 +21,7 @@ def test_strip_html_unescapes_entities():
 
 
 def test_sanitize_input_strips_script():
-    result = sanitize_input('<script>document.cookie</script>clean text')
+    result = sanitize_input("<script>document.cookie</script>clean text")
     assert "<script>" not in result
     assert "clean text" in result
 
@@ -111,7 +110,10 @@ async def test_body_size_limit_rejects_oversized(client: AsyncClient):
     resp = await client.post(
         "/api/auth/login",
         content=b"x" * (11 * 1024 * 1024),
-        headers={"Content-Length": str(11 * 1024 * 1024), "Content-Type": "application/json"},
+        headers={
+            "Content-Length": str(11 * 1024 * 1024),
+            "Content-Type": "application/json",
+        },
     )
     assert resp.status_code == 413
     body = resp.json()
@@ -132,11 +134,14 @@ async def test_body_size_allows_normal_request(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_create_agent_sanitizes_name(client: AsyncClient):
-    reg_resp = await client.post("/api/auth/register", json={
-        "email": "xss-agent@example.com",
-        "password": "securepass123",
-        "full_name": "XSS Tester",
-    })
+    reg_resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": "xss-agent@example.com",
+            "password": "securepass123",
+            "full_name": "XSS Tester",
+        },
+    )
     token = reg_resp.json()["data"]["access_token"]
 
     resp = await client.post(
@@ -156,11 +161,14 @@ async def test_create_agent_sanitizes_name(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_create_agent_rejects_unsafe_icon_url(client: AsyncClient):
-    reg_resp = await client.post("/api/auth/register", json={
-        "email": "xss-icon@example.com",
-        "password": "securepass123",
-        "full_name": "Icon Tester",
-    })
+    reg_resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": "xss-icon@example.com",
+            "password": "securepass123",
+            "full_name": "Icon Tester",
+        },
+    )
     token = reg_resp.json()["data"]["access_token"]
 
     resp = await client.post(

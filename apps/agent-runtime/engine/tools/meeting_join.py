@@ -1,10 +1,10 @@
 """Meeting join tool."""
+
 from __future__ import annotations
 
 import json
 import logging
 import os
-import time
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
@@ -36,14 +36,22 @@ class MeetingJoinTool(BaseTool):
                 "default": "livekit",
             },
             "room": {"type": "string", "description": "Provider room/meeting id."},
-            "url": {"type": "string", "description": "Optional override for provider URL."},
-            "token": {"type": "string", "description": "Optional pre-minted provider token."},
+            "url": {
+                "type": "string",
+                "description": "Optional override for provider URL.",
+            },
+            "token": {
+                "type": "string",
+                "description": "Optional pre-minted provider token.",
+            },
             "display_name": {
-                "type": "string", "default": "Abenix Assistant",
+                "type": "string",
+                "default": "Abenix Assistant",
                 "description": "Name shown in the participant list.",
             },
             "announce_consent": {
-                "type": "boolean", "default": True,
+                "type": "boolean",
+                "default": True,
                 "description": (
                     "If true, speak a short consent disclosure immediately "
                     "after joining. Recommended for any human-facing meeting."
@@ -83,7 +91,9 @@ class MeetingJoinTool(BaseTool):
             )
 
         # Read pre-authorized scope from Redis (written by /api/meetings/{id}/authorize)
-        scope_allow, scope_defer, persona_scopes, authorized, auth = await _read_meeting_scope(meeting_id)
+        scope_allow, scope_defer, persona_scopes, authorized, auth = (
+            await _read_meeting_scope(meeting_id)
+        )
         if not authorized:
             return ToolResult(
                 content=(
@@ -95,9 +105,17 @@ class MeetingJoinTool(BaseTool):
                 metadata={"authorized": False},
             )
 
-        provider = (auth.get("provider") or arguments.get("provider") or "livekit").strip().lower()
+        provider = (
+            (auth.get("provider") or arguments.get("provider") or "livekit")
+            .strip()
+            .lower()
+        )
         room = (auth.get("room") or arguments.get("room") or "").strip()
-        display_name = (auth.get("display_name") or arguments.get("display_name") or "Abenix Assistant").strip()
+        display_name = (
+            auth.get("display_name")
+            or arguments.get("display_name")
+            or "Abenix Assistant"
+        ).strip()
         if not room:
             return ToolResult(
                 content=(
@@ -147,7 +165,8 @@ class MeetingJoinTool(BaseTool):
         sessmod.register(sess)
         await sessmod.publish_session(sess)
         await sessmod.append_decision(
-            meeting_id, "join",
+            meeting_id,
+            "join",
             f"Bot joined as '{display_name}' via {provider}",
             detail={"session_id": result.session_id, "scope_allow": scope_allow},
         )
@@ -172,7 +191,9 @@ class MeetingJoinTool(BaseTool):
         )
 
 
-async def _read_meeting_scope(meeting_id: str) -> tuple[list[str], list[str], list[str], bool, dict]:
+async def _read_meeting_scope(
+    meeting_id: str,
+) -> tuple[list[str], list[str], list[str], bool, dict]:
     """Load pre-authorized scope + room/provider from Redis. Written by"""
     empty = ([], [], [], False, {})
     try:
@@ -192,7 +213,9 @@ async def _read_meeting_scope(meeting_id: str) -> tuple[list[str], list[str], li
         return empty
     allow = [s.strip() for s in (raw.get("allow") or "").split("|") if s.strip()]
     defer = [s.strip() for s in (raw.get("defer") or "").split("|") if s.strip()]
-    persona = [s.strip() for s in (raw.get("persona_scopes") or "").split("|") if s.strip()]
+    persona = [
+        s.strip() for s in (raw.get("persona_scopes") or "").split("|") if s.strip()
+    ]
     auth = {
         "room": (raw.get("room") or "").strip(),
         "provider": (raw.get("provider") or "").strip(),

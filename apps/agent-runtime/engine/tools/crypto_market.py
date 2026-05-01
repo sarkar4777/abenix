@@ -1,4 +1,5 @@
 """Crypto / digital-asset market data via CoinGecko (free public tier)."""
+
 from __future__ import annotations
 
 import os
@@ -40,10 +41,16 @@ class CryptoMarketTool(BaseTool):
             },
             "vs_currency": {"type": "string", "default": "usd"},
             "days": {
-                "type": "integer", "default": 7, "minimum": 1, "maximum": 365,
+                "type": "integer",
+                "default": 7,
+                "minimum": 1,
+                "maximum": 365,
                 "description": "Lookback for ohlc operation.",
             },
-            "query": {"type": "string", "description": "Free-text search for operation=search"},
+            "query": {
+                "type": "string",
+                "description": "Free-text search for operation=search",
+            },
         },
     }
 
@@ -65,12 +72,16 @@ class CryptoMarketTool(BaseTool):
                             f"{item.get('name')} ({item.get('symbol', '').upper()}) — "
                             f"id: {item.get('id')}"
                         )
-                    return ToolResult(content="\n".join(lines), metadata={"trending": coins})
+                    return ToolResult(
+                        content="\n".join(lines), metadata={"trending": coins}
+                    )
 
                 if op == "search":
                     q = (arguments.get("query") or "").strip()
                     if not q:
-                        return ToolResult(content="search requires 'query'", is_error=True)
+                        return ToolResult(
+                            content="search requires 'query'", is_error=True
+                        )
                     r = await client.get(f"{_BASE}/search", params={"query": q})
                     r.raise_for_status()
                     found = r.json().get("coins", [])[:10]
@@ -78,13 +89,19 @@ class CryptoMarketTool(BaseTool):
                         return ToolResult(content=f"No coin matched '{q}'.")
                     lines = [f"Search '{q}':"]
                     for c in found:
-                        lines.append(f"  {c.get('name')} ({c.get('symbol', '').upper()}) — id: {c.get('id')}")
-                    return ToolResult(content="\n".join(lines), metadata={"results": found})
+                        lines.append(
+                            f"  {c.get('name')} ({c.get('symbol', '').upper()}) — id: {c.get('id')}"
+                        )
+                    return ToolResult(
+                        content="\n".join(lines), metadata={"results": found}
+                    )
 
                 # price + ohlc both need coin_id
                 coin = (arguments.get("coin_id") or "").strip().lower()
                 if not coin:
-                    return ToolResult(content="coin_id is required for this operation", is_error=True)
+                    return ToolResult(
+                        content="coin_id is required for this operation", is_error=True
+                    )
                 vs = arguments.get("vs_currency", "usd").lower()
 
                 if op == "price":
@@ -95,7 +112,9 @@ class CryptoMarketTool(BaseTool):
                     r.raise_for_status()
                     rows = r.json() or []
                     if not rows:
-                        return ToolResult(content=f"No market data for {coin}", is_error=True)
+                        return ToolResult(
+                            content=f"No market data for {coin}", is_error=True
+                        )
                     m = rows[0]
                     return ToolResult(
                         content=(
@@ -119,23 +138,37 @@ class CryptoMarketTool(BaseTool):
                     r.raise_for_status()
                     points = r.json() or []
                     if not points:
-                        return ToolResult(content=f"No OHLC for {coin}/{vs} over {days}d", is_error=True)
+                        return ToolResult(
+                            content=f"No OHLC for {coin}/{vs} over {days}d",
+                            is_error=True,
+                        )
                     lines = [
                         f"OHLC — {coin} / {vs.upper()} — last {days}d ({len(points)} candles)",
                         "  ts                  open       high       low        close",
                     ]
                     import datetime as _dt
-                    for ts, o, h, l, c in points[-12:]:
+
+                    for ts, o, h, lo, c in points[-12:]:
                         d = _dt.datetime.fromtimestamp(ts / 1000, tz=_dt.timezone.utc)
-                        lines.append(f"  {d:%Y-%m-%d %H:%M}  {o:>9.4f}  {h:>9.4f}  {l:>9.4f}  {c:>9.4f}")
+                        lines.append(
+                            f"  {d:%Y-%m-%d %H:%M}  {o:>9.4f}  {h:>9.4f}  {lo:>9.4f}  {c:>9.4f}"
+                        )
                     return ToolResult(
                         content="\n".join(lines),
-                        metadata={"coin": coin, "vs": vs, "days": days, "candles": points},
+                        metadata={
+                            "coin": coin,
+                            "vs": vs,
+                            "days": days,
+                            "candles": points,
+                        },
                     )
 
             return ToolResult(content=f"Unknown operation: {op}", is_error=True)
         except httpx.HTTPStatusError as e:
             body = e.response.text[:200]
-            return ToolResult(content=f"CoinGecko HTTP {e.response.status_code}: {body}", is_error=True)
+            return ToolResult(
+                content=f"CoinGecko HTTP {e.response.status_code}: {body}",
+                is_error=True,
+            )
         except Exception as e:
             return ToolResult(content=f"CoinGecko error: {e}", is_error=True)

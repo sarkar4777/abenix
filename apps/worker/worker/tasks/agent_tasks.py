@@ -23,7 +23,9 @@ _root = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(_root / "apps" / "agent-runtime"))
 sys.path.insert(0, str(_root / "packages" / "db"))
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix")
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix"
+)
 
 
 def _get_sync_db_url() -> str:
@@ -102,7 +104,10 @@ def _update_execution(
                     input_tokens,
                     output_tokens,
                     cost,
-                    anthropic_cost, openai_cost, google_cost, other_cost,
+                    anthropic_cost,
+                    openai_cost,
+                    google_cost,
+                    other_cost,
                     duration_ms,
                     json.dumps(tool_calls) if tool_calls else None,
                     error_message,
@@ -128,9 +133,7 @@ async def _run_agent_async(
         raise ValueError(f"Agent {agent_id} not found")
 
     if agent["status"] != "ACTIVE":
-        raise ValueError(
-            f"Agent {agent_id} is not active (status={agent['status']})"
-        )
+        raise ValueError(f"Agent {agent_id} is not active (status={agent['status']})")
 
     model_cfg = agent["model_config"]
     model = model_cfg.get("model", "claude-sonnet-4-5-20250929")

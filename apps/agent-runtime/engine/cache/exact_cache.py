@@ -21,7 +21,12 @@ def _cache_key(
     temperature: float,
 ) -> str:
     payload = json.dumps(
-        {"model": model, "messages": messages, "tools": tools, "temperature": temperature},
+        {
+            "model": model,
+            "messages": messages,
+            "tools": tools,
+            "temperature": temperature,
+        },
         sort_keys=True,
         default=str,
     )

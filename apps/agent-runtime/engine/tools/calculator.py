@@ -67,7 +67,7 @@ def _safe_eval(node: ast.AST) -> Any:
             if callable(fn):
                 args = [_safe_eval(a) for a in node.args]
                 return fn(*args)
-        raise ValueError(f"Unsupported function call")
+        raise ValueError("Unsupported function call")
     raise ValueError(f"Unsupported expression: {type(node).__name__}")
 
 

@@ -74,9 +74,11 @@ class AgentStepTool(BaseTool):
         # Coerce non-string inputs (from upstream node outputs) to JSON strings
         if not isinstance(input_message, str):
             import json as _j
+
             input_message = _j.dumps(input_message, default=str, indent=2)
         if not isinstance(system_prompt, str):
             import json as _j
+
             system_prompt = _j.dumps(system_prompt, default=str, indent=2)
 
         if not input_message.strip():
@@ -90,13 +92,19 @@ class AgentStepTool(BaseTool):
             from engine.sandbox import ExecutionSandbox, SandboxPolicy
 
             # Build a sub-agent with its own sandbox (reduced limits to prevent runaway)
-            sub_sandbox = ExecutionSandbox(SandboxPolicy(
-                timeout_seconds=120,
-                max_tool_calls=20,
-                max_output_chars=50_000,
-            ))
+            sub_sandbox = ExecutionSandbox(
+                SandboxPolicy(
+                    timeout_seconds=120,
+                    max_tool_calls=20,
+                    max_output_chars=50_000,
+                )
+            )
 
-            tool_registry = build_tool_registry(tool_names) if tool_names else build_tool_registry([])
+            tool_registry = (
+                build_tool_registry(tool_names)
+                if tool_names
+                else build_tool_registry([])
+            )
             router = LLMRouter()
 
             executor = AgentExecutor(
@@ -129,7 +137,9 @@ class AgentStepTool(BaseTool):
                     "input_tokens": result.input_tokens,
                     "output_tokens": result.output_tokens,
                     "cost": result.cost,
-                    "tool_calls_count": len(result.tool_calls) if result.tool_calls else 0,
+                    "tool_calls_count": (
+                        len(result.tool_calls) if result.tool_calls else 0
+                    ),
                 },
             )
 

@@ -1,4 +1,5 @@
 """Agent Favorites — star agents and organize into collections."""
+
 from __future__ import annotations
 
 import uuid
@@ -13,6 +14,7 @@ from app.core.responses import error, success
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.agent import Agent
@@ -48,7 +50,10 @@ async def add_favorite(
     )
     db.add(fav)
     await db.commit()
-    return success({"id": str(fav.id), "agent_id": str(agent_id), "collection": fav.collection}, status_code=201)
+    return success(
+        {"id": str(fav.id), "agent_id": str(agent_id), "collection": fav.collection},
+        status_code=201,
+    )
 
 
 @router.delete("/{agent_id}/favorite")
@@ -83,19 +88,21 @@ async def list_favorites(
         .order_by(AgentFavorite.created_at.desc())
     )
     rows = result.all()
-    return success([
-        {
-            "favorite_id": str(fav.id),
-            "agent_id": str(agent.id),
-            "agent_name": agent.name,
-            "agent_slug": agent.slug,
-            "description": agent.description,
-            "category": agent.category,
-            "collection": fav.collection,
-            "created_at": fav.created_at.isoformat() if fav.created_at else None,
-        }
-        for fav, agent in rows
-    ])
+    return success(
+        [
+            {
+                "favorite_id": str(fav.id),
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "agent_slug": agent.slug,
+                "description": agent.description,
+                "category": agent.category,
+                "collection": fav.collection,
+                "created_at": fav.created_at.isoformat() if fav.created_at else None,
+            }
+            for fav, agent in rows
+        ]
+    )
 
 
 @router.put("/{agent_id}/favorite")

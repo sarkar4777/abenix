@@ -1,4 +1,5 @@
 """Code Assets API — upload a zip / clone a git repo, analyze it,"""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +10,6 @@ import shutil
 import tempfile
 import uuid
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +37,11 @@ def _serialize(a: CodeAsset) -> dict[str, Any]:
         "id": str(a.id),
         "name": a.name,
         "description": a.description,
-        "source_type": a.source_type.value if hasattr(a.source_type, "value") else str(a.source_type),
+        "source_type": (
+            a.source_type.value
+            if hasattr(a.source_type, "value")
+            else str(a.source_type)
+        ),
         "source_git_url": a.source_git_url,
         "source_ref": a.source_ref,
         "storage_uri": a.storage_uri,
@@ -76,9 +80,12 @@ def _looks_like_tgz(path: Path) -> bool:
 def _tgz_to_zip(tgz_path: Path) -> Path:
     """Repack a tar.gz as a zip so the rest of the pipeline is format-"""
     import tarfile as _tf
+
     zip_path = tgz_path.with_suffix(".zip")
     with _tf.open(tgz_path, "r:gz") as tar, zipfile.ZipFile(
-        zip_path, "w", zipfile.ZIP_DEFLATED,
+        zip_path,
+        "w",
+        zipfile.ZIP_DEFLATED,
     ) as zf:
         for member in tar.getmembers():
             if not member.isfile():
@@ -93,10 +100,12 @@ def _tgz_to_zip(tgz_path: Path) -> Path:
 
 
 async def _extract_and_analyze(
-    zip_path: Path, asset_id: str,
+    zip_path: Path,
+    asset_id: str,
 ) -> tuple[dict[str, Any], int]:
     """Extract the archive to a tmp dir, analyze, return (analysis_dict, size)."""
     import sys
+
     runtime_path = Path("/app/apps/agent-runtime")
     if runtime_path.exists() and str(runtime_path) not in sys.path:
         sys.path.insert(0, str(runtime_path))
@@ -201,7 +210,8 @@ async def _clone_git(url: str, ref: str | None) -> Path:
         argv += [url, str(tmp / "repo")]
         proc = await asyncio.create_subprocess_exec(
             *argv,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         try:
             await asyncio.wait_for(proc.wait(), timeout=60)
@@ -339,11 +349,17 @@ async def create_asset(
         example_input_for_probe = (asset.input_schema or {}).get("x-example")
     if example_input_for_probe:
         import asyncio as _asyncio
+
         role_val = user.role.value if hasattr(user.role, "value") else str(user.role)
-        _asyncio.create_task(_smoke_test_probe_bg(
-            str(asset.id), str(user.tenant_id), str(user.id), role_val,
-            example_input_for_probe,
-        ))
+        _asyncio.create_task(
+            _smoke_test_probe_bg(
+                str(asset.id),
+                str(user.tenant_id),
+                str(user.id),
+                role_val,
+                example_input_for_probe,
+            )
+        )
 
     return success(_serialize(asset), status_code=201)
 
@@ -356,15 +372,22 @@ async def list_assets(
 ) -> JSONResponse:
     """List code assets visible to the caller."""
     from app.core.permissions import (
-        accessible_resource_ids, apply_resource_scope, is_admin,
+        accessible_resource_ids,
+        apply_resource_scope,
+        is_admin,
     )
+
     if scope == "tenant" and not is_admin(user):
         return error("scope=tenant requires admin role", 403)
 
     accessible = await accessible_resource_ids(db, user, kind="code_asset")
     q = select(CodeAsset).where(CodeAsset.status != CodeAssetStatus.DELETED)
     q = apply_resource_scope(
-        q, CodeAsset, user, kind="code_asset", scope=scope,
+        q,
+        CodeAsset,
+        user,
+        kind="code_asset",
+        scope=scope,
         accessible_ids=accessible,
     )
     q = q.order_by(CodeAsset.created_at.desc())
@@ -389,8 +412,10 @@ async def get_asset(
         return error("not found", 404)
     # Per-user authorization — owner OR admin OR shared with this user.
     from app.core.permissions import (
-        accessible_resource_ids, assert_can_access,
+        accessible_resource_ids,
+        assert_can_access,
     )
+
     accessible = await accessible_resource_ids(db, user, kind="code_asset")
     if not assert_can_access(a, user, accessible_ids=accessible):
         return error("not found", 404)
@@ -414,8 +439,11 @@ async def update_asset(
     if not a:
         return error("not found", 404)
     for field in (
-        "name", "description",
-        "suggested_image", "suggested_build_command", "suggested_run_command",
+        "name",
+        "description",
+        "suggested_image",
+        "suggested_build_command",
+        "suggested_run_command",
         "detected_entrypoint",
     ):
         if field in body:
@@ -438,12 +466,14 @@ async def _run_asset_sample(
 ) -> tuple[bool, dict | str]:
     """Run a code asset with a sample input and return (ok, payload)."""
     import sys
+
     runtime_path = Path("/app/apps/agent-runtime")
     if runtime_path.exists() and str(runtime_path) not in sys.path:
         sys.path.insert(0, str(runtime_path))
     from engine.tools.code_asset import CodeAssetTool  # noqa: E402
 
     from app.core.security import create_access_token
+
     fetch_token = create_access_token(uuid.UUID(user_id), uuid.UUID(tenant_id), role)
     os.environ["CODE_ASSET_DOWNLOAD_TOKEN"] = f"Bearer {fetch_token}"
 
@@ -452,13 +482,15 @@ async def _run_asset_sample(
         redis_url=os.environ.get("REDIS_URL", ""),
         db_url=os.environ.get("DATABASE_URL", ""),
     )
-    res = await tool.execute({
-        "code_asset_id": asset_id,
-        "input": sample_input or {},
-        "timeout_seconds": timeout_seconds,
-        "memory_mb": 1024,
-        "allow_network": True,
-    })
+    res = await tool.execute(
+        {
+            "code_asset_id": asset_id,
+            "input": sample_input or {},
+            "timeout_seconds": timeout_seconds,
+            "memory_mb": 1024,
+            "allow_network": True,
+        }
+    )
     if res.is_error:
         return False, res.content
     try:
@@ -477,13 +509,20 @@ async def _smoke_test_probe_bg(
     """Fire-and-forget: run the asset once with example_input, infer"""
     try:
         ok, payload = await _run_asset_sample(
-            asset_id, tenant_id, user_id, role, example_input, timeout_seconds=180,
+            asset_id,
+            tenant_id,
+            user_id,
+            role,
+            example_input,
+            timeout_seconds=180,
         )
     except Exception as e:
         logger.info("smoke-test probe raised for %s: %s", asset_id, e)
         return
     if not ok:
-        logger.info("smoke-test probe non-zero exit for %s: %s", asset_id, str(payload)[:200])
+        logger.info(
+            "smoke-test probe non-zero exit for %s: %s", asset_id, str(payload)[:200]
+        )
         return
 
     # _run_asset_sample wraps parsed stdout as {"result": <parsed>,
@@ -498,6 +537,7 @@ async def _smoke_test_probe_bg(
     # Infer the JSON Schema from the observed output shape.
     try:
         import sys
+
         runtime_path = Path("/app/apps/agent-runtime")
         if runtime_path.exists() and str(runtime_path) not in sys.path:
             sys.path.insert(0, str(runtime_path))
@@ -512,6 +552,7 @@ async def _smoke_test_probe_bg(
     # upload request is long-closed by now.
     try:
         from app.core.deps import async_session
+
         async with async_session() as db:
             a = await db.get(CodeAsset, uuid.UUID(asset_id))
             if a is None or a.output_schema:
@@ -519,12 +560,14 @@ async def _smoke_test_probe_bg(
             a.output_schema = inferred
             # Leave a note so admins can see where it came from.
             notes = list(a.analysis_notes or [])
-            notes.append({
-                "level": "info",
-                "message": "output_schema populated by smoke-test probe.",
-                "suggestion": "The asset was run once with the example_input; "
-                              "the stdout shape became the output_schema.",
-            })
+            notes.append(
+                {
+                    "level": "info",
+                    "message": "output_schema populated by smoke-test probe.",
+                    "suggestion": "The asset was run once with the example_input; "
+                    "the stdout shape became the output_schema.",
+                }
+            )
             a.analysis_notes = notes
             await db.commit()
             logger.info("smoke-test probe populated output_schema for %s", asset_id)
@@ -554,7 +597,10 @@ async def test_asset(
 
     role_val = user.role.value if hasattr(user.role, "value") else str(user.role)
     ok, payload = await _run_asset_sample(
-        str(asset_id), str(user.tenant_id), str(user.id), role_val,
+        str(asset_id),
+        str(user.tenant_id),
+        str(user.id),
+        role_val,
         body.get("input") or {},
         timeout_seconds=int(body.get("timeout_seconds", 120)),
     )
@@ -565,6 +611,7 @@ async def test_asset(
     a.last_test_output = payload
     a.last_test_ok = True
     from datetime import datetime as _dt, timezone as _tz
+
     a.last_test_at = _dt.now(_tz.utc)
     await db.commit()
     return success({"execution": payload, "metadata": {}})
@@ -617,8 +664,11 @@ async def delete_asset(
     # the resource boundary so a collaborator can't yank work out from
     # under the owner.
     from app.core.permissions import assert_can_delete
+
     if not assert_can_delete(a, user):
-        return error("Only the asset owner or a tenant admin can delete this asset", 403)
+        return error(
+            "Only the asset owner or a tenant admin can delete this asset", 403
+        )
     a.status = CodeAssetStatus.DELETED
     await db.commit()
     return success({"deleted": True})

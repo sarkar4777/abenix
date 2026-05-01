@@ -18,8 +18,12 @@ class YahooFinanceTool(BaseTool):
             "action": {
                 "type": "string",
                 "enum": [
-                    "stock_price", "company_info", "earnings",
-                    "dividends", "economic_indicator", "market_index",
+                    "stock_price",
+                    "company_info",
+                    "earnings",
+                    "dividends",
+                    "economic_indicator",
+                    "market_index",
                 ],
             },
             "symbol": {
@@ -60,7 +64,7 @@ class YahooFinanceTool(BaseTool):
         except ImportError:
             return ToolResult(
                 content="Error: yfinance package is not installed. "
-                        "Install with: pip install yfinance",
+                "Install with: pip install yfinance",
                 is_error=True,
             )
 
@@ -175,9 +179,9 @@ class YahooFinanceTool(BaseTool):
     @staticmethod
     def _earnings(ticker: Any, symbol: str) -> ToolResult:
         try:
-            earnings = ticker.earnings_history
+            pass
         except Exception:
-            earnings = None
+            pass
 
         lines = [f"Earnings: {symbol}", ""]
 
@@ -230,7 +234,9 @@ class YahooFinanceTool(BaseTool):
 
         lines = [f"Dividends: {symbol}", f"Period: {period}", ""]
         for date, amount in recent.items():
-            date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)
+            date_str = (
+                date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)
+            )
             lines.append(f"  {date_str}: ${float(amount):.4f}")
 
         total = float(recent.sum())
@@ -260,7 +266,7 @@ class YahooFinanceTool(BaseTool):
         except ImportError:
             return ToolResult(
                 content="Error: fredapi package is not installed. "
-                        "Install with: pip install fredapi",
+                "Install with: pip install fredapi",
                 is_error=True,
             )
 
@@ -275,18 +281,29 @@ class YahooFinanceTool(BaseTool):
 
             # Apply period filter
             period_map = {
-                "1mo": 30, "3mo": 90, "6mo": 180,
-                "1y": 365, "2y": 730, "5y": 1825,
+                "1mo": 30,
+                "3mo": 90,
+                "6mo": 180,
+                "1y": 365,
+                "2y": 730,
+                "5y": 1825,
             }
             import datetime
+
             if period in period_map:
-                cutoff = datetime.datetime.now() - datetime.timedelta(days=period_map[period])
+                cutoff = datetime.datetime.now() - datetime.timedelta(
+                    days=period_map[period]
+                )
                 series = series[series.index >= cutoff]
 
             recent = series.tail(12)
             lines = [f"FRED Economic Indicator: {series_id}", ""]
             for date, value in recent.items():
-                date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)
+                date_str = (
+                    date.strftime("%Y-%m-%d")
+                    if hasattr(date, "strftime")
+                    else str(date)
+                )
                 lines.append(f"  {date_str}: {float(value):.2f}")
 
             latest = float(series.iloc[-1])

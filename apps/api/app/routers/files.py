@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import base64
 import mimetypes
 import os
 import sys
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -15,16 +13,26 @@ from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
 
-ALLOWED_UPLOAD_TYPES = frozenset({
-    "application/pdf", "text/plain", "text/csv", "text/markdown",
-    "application/json", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "image/png", "image/jpeg", "image/gif", "image/webp",
-    "application/zip", "application/gzip",
-})
+ALLOWED_UPLOAD_TYPES = frozenset(
+    {
+        "application/pdf",
+        "text/plain",
+        "text/csv",
+        "text/markdown",
+        "application/json",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "application/zip",
+        "application/gzip",
+    }
+)
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user
 from app.core.responses import error, success
 from models.user import User
 
@@ -39,6 +47,7 @@ async def download_file(
     """Download a file by its storage URI."""
     try:
         from engine.storage import get_storage
+
         storage = get_storage()
     except ImportError:
         return error("Storage service not available", 500)
@@ -86,6 +95,7 @@ async def download_export(
 
     try:
         from engine.storage import get_storage
+
         storage = get_storage()
     except ImportError:
         storage = None
@@ -133,6 +143,7 @@ async def list_files(
     """List files for the current tenant."""
     try:
         from engine.storage import get_storage
+
         storage = get_storage()
         files = await storage.list_files(str(user.tenant_id), prefix)
         return success(files)

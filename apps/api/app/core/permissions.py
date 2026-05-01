@@ -1,15 +1,15 @@
 """Per-user permissions + resource-scope helpers."""
+
 from __future__ import annotations
 
 import uuid
 from typing import Any, Iterable
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.user import User, UserRole
+from models.user import User
 from models.resource_share import ResourceShare, SharePermission
-
 
 # What every role can DO. The frontend reads this to decide which
 # sidebar items to render and which buttons to enable. Server-side
@@ -38,8 +38,8 @@ ROLE_FEATURES: dict[str, dict[str, bool]] = {
         "review_queue": False,
         "manage_team": False,
         "manage_settings": False,
-        "manage_api_keys": True,    # users manage their own keys
-        "manage_mcp": True,         # users manage their own MCP connections
+        "manage_api_keys": True,  # users manage their own keys
+        "manage_mcp": True,  # users manage their own MCP connections
         # KB v2: ontology authoring is admin-only by default. End users
         # get it by being granted ADMIN on a project (Phase 3 wires the
         # per-project check into the schema editor route handler), but
@@ -52,7 +52,7 @@ ROLE_FEATURES: dict[str, dict[str, bool]] = {
         # Creator gets everything user has + can publish + monetize
         "review_queue": False,
         "manage_team": False,
-        "manage_ontology": True,    # creators frequently author schemas
+        "manage_ontology": True,  # creators frequently author schemas
         "publish_to_marketplace": True,
         "see_other_users_resources": False,
     },
@@ -85,7 +85,10 @@ def is_admin(user: User) -> bool:
 
 
 async def accessible_resource_ids(
-    db: AsyncSession, user: User, *, kind: str,
+    db: AsyncSession,
+    user: User,
+    *,
+    kind: str,
     minimum_permission: SharePermission = SharePermission.VIEW,
 ) -> set[uuid.UUID]:
     """Return resource IDs of `kind` that have been shared with `user`"""
@@ -108,7 +111,10 @@ async def accessible_resource_ids(
 
 
 def apply_resource_scope(
-    query: Any, model: Any, user: User, *,
+    query: Any,
+    model: Any,
+    user: User,
+    *,
     kind: str,
     scope: str = "all",
     accessible_ids: Iterable[uuid.UUID] | None = None,
@@ -118,7 +124,9 @@ def apply_resource_scope(
     """Add the right WHERE clause to a SQLAlchemy `select(model)` based"""
     creator_col = getattr(model, creator_field, None)
     tenant_col = getattr(model, tenant_field, None)
-    role_str = (user.role.value if hasattr(user.role, "value") else str(user.role)).lower()
+    role_str = (
+        user.role.value if hasattr(user.role, "value") else str(user.role)
+    ).lower()
     is_admin_user = role_str == "admin"
 
     # Always tenant-scoped — never leak across tenants.
@@ -153,7 +161,9 @@ def apply_resource_scope(
 
 
 def assert_can_access(
-    resource: Any, user: User, *,
+    resource: Any,
+    user: User,
+    *,
     creator_field: str = "created_by",
     accessible_ids: Iterable[uuid.UUID] | None = None,
     permission_required: SharePermission = SharePermission.VIEW,
@@ -173,7 +183,10 @@ def assert_can_access(
 
 
 def assert_can_edit(
-    resource: Any, user: User, *, creator_field: str = "created_by",
+    resource: Any,
+    user: User,
+    *,
+    creator_field: str = "created_by",
 ) -> bool:
     """True if user can mutate the resource (rename, change config).
     Stricter than view: tenant admin OR creator OR explicit edit share."""
@@ -186,7 +199,10 @@ def assert_can_edit(
 
 
 def assert_can_delete(
-    resource: Any, user: User, *, creator_field: str = "created_by",
+    resource: Any,
+    user: User,
+    *,
+    creator_field: str = "created_by",
 ) -> bool:
     """Stricter than edit: ONLY creator OR tenant admin can delete."""
     creator_id = getattr(resource, creator_field, None)

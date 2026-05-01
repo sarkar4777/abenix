@@ -1,4 +1,5 @@
 """AAAK Compressor — Lossless shorthand compression for AI memory."""
+
 from __future__ import annotations
 
 import logging
@@ -32,6 +33,7 @@ async def compress_to_aaak(text: str, llm_router: Any = None) -> str:
 
     if llm_router is None:
         from engine.llm_router import LLMRouter
+
         llm_router = LLMRouter()
 
     try:
@@ -46,7 +48,12 @@ async def compress_to_aaak(text: str, llm_router: Any = None) -> str:
         compressed = response.content if hasattr(response, "content") else str(response)
         if compressed:
             ratio = len(text) / max(len(compressed), 1)
-            logger.debug("AAAK compression: %d chars -> %d chars (%.1fx)", len(text), len(compressed), ratio)
+            logger.debug(
+                "AAAK compression: %d chars -> %d chars (%.1fx)",
+                len(text),
+                len(compressed),
+                ratio,
+            )
             return compressed
         return text
     except Exception as e:
@@ -61,12 +68,16 @@ async def decompress_aaak(aaak_text: str, llm_router: Any = None) -> str:
 
     if llm_router is None:
         from engine.llm_router import LLMRouter
+
         llm_router = LLMRouter()
 
     try:
         response = await llm_router.complete(
             messages=[
-                {"role": "system", "content": "Expand this AAAK shorthand into clear natural language. Preserve all facts."},
+                {
+                    "role": "system",
+                    "content": "Expand this AAAK shorthand into clear natural language. Preserve all facts.",
+                },
                 {"role": "user", "content": aaak_text},
             ],
             model="claude-haiku-3-5-20241022",

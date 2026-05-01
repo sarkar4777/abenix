@@ -8,11 +8,14 @@ from httpx import AsyncClient
 
 async def _register(client: AsyncClient) -> str:
     email = f"analytics-{uuid.uuid4().hex[:8]}@test.com"
-    resp = await client.post("/api/auth/register", json={
-        "email": email,
-        "password": "securepass123",
-        "full_name": "Analytics Tester",
-    })
+    resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": "securepass123",
+            "full_name": "Analytics Tester",
+        },
+    )
     return resp.json()["data"]["access_token"]
 
 
@@ -36,7 +39,9 @@ async def test_analytics_overview(client: AsyncClient):
 async def test_analytics_overview_periods(client: AsyncClient):
     token = await _register(client)
     for period in ("7d", "30d", "90d"):
-        resp = await client.get(f"/api/analytics/overview?period={period}", headers=_auth(token))
+        resp = await client.get(
+            f"/api/analytics/overview?period={period}", headers=_auth(token)
+        )
         assert resp.status_code == 200
         assert resp.json()["data"]["period"] == period
 

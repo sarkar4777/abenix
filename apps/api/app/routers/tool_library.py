@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import sys
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +29,15 @@ class SaveToolRequest(BaseModel):
     description: str = Field(..., min_length=5, max_length=2000)
     code: str = Field(..., min_length=10, max_length=50000)
     input_schema: dict[str, Any] = Field(default_factory=dict)
-    permissions: dict[str, Any] = Field(default_factory=lambda: {
-        "network": False, "filesystem_read": False,
-        "filesystem_write": False, "third_party": [], "env_vars": [],
-    })
+    permissions: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "network": False,
+            "filesystem_read": False,
+            "filesystem_write": False,
+            "third_party": [],
+            "env_vars": [],
+        }
+    )
     review_score: float | None = None
 
 
@@ -81,11 +84,13 @@ async def save_tool(
     await db.commit()
     await db.refresh(tool)
 
-    return success({
-        "id": str(tool.id),
-        "name": tool.name,
-        "status": tool.status,
-    })
+    return success(
+        {
+            "id": str(tool.id),
+            "name": tool.name,
+            "status": tool.status,
+        }
+    )
 
 
 @router.get("/library")
@@ -112,17 +117,22 @@ async def list_tools(
     result = await db.execute(query)
     tools = result.scalars().all()
 
-    return success([{
-        "id": str(t.id),
-        "name": t.name,
-        "description": t.description,
-        "status": t.status,
-        "is_public": t.is_public,
-        "usage_count": t.usage_count,
-        "review_score": t.review_score,
-        "permissions": t.permissions,
-        "created_at": t.created_at.isoformat() if t.created_at else None,
-    } for t in tools])
+    return success(
+        [
+            {
+                "id": str(t.id),
+                "name": t.name,
+                "description": t.description,
+                "status": t.status,
+                "is_public": t.is_public,
+                "usage_count": t.usage_count,
+                "review_score": t.review_score,
+                "permissions": t.permissions,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in tools
+        ]
+    )
 
 
 @router.get("/library/{tool_id}")
@@ -142,22 +152,24 @@ async def get_tool(
     if not tool:
         return error("Tool not found", 404)
 
-    return success({
-        "id": str(tool.id),
-        "name": tool.name,
-        "description": tool.description,
-        "code": tool.code,
-        "input_schema": tool.input_schema,
-        "status": tool.status,
-        "is_public": tool.is_public,
-        "usage_count": tool.usage_count,
-        "review_score": tool.review_score,
-        "review_notes": tool.review_notes,
-        "permissions": tool.permissions,
-        "created_by": str(tool.created_by),
-        "approved_by": str(tool.approved_by) if tool.approved_by else None,
-        "created_at": tool.created_at.isoformat() if tool.created_at else None,
-    })
+    return success(
+        {
+            "id": str(tool.id),
+            "name": tool.name,
+            "description": tool.description,
+            "code": tool.code,
+            "input_schema": tool.input_schema,
+            "status": tool.status,
+            "is_public": tool.is_public,
+            "usage_count": tool.usage_count,
+            "review_score": tool.review_score,
+            "review_notes": tool.review_notes,
+            "permissions": tool.permissions,
+            "created_by": str(tool.created_by),
+            "approved_by": str(tool.approved_by) if tool.approved_by else None,
+            "created_at": tool.created_at.isoformat() if tool.created_at else None,
+        }
+    )
 
 
 @router.post("/library/{tool_id}/approve")

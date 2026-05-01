@@ -1,4 +1,5 @@
 """Persona-scoped retrieval."""
+
 from __future__ import annotations
 
 import json
@@ -26,7 +27,8 @@ class PersonaRagTool(BaseTool):
         "type": "object",
         "properties": {
             "query": {
-                "type": "string", "minLength": 2,
+                "type": "string",
+                "minLength": 2,
                 "description": "What you're looking for, phrased as a question or topic.",
             },
             "scope": {
@@ -80,22 +82,28 @@ class PersonaRagTool(BaseTool):
             # 'self' is implicit for anyone with tenant access
             if scope != "self" and scope not in allowed:
                 return ToolResult(
-                    content=json.dumps({
-                        "scope_denied": True,
-                        "requested_scope": scope,
-                        "allowed_scopes": ["self", *allowed],
-                        "hint": (
-                            "This meeting is not authorized to query that persona "
-                            "scope. Authorize it in /meetings/<id>/authorize."
-                        ),
-                    }),
+                    content=json.dumps(
+                        {
+                            "scope_denied": True,
+                            "requested_scope": scope,
+                            "allowed_scopes": ["self", *allowed],
+                            "hint": (
+                                "This meeting is not authorized to query that persona "
+                                "scope. Authorize it in /meetings/<id>/authorize."
+                            ),
+                        }
+                    ),
                     is_error=True,
                     metadata={"scope_denied": True},
                 )
 
         results = await _persona_vector_search(
-            query=query, kb_ids=self.kb_ids, tenant_id=self.tenant_id,
-            user_id=self.user_id, scope=scope, top_k=top_k,
+            query=query,
+            kb_ids=self.kb_ids,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            scope=scope,
+            top_k=top_k,
         )
         return ToolResult(
             content=json.dumps(
@@ -141,7 +149,9 @@ async def _persona_vector_search(
 
     client = AsyncOpenAI(api_key=api_key)
     try:
-        emb = await client.embeddings.create(model="text-embedding-3-small", input=query)
+        emb = await client.embeddings.create(
+            model="text-embedding-3-small", input=query
+        )
         vec = emb.data[0].embedding
     except Exception as e:
         logger.warning("persona_rag: embed failed: %s", e)
@@ -164,8 +174,11 @@ async def _persona_vector_search(
     namespace = f"persona:{tenant_id}"
     try:
         resp = index.query(
-            namespace=namespace, vector=vec, top_k=top_k,
-            include_metadata=True, filter=flt,
+            namespace=namespace,
+            vector=vec,
+            top_k=top_k,
+            include_metadata=True,
+            filter=flt,
         )
     except Exception as e:
         logger.warning("persona_rag: pinecone query failed: %s", e)
@@ -175,9 +188,11 @@ async def _persona_vector_search(
         resp.get("matches", []) if isinstance(resp, dict) else []
     )
     for m in matches:
-        meta = getattr(m, "metadata", None) or (
-            m.get("metadata", {}) if isinstance(m, dict) else {}
-        ) or {}
+        meta = (
+            getattr(m, "metadata", None)
+            or (m.get("metadata", {}) if isinstance(m, dict) else {})
+            or {}
+        )
         # Defense-in-depth: re-verify the filter held (Pinecone bugs have
         # returned mis-filtered results before in certain index versions).
         if meta.get("tenant_id") != tenant_id:

@@ -1,9 +1,9 @@
 """Code asset analyzer — turn a user-uploaded repo into a runnable spec."""
+
 from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AnalysisNote:
-    level: str       # "info" | "warn" | "error"
+    level: str  # "info" | "warn" | "error"
     message: str
     suggestion: str = ""
 
@@ -35,7 +35,7 @@ class RepoAnalysis:
     # found; callers fall back to smoke-test at invocation time.
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
-    schema_source: str = ""           # "abenix.yaml" | "examples" | "readme" | ""
+    schema_source: str = ""  # "abenix.yaml" | "examples" | "readme" | ""
     example_input: dict[str, Any] | None = None
     example_output: dict[str, Any] | None = None
 
@@ -142,7 +142,7 @@ def _analyze_python(root: Path, a: RepoAnalysis) -> None:
         # python version: [tool.poetry.dependencies] python = "^3.11"
         # or [project] requires-python = ">=3.11"
         m = re.search(
-            r"python\s*=\s*['\"]([^'\"]+)['\"]"          # poetry
+            r"python\s*=\s*['\"]([^'\"]+)['\"]"  # poetry
             r"|requires-python\s*=\s*['\"]([^'\"]+)['\"]",  # PEP 621
             txt,
         )
@@ -160,11 +160,13 @@ def _analyze_python(root: Path, a: RepoAnalysis) -> None:
         a.package_manager = "pip"
     else:
         a.package_manager = "pip"
-        a.notes.append(AnalysisNote(
-            "warn",
-            "No pyproject.toml, setup.py, or requirements.txt found.",
-            "Add requirements.txt listing your dependencies so the sandbox can pip-install them.",
-        ))
+        a.notes.append(
+            AnalysisNote(
+                "warn",
+                "No pyproject.toml, setup.py, or requirements.txt found.",
+                "Add requirements.txt listing your dependencies so the sandbox can pip-install them.",
+            )
+        )
 
     # Entrypoint — prefer main.py, app.py, run.py, __main__.py
     for candidate in ("main.py", "app.py", "run.py", "cli.py", "__main__.py"):
@@ -178,17 +180,21 @@ def _analyze_python(root: Path, a: RepoAnalysis) -> None:
         if top_py:
             a.entrypoint = top_py[0].name
         else:
-            a.notes.append(AnalysisNote(
-                "warn",
-                "No entrypoint .py file found at the top of the repo.",
-                "Add main.py that reads JSON from stdin and prints JSON to stdout.",
-            ))
+            a.notes.append(
+                AnalysisNote(
+                    "warn",
+                    "No entrypoint .py file found at the top of the repo.",
+                    "Add main.py that reads JSON from stdin and prints JSON to stdout.",
+                )
+            )
 
     a.suggested_image = _pick_python_image(a.version)
 
     # Build + run commands
     if a.package_manager == "poetry":
-        a.suggested_build_command = "pip install poetry && poetry install --no-interaction --no-root"
+        a.suggested_build_command = (
+            "pip install poetry && poetry install --no-interaction --no-root"
+        )
         a.suggested_run_command = f"poetry run python {a.entrypoint or 'main.py'}"
     elif a.package_manager == "uv":
         a.suggested_build_command = "pip install uv && uv sync"
@@ -205,7 +211,11 @@ def _analyze_node(root: Path, a: RepoAnalysis) -> None:
     a.language = "node"
     pkg = _find_one(root, ["package.json"])
     if not pkg:
-        a.notes.append(AnalysisNote("error", "package.json not found.", "Is this really a Node project?"))
+        a.notes.append(
+            AnalysisNote(
+                "error", "package.json not found.", "Is this really a Node project?"
+            )
+        )
         return
     try:
         pkg_data = json.loads(_read(pkg))
@@ -232,7 +242,13 @@ def _analyze_node(root: Path, a: RepoAnalysis) -> None:
         a.entrypoint = "(via npm start)"
     else:
         # fallback scan
-        for candidate in ("index.js", "index.mjs", "index.ts", "src/index.js", "src/index.ts"):
+        for candidate in (
+            "index.js",
+            "index.mjs",
+            "index.ts",
+            "src/index.js",
+            "src/index.ts",
+        ):
             p = _find_one(root, [candidate])
             if p:
                 a.entrypoint = str(p.relative_to(root))
@@ -242,11 +258,17 @@ def _analyze_node(root: Path, a: RepoAnalysis) -> None:
 
     # Build: install deps. Avoid --production so dev deps like TS compiler are included.
     if a.package_manager == "pnpm":
-        a.suggested_build_command = "npm install -g pnpm && pnpm install --frozen-lockfile"
+        a.suggested_build_command = (
+            "npm install -g pnpm && pnpm install --frozen-lockfile"
+        )
     elif a.package_manager == "yarn":
-        a.suggested_build_command = "npm install -g yarn && yarn install --frozen-lockfile"
+        a.suggested_build_command = (
+            "npm install -g yarn && yarn install --frozen-lockfile"
+        )
     else:
-        a.suggested_build_command = "npm ci --no-audit --no-fund || npm install --no-audit --no-fund"
+        a.suggested_build_command = (
+            "npm ci --no-audit --no-fund || npm install --no-audit --no-fund"
+        )
 
     if start_script:
         a.suggested_run_command = f"{a.package_manager} start"
@@ -257,11 +279,13 @@ def _analyze_node(root: Path, a: RepoAnalysis) -> None:
         a.suggested_run_command = f"node {a.entrypoint}"
     else:
         a.suggested_run_command = "node index.js"
-        a.notes.append(AnalysisNote(
-            "warn",
-            "No main/entrypoint declared in package.json.",
-            "Add \"main\": \"index.js\" or a \"start\" script so the runner knows what to invoke.",
-        ))
+        a.notes.append(
+            AnalysisNote(
+                "warn",
+                "No main/entrypoint declared in package.json.",
+                'Add "main": "index.js" or a "start" script so the runner knows what to invoke.',
+            )
+        )
 
 
 def _analyze_go(root: Path, a: RepoAnalysis) -> None:
@@ -395,11 +419,13 @@ def _analyze_perl(root: Path, a: RepoAnalysis) -> None:
         if top:
             a.entrypoint = top[0].name
         else:
-            a.notes.append(AnalysisNote(
-                "warn",
-                "No .pl entrypoint found at the repo root.",
-                "Add main.pl that reads JSON from stdin and prints JSON to stdout.",
-            ))
+            a.notes.append(
+                AnalysisNote(
+                    "warn",
+                    "No .pl entrypoint found at the repo root.",
+                    "Add main.pl that reads JSON from stdin and prints JSON to stdout.",
+                )
+            )
     a.suggested_image = _pick_perl_image(a.version)
     # -I lib so `use TextSummary;` finds modules under ./lib without
     # requiring the user to tweak @INC themselves.
@@ -418,8 +444,12 @@ def _analyze_java(root: Path, a: RepoAnalysis) -> None:
         txt = _read(pom)
         m = (
             re.search(r"<java\.version>(\d+)</java\.version>", txt)
-            or re.search(r"<maven\.compiler\.source>(\d+)</maven\.compiler\.source>", txt)
-            or re.search(r"<maven\.compiler\.target>(\d+)</maven\.compiler\.target>", txt)
+            or re.search(
+                r"<maven\.compiler\.source>(\d+)</maven\.compiler\.source>", txt
+            )
+            or re.search(
+                r"<maven\.compiler\.target>(\d+)</maven\.compiler\.target>", txt
+            )
         )
         if m:
             a.version = m.group(1)
@@ -497,30 +527,36 @@ def analyze_directory(root: Path) -> RepoAnalysis:
         elif pl:
             _analyze_perl(root, a)
         else:
-            a.notes.append(AnalysisNote(
-                "error",
-                "Couldn't detect a supported language from the files in this repo.",
-                "Supported: Python, Node.js, Go, Rust, Ruby, Java, Perl. "
-                "Add the appropriate manifest (pyproject.toml, package.json, "
-                "go.mod, Cargo.toml, Gemfile, pom.xml, cpanfile, etc.).",
-            ))
+            a.notes.append(
+                AnalysisNote(
+                    "error",
+                    "Couldn't detect a supported language from the files in this repo.",
+                    "Supported: Python, Node.js, Go, Rust, Ruby, Java, Perl. "
+                    "Add the appropriate manifest (pyproject.toml, package.json, "
+                    "go.mod, Cargo.toml, Gemfile, pom.xml, cpanfile, etc.).",
+                )
+            )
 
     if len(matched) > 1:
-        a.notes.append(AnalysisNote(
-            "info",
-            f"Multiple language markers present: {', '.join(matched)}.",
-            "Analyzed as "
-            f"{a.language}; specify the entrypoint manually if a different "
-            "language is the main build target.",
-        ))
+        a.notes.append(
+            AnalysisNote(
+                "info",
+                f"Multiple language markers present: {', '.join(matched)}.",
+                "Analyzed as "
+                f"{a.language}; specify the entrypoint manually if a different "
+                "language is the main build target.",
+            )
+        )
 
     if a.language != "unknown" and a.suggested_image:
-        a.notes.append(AnalysisNote(
-            "info",
-            f"Suggested image: {a.suggested_image}",
-            "You can override this in the asset settings to pin a specific "
-            "version tag (e.g. python:3.11.9-slim).",
-        ))
+        a.notes.append(
+            AnalysisNote(
+                "info",
+                f"Suggested image: {a.suggested_image}",
+                "You can override this in the asset settings to pin a specific "
+                "version tag (e.g. python:3.11.9-slim).",
+            )
+        )
 
     # Populate input/output schemas from author-supplied contracts.
     # Silent on miss — the API upload path follows up with a
@@ -535,6 +571,7 @@ def analyze_directory(root: Path) -> RepoAnalysis:
 
 def _infer_schema_from_example(obj: Any) -> dict[str, Any]:
     """Best-effort JSON-Schema draft-7 inference from a sample JSON."""
+
     def _schema_of(v: Any) -> dict[str, Any]:
         if isinstance(v, bool):
             return {"type": "boolean"}
@@ -561,7 +598,9 @@ def _infer_schema_from_example(obj: Any) -> dict[str, Any]:
     return _schema_of(obj)
 
 
-def _probe_abenix_yaml(root: Path) -> tuple[dict | None, dict | None, dict | None, dict | None, str]:
+def _probe_abenix_yaml(
+    root: Path,
+) -> tuple[dict | None, dict | None, dict | None, dict | None, str]:
     """Priority 1 — explicit contract in abenix.yaml at zip root."""
     for name in ("abenix.yaml", "abenix.yml", ".abenix.yaml"):
         p = root / name
@@ -569,14 +608,31 @@ def _probe_abenix_yaml(root: Path) -> tuple[dict | None, dict | None, dict | Non
             continue
         try:
             import yaml
+
             data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
             if not isinstance(data, dict):
                 continue
             return (
-                data.get("input_schema") if isinstance(data.get("input_schema"), dict) else None,
-                data.get("output_schema") if isinstance(data.get("output_schema"), dict) else None,
-                data.get("example_input") if isinstance(data.get("example_input"), dict) else None,
-                data.get("example_output") if isinstance(data.get("example_output"), dict) else None,
+                (
+                    data.get("input_schema")
+                    if isinstance(data.get("input_schema"), dict)
+                    else None
+                ),
+                (
+                    data.get("output_schema")
+                    if isinstance(data.get("output_schema"), dict)
+                    else None
+                ),
+                (
+                    data.get("example_input")
+                    if isinstance(data.get("example_input"), dict)
+                    else None
+                ),
+                (
+                    data.get("example_output")
+                    if isinstance(data.get("example_output"), dict)
+                    else None
+                ),
                 "abenix.yaml",
             )
         except Exception as e:
@@ -584,7 +640,9 @@ def _probe_abenix_yaml(root: Path) -> tuple[dict | None, dict | None, dict | Non
     return None, None, None, None, ""
 
 
-def _probe_examples_dir(root: Path) -> tuple[dict | None, dict | None, dict | None, dict | None, str]:
+def _probe_examples_dir(
+    root: Path,
+) -> tuple[dict | None, dict | None, dict | None, dict | None, str]:
     """Priority 2 — examples/input.json + examples/output.json."""
     ex_in = root / "examples" / "input.json"
     ex_out = root / "examples" / "output.json"
@@ -613,7 +671,9 @@ def _probe_examples_dir(root: Path) -> tuple[dict | None, dict | None, dict | No
     return in_schema, out_schema, in_obj, out_obj, "examples"
 
 
-def _probe_readme_fenced_blocks(root: Path) -> tuple[dict | None, dict | None, dict | None, dict | None, str]:
+def _probe_readme_fenced_blocks(
+    root: Path,
+) -> tuple[dict | None, dict | None, dict | None, dict | None, str]:
     """Priority 3 — README.md fenced code blocks tagged json and"""
     for name in ("README.md", "README.MD", "readme.md", "Readme.md"):
         p = root / name
@@ -627,7 +687,9 @@ def _probe_readme_fenced_blocks(root: Path) -> tuple[dict | None, dict | None, d
         r"(?:```+)\s*(json)(?:\s+(input|output))?\s*\n(.*?)(?:```+)",
         re.DOTALL | re.IGNORECASE,
     )
-    heading_pat = re.compile(r"^\s*#+\s+(input|output)\s*$", re.MULTILINE | re.IGNORECASE)
+    heading_pat = re.compile(
+        r"^\s*#+\s+(input|output)\s*$", re.MULTILINE | re.IGNORECASE
+    )
 
     in_obj = out_obj = None
 
@@ -693,23 +755,24 @@ def probe_schemas(root: Path, analysis: RepoAnalysis) -> None:
             sources.append(src)
     if sources:
         analysis.schema_source = "+".join(sources)
-        analysis.notes.append(AnalysisNote(
-            "info",
-            f"Input / output contract discovered from {analysis.schema_source}.",
-            "The Builder will pre-fill pipeline-node arguments from this schema. "
-            "Authors can override in the asset settings if inference is wrong.",
-        ))
+        analysis.notes.append(
+            AnalysisNote(
+                "info",
+                f"Input / output contract discovered from {analysis.schema_source}.",
+                "The Builder will pre-fill pipeline-node arguments from this schema. "
+                "Authors can override in the asset settings if inference is wrong.",
+            )
+        )
 
 
 def generate_json_wrapper(
-    *, language: str, entrypoint: str, run_command: str,
+    *,
+    language: str,
+    entrypoint: str,
+    run_command: str,
 ) -> str:
     """Generate a shell wrapper that:"""
     # Store input in /tmp/input.json (available in the sandbox's writable tmpfs).
     # User code reads it from /tmp/input.json OR from stdin — our wrapper
     # pipes stdin through too, so both patterns work.
-    return (
-        "set -e; "
-        "cat > /tmp/input.json; "
-        f"cat /tmp/input.json | {run_command}"
-    )
+    return "set -e; " "cat > /tmp/input.json; " f"cat /tmp/input.json | {run_command}"

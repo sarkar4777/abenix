@@ -45,7 +45,9 @@ class Settings(BaseSettings):
     # of running in the API process. Consumers in per-pool Deployments
     # pick them up and execute. Defaults OFF so behaviour is unchanged.
     scaling_exec_remote: bool = False
-    queue_backend: str = "celery"  # celery | nats — also read by the agent-runtime consumer
+    queue_backend: str = (
+        "celery"  # celery | nats — also read by the agent-runtime consumer
+    )
 
     model_config = {
         "env_prefix": "",

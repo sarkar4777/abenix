@@ -26,7 +26,16 @@ class JsonTransformerTool(BaseTool):
             },
             "operation": {
                 "type": "string",
-                "enum": ["query", "filter", "flatten", "aggregate", "reshape", "merge", "diff", "schema"],
+                "enum": [
+                    "query",
+                    "filter",
+                    "flatten",
+                    "aggregate",
+                    "reshape",
+                    "merge",
+                    "diff",
+                    "schema",
+                ],
                 "description": "Transformation operation",
             },
             "path": {
@@ -106,7 +115,7 @@ class JsonTransformerTool(BaseTool):
         current = data
         for part in parts:
             if part == "*" and isinstance(current, list):
-                remaining = ".".join(parts[parts.index(part) + 1:])
+                remaining = ".".join(parts[parts.index(part) + 1 :])
                 if remaining:
                     return [self._query(item, {"path": remaining}) for item in current]
                 return current
@@ -152,7 +161,10 @@ class JsonTransformerTool(BaseTool):
                             match = False
                         elif op == "ne" and val == cmp_val:
                             match = False
-                        elif op == "contains" and str(cmp_val).lower() not in str(val).lower():
+                        elif (
+                            op == "contains"
+                            and str(cmp_val).lower() not in str(val).lower()
+                        ):
                             match = False
                         elif op == "in" and val not in cmp_val:
                             match = False
@@ -202,7 +214,12 @@ class JsonTransformerTool(BaseTool):
             for key, vals in groups.items():
                 result_groups[key] = self._apply_agg(vals, agg_func)
 
-            return {"grouped_by": group_by, "field": agg_field, "function": agg_func, "results": result_groups}
+            return {
+                "grouped_by": group_by,
+                "field": agg_field,
+                "function": agg_func,
+                "results": result_groups,
+            }
 
         values = []
         for item in data:
@@ -283,7 +300,9 @@ class JsonTransformerTool(BaseTool):
                 "total": len(data) + len(second),
             }
 
-        return {"error": "Both data and second_data must be same type (both objects or both arrays)"}
+        return {
+            "error": "Both data and second_data must be same type (both objects or both arrays)"
+        }
 
     def _diff(self, data: Any, args: dict[str, Any]) -> dict[str, Any]:
         second = args.get("second_data")

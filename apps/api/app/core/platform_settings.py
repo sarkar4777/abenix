@@ -1,4 +1,5 @@
 """Platform-settings helper."""
+
 from __future__ import annotations
 
 import time
@@ -25,7 +26,9 @@ def _get_session_factory():
     global _engine, _SessionLocal
     if _SessionLocal is None:
         _engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-        _SessionLocal = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+        _SessionLocal = sessionmaker(
+            _engine, class_=AsyncSession, expire_on_commit=False
+        )
     return _SessionLocal
 
 

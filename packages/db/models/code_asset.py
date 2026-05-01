@@ -1,4 +1,5 @@
 """Code Asset — a user-uploaded repo or zip that becomes a callable"""
+
 from __future__ import annotations
 
 import enum
@@ -6,8 +7,14 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, DateTime, Enum, ForeignKey, Index,
-    Integer, String, Text, func,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -39,8 +46,11 @@ class CodeAsset(UUIDMixin, TenantMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     source_type: Mapped[CodeAssetSource] = mapped_column(
-        Enum(CodeAssetSource, name="code_asset_source",
-             values_callable=lambda e: [m.value for m in e]),
+        Enum(
+            CodeAssetSource,
+            name="code_asset_source",
+            values_callable=lambda e: [m.value for m in e],
+        ),
     )
     # One of the two is set:
     source_git_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -54,7 +64,9 @@ class CodeAsset(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # Analysis results (populated by analyzer)
     detected_language: Mapped[str | None] = mapped_column(String(50), nullable=True)
     detected_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    detected_package_manager: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    detected_package_manager: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )
     detected_entrypoint: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     suggested_image: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -75,8 +87,11 @@ class CodeAsset(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
     # Status flow
     status: Mapped[CodeAssetStatus] = mapped_column(
-        Enum(CodeAssetStatus, name="code_asset_status",
-             values_callable=lambda e: [m.value for m in e]),
+        Enum(
+            CodeAssetStatus,
+            name="code_asset_status",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         default=CodeAssetStatus.UPLOADED,
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -84,9 +99,13 @@ class CodeAsset(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # Last successful test run's output (for UI display)
     last_test_input: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     last_test_output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_test_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True,
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True,
     )

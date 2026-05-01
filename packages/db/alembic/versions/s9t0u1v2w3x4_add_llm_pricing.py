@@ -1,8 +1,8 @@
 """LLM pricing table + per-provider cost subtotals."""
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 revision = "s9t0u1v2w3x4"
 down_revision = "r8s9t0u1v2w3"
@@ -13,7 +13,12 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "llm_model_pricing",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("model", sa.String(128), nullable=False),
         sa.Column("provider", sa.String(32), nullable=False),
         sa.Column("input_per_m", sa.Numeric(18, 12), nullable=False),
@@ -21,24 +26,38 @@ def upgrade() -> None:
         sa.Column("cached_input_per_m", sa.Numeric(18, 12), nullable=True),
         sa.Column("batch_input_per_m", sa.Numeric(18, 12), nullable=True),
         sa.Column("batch_output_per_m", sa.Numeric(18, 12), nullable=True),
-        sa.Column("effective_from", sa.DateTime(timezone=True), nullable=False,
-                  server_default=sa.func.now()),
+        sa.Column(
+            "effective_from",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.Column("notes", sa.String(512), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
-                  server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
-                  server_default=sa.func.now()),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
     )
-    op.create_index("ix_llm_pricing_model_effective", "llm_model_pricing",
-                    ["model", "effective_from"])
+    op.create_index(
+        "ix_llm_pricing_model_effective",
+        "llm_model_pricing",
+        ["model", "effective_from"],
+    )
     op.create_index("ix_llm_pricing_provider", "llm_model_pricing", ["provider"])
 
     # Single INSERT with VALUES list — cheaper than 14 statements and
     # keeps the migration atomic. `notes` is omitted (null) so the UI
     # can show it as "uncustomised".
-    seed = sa.text(
-        """
+    seed = sa.text("""
         INSERT INTO llm_model_pricing
             (model, provider, input_per_m, output_per_m,
              cached_input_per_m, batch_input_per_m, batch_output_per_m)
@@ -61,8 +80,7 @@ def upgrade() -> None:
             ('gemini-2.5-flash',          'google',    0.30, 2.50, null, null, null),
             ('gemini-2.5-pro',            'google',    1.25, 10.0, null, null, null),
             ('gemini-1.5-pro',            'google',    1.25, 5.00, null, null, null)
-        """
-    )
+        """)
     op.execute(seed)
 
     bind = op.get_bind()
@@ -76,8 +94,12 @@ def upgrade() -> None:
             if col not in existing:
                 op.add_column(
                     table,
-                    sa.Column(col, sa.Numeric(10, 6), nullable=False,
-                              server_default=sa.text("0")),
+                    sa.Column(
+                        col,
+                        sa.Numeric(10, 6),
+                        nullable=False,
+                        server_default=sa.text("0"),
+                    ),
                 )
 
     _add_cost_cols("executions")

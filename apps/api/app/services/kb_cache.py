@@ -1,4 +1,5 @@
 """API-side proxy for the agent-runtime search cache."""
+
 from __future__ import annotations
 
 import logging
@@ -17,10 +18,14 @@ async def _get_client() -> Any | None:
         return _redis_client
     try:
         import redis.asyncio as aioredis
+
         url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         _redis_client = aioredis.from_url(
-            url, encoding="utf-8", decode_responses=True,
-            socket_connect_timeout=2, socket_timeout=2,
+            url,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
         )
         return _redis_client
     except Exception:
@@ -37,7 +42,9 @@ async def invalidate_tenant_search_cache(tenant_id: str) -> int:
         cursor = 0
         while True:
             cursor, keys = await client.scan(
-                cursor=cursor, match="kbsearch:*", count=200,
+                cursor=cursor,
+                match="kbsearch:*",
+                count=200,
             )
             if keys:
                 await client.delete(*keys)

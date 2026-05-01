@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -71,11 +70,13 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test_initialize_success(self):
         client = MCPClient(server_url="http://localhost:9000/mcp")
-        init_resp = _make_mock_response({
-            "protocolVersion": "2025-11-25",
-            "serverInfo": {"name": "test-server", "version": "1.0"},
-            "capabilities": {"tools": {}},
-        })
+        init_resp = _make_mock_response(
+            {
+                "protocolVersion": "2025-11-25",
+                "serverInfo": {"name": "test-server", "version": "1.0"},
+                "capabilities": {"tools": {}},
+            }
+        )
         notify_resp = _make_mock_response({})
 
         mock_http = AsyncMock()
@@ -88,16 +89,18 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test_list_tools_parses_response(self):
         client = MCPClient(server_url="http://localhost:9000/mcp")
-        mock_response = _make_mock_response({
-            "tools": [
-                {
-                    "name": "read_file",
-                    "description": "Read a file",
-                    "inputSchema": {"type": "object"},
-                    "annotations": {"readOnlyHint": True},
-                }
-            ]
-        })
+        mock_response = _make_mock_response(
+            {
+                "tools": [
+                    {
+                        "name": "read_file",
+                        "description": "Read a file",
+                        "inputSchema": {"type": "object"},
+                        "annotations": {"readOnlyHint": True},
+                    }
+                ]
+            }
+        )
 
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(return_value=mock_response)
@@ -111,11 +114,13 @@ class TestMCPClient:
     @pytest.mark.asyncio
     async def test_health_check_success(self):
         client = MCPClient(server_url="http://localhost:9000/mcp")
-        init_resp = _make_mock_response({
-            "protocolVersion": "2025-11-25",
-            "serverInfo": {"name": "test-server", "version": "1.0"},
-            "capabilities": {},
-        })
+        init_resp = _make_mock_response(
+            {
+                "protocolVersion": "2025-11-25",
+                "serverInfo": {"name": "test-server", "version": "1.0"},
+                "capabilities": {},
+            }
+        )
         notify_resp = _make_mock_response({})
 
         mock_http = AsyncMock()

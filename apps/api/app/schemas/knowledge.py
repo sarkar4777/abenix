@@ -12,10 +12,12 @@ class CreateKnowledgeBaseRequest(BaseModel):
     # they're cut over in Phase 2.
     project_id: str | None = None
     default_visibility: str | None = Field(
-        default=None, pattern="^(private|project|tenant)$",
+        default=None,
+        pattern="^(private|project|tenant)$",
     )
     vector_backend: str | None = Field(
-        default=None, pattern="^(pinecone|pgvector)$",
+        default=None,
+        pattern="^(pinecone|pgvector)$",
     )
 
 
@@ -25,5 +27,6 @@ class UpdateKnowledgeBaseRequest(BaseModel):
     agent_id: str | None = None
     project_id: str | None = None
     default_visibility: str | None = Field(
-        default=None, pattern="^(private|project|tenant)$",
+        default=None,
+        pattern="^(private|project|tenant)$",
     )

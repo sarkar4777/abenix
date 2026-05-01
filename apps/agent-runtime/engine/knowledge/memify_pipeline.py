@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from engine.knowledge.neo4j_client import get_neo4j_driver, is_neo4j_available
@@ -33,6 +33,7 @@ async def run_memify(
 ) -> MemifyResult:
     """Execute the memify pipeline to evolve the knowledge graph."""
     import time
+
     start = time.monotonic()
     result = MemifyResult(kb_id=kb_id, trigger=trigger)
 
@@ -68,7 +69,8 @@ async def run_memify(
             SET r.weight = r.weight * 0.9
             RETURN count(r) AS weakened
             """,
-            kb_id=kb_id, days=prune_threshold_days,
+            kb_id=kb_id,
+            days=prune_threshold_days,
         )
         record = await weaken_result.single()
         result.edges_weakened = record["weakened"] if record else 0
@@ -84,7 +86,9 @@ async def run_memify(
             DETACH DELETE e
             RETURN count(e) AS pruned
             """,
-            kb_id=kb_id, min_conf=min_confidence, days=prune_threshold_days,
+            kb_id=kb_id,
+            min_conf=min_confidence,
+            days=prune_threshold_days,
         )
         record = await prune_result.single()
         result.nodes_pruned = record["pruned"] if record else 0
@@ -118,7 +122,9 @@ async def run_memify(
                         ELSE GREATEST(r.weight + $delta, 0.1)
                     END
                     """,
-                    kb_id=kb_id, entity_ids=entity_ids, delta=weight_delta,
+                    kb_id=kb_id,
+                    entity_ids=entity_ids,
+                    delta=weight_delta,
                 )
 
     # If two entities frequently appear in the same search results
@@ -144,7 +150,11 @@ async def run_memify(
     result.duration_seconds = time.monotonic() - start
     logger.info(
         "Memify [%s] Complete: +%d strengthened, -%d weakened, -%d pruned, +%d derived (%.1fs)",
-        kb_id[:8], result.edges_strengthened, result.edges_weakened,
-        result.nodes_pruned, result.facts_derived, result.duration_seconds,
+        kb_id[:8],
+        result.edges_strengthened,
+        result.edges_weakened,
+        result.nodes_pruned,
+        result.facts_derived,
+        result.duration_seconds,
     )
     return result

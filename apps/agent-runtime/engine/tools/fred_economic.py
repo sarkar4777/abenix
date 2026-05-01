@@ -1,4 +1,5 @@
 """US macro indicators via FRED (St. Louis Fed)."""
+
 from __future__ import annotations
 
 import csv
@@ -15,18 +16,18 @@ _CSV_BASE = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 
 # Friendly aliases for FRED series ids.
 _SERIES_ALIASES = {
-    "fed_funds_rate":     "FEDFUNDS",
-    "ten_year_treasury":  "DGS10",
-    "two_year_treasury":  "DGS2",
-    "cpi":                "CPIAUCSL",
-    "core_cpi":           "CPILFESL",
-    "unemployment":       "UNRATE",
-    "gdp":                "GDP",
-    "real_gdp":           "GDPC1",
-    "wti_oil":            "DCOILWTICO",
-    "natural_gas":        "DHHNGSP",
-    "gold":               "GOLDAMGBD228NLBM",
-    "us_dollar_index":    "DTWEXBGS",
+    "fed_funds_rate": "FEDFUNDS",
+    "ten_year_treasury": "DGS10",
+    "two_year_treasury": "DGS2",
+    "cpi": "CPIAUCSL",
+    "core_cpi": "CPILFESL",
+    "unemployment": "UNRATE",
+    "gdp": "GDP",
+    "real_gdp": "GDPC1",
+    "wti_oil": "DCOILWTICO",
+    "natural_gas": "DHHNGSP",
+    "gold": "GOLDAMGBD228NLBM",
+    "us_dollar_index": "DTWEXBGS",
     "consumer_sentiment": "UMCSENT",
 }
 
@@ -59,7 +60,10 @@ class FredEconomicTool(BaseTool):
                 "description": "ISO date YYYY-MM-DD. Default: today.",
             },
             "limit": {
-                "type": "integer", "default": 50, "minimum": 1, "maximum": 1000,
+                "type": "integer",
+                "default": 50,
+                "minimum": 1,
+                "maximum": 1000,
                 "description": "Most recent N observations to return.",
             },
         },
@@ -79,11 +83,16 @@ class FredEconomicTool(BaseTool):
         try:
             if api_key:
                 params: dict[str, Any] = {
-                    "series_id": series, "api_key": api_key, "file_type": "json",
-                    "sort_order": "desc", "limit": limit,
+                    "series_id": series,
+                    "api_key": api_key,
+                    "file_type": "json",
+                    "sort_order": "desc",
+                    "limit": limit,
                 }
-                if start: params["observation_start"] = start
-                if end: params["observation_end"] = end
+                if start:
+                    params["observation_start"] = start
+                if end:
+                    params["observation_end"] = end
                 async with httpx.AsyncClient(timeout=15) as client:
                     r = await client.get(f"{_BASE}/series/observations", params=params)
                     r.raise_for_status()
@@ -108,11 +117,18 @@ class FredEconomicTool(BaseTool):
                     )
                 # CSV header is "DATE", "<SERIES>"
                 value_col = next((c for c in rows[0] if c != "DATE"), None)
-                obs = [{"date": r["DATE"], "value": r[value_col]} for r in rows if r.get(value_col) not in (None, ".", "")]
+                obs = [
+                    {"date": r["DATE"], "value": r[value_col]}
+                    for r in rows
+                    if r.get(value_col) not in (None, ".", "")
+                ]
                 obs = list(reversed(obs))[:limit]  # newest first, capped
                 source = "fred-csv-public"
         except httpx.HTTPStatusError as e:
-            return ToolResult(content=f"FRED HTTP {e.response.status_code}: {e.response.text[:200]}", is_error=True)
+            return ToolResult(
+                content=f"FRED HTTP {e.response.status_code}: {e.response.text[:200]}",
+                is_error=True,
+            )
         except Exception as e:
             return ToolResult(content=f"FRED fetch failed: {e}", is_error=True)
 
@@ -132,7 +148,9 @@ class FredEconomicTool(BaseTool):
             lines.append(f"  {o['date']}: {o['value']}")
         if values:
             lines.append("")
-            lines.append(f"Latest: {values[0]}  |  Min: {min(values)}  |  Max: {max(values)}")
+            lines.append(
+                f"Latest: {values[0]}  |  Min: {min(values)}  |  Max: {max(values)}"
+            )
 
         return ToolResult(
             content="\n".join(lines),

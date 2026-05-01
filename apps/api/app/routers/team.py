@@ -40,7 +40,11 @@ def _serialize_invite(inv: TeamInvite) -> dict:
         "id": str(inv.id),
         "email": inv.email,
         "role": inv.role,
-        "status": inv.status.value if isinstance(inv.status, InviteStatus) else str(inv.status),
+        "status": (
+            inv.status.value
+            if isinstance(inv.status, InviteStatus)
+            else str(inv.status)
+        ),
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
         "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
     }
@@ -52,9 +56,7 @@ async def list_members(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     result = await db.execute(
-        select(User)
-        .where(User.tenant_id == user.tenant_id)
-        .order_by(User.created_at)
+        select(User).where(User.tenant_id == user.tenant_id).order_by(User.created_at)
     )
     members = result.scalars().all()
 
@@ -66,10 +68,12 @@ async def list_members(
     )
     invites = inv_result.scalars().all()
 
-    return success({
-        "members": [_serialize_member(m) for m in members],
-        "pending_invites": [_serialize_invite(i) for i in invites],
-    })
+    return success(
+        {
+            "members": [_serialize_member(m) for m in members],
+            "pending_invites": [_serialize_invite(i) for i in invites],
+        }
+    )
 
 
 @router.post("/dev-create-member")
@@ -80,6 +84,7 @@ async def dev_create_member(
 ) -> JSONResponse:
     """Admin-only: synchronously create a member in the caller's tenant."""
     import os
+
     if os.environ.get("ALLOW_DEV_CREATE_MEMBER", "true").lower() != "true":
         return error("dev-create-member is disabled in this environment", 403)
     if user.role not in (UserRole.ADMIN,):
@@ -102,6 +107,7 @@ async def dev_create_member(
         return error("member already exists", 409)
 
     from app.core.security import hash_password
+
     new_user = User(
         tenant_id=user.tenant_id,
         email=email,
@@ -268,11 +274,15 @@ async def set_member_quota(
 
     await db.commit()
 
-    return success({
-        "id": str(member.id),
-        "email": member.email,
-        "token_monthly_allowance": member.token_monthly_allowance,
-        "cost_monthly_limit": float(member.cost_monthly_limit) if member.cost_monthly_limit else None,
-        "tokens_used": member.tokens_used_this_month or 0,
-        "cost_used": float(member.cost_used_this_month or 0),
-    })
+    return success(
+        {
+            "id": str(member.id),
+            "email": member.email,
+            "token_monthly_allowance": member.token_monthly_allowance,
+            "cost_monthly_limit": (
+                float(member.cost_monthly_limit) if member.cost_monthly_limit else None
+            ),
+            "tokens_used": member.tokens_used_this_month or 0,
+            "cost_used": float(member.cost_used_this_month or 0),
+        }
+    )

@@ -1,4 +1,5 @@
 """Notification creation + multi-channel delivery."""
+
 from __future__ import annotations
 
 import logging
@@ -35,7 +36,9 @@ def _settings_allows(prefs: dict | None, type_key: str, channel_key: str) -> boo
     return True
 
 
-async def _post_slack(webhook_url: str, *, title: str, message: str, link: str | None) -> bool:
+async def _post_slack(
+    webhook_url: str, *, title: str, message: str, link: str | None
+) -> bool:
     """Best-effort Slack post via incoming webhook. Returns True on"""
     if not webhook_url:
         return False
@@ -43,10 +46,12 @@ async def _post_slack(webhook_url: str, *, title: str, message: str, link: str |
         "text": f"*{title}*\n{message}",
     }
     if link:
-        payload["attachments"] = [{
-            "color": "warning",
-            "actions": [{"type": "button", "text": "View in Abenix", "url": link}],
-        }]
+        payload["attachments"] = [
+            {
+                "color": "warning",
+                "actions": [{"type": "button", "text": "View in Abenix", "url": link}],
+            }
+        ]
     try:
         async with httpx.AsyncClient(timeout=5.0) as c:
             r = await c.post(webhook_url, json=payload)
@@ -64,6 +69,7 @@ async def _send_email(*, to: str, subject: str, body: str) -> bool:
     try:
         import aiosmtplib  # type: ignore
         from email.message import EmailMessage
+
         msg = EmailMessage()
         msg["From"] = os.environ.get("SMTP_FROM", "no-reply@abenix.dev")
         msg["To"] = to
@@ -90,6 +96,7 @@ async def _send_email(*, to: str, subject: str, body: str) -> bool:
 def _emit_notif_metric(channel: str, severity: str) -> None:
     try:
         from app.core.telemetry import notifications_sent_total
+
         notifications_sent_total.labels(channel=channel, severity=severity).inc()
     except Exception:
         pass
@@ -146,6 +153,7 @@ async def create_notification(
         from sqlalchemy import select
         from models.user import User
         from models.tenant import Tenant
+
         u_res = await db.execute(select(User).where(User.id == user_id))
         user = u_res.scalar_one_or_none()
         if user:
@@ -154,8 +162,7 @@ async def create_notification(
         t_res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = t_res.scalar_one_or_none()
         slack_webhook = (
-            (getattr(tenant, "slack_webhook_url", None) or "").strip()
-            if tenant else ""
+            (getattr(tenant, "slack_webhook_url", None) or "").strip() if tenant else ""
         )
         if not slack_webhook:
             slack_webhook = (os.environ.get("ABENIX_SLACK_WEBHOOK_URL") or "").strip()
@@ -166,7 +173,9 @@ async def create_notification(
     if _settings_allows(prefs, type_key=type, channel_key=""):
         try:
             await ws_manager.send_to_user(
-                user_id, "notification", _serialize_notification(notification),
+                user_id,
+                "notification",
+                _serialize_notification(notification),
             )
             _emit_notif_metric("ws", severity)
         except Exception as e:
@@ -186,9 +195,8 @@ async def create_notification(
     # Email — only fires for error-severity by default, to avoid inbox
     # noise. Operators can override per-user via prefs.email_for_info=true
     # if they really want everything.
-    email_eligible = (
-        severity == "error"
-        or (prefs and prefs.get("email_for_info") is True)
+    email_eligible = severity == "error" or (
+        prefs and prefs.get("email_for_info") is True
     )
     if email_eligible and _settings_allows(prefs, type_key=type, channel_key="email"):
         ok = await _send_email(

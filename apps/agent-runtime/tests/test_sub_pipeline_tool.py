@@ -11,12 +11,12 @@ import pytest
 from engine.tools.base import BaseTool, ToolRegistry, ToolResult
 from engine.tools.sub_pipeline import SubPipelineTool
 
-
 # ── Test helpers ──────────────────────────────────────────────────
 
 
 class EchoTool(BaseTool):
     """Returns its arguments as JSON output."""
+
     name = "echo"
     description = "Echo arguments"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -27,6 +27,7 @@ class EchoTool(BaseTool):
 
 class FailTool(BaseTool):
     """Always returns an error."""
+
     name = "fail"
     description = "Always fails"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -37,6 +38,7 @@ class FailTool(BaseTool):
 
 class SlowTool(BaseTool):
     """Takes some time to execute."""
+
     name = "slow"
     description = "Slow tool"
     input_schema: dict[str, Any] = {"type": "object", "properties": {}}
@@ -67,21 +69,23 @@ class TestSubPipelineTool:
     @pytest.mark.asyncio
     async def test_basic_sub_pipeline(self, tool: SubPipelineTool) -> None:
         """A 2-node echo pipeline should execute both nodes and return results."""
-        result = await tool.execute({
-            "nodes": [
-                {
-                    "id": "n1",
-                    "tool_name": "echo",
-                    "arguments": {"msg": "hello"},
-                },
-                {
-                    "id": "n2",
-                    "tool_name": "echo",
-                    "arguments": {"msg": "world"},
-                    "depends_on": ["n1"],
-                },
-            ],
-        })
+        result = await tool.execute(
+            {
+                "nodes": [
+                    {
+                        "id": "n1",
+                        "tool_name": "echo",
+                        "arguments": {"msg": "hello"},
+                    },
+                    {
+                        "id": "n2",
+                        "tool_name": "echo",
+                        "arguments": {"msg": "world"},
+                        "depends_on": ["n1"],
+                    },
+                ],
+            }
+        )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -93,26 +97,26 @@ class TestSubPipelineTool:
         assert len(parsed["execution_path"]) == 2
 
     @pytest.mark.asyncio
-    async def test_sub_pipeline_with_context(
-        self, tool: SubPipelineTool
-    ) -> None:
+    async def test_sub_pipeline_with_context(self, tool: SubPipelineTool) -> None:
         """Context data is accessible in the sub-pipeline via input_mappings."""
-        result = await tool.execute({
-            "nodes": [
-                {
-                    "id": "n1",
-                    "tool_name": "echo",
-                    "arguments": {},
-                    "input_mappings": {
-                        "value": {
-                            "source_node": "ctx",
-                            "source_field": "data",
+        result = await tool.execute(
+            {
+                "nodes": [
+                    {
+                        "id": "n1",
+                        "tool_name": "echo",
+                        "arguments": {},
+                        "input_mappings": {
+                            "value": {
+                                "source_node": "ctx",
+                                "source_field": "data",
+                            },
                         },
                     },
-                },
-            ],
-            "context": {"ctx": {"data": "from_context"}},
-        })
+                ],
+                "context": {"ctx": {"data": "from_context"}},
+            }
+        )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -121,29 +125,29 @@ class TestSubPipelineTool:
         assert node_output["value"] == "from_context"
 
     @pytest.mark.asyncio
-    async def test_sub_pipeline_timeout(
-        self, tool: SubPipelineTool
-    ) -> None:
+    async def test_sub_pipeline_timeout(self, tool: SubPipelineTool) -> None:
         """A sub-pipeline with a tight timeout and slow tools should handle timeout."""
-        result = await tool.execute({
-            "nodes": [
-                {
-                    "id": "s1",
-                    "tool_name": "slow",
-                },
-                {
-                    "id": "s2",
-                    "tool_name": "slow",
-                    "depends_on": ["s1"],
-                },
-                {
-                    "id": "s3",
-                    "tool_name": "slow",
-                    "depends_on": ["s2"],
-                },
-            ],
-            "timeout_seconds": 5,  # Use a minimum valid timeout
-        })
+        result = await tool.execute(
+            {
+                "nodes": [
+                    {
+                        "id": "s1",
+                        "tool_name": "slow",
+                    },
+                    {
+                        "id": "s2",
+                        "tool_name": "slow",
+                        "depends_on": ["s1"],
+                    },
+                    {
+                        "id": "s3",
+                        "tool_name": "slow",
+                        "depends_on": ["s2"],
+                    },
+                ],
+                "timeout_seconds": 5,  # Use a minimum valid timeout
+            }
+        )
 
         # The tool should still return a result (not crash)
         assert not result.is_error or result.is_error
@@ -155,20 +159,22 @@ class TestSubPipelineTool:
         self, tool: SubPipelineTool
     ) -> None:
         """A sub-pipeline with a failing node propagates the error."""
-        result = await tool.execute({
-            "nodes": [
-                {
-                    "id": "good",
-                    "tool_name": "echo",
-                    "arguments": {"ok": True},
-                },
-                {
-                    "id": "bad",
-                    "tool_name": "fail",
-                    "depends_on": ["good"],
-                },
-            ],
-        })
+        result = await tool.execute(
+            {
+                "nodes": [
+                    {
+                        "id": "good",
+                        "tool_name": "echo",
+                        "arguments": {"ok": True},
+                    },
+                    {
+                        "id": "bad",
+                        "tool_name": "fail",
+                        "depends_on": ["good"],
+                    },
+                ],
+            }
+        )
 
         assert not result.is_error  # The tool itself succeeds, but reports failure
         parsed = json.loads(result.content)
@@ -177,43 +183,43 @@ class TestSubPipelineTool:
         assert parsed["node_results"]["bad"]["status"] == "failed"
 
     @pytest.mark.asyncio
-    async def test_sub_pipeline_with_conditions(
-        self, tool: SubPipelineTool
-    ) -> None:
+    async def test_sub_pipeline_with_conditions(self, tool: SubPipelineTool) -> None:
         """Sub-pipeline with conditional node executes conditionally."""
-        result = await tool.execute({
-            "nodes": [
-                {
-                    "id": "source",
-                    "tool_name": "echo",
-                    "arguments": {"flag": "yes"},
-                },
-                {
-                    "id": "conditional_yes",
-                    "tool_name": "echo",
-                    "arguments": {"branch": "taken"},
-                    "depends_on": ["source"],
-                    "condition": {
-                        "source_node": "source",
-                        "field": "flag",
-                        "operator": "eq",
-                        "value": "yes",
+        result = await tool.execute(
+            {
+                "nodes": [
+                    {
+                        "id": "source",
+                        "tool_name": "echo",
+                        "arguments": {"flag": "yes"},
                     },
-                },
-                {
-                    "id": "conditional_no",
-                    "tool_name": "echo",
-                    "arguments": {"branch": "skipped"},
-                    "depends_on": ["source"],
-                    "condition": {
-                        "source_node": "source",
-                        "field": "flag",
-                        "operator": "eq",
-                        "value": "no",
+                    {
+                        "id": "conditional_yes",
+                        "tool_name": "echo",
+                        "arguments": {"branch": "taken"},
+                        "depends_on": ["source"],
+                        "condition": {
+                            "source_node": "source",
+                            "field": "flag",
+                            "operator": "eq",
+                            "value": "yes",
+                        },
                     },
-                },
-            ],
-        })
+                    {
+                        "id": "conditional_no",
+                        "tool_name": "echo",
+                        "arguments": {"branch": "skipped"},
+                        "depends_on": ["source"],
+                        "condition": {
+                            "source_node": "source",
+                            "field": "flag",
+                            "operator": "eq",
+                            "value": "no",
+                        },
+                    },
+                ],
+            }
+        )
 
         assert not result.is_error
         parsed = json.loads(result.content)
@@ -222,29 +228,29 @@ class TestSubPipelineTool:
         assert "conditional_no" in parsed["skipped_nodes"]
 
     @pytest.mark.asyncio
-    async def test_sub_pipeline_parallel_nodes(
-        self, tool: SubPipelineTool
-    ) -> None:
+    async def test_sub_pipeline_parallel_nodes(self, tool: SubPipelineTool) -> None:
         """Sub-pipeline with 3 independent nodes executes them in parallel."""
-        result = await tool.execute({
-            "nodes": [
-                {
-                    "id": "p1",
-                    "tool_name": "echo",
-                    "arguments": {"task": 1},
-                },
-                {
-                    "id": "p2",
-                    "tool_name": "echo",
-                    "arguments": {"task": 2},
-                },
-                {
-                    "id": "p3",
-                    "tool_name": "echo",
-                    "arguments": {"task": 3},
-                },
-            ],
-        })
+        result = await tool.execute(
+            {
+                "nodes": [
+                    {
+                        "id": "p1",
+                        "tool_name": "echo",
+                        "arguments": {"task": 1},
+                    },
+                    {
+                        "id": "p2",
+                        "tool_name": "echo",
+                        "arguments": {"task": 2},
+                    },
+                    {
+                        "id": "p3",
+                        "tool_name": "echo",
+                        "arguments": {"task": 3},
+                    },
+                ],
+            }
+        )
 
         assert not result.is_error
         parsed = json.loads(result.content)

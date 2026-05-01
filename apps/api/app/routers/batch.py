@@ -1,4 +1,5 @@
 """Batch Execution API — Execute an agent against multiple inputs in parallel."""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,10 +16,10 @@ from app.core.responses import error, success
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.agent import Agent, AgentStatus, AgentType
-from models.execution import Execution, ExecutionStatus
 from models.user import User
 
 router = APIRouter(prefix="/api/batch", tags=["batch"])
@@ -27,12 +28,14 @@ router = APIRouter(prefix="/api/batch", tags=["batch"])
 async def _get_redis():
     import redis.asyncio as aioredis
     from app.core.config import settings
+
     return aioredis.from_url(settings.redis_url, decode_responses=True)
 
 
 async def _save_batch(batch_id: str, data: dict[str, Any]) -> None:
     """Persist batch state to Redis (survives API restarts)."""
     import json
+
     r = await _get_redis()
     await r.set(f"batch:{batch_id}", json.dumps(data, default=str), ex=86400)  # 24h TTL
     await r.aclose()
@@ -41,6 +44,7 @@ async def _save_batch(batch_id: str, data: dict[str, Any]) -> None:
 async def _load_batch(batch_id: str) -> dict[str, Any] | None:
     """Load batch state from Redis."""
     import json
+
     r = await _get_redis()
     raw = await r.get(f"batch:{batch_id}")
     await r.aclose()
@@ -95,16 +99,17 @@ async def batch_execute(
     await _save_batch(batch_id, batch_state)
 
     # Launch batch execution in background
-    asyncio.create_task(
-        _run_batch(batch_id, agent, user, inputs, max_concurrency, db)
-    )
+    asyncio.create_task(_run_batch(batch_id, agent, user, inputs, max_concurrency, db))
 
-    return success({
-        "batch_id": batch_id,
-        "status": "running",
-        "total_inputs": len(inputs),
-        "max_concurrency": max_concurrency,
-    }, status_code=202)
+    return success(
+        {
+            "batch_id": batch_id,
+            "status": "running",
+            "total_inputs": len(inputs),
+            "max_concurrency": max_concurrency,
+        },
+        status_code=202,
+    )
 
 
 @router.get("/{batch_id}")
@@ -138,7 +143,7 @@ async def _run_batch(
     async def run_one(idx: int, inp: dict[str, Any]) -> None:
         async with semaphore:
             message = inp.get("message", "")
-            context = inp.get("context", {})
+            inp.get("context", {})
 
             try:
                 from engine.llm_router import LLMRouter
@@ -168,25 +173,29 @@ async def _run_batch(
                 result = await executor.invoke(message)
 
                 current = await _load_batch(batch_id) or job
-                current.setdefault("results", []).append({
-                    "index": idx,
-                    "status": "completed",
-                    "output": result.output[:2000],
-                    "input_tokens": result.input_tokens,
-                    "output_tokens": result.output_tokens,
-                    "cost": float(result.cost),
-                    "duration_ms": result.duration_ms,
-                })
+                current.setdefault("results", []).append(
+                    {
+                        "index": idx,
+                        "status": "completed",
+                        "output": result.output[:2000],
+                        "input_tokens": result.input_tokens,
+                        "output_tokens": result.output_tokens,
+                        "cost": float(result.cost),
+                        "duration_ms": result.duration_ms,
+                    }
+                )
                 current["completed"] = current.get("completed", 0) + 1
                 await _save_batch(batch_id, current)
 
             except Exception as e:
                 current = await _load_batch(batch_id) or job
-                current.setdefault("results", []).append({
-                    "index": idx,
-                    "status": "failed",
-                    "error": str(e)[:500],
-                })
+                current.setdefault("results", []).append(
+                    {
+                        "index": idx,
+                        "status": "failed",
+                        "error": str(e)[:500],
+                    }
+                )
                 current["failed"] = current.get("failed", 0) + 1
                 await _save_batch(batch_id, current)
 

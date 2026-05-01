@@ -106,7 +106,9 @@ class MCPClient:
 
         return headers
 
-    def _make_request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _make_request(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         return {
             "jsonrpc": JSON_RPC_VERSION,
             "id": str(uuid.uuid4()),
@@ -143,14 +145,17 @@ class MCPClient:
 
     async def initialize(self) -> dict[str, Any]:
         result = await self._send(
-            self._make_request("initialize", {
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {
-                    "name": "Abenix",
-                    "version": "0.1.0",
+            self._make_request(
+                "initialize",
+                {
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "Abenix",
+                        "version": "0.1.0",
+                    },
                 },
-            })
+            )
         )
 
         self._server_info = result.get("serverInfo", {})
@@ -169,20 +174,25 @@ class MCPClient:
         result = await self._send(self._make_request("tools/list"))
         tools: list[MCPTool] = []
         for t in result.get("tools", []):
-            tools.append(MCPTool(
-                name=t["name"],
-                description=t.get("description", ""),
-                input_schema=t.get("inputSchema", {}),
-                annotations=t.get("annotations", {}),
-            ))
+            tools.append(
+                MCPTool(
+                    name=t["name"],
+                    description=t.get("description", ""),
+                    input_schema=t.get("inputSchema", {}),
+                    annotations=t.get("annotations", {}),
+                )
+            )
         return tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         result = await self._send(
-            self._make_request("tools/call", {
-                "name": name,
-                "arguments": arguments,
-            })
+            self._make_request(
+                "tools/call",
+                {
+                    "name": name,
+                    "arguments": arguments,
+                },
+            )
         )
 
         content_parts = result.get("content", [])
@@ -204,18 +214,18 @@ class MCPClient:
         result = await self._send(self._make_request("resources/list"))
         resources: list[MCPResource] = []
         for r in result.get("resources", []):
-            resources.append(MCPResource(
-                uri=r["uri"],
-                name=r.get("name", ""),
-                description=r.get("description", ""),
-                mime_type=r.get("mimeType"),
-            ))
+            resources.append(
+                MCPResource(
+                    uri=r["uri"],
+                    name=r.get("name", ""),
+                    description=r.get("description", ""),
+                    mime_type=r.get("mimeType"),
+                )
+            )
         return resources
 
     async def read_resource(self, uri: str) -> MCPResourceContent:
-        result = await self._send(
-            self._make_request("resources/read", {"uri": uri})
-        )
+        result = await self._send(self._make_request("resources/read", {"uri": uri}))
         contents = result.get("contents", [])
         if not contents:
             return MCPResourceContent(uri=uri, text="")
@@ -231,30 +241,39 @@ class MCPClient:
         result = await self._send(self._make_request("prompts/list"))
         prompts: list[MCPPrompt] = []
         for p in result.get("prompts", []):
-            prompts.append(MCPPrompt(
-                name=p["name"],
-                description=p.get("description", ""),
-                arguments=p.get("arguments", []),
-            ))
+            prompts.append(
+                MCPPrompt(
+                    name=p["name"],
+                    description=p.get("description", ""),
+                    arguments=p.get("arguments", []),
+                )
+            )
         return prompts
 
     async def get_prompt(
         self, name: str, arguments: dict[str, str] | None = None
     ) -> list[MCPPromptMessage]:
         result = await self._send(
-            self._make_request("prompts/get", {
-                "name": name,
-                "arguments": arguments or {},
-            })
+            self._make_request(
+                "prompts/get",
+                {
+                    "name": name,
+                    "arguments": arguments or {},
+                },
+            )
         )
         messages: list[MCPPromptMessage] = []
         for m in result.get("messages", []):
             content = m.get("content", {})
-            text = content.get("text", "") if isinstance(content, dict) else str(content)
-            messages.append(MCPPromptMessage(
-                role=m.get("role", "user"),
-                content=text,
-            ))
+            text = (
+                content.get("text", "") if isinstance(content, dict) else str(content)
+            )
+            messages.append(
+                MCPPromptMessage(
+                    role=m.get("role", "user"),
+                    content=text,
+                )
+            )
         return messages
 
     async def health_check(self) -> bool:

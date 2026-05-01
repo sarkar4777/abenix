@@ -47,7 +47,14 @@ class RegexExtractorTool(BaseTool):
             },
             "operation": {
                 "type": "string",
-                "enum": ["extract", "extract_preset", "replace", "split", "validate", "list_presets"],
+                "enum": [
+                    "extract",
+                    "extract_preset",
+                    "replace",
+                    "split",
+                    "validate",
+                    "list_presets",
+                ],
                 "description": "Regex operation",
                 "default": "extract",
             },
@@ -70,7 +77,10 @@ class RegexExtractorTool(BaseTool):
             },
             "flags": {
                 "type": "array",
-                "items": {"type": "string", "enum": ["ignorecase", "multiline", "dotall"]},
+                "items": {
+                    "type": "string",
+                    "enum": ["ignorecase", "multiline", "dotall"],
+                },
                 "description": "Regex flags",
             },
             "group": {
@@ -148,12 +158,14 @@ class RegexExtractorTool(BaseTool):
             except IndexError:
                 match_val = m.group(0)
 
-            matches.append({
-                "match": match_val,
-                "start": m.start(),
-                "end": m.end(),
-                "groups": list(m.groups()) if m.groups() else [],
-            })
+            matches.append(
+                {
+                    "match": match_val,
+                    "start": m.start(),
+                    "end": m.end(),
+                    "groups": list(m.groups()) if m.groups() else [],
+                }
+            )
 
         return {
             "pattern": pattern,

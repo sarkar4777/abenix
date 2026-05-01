@@ -1,4 +1,5 @@
 """ML Model Tool — run inference on registered ML models."""
+
 from __future__ import annotations
 
 import json
@@ -54,11 +55,16 @@ class MLModelTool(BaseTool):
 
     async def _get_conn(self) -> Any:
         import asyncpg
+
         url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
         # Strip ssl params that asyncpg doesn't understand
         if "?" in url:
             base, query = url.split("?", 1)
-            kept = [p for p in query.split("&") if not p.lower().startswith(("ssl=", "sslmode="))]
+            kept = [
+                p
+                for p in query.split("&")
+                if not p.lower().startswith(("ssl=", "sslmode="))
+            ]
             url = base + ("?" + "&".join(kept) if kept else "")
         return await asyncpg.connect(url)
 
@@ -83,17 +89,22 @@ class MLModelTool(BaseTool):
     async def _list_models(self) -> ToolResult:
         conn = await self._get_conn()
         try:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT name, version, framework, status, description,
                        input_schema, output_schema, training_metrics, tags, is_active
                 FROM ml_models
                 WHERE tenant_id = $1::uuid AND status != 'deleted'
                 ORDER BY name, is_active DESC, updated_at DESC
                 LIMIT 50
-            """, self.tenant_id)
+            """,
+                self.tenant_id,
+            )
 
             if not rows:
-                return ToolResult(content="No ML models registered. Upload one via POST /api/ml-models.")
+                return ToolResult(
+                    content="No ML models registered. Upload one via POST /api/ml-models."
+                )
 
             lines = [f"Available ML Models ({len(rows)}):\n"]
             for r in rows:
@@ -115,19 +126,27 @@ class MLModelTool(BaseTool):
         model_name = args.get("model_name", "")
         input_data = args.get("input_data")
         if not model_name:
-            return ToolResult(content="Error: model_name is required for predict", is_error=True)
+            return ToolResult(
+                content="Error: model_name is required for predict", is_error=True
+            )
         if not input_data:
-            return ToolResult(content="Error: input_data is required for predict", is_error=True)
+            return ToolResult(
+                content="Error: input_data is required for predict", is_error=True
+            )
 
         conn = await self._get_conn()
         try:
             # Find the ACTIVE version of the model (is_active=true takes priority)
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT id, file_uri, framework, input_schema, output_schema, name, version
                 FROM ml_models
                 WHERE tenant_id = $1::uuid AND name = $2 AND status = 'ready'
                 ORDER BY is_active DESC, updated_at DESC LIMIT 1
-            """, self.tenant_id, model_name)
+            """,
+                self.tenant_id,
+                model_name,
+            )
 
             if not row:
                 return ToolResult(
@@ -135,15 +154,18 @@ class MLModelTool(BaseTool):
                     is_error=True,
                 )
 
-            model_id = str(row["id"])
+            str(row["id"])
 
             # Check for k8s deployment
-            dep_row = await conn.fetchrow("""
+            dep_row = await conn.fetchrow(
+                """
                 SELECT endpoint_url, deployment_type, status
                 FROM ml_model_deployments
                 WHERE model_id = $1::uuid AND status = 'running' AND endpoint_url IS NOT NULL
                 ORDER BY created_at DESC LIMIT 1
-            """, row["id"])
+            """,
+                row["id"],
+            )
 
             predictions = None
             source = "local"
@@ -152,18 +174,25 @@ class MLModelTool(BaseTool):
             if dep_row and dep_row["endpoint_url"]:
                 try:
                     import httpx
+
                     async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.post(dep_row["endpoint_url"], json={"input_data": input_data})
+                        resp = await client.post(
+                            dep_row["endpoint_url"], json={"input_data": input_data}
+                        )
                         resp.raise_for_status()
                         predictions = resp.json().get("predictions")
                         source = "k8s"
                 except Exception as e:
-                    logger.warning("K8s prediction failed, falling back to local: %s", e)
+                    logger.warning(
+                        "K8s prediction failed, falling back to local: %s", e
+                    )
 
             # Fall back to local inference
             if predictions is None:
                 predictions = await self._local_predict(
-                    row["file_uri"], row["framework"], input_data,
+                    row["file_uri"],
+                    row["framework"],
+                    input_data,
                 )
                 source = "local"
 
@@ -184,7 +213,9 @@ class MLModelTool(BaseTool):
         finally:
             await conn.close()
 
-    async def _local_predict(self, file_uri: str, framework: str, input_data: Any) -> Any:
+    async def _local_predict(
+        self, file_uri: str, framework: str, input_data: Any
+    ) -> Any:
         """Load model from disk and run inference."""
         import numpy as np
 
@@ -196,7 +227,11 @@ class MLModelTool(BaseTool):
         else:
             raise ValueError(f"input_data must be dict or list, got {type(input_data)}")
 
-        X = np.array([features]) if not isinstance(features[0], (list, np.ndarray)) else np.array(features)
+        X = (
+            np.array([features])
+            if not isinstance(features[0], (list, np.ndarray))
+            else np.array(features)
+        )
 
         # Load model (with simple cache)
         cache_key = f"{file_uri}:{framework}"
@@ -207,12 +242,15 @@ class MLModelTool(BaseTool):
 
             if framework in ("sklearn", "xgboost"):
                 import joblib
+
                 _MODEL_CACHE[cache_key] = joblib.load(file_uri)
             elif framework == "onnx":
                 import onnxruntime as ort
+
                 _MODEL_CACHE[cache_key] = ort.InferenceSession(file_uri)
             elif framework == "pytorch":
                 import torch
+
                 model = torch.load(file_uri, map_location="cpu", weights_only=False)
                 model.eval()
                 _MODEL_CACHE[cache_key] = model
@@ -229,14 +267,21 @@ class MLModelTool(BaseTool):
                 result["probabilities"] = model.predict_proba(X).tolist()
             if hasattr(model, "classes_"):
                 result["classes"] = [str(c) for c in model.classes_]
-                result["predicted_class"] = str(model.classes_[preds[0]]) if preds.size > 0 else None
+                result["predicted_class"] = (
+                    str(model.classes_[preds[0]]) if preds.size > 0 else None
+                )
             return result
         elif framework == "onnx":
             input_name = model.get_inputs()[0].name
             preds = model.run(None, {input_name: X.astype(np.float32)})
-            return {"predictions": [p.tolist() if hasattr(p, 'tolist') else p for p in preds]}
+            return {
+                "predictions": [
+                    p.tolist() if hasattr(p, "tolist") else p for p in preds
+                ]
+            }
         elif framework == "pytorch":
             import torch
+
             with torch.no_grad():
                 output = model(torch.FloatTensor(X))
                 return {"predictions": output.numpy().tolist()}
@@ -250,17 +295,23 @@ class MLModelTool(BaseTool):
 
         conn = await self._get_conn()
         try:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT name, version, framework, status, description,
                        input_schema, output_schema, training_metrics, tags,
                        file_size_bytes, created_at
                 FROM ml_models
                 WHERE tenant_id = $1::uuid AND name = $2 AND status != 'deleted'
                 ORDER BY updated_at DESC LIMIT 1
-            """, self.tenant_id, model_name)
+            """,
+                self.tenant_id,
+                model_name,
+            )
 
             if not row:
-                return ToolResult(content=f"Model '{model_name}' not found.", is_error=True)
+                return ToolResult(
+                    content=f"Model '{model_name}' not found.", is_error=True
+                )
 
             info = {
                 "name": row["name"],
@@ -268,11 +319,27 @@ class MLModelTool(BaseTool):
                 "framework": row["framework"],
                 "status": row["status"],
                 "description": row["description"],
-                "input_schema": json.loads(row["input_schema"]) if isinstance(row["input_schema"], str) else row["input_schema"],
-                "output_schema": json.loads(row["output_schema"]) if isinstance(row["output_schema"], str) else row["output_schema"],
-                "training_metrics": json.loads(row["training_metrics"]) if isinstance(row["training_metrics"], str) else row["training_metrics"],
+                "input_schema": (
+                    json.loads(row["input_schema"])
+                    if isinstance(row["input_schema"], str)
+                    else row["input_schema"]
+                ),
+                "output_schema": (
+                    json.loads(row["output_schema"])
+                    if isinstance(row["output_schema"], str)
+                    else row["output_schema"]
+                ),
+                "training_metrics": (
+                    json.loads(row["training_metrics"])
+                    if isinstance(row["training_metrics"], str)
+                    else row["training_metrics"]
+                ),
                 "tags": row["tags"],
-                "file_size_mb": round(row["file_size_bytes"] / (1024 * 1024), 2) if row["file_size_bytes"] else None,
+                "file_size_mb": (
+                    round(row["file_size_bytes"] / (1024 * 1024), 2)
+                    if row["file_size_bytes"]
+                    else None
+                ),
             }
             return ToolResult(
                 content=f"Model info for '{model_name}':\n\n{json.dumps(info, indent=2, default=str)}",

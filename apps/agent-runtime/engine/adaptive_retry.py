@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
@@ -57,7 +56,7 @@ async def _fixed_retry(
             last_error = str(e)
             if attempt < policy.max_retries:
                 delay = min(
-                    policy.base_delay * (policy.backoff_factor ** attempt),
+                    policy.base_delay * (policy.backoff_factor**attempt),
                     policy.max_delay,
                 )
                 await asyncio.sleep(delay)
@@ -115,7 +114,9 @@ async def _adaptive_retry(
                 advice = json.loads(advice_raw)
 
                 if not advice.get("retry", True):
-                    modifications.append(f"LLM advised giving up: {advice.get('reason', 'unknown')}")
+                    modifications.append(
+                        f"LLM advised giving up: {advice.get('reason', 'unknown')}"
+                    )
                     break
 
                 if "modified_args" in advice:
@@ -125,10 +126,12 @@ async def _adaptive_retry(
 
             except (json.JSONDecodeError, Exception):
                 # If LLM advice fails, fall back to simple retry
-                modifications.append(f"Attempt {attempt + 1}: LLM advice unavailable, retrying as-is")
+                modifications.append(
+                    f"Attempt {attempt + 1}: LLM advice unavailable, retrying as-is"
+                )
 
             delay = min(
-                policy.base_delay * (policy.backoff_factor ** attempt),
+                policy.base_delay * (policy.backoff_factor**attempt),
                 policy.max_delay,
             )
             await asyncio.sleep(delay)

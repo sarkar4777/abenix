@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 import redis.asyncio as aioredis
 from fastapi import Request
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
-
 
 _REDIS_POOL: dict[str, aioredis.Redis] = {}
 _REDIS_LOCK = asyncio.Lock()
@@ -88,6 +86,7 @@ def _get_user_id(request: Request) -> str | None:
     if not auth.startswith("Bearer "):
         return None
     from app.core.security import verify_token
+
     payload = verify_token(auth.removeprefix("Bearer "))
     return payload.get("sub")
 
@@ -114,7 +113,9 @@ _DEFAULT_WINDOW = int(_os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
 _DEFAULT_AUTH_LIMIT = int(_os.environ.get("RATE_LIMIT_AUTH_REQ_PER_MIN", "30"))
 
 
-async def rate_limit_user(request: Request, limit: int | None = None, window: int | None = None) -> JSONResponse | None:
+async def rate_limit_user(
+    request: Request, limit: int | None = None, window: int | None = None
+) -> JSONResponse | None:
     """Rate limit by authenticated user ID, falling back to IP."""
     user_id = _get_user_id(request)
     if user_id:
@@ -136,7 +137,9 @@ async def rate_limit_auth(request: Request) -> JSONResponse | None:
     ip = _get_client_ip(request)
     key = f"auth:{ip}"
     allowed, remaining, retry_after = await sliding_window_check(
-        key, _DEFAULT_AUTH_LIMIT, _DEFAULT_WINDOW,
+        key,
+        _DEFAULT_AUTH_LIMIT,
+        _DEFAULT_WINDOW,
     )
     if not allowed:
         return _rate_limit_response(retry_after)

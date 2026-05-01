@@ -49,9 +49,15 @@ class CognifyJob(UUIDMixin, TenantMixin, TimestampMixin, Base):
     cost_usd: Mapped[float] = mapped_column(Numeric(10, 6), default=0)
     # Per-provider subtotals so the UI can show "Anthropic $X + OpenAI
     # fallback $Y". These sum to cost_usd.
-    anthropic_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
-    openai_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
-    google_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
+    anthropic_cost: Mapped[float] = mapped_column(
+        Numeric(10, 6), default=0, nullable=False
+    )
+    openai_cost: Mapped[float] = mapped_column(
+        Numeric(10, 6), default=0, nullable=False
+    )
+    google_cost: Mapped[float] = mapped_column(
+        Numeric(10, 6), default=0, nullable=False
+    )
     other_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
     duration_seconds: Mapped[float | None] = mapped_column(
         Numeric(10, 2), nullable=True

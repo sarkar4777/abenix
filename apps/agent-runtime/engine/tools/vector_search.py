@@ -78,9 +78,7 @@ class VectorSearchTool(BaseTool):
             source = r.get("filename", "unknown")
             score = r.get("score", 0)
             text = r.get("text", "")
-            output_parts.append(
-                f"[{i}] (score: {score:.3f}, source: {source})\n{text}"
-            )
+            output_parts.append(f"[{i}] (score: {score:.3f}, source: {source})\n{text}")
 
         return ToolResult(
             content="\n\n---\n\n".join(output_parts),
@@ -112,12 +110,14 @@ class VectorSearchTool(BaseTool):
         results = []
         for match in response.get("matches", []):
             meta = match.get("metadata", {})
-            results.append({
-                "score": match.get("score", 0),
-                "text": meta.get("text", ""),
-                "filename": meta.get("filename", ""),
-                "doc_id": meta.get("doc_id", ""),
-                "chunk_index": meta.get("chunk_index", 0),
-            })
+            results.append(
+                {
+                    "score": match.get("score", 0),
+                    "text": meta.get("text", ""),
+                    "filename": meta.get("filename", ""),
+                    "doc_id": meta.get("doc_id", ""),
+                    "chunk_index": meta.get("chunk_index", 0),
+                }
+            )
 
         return results

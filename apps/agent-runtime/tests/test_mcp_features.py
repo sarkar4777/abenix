@@ -11,7 +11,6 @@ import pytest
 
 from engine.mcp_client import (
     MCPClient,
-    MCPError,
     MCPPrompt,
     MCPPromptMessage,
     MCPResource,
@@ -81,7 +80,9 @@ class TestMCPDataclasses:
 
     def test_mcp_prompt_with_arguments(self):
         args = [{"name": "language", "required": True}]
-        prompt = MCPPrompt(name="translate", description="Translate text", arguments=args)
+        prompt = MCPPrompt(
+            name="translate", description="Translate text", arguments=args
+        )
         assert len(prompt.arguments) == 1
         assert prompt.arguments[0]["name"] == "language"
 
@@ -91,7 +92,9 @@ class TestMCPDataclasses:
         assert msg.content == "Hello, world!"
 
     def test_mcp_resource_content_text(self):
-        rc = MCPResourceContent(uri="file:///readme.md", mime_type="text/markdown", text="# Hi")
+        rc = MCPResourceContent(
+            uri="file:///readme.md", mime_type="text/markdown", text="# Hi"
+        )
         assert rc.uri == "file:///readme.md"
         assert rc.mime_type == "text/markdown"
         assert rc.text == "# Hi"
@@ -104,7 +107,12 @@ class TestMCPDataclasses:
         assert rc.mime_type is None
 
     def test_mcp_resource_dataclass(self):
-        r = MCPResource(uri="file:///data.csv", name="data", description="Data file", mime_type="text/csv")
+        r = MCPResource(
+            uri="file:///data.csv",
+            name="data",
+            description="Data file",
+            mime_type="text/csv",
+        )
         assert r.uri == "file:///data.csv"
         assert r.name == "data"
         assert r.mime_type == "text/csv"
@@ -120,15 +128,17 @@ class TestMCPDataclasses:
 class TestMCPClientNewMethods:
     @pytest.mark.asyncio
     async def test_read_resource_returns_text(self):
-        client = _make_client_with_mock({
-            "contents": [
-                {
-                    "uri": "file:///readme.md",
-                    "mimeType": "text/markdown",
-                    "text": "# Project README",
-                }
-            ]
-        })
+        client = _make_client_with_mock(
+            {
+                "contents": [
+                    {
+                        "uri": "file:///readme.md",
+                        "mimeType": "text/markdown",
+                        "text": "# Project README",
+                    }
+                ]
+            }
+        )
 
         content = await client.read_resource("file:///readme.md")
         assert isinstance(content, MCPResourceContent)
@@ -139,15 +149,17 @@ class TestMCPClientNewMethods:
 
     @pytest.mark.asyncio
     async def test_read_resource_returns_blob(self):
-        client = _make_client_with_mock({
-            "contents": [
-                {
-                    "uri": "file:///image.png",
-                    "mimeType": "image/png",
-                    "blob": "aW1hZ2VkYXRh",
-                }
-            ]
-        })
+        client = _make_client_with_mock(
+            {
+                "contents": [
+                    {
+                        "uri": "file:///image.png",
+                        "mimeType": "image/png",
+                        "blob": "aW1hZ2VkYXRh",
+                    }
+                ]
+            }
+        )
 
         content = await client.read_resource("file:///image.png")
         assert content.blob == "aW1hZ2VkYXRh"
@@ -164,19 +176,21 @@ class TestMCPClientNewMethods:
 
     @pytest.mark.asyncio
     async def test_list_prompts_parses_response(self):
-        client = _make_client_with_mock({
-            "prompts": [
-                {
-                    "name": "summarize",
-                    "description": "Summarize a document",
-                    "arguments": [{"name": "length", "required": False}],
-                },
-                {
-                    "name": "translate",
-                    "description": "Translate text",
-                },
-            ]
-        })
+        client = _make_client_with_mock(
+            {
+                "prompts": [
+                    {
+                        "name": "summarize",
+                        "description": "Summarize a document",
+                        "arguments": [{"name": "length", "required": False}],
+                    },
+                    {
+                        "name": "translate",
+                        "description": "Translate text",
+                    },
+                ]
+            }
+        )
 
         prompts = await client.list_prompts()
         assert len(prompts) == 2
@@ -194,12 +208,20 @@ class TestMCPClientNewMethods:
 
     @pytest.mark.asyncio
     async def test_get_prompt_returns_messages(self):
-        client = _make_client_with_mock({
-            "messages": [
-                {"role": "user", "content": {"type": "text", "text": "Summarize this"}},
-                {"role": "assistant", "content": {"type": "text", "text": "Here is a summary..."}},
-            ]
-        })
+        client = _make_client_with_mock(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": {"type": "text", "text": "Summarize this"},
+                    },
+                    {
+                        "role": "assistant",
+                        "content": {"type": "text", "text": "Here is a summary..."},
+                    },
+                ]
+            }
+        )
 
         messages = await client.get_prompt("summarize", {"length": "short"})
         assert len(messages) == 2
@@ -211,11 +233,13 @@ class TestMCPClientNewMethods:
 
     @pytest.mark.asyncio
     async def test_get_prompt_no_arguments(self):
-        client = _make_client_with_mock({
-            "messages": [
-                {"role": "user", "content": {"type": "text", "text": "Hello"}},
-            ]
-        })
+        client = _make_client_with_mock(
+            {
+                "messages": [
+                    {"role": "user", "content": {"type": "text", "text": "Hello"}},
+                ]
+            }
+        )
 
         messages = await client.get_prompt("greet")
         assert len(messages) == 1
@@ -230,11 +254,13 @@ class TestMCPClientNewMethods:
     @pytest.mark.asyncio
     async def test_get_prompt_string_content_fallback(self):
         """When content is a bare string (not a dict), should still work."""
-        client = _make_client_with_mock({
-            "messages": [
-                {"role": "user", "content": "plain text content"},
-            ]
-        })
+        client = _make_client_with_mock(
+            {
+                "messages": [
+                    {"role": "user", "content": "plain text content"},
+                ]
+            }
+        )
 
         messages = await client.get_prompt("simple")
         assert len(messages) == 1
@@ -253,25 +279,33 @@ class TestMCPToolWrapper:
             return_value=MCPToolResult(content="file contents here", is_error=False)
         )
 
-        wrapper = MCPToolWrapper(client=mock_client, mcp_tool=mcp_tool, security_ctx=None)
+        wrapper = MCPToolWrapper(
+            client=mock_client, mcp_tool=mcp_tool, security_ctx=None
+        )
         result = await wrapper.execute({"path": "/tmp/test.txt"})
 
         assert isinstance(result, ToolResult)
         assert result.content == "file contents here"
         assert result.is_error is False
-        mock_client.call_tool.assert_awaited_once_with("read_file", {"path": "/tmp/test.txt"})
+        mock_client.call_tool.assert_awaited_once_with(
+            "read_file", {"path": "/tmp/test.txt"}
+        )
 
     @pytest.mark.asyncio
     async def test_execute_with_security_context(self):
         mcp_tool = _make_tool(name="delete_file", annotations={"destructiveHint": True})
         mock_client = AsyncMock()
 
-        security_ctx = MCPSecurityContext(MCPSecurityPolicy(block_unapproved_destructive=False))
+        security_ctx = MCPSecurityContext(
+            MCPSecurityPolicy(block_unapproved_destructive=False)
+        )
         mock_client.call_tool = AsyncMock(
             return_value=MCPToolResult(content="deleted", is_error=False)
         )
 
-        wrapper = MCPToolWrapper(client=mock_client, mcp_tool=mcp_tool, security_ctx=security_ctx)
+        wrapper = MCPToolWrapper(
+            client=mock_client, mcp_tool=mcp_tool, security_ctx=security_ctx
+        )
         result = await wrapper.execute({"path": "/tmp/old.txt"})
 
         assert isinstance(result, ToolResult)
@@ -283,9 +317,13 @@ class TestMCPToolWrapper:
         mcp_tool = _make_tool(name="drop_table", annotations={"destructiveHint": True})
         mock_client = AsyncMock()
 
-        security_ctx = MCPSecurityContext(MCPSecurityPolicy(block_unapproved_destructive=True))
+        security_ctx = MCPSecurityContext(
+            MCPSecurityPolicy(block_unapproved_destructive=True)
+        )
 
-        wrapper = MCPToolWrapper(client=mock_client, mcp_tool=mcp_tool, security_ctx=security_ctx)
+        wrapper = MCPToolWrapper(
+            client=mock_client, mcp_tool=mcp_tool, security_ctx=security_ctx
+        )
         result = await wrapper.execute({"table": "users"})
 
         assert result.is_error is True
@@ -345,7 +383,9 @@ class TestResolveTools:
             _make_tool(name="github_create_pr", annotations={"destructiveHint": False}),
         ]
 
-        with patch("engine.agent_executor.build_tool_registry", return_value=builtin_registry):
+        with patch(
+            "engine.agent_executor.build_tool_registry", return_value=builtin_registry
+        ):
             with patch("engine.tool_resolver.MCPClient") as MockClient:
                 mock_instance = AsyncMock()
                 mock_instance.initialize = AsyncMock()
@@ -373,10 +413,14 @@ class TestResolveTools:
     async def test_resolve_failed_mcp_connection_skipped(self):
         builtin_registry = ToolRegistry()
 
-        with patch("engine.agent_executor.build_tool_registry", return_value=builtin_registry):
+        with patch(
+            "engine.agent_executor.build_tool_registry", return_value=builtin_registry
+        ):
             with patch("engine.tool_resolver.MCPClient") as MockClient:
                 mock_instance = AsyncMock()
-                mock_instance.initialize = AsyncMock(side_effect=Exception("Connection refused"))
+                mock_instance.initialize = AsyncMock(
+                    side_effect=Exception("Connection refused")
+                )
                 mock_instance.close = AsyncMock()
                 MockClient.return_value = mock_instance
 
@@ -402,7 +446,9 @@ class TestResolveTools:
 
         remote_tools = [_make_tool(name="calculator")]
 
-        with patch("engine.agent_executor.build_tool_registry", return_value=builtin_registry):
+        with patch(
+            "engine.agent_executor.build_tool_registry", return_value=builtin_registry
+        ):
             with patch("engine.tool_resolver.MCPClient") as MockClient:
                 mock_instance = AsyncMock()
                 mock_instance.initialize = AsyncMock()
@@ -431,7 +477,9 @@ class TestResolveTools:
             _make_tool(name="tool_c"),
         ]
 
-        with patch("engine.agent_executor.build_tool_registry", return_value=builtin_registry):
+        with patch(
+            "engine.agent_executor.build_tool_registry", return_value=builtin_registry
+        ):
             with patch("engine.tool_resolver.MCPClient") as MockClient:
                 mock_instance = AsyncMock()
                 mock_instance.initialize = AsyncMock()
@@ -459,11 +507,15 @@ class TestResolveTools:
         builtin_registry = ToolRegistry()
         policy = MCPSecurityPolicy(max_calls_per_execution=5)
 
-        with patch("engine.agent_executor.build_tool_registry", return_value=builtin_registry):
+        with patch(
+            "engine.agent_executor.build_tool_registry", return_value=builtin_registry
+        ):
             with patch("engine.tool_resolver.MCPClient") as MockClient:
                 mock_instance = AsyncMock()
                 mock_instance.initialize = AsyncMock()
-                mock_instance.list_tools = AsyncMock(return_value=[_make_tool(name="x")])
+                mock_instance.list_tools = AsyncMock(
+                    return_value=[_make_tool(name="x")]
+                )
                 mock_instance.close = AsyncMock()
                 MockClient.return_value = mock_instance
 
@@ -545,7 +597,9 @@ class TestMCPSecurityExtended:
             return_value=MCPToolResult(content="data here", is_error=False)
         )
 
-        result = await ctx.execute_tool(mock_client, tool, {"url": "http://example.com"})
+        result = await ctx.execute_tool(
+            mock_client, tool, {"url": "http://example.com"}
+        )
         assert result.content == "data here"
         assert len(ctx.audit_log) == 1
         record = ctx.audit_log[0]
@@ -600,15 +654,17 @@ class TestMCPSecurityExtended:
 
     def test_get_audit_records_format(self):
         ctx = MCPSecurityContext()
-        ctx.audit_log.append(ToolCallRecord(
-            tool_name="test",
-            arguments={"a": 1},
-            result="ok" * 200,  # long result
-            is_error=False,
-            duration_ms=42,
-            required_approval=False,
-            annotations={"readOnlyHint": True},
-        ))
+        ctx.audit_log.append(
+            ToolCallRecord(
+                tool_name="test",
+                arguments={"a": 1},
+                result="ok" * 200,  # long result
+                is_error=False,
+                duration_ms=42,
+                required_approval=False,
+                annotations={"readOnlyHint": True},
+            )
+        )
         records = ctx.get_audit_records()
         assert len(records) == 1
         rec = records[0]
@@ -662,6 +718,7 @@ class TestValidateToolAnnotations:
 class TestTokenEncryption:
     def _get_encrypt_decrypt(self):
         from app.routers.mcp import _decrypt_token, _encrypt_token
+
         return _encrypt_token, _decrypt_token
 
     def test_roundtrip_simple_token(self):
@@ -691,6 +748,7 @@ class TestTokenEncryption:
     def test_encrypted_is_base64(self):
         encrypt, _ = self._get_encrypt_decrypt()
         import base64
+
         encrypted = encrypt("some-token")
         # Should not raise
         base64.b64decode(encrypted)

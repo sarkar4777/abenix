@@ -1,7 +1,6 @@
 """KB v2 phase 5 — pgvector extension + chunks table."""
-from alembic import op
-import sqlalchemy as sa
 
+from alembic import op
 
 revision = "p6q7r8s9t0u1"
 down_revision = "o5p6q7r8s9t0"
@@ -31,14 +30,12 @@ def upgrade() -> None:
 
     # B-tree on collection_id for the WHERE filter.
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_chunks_collection "
-        "ON chunks (collection_id);"
+        "CREATE INDEX IF NOT EXISTS ix_chunks_collection " "ON chunks (collection_id);"
     )
     # Document scoped lookups (delete cascade fast path + per-doc
     # listing).
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_chunks_document "
-        "ON chunks (document_id);"
+        "CREATE INDEX IF NOT EXISTS ix_chunks_document " "ON chunks (document_id);"
     )
 
     op.execute("""

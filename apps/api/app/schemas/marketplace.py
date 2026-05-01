@@ -10,5 +10,9 @@ class CreateReviewRequest(BaseModel):
 
 class SubscribeRequest(BaseModel):
     plan_type: str = "free"
-    success_url: str = Field(default_factory=lambda: f"{settings.frontend_url}/marketplace?subscribed=true")
-    cancel_url: str = Field(default_factory=lambda: f"{settings.frontend_url}/marketplace")
+    success_url: str = Field(
+        default_factory=lambda: f"{settings.frontend_url}/marketplace?subscribed=true"
+    )
+    cancel_url: str = Field(
+        default_factory=lambda: f"{settings.frontend_url}/marketplace"
+    )

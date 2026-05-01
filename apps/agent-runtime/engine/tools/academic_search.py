@@ -57,7 +57,9 @@ class AcademicSearchTool(BaseTool):
 
         if source in ("semantic_scholar", "both"):
             try:
-                papers = await self._semantic_scholar(query, max_results, year_from, year_to)
+                papers = await self._semantic_scholar(
+                    query, max_results, year_from, year_to
+                )
                 all_papers.extend(papers)
             except Exception as e:
                 errors.append(f"Semantic Scholar error: {e}")
@@ -94,8 +96,10 @@ class AcademicSearchTool(BaseTool):
 
     @staticmethod
     async def _semantic_scholar(
-        query: str, max_results: int,
-        year_from: int | None, year_to: int | None,
+        query: str,
+        max_results: int,
+        year_from: int | None,
+        year_to: int | None,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "query": query,
@@ -120,22 +124,26 @@ class AcademicSearchTool(BaseTool):
         papers: list[dict[str, Any]] = []
         for item in data.get("data", []):
             authors = [a.get("name", "") for a in item.get("authors", [])]
-            papers.append({
-                "title": item.get("title", ""),
-                "abstract": item.get("abstract", "") or "",
-                "year": item.get("year"),
-                "citations": item.get("citationCount", 0),
-                "authors": authors,
-                "url": item.get("url", ""),
-                "venue": item.get("venue", ""),
-                "source": "Semantic Scholar",
-            })
+            papers.append(
+                {
+                    "title": item.get("title", ""),
+                    "abstract": item.get("abstract", "") or "",
+                    "year": item.get("year"),
+                    "citations": item.get("citationCount", 0),
+                    "authors": authors,
+                    "url": item.get("url", ""),
+                    "venue": item.get("venue", ""),
+                    "source": "Semantic Scholar",
+                }
+            )
         return papers
 
     @staticmethod
     async def _arxiv(
-        query: str, max_results: int,
-        year_from: int | None, year_to: int | None,
+        query: str,
+        max_results: int,
+        year_from: int | None,
+        year_to: int | None,
     ) -> list[dict[str, Any]]:
         encoded_query = quote(query)
         url = (
@@ -182,16 +190,18 @@ class AcademicSearchTool(BaseTool):
                 if name_el is not None and name_el.text:
                     authors.append(name_el.text.strip())
 
-            papers.append({
-                "title": title,
-                "abstract": abstract[:500] if abstract else "",
-                "year": year,
-                "citations": None,
-                "authors": authors,
-                "url": paper_url,
-                "venue": "arXiv",
-                "source": "arXiv",
-            })
+            papers.append(
+                {
+                    "title": title,
+                    "abstract": abstract[:500] if abstract else "",
+                    "year": year,
+                    "citations": None,
+                    "authors": authors,
+                    "url": paper_url,
+                    "venue": "arXiv",
+                    "source": "arXiv",
+                }
+            )
 
         return papers
 
