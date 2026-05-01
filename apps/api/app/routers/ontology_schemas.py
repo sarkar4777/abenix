@@ -1,4 +1,5 @@
 """Ontology Schema CRUD + project activation."""
+
 from __future__ import annotations
 
 import sys
@@ -65,7 +66,10 @@ def _serialize(s: OntologySchema) -> dict[str, Any]:
 
 
 async def _can_author_ontology(
-    db: AsyncSession, *, user: User, project: KnowledgeProject,
+    db: AsyncSession,
+    *,
+    user: User,
+    project: KnowledgeProject,
 ) -> bool:
     """Author ontology if any of:"""
     if is_admin(user):
@@ -78,14 +82,20 @@ async def _can_author_ontology(
     # KB v2 deviation fix — honour per-project membership grants.
     from app.services.project_access import assert_project_role
     from models.project_member import ProjectRole
+
     return await assert_project_role(
-        db, user_id=user.id, project_id=project.id,
+        db,
+        user_id=user.id,
+        project_id=project.id,
         minimum_role=ProjectRole.EDIT,
     )
 
 
 async def _load_project(
-    db: AsyncSession, *, project_id: uuid.UUID, tenant_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    tenant_id: uuid.UUID,
 ) -> KnowledgeProject | None:
     p = await db.get(KnowledgeProject, project_id)
     if p is None or p.tenant_id != tenant_id:
@@ -102,11 +112,19 @@ async def list_schemas(
     p = await _load_project(db, project_id=project_id, tenant_id=user.tenant_id)
     if p is None:
         return error("Project not found", 404)
-    rows = (await db.execute(
-        select(OntologySchema).where(
-            OntologySchema.project_id == project_id,
-        ).order_by(desc(OntologySchema.version))
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(OntologySchema)
+                .where(
+                    OntologySchema.project_id == project_id,
+                )
+                .order_by(desc(OntologySchema.version))
+            )
+        )
+        .scalars()
+        .all()
+    )
     return success([_serialize(s) for s in rows])
 
 
@@ -204,11 +222,13 @@ async def list_top_correlations(
     # Pull collection ids in this project, then query graph_entities
     # for the top entities by mention_count. Bounded at 25 — this is
     # the "what's in this project at a glance" fast path.
-    coll_rows = (await db.execute(
-        select(KnowledgeBase.id).where(
-            KnowledgeBase.project_id == project_id,
+    coll_rows = (
+        await db.execute(
+            select(KnowledgeBase.id).where(
+                KnowledgeBase.project_id == project_id,
+            )
         )
-    )).all()
+    ).all()
     coll_ids = [r[0] for r in coll_rows]
     if not coll_ids:
         return success([])
@@ -216,8 +236,8 @@ async def list_top_correlations(
     # Fall back to a lightweight raw SQL for the cross-collection
     # entity scan — keeps the v1 schema (kb_id) compatible.
     from sqlalchemy import text as _t
-    rows = (await db.execute(_t(
-        """
+
+    rows = (await db.execute(_t("""
         SELECT canonical_name, entity_type, SUM(mention_count) AS mentions,
                COUNT(DISTINCT kb_id) AS collections
         FROM graph_entities
@@ -225,18 +245,19 @@ async def list_top_correlations(
         GROUP BY canonical_name, entity_type
         ORDER BY mentions DESC
         LIMIT 25
-        """
-    ).bindparams(coll_ids=coll_ids))).all()
+        """).bindparams(coll_ids=coll_ids))).all()
 
-    return success([
-        {
-            "name": r[0],
-            "type": r[1],
-            "mentions": int(r[2] or 0),
-            "collections": int(r[3] or 0),
-        }
-        for r in rows
-    ])
+    return success(
+        [
+            {
+                "name": r[0],
+                "type": r[1],
+                "mentions": int(r[2] or 0),
+                "collections": int(r[3] or 0),
+            }
+            for r in rows
+        ]
+    )
 
 
 @router.get("/{project_id}/correlations/{entity_name}")
@@ -250,11 +271,13 @@ async def correlate_entity(
     p = await _load_project(db, project_id=project_id, tenant_id=user.tenant_id)
     if p is None:
         return error("Project not found", 404)
-    coll_rows = (await db.execute(
-        select(KnowledgeBase.id).where(
-            KnowledgeBase.project_id == project_id,
+    coll_rows = (
+        await db.execute(
+            select(KnowledgeBase.id).where(
+                KnowledgeBase.project_id == project_id,
+            )
         )
-    )).all()
+    ).all()
     coll_ids = [r[0] for r in coll_rows]
     if not coll_ids:
         return success({"entity": entity_name, "related": []})
@@ -263,12 +286,17 @@ async def correlate_entity(
     # that share at least one of those doc ids. JSONB ?| operator does
     # the array intersection in one query.
     from sqlalchemy import text as _t
-    target = (await db.execute(_t(
-        "SELECT id, source_doc_ids, mention_count "
-        "FROM graph_entities "
-        "WHERE kb_id = ANY(:coll_ids) AND canonical_name = :name "
-        "ORDER BY mention_count DESC LIMIT 1"
-    ).bindparams(coll_ids=coll_ids, name=entity_name))).first()
+
+    target = (
+        await db.execute(
+            _t(
+                "SELECT id, source_doc_ids, mention_count "
+                "FROM graph_entities "
+                "WHERE kb_id = ANY(:coll_ids) AND canonical_name = :name "
+                "ORDER BY mention_count DESC LIMIT 1"
+            ).bindparams(coll_ids=coll_ids, name=entity_name)
+        )
+    ).first()
     if target is None:
         return error("Entity not found in this project", 404)
 
@@ -278,8 +306,9 @@ async def correlate_entity(
     if not isinstance(src, list) or not src:
         return success({"entity": entity_name, "related": []})
 
-    related = (await db.execute(_t(
-        """
+    related = (
+        await db.execute(
+            _t("""
         SELECT canonical_name, entity_type, mention_count,
                cardinality(ARRAY(
                  SELECT jsonb_array_elements_text(source_doc_ids)
@@ -293,19 +322,24 @@ async def correlate_entity(
           )
         ORDER BY shared_docs DESC, mention_count DESC
         LIMIT 25
-        """
-    ).bindparams(coll_ids=coll_ids, name=entity_name, src=__import__("json").dumps(src)))).all()
+        """).bindparams(
+                coll_ids=coll_ids, name=entity_name, src=__import__("json").dumps(src)
+            )
+        )
+    ).all()
 
-    return success({
-        "entity": entity_name,
-        "type": target[2] if len(target) > 2 else None,
-        "related": [
-            {
-                "name": r[0],
-                "type": r[1],
-                "mentions": int(r[2] or 0),
-                "shared_documents": int(r[3] or 0),
-            }
-            for r in related
-        ],
-    })
+    return success(
+        {
+            "entity": entity_name,
+            "type": target[2] if len(target) > 2 else None,
+            "related": [
+                {
+                    "name": r[0],
+                    "type": r[1],
+                    "mentions": int(r[2] or 0),
+                    "shared_documents": int(r[3] or 0),
+                }
+                for r in related
+            ],
+        }
+    )

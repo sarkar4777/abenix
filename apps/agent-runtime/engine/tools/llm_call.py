@@ -61,15 +61,17 @@ class LLMCallTool(BaseTool):
         system_prompt = arguments.get("system_prompt", "")
         model = arguments.get("model", "claude-sonnet-4-5-20250929")
         temperature = arguments.get("temperature", 0.7)
-        max_tokens = arguments.get("max_tokens", 4096)
+        arguments.get("max_tokens", 4096)
 
         # Coerce non-string prompts (dicts/lists from upstream node outputs)
         # into a JSON string so the LLM can still reason over the data.
         if not isinstance(prompt, str):
             import json as _j
+
             prompt = _j.dumps(prompt, default=str, indent=2)
         if not isinstance(system_prompt, str):
             import json as _j
+
             system_prompt = _j.dumps(system_prompt, default=str, indent=2)
 
         if not prompt.strip():

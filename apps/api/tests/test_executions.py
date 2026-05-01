@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 
 import pytest
@@ -11,11 +10,14 @@ from httpx import AsyncClient
 
 async def _register(client: AsyncClient) -> str:
     email = f"exec-{uuid.uuid4().hex[:8]}@test.com"
-    resp = await client.post("/api/auth/register", json={
-        "email": email,
-        "password": "securepass123",
-        "full_name": "Exec Tester",
-    })
+    resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": "securepass123",
+            "full_name": "Exec Tester",
+        },
+    )
     return resp.json()["data"]["access_token"]
 
 

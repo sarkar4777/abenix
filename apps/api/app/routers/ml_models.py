@@ -1,20 +1,18 @@
 """ML Model Registry — upload, deploy, and serve ML models."""
+
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
-import shutil
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, func as sqlfunc
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -24,8 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.user import User
 from models.ml_model import (
-    MLModel, MLModelDeployment, MLModelFramework, MLModelStatus,
-    DeploymentType, DeploymentStatus,
+    MLModel,
+    MLModelDeployment,
+    MLModelFramework,
+    MLModelStatus,
+    DeploymentType,
+    DeploymentStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ ALLOWED_EXTENSIONS = {
     ".xgb": MLModelFramework.XGBOOST,
 }
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+
 
 def _serialize(m: MLModel) -> dict:
     return {
@@ -106,6 +109,7 @@ async def _validate_model(file_path: str, framework: MLModelFramework) -> dict |
     try:
         if framework in (MLModelFramework.SKLEARN, MLModelFramework.XGBOOST):
             import joblib
+
             model = joblib.load(file_path)
             info = {"type": type(model).__name__}
             if hasattr(model, "n_features_in_"):
@@ -117,12 +121,20 @@ async def _validate_model(file_path: str, framework: MLModelFramework) -> dict |
             return info
         elif framework == MLModelFramework.ONNX:
             import onnxruntime as ort
+
             sess = ort.InferenceSession(file_path)
-            inputs = [{"name": i.name, "shape": i.shape, "type": i.type} for i in sess.get_inputs()]
-            outputs = [{"name": o.name, "shape": o.shape, "type": o.type} for o in sess.get_outputs()]
+            inputs = [
+                {"name": i.name, "shape": i.shape, "type": i.type}
+                for i in sess.get_inputs()
+            ]
+            outputs = [
+                {"name": o.name, "shape": o.shape, "type": o.type}
+                for o in sess.get_outputs()
+            ]
             return {"inputs": inputs, "outputs": outputs}
         elif framework == MLModelFramework.PYTORCH:
             import torch
+
             model = torch.load(file_path, map_location="cpu", weights_only=False)
             return {"type": type(model).__name__}
         else:
@@ -132,7 +144,9 @@ async def _validate_model(file_path: str, framework: MLModelFramework) -> dict |
         return None
 
 
-def _infer_ml_schemas(validation: dict | None, framework: MLModelFramework) -> tuple[dict | None, dict | None]:
+def _infer_ml_schemas(
+    validation: dict | None, framework: MLModelFramework
+) -> tuple[dict | None, dict | None]:
     """Build JSON schemas from validation introspection."""
     if not validation:
         return None, None
@@ -148,7 +162,8 @@ def _infer_ml_schemas(validation: dict | None, framework: MLModelFramework) -> t
                     "type": "array",
                     "description": (
                         f"Array of samples; each sample is an array of {n} numeric features."
-                        if n else "Array of samples; each sample is an array of numeric features."
+                        if n
+                        else "Array of samples; each sample is an array of numeric features."
                     ),
                     "items": {
                         "type": "array",
@@ -173,7 +188,8 @@ def _infer_ml_schemas(validation: dict | None, framework: MLModelFramework) -> t
         }
         if classes:
             output_schema["properties"]["classes"] = {
-                "type": "array", "items": {"type": "string"},
+                "type": "array",
+                "items": {"type": "string"},
                 "description": "Class labels in the order used by probabilities[].",
                 "enum": [classes],
             }
@@ -183,7 +199,8 @@ def _infer_ml_schemas(validation: dict | None, framework: MLModelFramework) -> t
                 "items": {
                     "type": "array",
                     "items": {"type": "number"},
-                    "minItems": len(classes), "maxItems": len(classes),
+                    "minItems": len(classes),
+                    "maxItems": len(classes),
                 },
             }
         return input_schema, output_schema
@@ -231,7 +248,10 @@ async def upload_model(
 
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS and ext not in (".bin",):
-        return error(f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS.keys())}", 400)
+        return error(
+            f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS.keys())}",
+            400,
+        )
 
     # Parse metadata
     try:
@@ -262,9 +282,14 @@ async def upload_model(
     # Deactivate previous versions of the same model name for this tenant
     # (only the latest upload is active by default)
     from sqlalchemy import update as sql_update
+
     await db.execute(
         sql_update(MLModel)
-        .where(MLModel.tenant_id == user.tenant_id, MLModel.name == name, MLModel.is_active.is_(True))
+        .where(
+            MLModel.tenant_id == user.tenant_id,
+            MLModel.name == name,
+            MLModel.is_active.is_(True),
+        )
         .values(is_active=False)
     )
 
@@ -324,14 +349,21 @@ async def list_models(
 ) -> JSONResponse:
     """List ML models visible to the caller."""
     from app.core.permissions import (
-        accessible_resource_ids, apply_resource_scope, is_admin,
+        accessible_resource_ids,
+        apply_resource_scope,
+        is_admin,
     )
+
     if scope == "tenant" and not is_admin(user):
         return error("scope=tenant requires admin role", 403)
     accessible = await accessible_resource_ids(db, user, kind="ml_model")
     query = select(MLModel).where(MLModel.status != MLModelStatus.DELETED)
     query = apply_resource_scope(
-        query, MLModel, user, kind="ml_model", scope=scope,
+        query,
+        MLModel,
+        user,
+        kind="ml_model",
+        scope=scope,
         accessible_ids=accessible,
     )
     if search:
@@ -418,7 +450,7 @@ async def deploy_model(
     try:
         dtype = DeploymentType(dep_type)
     except ValueError:
-        return error(f"Invalid deployment_type. Use 'local' or 'k8s'.", 400)
+        return error("Invalid deployment_type. Use 'local' or 'k8s'.", 400)
 
     if dtype == DeploymentType.K8S:
         # Role gate: only admins can spawn cluster pods.
@@ -474,6 +506,7 @@ async def deploy_model(
             namespace = deployment.k8s_namespace
 
             from kubernetes import client, config
+
             try:
                 config.load_incluster_config()
             except Exception:
@@ -484,7 +517,12 @@ async def deploy_model(
 
             download_url = f"http://abenix-api.{namespace}.svc.cluster.local:8000/api/ml-models/{model.id}/download"
             from app.core.security import create_access_token
-            fetch_token = create_access_token(user.id, user.tenant_id, user.role.value if hasattr(user.role, "value") else str(user.role))
+
+            fetch_token = create_access_token(
+                user.id,
+                user.tenant_id,
+                user.role.value if hasattr(user.role, "value") else str(user.role),
+            )
 
             image_ref = os.environ.get(
                 "ML_MODEL_SERVING_IMAGE",
@@ -497,8 +535,12 @@ async def deploy_model(
                 ports=[client.V1ContainerPort(container_port=8080)],
                 env=[
                     client.V1EnvVar(name="MODEL_URI", value=download_url),
-                    client.V1EnvVar(name="MODEL_FRAMEWORK", value=model.framework.value),
-                    client.V1EnvVar(name="MODEL_AUTH_HEADER", value=f"Bearer {fetch_token}"),
+                    client.V1EnvVar(
+                        name="MODEL_FRAMEWORK", value=model.framework.value
+                    ),
+                    client.V1EnvVar(
+                        name="MODEL_AUTH_HEADER", value=f"Bearer {fetch_token}"
+                    ),
                 ],
                 resources=client.V1ResourceRequirements(
                     requests={"cpu": "250m", "memory": "512Mi"},
@@ -513,29 +555,41 @@ async def deploy_model(
                 metadata=client.V1ObjectMeta(
                     name=svc_name,
                     namespace=namespace,
-                    labels={"app": "abenix-model-serving", "model-id": str(model.id)[:8]},
+                    labels={
+                        "app": "abenix-model-serving",
+                        "model-id": str(model.id)[:8],
+                    },
                 ),
                 spec=client.V1DeploymentSpec(
                     replicas=replicas,
                     selector=client.V1LabelSelector(
-                        match_labels={"app": "abenix-model-serving", "model-id": str(model.id)[:8]},
+                        match_labels={
+                            "app": "abenix-model-serving",
+                            "model-id": str(model.id)[:8],
+                        },
                     ),
                     template=client.V1PodTemplateSpec(
                         metadata=client.V1ObjectMeta(
-                            labels={"app": "abenix-model-serving", "model-id": str(model.id)[:8]},
+                            labels={
+                                "app": "abenix-model-serving",
+                                "model-id": str(model.id)[:8],
+                            },
                         ),
                         spec=client.V1PodSpec(containers=[container]),
                     ),
                 ),
             )
             from kubernetes.client.exceptions import ApiException as _K8sApi
+
             try:
                 apps_v1.create_namespaced_deployment(namespace=namespace, body=dep_spec)
             except _K8sApi as e:
                 if e.status != 409:
                     raise
                 # Already exists — replace spec so image/env refresh
-                apps_v1.replace_namespaced_deployment(name=svc_name, namespace=namespace, body=dep_spec)
+                apps_v1.replace_namespaced_deployment(
+                    name=svc_name, namespace=namespace, body=dep_spec
+                )
 
             # Service
             svc_spec = client.V1Service(
@@ -543,7 +597,10 @@ async def deploy_model(
                 kind="Service",
                 metadata=client.V1ObjectMeta(name=svc_name, namespace=namespace),
                 spec=client.V1ServiceSpec(
-                    selector={"app": "abenix-model-serving", "model-id": str(model.id)[:8]},
+                    selector={
+                        "app": "abenix-model-serving",
+                        "model-id": str(model.id)[:8],
+                    },
                     ports=[client.V1ServicePort(port=8080, target_port=8080)],
                     type="ClusterIP",
                 ),
@@ -559,20 +616,25 @@ async def deploy_model(
             # superseded so we don't end up with "2 failed + 1 running"
             # drift in the UI after a retry.
             from sqlalchemy import update as _update
+
             await db.execute(
                 _update(MLModelDeployment)
                 .where(
                     MLModelDeployment.model_id == model.id,
                     MLModelDeployment.deployment_type == DeploymentType.K8S,
                     MLModelDeployment.id != deployment.id,
-                    MLModelDeployment.status.in_([DeploymentStatus.FAILED, DeploymentStatus.DEPLOYING]),
+                    MLModelDeployment.status.in_(
+                        [DeploymentStatus.FAILED, DeploymentStatus.DEPLOYING]
+                    ),
                 )
                 .values(status=DeploymentStatus.STOPPED)
             )
 
             deployment.pod_name = svc_name
             deployment.service_name = svc_name
-            deployment.endpoint_url = f"http://{svc_name}.{namespace}.svc.cluster.local:8080/predict"
+            deployment.endpoint_url = (
+                f"http://{svc_name}.{namespace}.svc.cluster.local:8080/predict"
+            )
             deployment.status = DeploymentStatus.DEPLOYING
             await db.commit()
             deployment_id = deployment.id
@@ -586,7 +648,10 @@ async def deploy_model(
                         await asyncio.sleep(3)
                         try:
                             st = api.read_namespaced_deployment_status(svc, ns)
-                            if st.status.ready_replicas and st.status.ready_replicas >= 1:
+                            if (
+                                st.status.ready_replicas
+                                and st.status.ready_replicas >= 1
+                            ):
                                 async with async_session() as bg_db:
                                     bg_dep = await bg_db.get(MLModelDeployment, dep_id)
                                     if bg_dep is not None:
@@ -602,12 +667,16 @@ async def deploy_model(
                         bg_dep = await bg_db.get(MLModelDeployment, dep_id)
                         if bg_dep and bg_dep.status == DeploymentStatus.DEPLOYING:
                             bg_dep.status = DeploymentStatus.FAILED
-                            bg_dep.config = {"error": "timed out waiting for ready_replicas>=1 after 120s"}
+                            bg_dep.config = {
+                                "error": "timed out waiting for ready_replicas>=1 after 120s"
+                            }
                             await bg_db.commit()
                 except Exception:
                     logger.exception("poll_ready background task crashed")
 
-            asyncio.create_task(_poll_ready(deployment_id, svc_name, namespace, apps_v1))
+            asyncio.create_task(
+                _poll_ready(deployment_id, svc_name, namespace, apps_v1)
+            )
 
         except Exception as e:
             logger.exception("K8s deployment failed")
@@ -617,12 +686,14 @@ async def deploy_model(
             return error(f"K8s deployment failed: {e}", 500)
 
     await db.refresh(deployment)
-    return success({
-        "deployment_id": str(deployment.id),
-        "deployment_type": deployment.deployment_type.value,
-        "status": deployment.status.value,
-        "endpoint_url": deployment.endpoint_url,
-    })
+    return success(
+        {
+            "deployment_id": str(deployment.id),
+            "deployment_type": deployment.deployment_type.value,
+            "status": deployment.status.value,
+            "endpoint_url": deployment.endpoint_url,
+        }
+    )
 
 
 @router.post("/{model_id}/predict")
@@ -634,6 +705,7 @@ async def predict(
 ) -> JSONResponse:
     """Run inference on a deployed model."""
     import time
+
     start = time.monotonic()
 
     result = await db.execute(
@@ -653,11 +725,14 @@ async def predict(
 
     # Check for k8s deployment with endpoint
     dep_result = await db.execute(
-        select(MLModelDeployment).where(
+        select(MLModelDeployment)
+        .where(
             MLModelDeployment.model_id == model.id,
             MLModelDeployment.status == DeploymentStatus.RUNNING,
             MLModelDeployment.endpoint_url.is_not(None),
-        ).order_by(MLModelDeployment.created_at.desc()).limit(1)
+        )
+        .order_by(MLModelDeployment.created_at.desc())
+        .limit(1)
     )
     k8s_dep = dep_result.scalar_one_or_none()
 
@@ -668,8 +743,11 @@ async def predict(
         # Route to k8s endpoint
         try:
             import httpx
+
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(k8s_dep.endpoint_url, json={"input_data": input_data})
+                resp = await client.post(
+                    k8s_dep.endpoint_url, json={"input_data": input_data}
+                )
                 resp.raise_for_status()
                 resp_data = resp.json()
                 predictions = resp_data.get("predictions")
@@ -680,23 +758,29 @@ async def predict(
     if predictions is None:
         # Local inference
         try:
-            predictions = await _local_predict(model.file_uri, model.framework, input_data)
+            predictions = await _local_predict(
+                model.file_uri, model.framework, input_data
+            )
             source = "local"
         except Exception as e:
             return error(f"Prediction failed: {e}", 500)
 
     latency_ms = int((time.monotonic() - start) * 1000)
-    return success({
-        "predictions": predictions,
-        "model_name": model.name,
-        "model_version": model.version,
-        "framework": model.framework.value,
-        "source": source,
-        "latency_ms": latency_ms,
-    })
+    return success(
+        {
+            "predictions": predictions,
+            "model_name": model.name,
+            "model_version": model.version,
+            "framework": model.framework.value,
+            "source": source,
+            "latency_ms": latency_ms,
+        }
+    )
 
 
-async def _local_predict(file_uri: str, framework: MLModelFramework, input_data: Any) -> Any:
+async def _local_predict(
+    file_uri: str, framework: MLModelFramework, input_data: Any
+) -> Any:
     """Load model and run inference locally."""
     import numpy as np
 
@@ -708,10 +792,15 @@ async def _local_predict(file_uri: str, framework: MLModelFramework, input_data:
     else:
         raise ValueError(f"input_data must be a dict or list, got {type(input_data)}")
 
-    X = np.array([features]) if not isinstance(features[0], list) else np.array(features)
+    X = (
+        np.array([features])
+        if not isinstance(features[0], list)
+        else np.array(features)
+    )
 
     if framework in (MLModelFramework.SKLEARN, MLModelFramework.XGBOOST):
         import joblib
+
         model = joblib.load(file_uri)
         preds = model.predict(X)
         # If classifier, also get probabilities
@@ -726,13 +815,17 @@ async def _local_predict(file_uri: str, framework: MLModelFramework, input_data:
 
     elif framework == MLModelFramework.ONNX:
         import onnxruntime as ort
+
         sess = ort.InferenceSession(file_uri)
         input_name = sess.get_inputs()[0].name
         preds = sess.run(None, {input_name: X.astype(np.float32)})
-        return {"predictions": [p.tolist() if hasattr(p, 'tolist') else p for p in preds]}
+        return {
+            "predictions": [p.tolist() if hasattr(p, "tolist") else p for p in preds]
+        }
 
     elif framework == MLModelFramework.PYTORCH:
         import torch
+
         model = torch.load(file_uri, map_location="cpu", weights_only=False)
         model.eval()
         with torch.no_grad():
@@ -765,7 +858,9 @@ async def undeploy_model(
     deps_result = await db.execute(
         select(MLModelDeployment).where(
             MLModelDeployment.model_id == model.id,
-            MLModelDeployment.status.in_([DeploymentStatus.RUNNING, DeploymentStatus.DEPLOYING]),
+            MLModelDeployment.status.in_(
+                [DeploymentStatus.RUNNING, DeploymentStatus.DEPLOYING]
+            ),
         )
     )
     deps = deps_result.scalars().all()
@@ -775,6 +870,7 @@ async def undeploy_model(
         if dep.deployment_type == DeploymentType.K8S and dep.service_name:
             try:
                 from kubernetes import client, config
+
                 try:
                     config.load_incluster_config()
                 except Exception:
@@ -800,10 +896,12 @@ async def undeploy_model(
         dep.status = DeploymentStatus.STOPPED
     await db.commit()
 
-    return success({
-        "undeployed": len(deps),
-        "k8s_resources_deleted": deleted_k8s,
-    })
+    return success(
+        {
+            "undeployed": len(deps),
+            "k8s_resources_deleted": deleted_k8s,
+        }
+    )
 
 
 @router.get("/{model_id}/download")
@@ -844,11 +942,13 @@ async def list_versions(
 ) -> JSONResponse:
     """List all versions of a model by name."""
     result = await db.execute(
-        select(MLModel).where(
+        select(MLModel)
+        .where(
             MLModel.tenant_id == user.tenant_id,
             MLModel.name == model_name,
             MLModel.status != MLModelStatus.DELETED,
-        ).order_by(MLModel.created_at.desc())
+        )
+        .order_by(MLModel.created_at.desc())
     )
     models = result.scalars().all()
     return success([_serialize(m) for m in models])
@@ -873,9 +973,14 @@ async def activate_version(
 
     # Deactivate all other versions with the same name
     from sqlalchemy import update as sql_update
+
     await db.execute(
         sql_update(MLModel)
-        .where(MLModel.tenant_id == user.tenant_id, MLModel.name == model.name, MLModel.is_active.is_(True))
+        .where(
+            MLModel.tenant_id == user.tenant_id,
+            MLModel.name == model.name,
+            MLModel.is_active.is_(True),
+        )
         .values(is_active=False)
     )
     # Activate this one
@@ -919,37 +1024,46 @@ async def check_model_ready(
     """
     # Find active version
     result = await db.execute(
-        select(MLModel).where(
+        select(MLModel)
+        .where(
             MLModel.tenant_id == user.tenant_id,
             MLModel.name == model_name,
             MLModel.is_active.is_(True),
             MLModel.status == MLModelStatus.READY,
-        ).limit(1)
+        )
+        .limit(1)
     )
     model = result.scalar_one_or_none()
 
     if not model:
-        return success({
-            "ready": False,
-            "deployed": False,
-            "active_version": None,
-            "message": f"No active model named '{model_name}' found. Upload one via /ml-models.",
-        })
+        return success(
+            {
+                "ready": False,
+                "deployed": False,
+                "active_version": None,
+                "message": f"No active model named '{model_name}' found. Upload one via /ml-models.",
+            }
+        )
 
     # Check deployment
     dep_result = await db.execute(
-        select(MLModelDeployment).where(
+        select(MLModelDeployment)
+        .where(
             MLModelDeployment.model_id == model.id,
             MLModelDeployment.status == DeploymentStatus.RUNNING,
-        ).limit(1)
+        )
+        .limit(1)
     )
     deployed = dep_result.scalar_one_or_none() is not None
 
-    return success({
-        "ready": True,
-        "deployed": deployed,
-        "active_version": model.version,
-        "model_id": str(model.id),
-        "framework": model.framework.value,
-        "message": "Model is ready" + (" and deployed" if deployed else " but NOT deployed. Deploy it first."),
-    })
+    return success(
+        {
+            "ready": True,
+            "deployed": deployed,
+            "active_version": model.version,
+            "model_id": str(model.id),
+            "framework": model.framework.value,
+            "message": "Model is ready"
+            + (" and deployed" if deployed else " but NOT deployed. Deploy it first."),
+        }
+    )

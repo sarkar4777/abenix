@@ -59,11 +59,18 @@ class FileReaderTool(BaseTool):
 
             char_count = len(content)
             if char_count > 100_000:
-                content = content[:100_000] + f"\n\n[Truncated at 100,000 characters. Total: {char_count}]"
+                content = (
+                    content[:100_000]
+                    + f"\n\n[Truncated at 100,000 characters. Total: {char_count}]"
+                )
 
             return ToolResult(
                 content=content,
-                metadata={"file": str(path), "extension": ext, "size_bytes": path.stat().st_size},
+                metadata={
+                    "file": str(path),
+                    "extension": ext,
+                    "size_bytes": path.stat().st_size,
+                },
             )
         except Exception as e:
             return ToolResult(content=f"Failed to read file: {str(e)}", is_error=True)
@@ -84,7 +91,11 @@ class FileReaderTool(BaseTool):
 
         doc = Document(str(path))
         paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        return "\n\n".join(paragraphs) if paragraphs else "No text content found in document."
+        return (
+            "\n\n".join(paragraphs)
+            if paragraphs
+            else "No text content found in document."
+        )
 
     def _read_csv(self, path: Path) -> str:
         text = path.read_text(encoding="utf-8", errors="replace")

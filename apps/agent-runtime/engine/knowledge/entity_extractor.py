@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 from engine.knowledge.prompts import (
     ENTITY_EXTRACTION_SYSTEM,
@@ -49,6 +48,7 @@ class ChunkExtractionResult:
 @dataclass
 class DocumentExtractionResult:
     """Aggregated extraction results for an entire document."""
+
     doc_id: str
     filename: str
     chunks_processed: int = 0
@@ -96,6 +96,7 @@ async def extract_from_chunk(
 ) -> ChunkExtractionResult:
     """Extract entities and relationships from a single text chunk."""
     from engine.llm_router import LLMRouter
+
     llm = LLMRouter()
 
     # Build context about existing entities
@@ -128,26 +129,36 @@ async def extract_from_chunk(
         text = response.content.strip()
         # Extract JSON from response
         if "{" in text:
-            json_str = text[text.index("{"):text.rindex("}") + 1]
+            json_str = text[text.index("{") : text.rindex("}") + 1]
             data = json.loads(json_str)
         else:
-            logger.warning("Entity extraction returned no JSON for chunk %d of doc %s", chunk_index, doc_id)
+            logger.warning(
+                "Entity extraction returned no JSON for chunk %d of doc %s",
+                chunk_index,
+                doc_id,
+            )
             return ChunkExtractionResult(
-                entities=[], relationships=[], chunk_index=chunk_index, doc_id=doc_id,
-                tokens_used=response.input_tokens + response.output_tokens, cost=response.cost,
+                entities=[],
+                relationships=[],
+                chunk_index=chunk_index,
+                doc_id=doc_id,
+                tokens_used=response.input_tokens + response.output_tokens,
+                cost=response.cost,
             )
 
         entities = []
         for e in data.get("entities", []):
             if not e.get("name"):
                 continue
-            entities.append(ExtractedEntity(
-                name=e["name"].strip(),
-                entity_type=e.get("type", "concept").lower(),
-                description=e.get("description", ""),
-                source_chunk_index=chunk_index,
-                source_doc_id=doc_id,
-            ))
+            entities.append(
+                ExtractedEntity(
+                    name=e["name"].strip(),
+                    entity_type=e.get("type", "concept").lower(),
+                    description=e.get("description", ""),
+                    source_chunk_index=chunk_index,
+                    source_doc_id=doc_id,
+                )
+            )
 
         relationships = []
         entity_names = {e.name for e in entities}
@@ -158,14 +169,18 @@ async def extract_from_chunk(
                 continue
             # Only keep relationships where both entities exist
             if src in entity_names and tgt in entity_names:
-                relationships.append(ExtractedRelationship(
-                    source=src,
-                    target=tgt,
-                    relationship_type=r.get("type", "RELATED_TO").upper().replace(" ", "_"),
-                    description=r.get("description", ""),
-                    source_chunk_index=chunk_index,
-                    source_doc_id=doc_id,
-                ))
+                relationships.append(
+                    ExtractedRelationship(
+                        source=src,
+                        target=tgt,
+                        relationship_type=r.get("type", "RELATED_TO")
+                        .upper()
+                        .replace(" ", "_"),
+                        description=r.get("description", ""),
+                        source_chunk_index=chunk_index,
+                        source_doc_id=doc_id,
+                    )
+                )
 
         return ChunkExtractionResult(
             entities=entities,
@@ -177,9 +192,17 @@ async def extract_from_chunk(
         )
 
     except Exception as e:
-        logger.error("Entity extraction failed for chunk %d of doc %s: %s", chunk_index, doc_id, e)
+        logger.error(
+            "Entity extraction failed for chunk %d of doc %s: %s",
+            chunk_index,
+            doc_id,
+            e,
+        )
         return ChunkExtractionResult(
-            entities=[], relationships=[], chunk_index=chunk_index, doc_id=doc_id,
+            entities=[],
+            relationships=[],
+            chunk_index=chunk_index,
+            doc_id=doc_id,
         )
 
 
@@ -220,6 +243,10 @@ async def extract_from_document(
 
     logger.info(
         "Document %s (%s): extracted %d entities, %d relationships from %d chunks",
-        doc_id, filename, len(result.entities), len(result.relationships), result.chunks_processed,
+        doc_id,
+        filename,
+        len(result.entities),
+        len(result.relationships),
+        result.chunks_processed,
     )
     return result

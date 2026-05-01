@@ -131,10 +131,16 @@ class WeatherSimulatorTool(BaseTool):
 
         period_months = max(1, min(arguments.get("period_months", 12), 120))
         scenarios = arguments.get("scenarios") or [
-            "base", "optimistic", "pessimistic", "extreme",
+            "base",
+            "optimistic",
+            "pessimistic",
+            "extreme",
         ]
         params = arguments.get("parameters") or [
-            "solar_irradiance", "wind_speed", "temperature", "precipitation",
+            "solar_irradiance",
+            "wind_speed",
+            "temperature",
+            "precipitation",
         ]
         seed = arguments.get("seed")
 
@@ -147,7 +153,12 @@ class WeatherSimulatorTool(BaseTool):
                 is_error=True,
             )
 
-        valid_params = {"solar_irradiance", "wind_speed", "temperature", "precipitation"}
+        valid_params = {
+            "solar_irradiance",
+            "wind_speed",
+            "temperature",
+            "precipitation",
+        }
         bad_p = [p for p in params if p not in valid_params]
         if bad_p:
             return ToolResult(
@@ -165,27 +176,44 @@ class WeatherSimulatorTool(BaseTool):
             result_scenarios = []
             for scenario_name in scenarios:
                 mods = self._SCENARIO_MODS[scenario_name]
-                scenario_data: dict[str, Any] = {"name": scenario_name, "parameters": {}}
+                scenario_data: dict[str, Any] = {
+                    "name": scenario_name,
+                    "parameters": {},
+                }
 
                 if "solar_irradiance" in params:
                     scenario_data["parameters"]["solar_irradiance"] = self._sim_solar(
-                        lat, hemisphere, period_months, mods["solar_scale"],
+                        lat,
+                        hemisphere,
+                        period_months,
+                        mods["solar_scale"],
                     )
                 if "wind_speed" in params:
                     scenario_data["parameters"]["wind_speed"] = self._sim_wind(
-                        lat, period_months, mods["wind_scale"],
+                        lat,
+                        period_months,
+                        mods["wind_scale"],
                     )
                 if "temperature" in params:
                     scenario_data["parameters"]["temperature"] = self._sim_temperature(
-                        lat, hemisphere, period_months, mods["temp_offset"],
+                        lat,
+                        hemisphere,
+                        period_months,
+                        mods["temp_offset"],
                     )
                 if "precipitation" in params:
-                    scenario_data["parameters"]["precipitation"] = self._sim_precipitation(
-                        lat, period_months, mods["precip_scale"],
+                    scenario_data["parameters"]["precipitation"] = (
+                        self._sim_precipitation(
+                            lat,
+                            period_months,
+                            mods["precip_scale"],
+                        )
                     )
 
                 scenario_data["extreme_events"] = self._sim_extreme_events(
-                    lat, period_months, mods["extreme_scale"],
+                    lat,
+                    period_months,
+                    mods["extreme_scale"],
                 )
 
                 result_scenarios.append(scenario_data)
@@ -228,7 +256,11 @@ class WeatherSimulatorTool(BaseTool):
     # Solar irradiance simulation (kWh/m^2/day)
     # Seasonal sine wave modulated by latitude + gaussian noise
     def _sim_solar(
-        self, lat: float, hemisphere: str, months: int, scale: float,
+        self,
+        lat: float,
+        hemisphere: str,
+        months: int,
+        scale: float,
     ) -> dict[str, Any]:
         abs_lat = abs(lat)
         # Peak summer irradiance decreases with latitude
@@ -265,7 +297,10 @@ class WeatherSimulatorTool(BaseTool):
 
     # Wind speed simulation (m/s) — Weibull distribution
     def _sim_wind(
-        self, lat: float, months: int, scale: float,
+        self,
+        lat: float,
+        months: int,
+        scale: float,
     ) -> dict[str, Any]:
         abs_lat = abs(lat)
         # Mid-latitudes (~40-60) are windiest
@@ -276,7 +311,9 @@ class WeatherSimulatorTool(BaseTool):
         for m in range(months):
             month_of_year = m % 12
             # Wind tends to be stronger in winter in most locations
-            winter_boost = 1.0 + 0.2 * math.cos((month_of_year - 0) / 12.0 * 2 * math.pi)
+            winter_boost = 1.0 + 0.2 * math.cos(
+                (month_of_year - 0) / 12.0 * 2 * math.pi
+            )
             effective_scale = base_scale_param * winter_boost * scale
 
             # Sample from Weibull: use inverse transform
@@ -308,7 +345,11 @@ class WeatherSimulatorTool(BaseTool):
 
     # Temperature simulation (degrees C) — seasonal baseline + noise
     def _sim_temperature(
-        self, lat: float, hemisphere: str, months: int, temp_offset: float,
+        self,
+        lat: float,
+        hemisphere: str,
+        months: int,
+        temp_offset: float,
     ) -> dict[str, Any]:
         abs_lat = abs(lat)
         # Annual mean temperature decreases with latitude
@@ -344,7 +385,10 @@ class WeatherSimulatorTool(BaseTool):
 
     # Precipitation simulation (mm/month) — gamma distribution
     def _sim_precipitation(
-        self, lat: float, months: int, precip_scale: float,
+        self,
+        lat: float,
+        months: int,
+        precip_scale: float,
     ) -> dict[str, Any]:
         abs_lat = abs(lat)
         # Tropical regions are wettest; mid-latitude moderate; polar dry
@@ -365,7 +409,9 @@ class WeatherSimulatorTool(BaseTool):
         for m in range(months):
             month_of_year = m % 12
             # Mild seasonal variation
-            seasonal_factor = 1.0 + 0.3 * math.sin((month_of_year - 3) / 12.0 * 2 * math.pi)
+            seasonal_factor = 1.0 + 0.3 * math.sin(
+                (month_of_year - 3) / 12.0 * 2 * math.pi
+            )
             effective_beta = beta / (seasonal_factor * precip_scale)
 
             # Gamma sampling via Marsaglia-Tsang (simplified: use sum of exponentials
@@ -389,7 +435,10 @@ class WeatherSimulatorTool(BaseTool):
 
     # Extreme events — Poisson process for storms, heatwaves, frost
     def _sim_extreme_events(
-        self, lat: float, months: int, extreme_scale: float,
+        self,
+        lat: float,
+        months: int,
+        extreme_scale: float,
     ) -> list[dict[str, Any]]:
         abs_lat = abs(lat)
         years = months / 12.0
@@ -401,80 +450,94 @@ class WeatherSimulatorTool(BaseTool):
         storm_rate = storm_annual_rate * years * extreme_scale
         storm_count = self._poisson_sample(storm_rate)
         storm_prob = 1 - math.exp(-storm_rate)
-        events.append({
-            "type": "severe_storm",
-            "expected_count": round(storm_count, 1),
-            "probability": round(min(storm_prob, 1.0), 3),
-            "impact_severity": "high" if abs_lat < 30 else "medium",
-            "description": (
-                f"Severe storms (hail, high wind, heavy rain): "
-                f"~{storm_count:.0f} events expected over {months} months"
-            ),
-        })
+        events.append(
+            {
+                "type": "severe_storm",
+                "expected_count": round(storm_count, 1),
+                "probability": round(min(storm_prob, 1.0), 3),
+                "impact_severity": "high" if abs_lat < 30 else "medium",
+                "description": (
+                    f"Severe storms (hail, high wind, heavy rain): "
+                    f"~{storm_count:.0f} events expected over {months} months"
+                ),
+            }
+        )
 
         # Heatwaves — higher at low latitude and mid-latitude
         heat_annual_rate = 3.0 if abs_lat < 35 else 1.5 if abs_lat < 50 else 0.5
         heat_rate = heat_annual_rate * years * extreme_scale
         heat_count = self._poisson_sample(heat_rate)
         heat_prob = 1 - math.exp(-heat_rate)
-        events.append({
-            "type": "heatwave",
-            "expected_count": round(heat_count, 1),
-            "probability": round(min(heat_prob, 1.0), 3),
-            "impact_severity": "high" if abs_lat < 35 else "medium",
-            "description": (
-                f"Extended periods of extreme heat (>35C): "
-                f"~{heat_count:.0f} events expected over {months} months"
-            ),
-        })
+        events.append(
+            {
+                "type": "heatwave",
+                "expected_count": round(heat_count, 1),
+                "probability": round(min(heat_prob, 1.0), 3),
+                "impact_severity": "high" if abs_lat < 35 else "medium",
+                "description": (
+                    f"Extended periods of extreme heat (>35C): "
+                    f"~{heat_count:.0f} events expected over {months} months"
+                ),
+            }
+        )
 
         # Frost / cold snaps — higher at high latitude
         frost_annual_rate = 0.2 if abs_lat < 25 else 2.0 if abs_lat < 50 else 5.0
         frost_rate = frost_annual_rate * years * extreme_scale
         frost_count = self._poisson_sample(frost_rate)
         frost_prob = 1 - math.exp(-frost_rate)
-        events.append({
-            "type": "frost_cold_snap",
-            "expected_count": round(frost_count, 1),
-            "probability": round(min(frost_prob, 1.0), 3),
-            "impact_severity": "low" if abs_lat < 25 else "medium" if abs_lat < 50 else "high",
-            "description": (
-                f"Frost or cold snap events (<-5C): "
-                f"~{frost_count:.0f} events expected over {months} months"
-            ),
-        })
+        events.append(
+            {
+                "type": "frost_cold_snap",
+                "expected_count": round(frost_count, 1),
+                "probability": round(min(frost_prob, 1.0), 3),
+                "impact_severity": (
+                    "low" if abs_lat < 25 else "medium" if abs_lat < 50 else "high"
+                ),
+                "description": (
+                    f"Frost or cold snap events (<-5C): "
+                    f"~{frost_count:.0f} events expected over {months} months"
+                ),
+            }
+        )
 
         # Drought — moderate everywhere, worse in arid zones
         drought_annual_rate = 0.8 if abs_lat < 35 else 0.4
         drought_rate = drought_annual_rate * years * extreme_scale
         drought_count = self._poisson_sample(drought_rate)
         drought_prob = 1 - math.exp(-drought_rate)
-        events.append({
-            "type": "drought",
-            "expected_count": round(drought_count, 1),
-            "probability": round(min(drought_prob, 1.0), 3),
-            "impact_severity": "high" if abs_lat > 20 and abs_lat < 40 else "medium",
-            "description": (
-                f"Prolonged dry spells (>30 days below 10% normal precipitation): "
-                f"~{drought_count:.0f} events expected over {months} months"
-            ),
-        })
+        events.append(
+            {
+                "type": "drought",
+                "expected_count": round(drought_count, 1),
+                "probability": round(min(drought_prob, 1.0), 3),
+                "impact_severity": (
+                    "high" if abs_lat > 20 and abs_lat < 40 else "medium"
+                ),
+                "description": (
+                    f"Prolonged dry spells (>30 days below 10% normal precipitation): "
+                    f"~{drought_count:.0f} events expected over {months} months"
+                ),
+            }
+        )
 
         # Flooding — tropical and coastal
         flood_annual_rate = 1.5 if abs_lat < 25 else 0.7
         flood_rate = flood_annual_rate * years * extreme_scale
         flood_count = self._poisson_sample(flood_rate)
         flood_prob = 1 - math.exp(-flood_rate)
-        events.append({
-            "type": "flooding",
-            "expected_count": round(flood_count, 1),
-            "probability": round(min(flood_prob, 1.0), 3),
-            "impact_severity": "high" if abs_lat < 25 else "medium",
-            "description": (
-                f"Significant flooding events: "
-                f"~{flood_count:.0f} events expected over {months} months"
-            ),
-        })
+        events.append(
+            {
+                "type": "flooding",
+                "expected_count": round(flood_count, 1),
+                "probability": round(min(flood_prob, 1.0), 3),
+                "impact_severity": "high" if abs_lat < 25 else "medium",
+                "description": (
+                    f"Significant flooding events: "
+                    f"~{flood_count:.0f} events expected over {months} months"
+                ),
+            }
+        )
 
         return events
 

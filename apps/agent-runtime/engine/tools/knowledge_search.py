@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
@@ -98,19 +97,27 @@ class KnowledgeSearchTool(BaseTool):
             try:
                 async with AsyncSession(engine) as session:
                     # Gate 1: tenant match.
-                    rows = (await session.execute(text(
-                        "SELECT id FROM knowledge_collections "
-                        "WHERE id = ANY(:ids) AND tenant_id = :tid"
-                    ).bindparams(ids=uuid_inputs, tid=tenant_uuid))).all()
+                    rows = (
+                        await session.execute(
+                            text(
+                                "SELECT id FROM knowledge_collections "
+                                "WHERE id = ANY(:ids) AND tenant_id = :tid"
+                            ).bindparams(ids=uuid_inputs, tid=tenant_uuid)
+                        )
+                    ).all()
                     tenant_ok = {str(r[0]) for r in rows}
 
                     # Gate 2: agent grants (only when agent has ANY grants).
                     grant_ok: set[str] | None = None
                     if agent_uuid is not None:
-                        g_rows = (await session.execute(text(
-                            "SELECT collection_id FROM agent_collection_grants "
-                            "WHERE agent_id = :aid"
-                        ).bindparams(aid=agent_uuid))).all()
+                        g_rows = (
+                            await session.execute(
+                                text(
+                                    "SELECT collection_id FROM agent_collection_grants "
+                                    "WHERE agent_id = :aid"
+                                ).bindparams(aid=agent_uuid)
+                            )
+                        ).all()
                         if g_rows:
                             grant_ok = {str(r[0]) for r in g_rows}
             finally:
@@ -131,10 +138,12 @@ class KnowledgeSearchTool(BaseTool):
 
         try:
             from engine.knowledge.hybrid_search import hybrid_search, SearchMode
+
             mode = SearchMode(mode_str)
         except (ImportError, ValueError):
             # Fall back to vector-only if knowledge engine not available
             from engine.knowledge.hybrid_search import hybrid_search, SearchMode
+
             mode = SearchMode.VECTOR
 
         # v2 safeguard: re-check that every kb_id still belongs to this
@@ -157,19 +166,25 @@ class KnowledgeSearchTool(BaseTool):
                 )
 
             # Format results for the LLM
-            parts = [f"Knowledge Search Results ({response.mode_used} mode, {len(response.results)} results):"]
+            parts = [
+                f"Knowledge Search Results ({response.mode_used} mode, {len(response.results)} results):"
+            ]
             parts.append("")
 
             for i, r in enumerate(response.results, 1):
                 source_label = f"[{r.source_type}]" if r.source_type != "chunk" else ""
-                parts.append(f"[{i}] (score: {r.score:.3f}, source: {r.source} {source_label})")
+                parts.append(
+                    f"[{i}] (score: {r.score:.3f}, source: {r.source} {source_label})"
+                )
                 parts.append(r.content)
                 if r.metadata.get("relationship_chain"):
                     parts.append(f"  Path: {r.metadata['relationship_chain']}")
                 parts.append("")
 
             if response.entities_found:
-                parts.append(f"Entities identified: {', '.join(response.entities_found)}")
+                parts.append(
+                    f"Entities identified: {', '.join(response.entities_found)}"
+                )
             if response.graph_hops > 0:
                 parts.append(f"Graph depth: {response.graph_hops} hops")
 

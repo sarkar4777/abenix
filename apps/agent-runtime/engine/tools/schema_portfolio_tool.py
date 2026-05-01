@@ -13,7 +13,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
-_SAFE_IDENTIFIER = re.compile(r'^[a-z_][a-z0-9_]*$')
+_SAFE_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
 def _validate_identifier(name: str) -> bool:
@@ -26,14 +26,17 @@ def _strip_sqlalchemy_url(url: str) -> str:
     if "?" in cleaned:
         base, query = cleaned.split("?", 1)
         kept = [
-            p for p in query.split("&")
+            p
+            for p in query.split("&")
             if not p.lower().startswith(("ssl=", "sslmode="))
         ]
         cleaned = base + ("?" + "&".join(kept) if kept else "")
     return cleaned
 
 
-async def load_schema_from_db(domain_name: str, tenant_id: str, db_url: str = "") -> dict | None:
+async def load_schema_from_db(
+    domain_name: str, tenant_id: str, db_url: str = ""
+) -> dict | None:
     """Load a portfolio schema from the database (created via /api/portfolio-schemas).
 
     Returns the schema_json field, or None if not found.
@@ -43,13 +46,18 @@ async def load_schema_from_db(domain_name: str, tenant_id: str, db_url: str = ""
         return None
     try:
         import asyncpg
+
         conn = await asyncpg.connect(_strip_sqlalchemy_url(db_url))
         try:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT schema_json FROM portfolio_schemas
                 WHERE domain_name = $1 AND tenant_id = $2::uuid AND is_active = true
                 LIMIT 1
-            """, domain_name, tenant_id)
+            """,
+                domain_name,
+                tenant_id,
+            )
             if row and row["schema_json"]:
                 schema = row["schema_json"]
                 if isinstance(schema, str):
@@ -81,7 +89,9 @@ class SchemaPortfolioTool(BaseTool):
         self._deferred_tenant = tenant_id
 
         if schema is None and not domain_name:
-            raise ValueError("SchemaPortfolioTool requires either schema= or domain_name=")
+            raise ValueError(
+                "SchemaPortfolioTool requires either schema= or domain_name="
+            )
 
         if schema is not None:
             self._bind_schema(schema)
@@ -135,7 +145,14 @@ class SchemaPortfolioTool(BaseTool):
         )
 
         # Build the operations enum dynamically
-        ops = ["list_records", "get_record", "search", "get_summary", "get_related", "compare_field"]
+        ops = [
+            "list_records",
+            "get_record",
+            "search",
+            "get_summary",
+            "get_related",
+            "compare_field",
+        ]
         kv_tables = [r for r in self._related if r.get("is_kv_store")]
         if kv_tables:
             ops.extend(["discover_fields", "query_fields"])
@@ -176,7 +193,9 @@ class SchemaPortfolioTool(BaseTool):
 
     def _validate_schema(self) -> None:
         """Validate all table and column names are safe SQL identifiers."""
-        assert _validate_identifier(self._main["name"]), f"Unsafe table name: {self._main['name']}"
+        assert _validate_identifier(
+            self._main["name"]
+        ), f"Unsafe table name: {self._main['name']}"
         for col in self._main.get("columns", {}):
             assert _validate_identifier(col), f"Unsafe column: {col}"
         for rel in self._related:
@@ -186,6 +205,7 @@ class SchemaPortfolioTool(BaseTool):
 
     async def _get_conn(self) -> Any:
         import asyncpg
+
         if self.db_url:
             return await asyncpg.connect(_strip_sqlalchemy_url(self.db_url))
         return await asyncpg.connect(
@@ -268,16 +288,22 @@ class SchemaPortfolioTool(BaseTool):
 
         rows = await conn.fetch(
             f"SELECT {col_str} FROM {table} WHERE {scope_col} = $1 ORDER BY {created_col} DESC LIMIT $2",
-            self.user_id, limit,
+            self.user_id,
+            limit,
         )
 
         if not rows:
-            return ToolResult(content=f"No {self._domain['record_noun_plural']} found.", metadata={"count": 0})
+            return ToolResult(
+                content=f"No {self._domain['record_noun_plural']} found.",
+                metadata={"count": 0},
+            )
 
         title_col = self._main["title_column"]
         col_configs = self._main["columns"]
 
-        lines = [f"{self._domain['label']}: {len(rows)} {self._domain['record_noun_plural']}\n"]
+        lines = [
+            f"{self._domain['label']}: {len(rows)} {self._domain['record_noun_plural']}\n"
+        ]
         for r in rows:
             title = r.get(title_col, "Untitled")
             detail_parts = []
@@ -301,9 +327,16 @@ class SchemaPortfolioTool(BaseTool):
 
         table = self._main["name"]
         scope_col = self._main["user_scope_column"]
-        row = await conn.fetchrow(f"SELECT * FROM {table} WHERE id = $1 AND {scope_col} = $2", rid, self.user_id)
+        row = await conn.fetchrow(
+            f"SELECT * FROM {table} WHERE id = $1 AND {scope_col} = $2",
+            rid,
+            self.user_id,
+        )
         if not row:
-            return ToolResult(content=f"{self._domain['record_noun'].title()} not found.", is_error=True)
+            return ToolResult(
+                content=f"{self._domain['record_noun'].title()} not found.",
+                is_error=True,
+            )
 
         title_col = self._main["title_column"]
         col_configs = self._main["columns"]
@@ -323,10 +356,15 @@ class SchemaPortfolioTool(BaseTool):
             col_str = ", ".join(rel_cols)
             order = rel.get("order_by", "")
             order_clause = f" ORDER BY {order}" if order else ""
-            rows = await conn.fetch(f"SELECT {col_str} FROM {rel['name']} WHERE {fk} = $1{order_clause}", rid)
+            rows = await conn.fetch(
+                f"SELECT {col_str} FROM {rel['name']} WHERE {fk} = $1{order_clause}",
+                rid,
+            )
             return rel, list(rows)
 
-        related_results = await asyncio.gather(*[fetch_related(r) for r in self._related])
+        related_results = await asyncio.gather(
+            *[fetch_related(r) for r in self._related]
+        )
 
         for rel, rel_rows in related_results:
             if not rel_rows:
@@ -346,7 +384,9 @@ class SchemaPortfolioTool(BaseTool):
     async def _search(self, conn: Any, args: dict) -> ToolResult:
         query = args.get("query", "")
         if not query:
-            return ToolResult(content="Error: query is required for search", is_error=True)
+            return ToolResult(
+                content="Error: query is required for search", is_error=True
+            )
 
         limit = min(args.get("limit", 20), 50)
         table = self._main["name"]
@@ -358,7 +398,9 @@ class SchemaPortfolioTool(BaseTool):
         or_clauses = " OR ".join(f"{c} ILIKE $2" for c in search_cols)
         main_rows = await conn.fetch(
             f"SELECT id, {title_col} FROM {table} WHERE {scope_col} = $1 AND ({or_clauses}) LIMIT $3",
-            self.user_id, f"%{query}%", limit,
+            self.user_id,
+            f"%{query}%",
+            limit,
         )
 
         # Search related tables with searchable_columns
@@ -367,21 +409,31 @@ class SchemaPortfolioTool(BaseTool):
             if not rel.get("searchable_columns"):
                 continue
             fk = rel["foreign_key"]
-            search_or = " OR ".join(f"r.{c} ILIKE $2" for c in rel["searchable_columns"])
+            search_or = " OR ".join(
+                f"r.{c} ILIKE $2" for c in rel["searchable_columns"]
+            )
             hits = await conn.fetch(
                 f"SELECT m.{title_col}, r.* FROM {rel['name']} r "
                 f"JOIN {table} m ON r.{fk} = m.id "
                 f"WHERE m.{scope_col} = $1 AND ({search_or}) LIMIT $3",
-                self.user_id, f"%{query}%", limit,
+                self.user_id,
+                f"%{query}%",
+                limit,
             )
             for h in hits:
                 rel_configs = rel["columns"]
-                detail = " | ".join(f"{cfg.get('label', c)}: {self._fmt(h.get(c), cfg)}" for c, cfg in list(rel_configs.items())[:4] if h.get(c))
+                detail = " | ".join(
+                    f"{cfg.get('label', c)}: {self._fmt(h.get(c), cfg)}"
+                    for c, cfg in list(rel_configs.items())[:4]
+                    if h.get(c)
+                )
                 related_hits.append(f"- [{h.get(title_col)}] ({rel['label']}) {detail}")
 
         lines = [f"Search results for '{query}':\n"]
         if main_rows:
-            lines.append(f"## {self._domain['record_noun_plural'].title()} ({len(main_rows)})")
+            lines.append(
+                f"## {self._domain['record_noun_plural'].title()} ({len(main_rows)})"
+            )
             for r in main_rows:
                 lines.append(f"- **{r.get(title_col)}** (ID: {r['id']})")
         if related_hits:
@@ -390,7 +442,10 @@ class SchemaPortfolioTool(BaseTool):
         if not main_rows and not related_hits:
             lines.append("No results found.")
 
-        return ToolResult(content="\n".join(lines), metadata={"main": len(main_rows), "related": len(related_hits)})
+        return ToolResult(
+            content="\n".join(lines),
+            metadata={"main": len(main_rows), "related": len(related_hits)},
+        )
 
     async def _get_summary(self, conn: Any, args: dict) -> ToolResult:
         table = self._main["name"]
@@ -401,7 +456,9 @@ class SchemaPortfolioTool(BaseTool):
             return ToolResult(content="No summary aggregations defined.", is_error=True)
 
         agg_sql = ", ".join(f"{v['sql']} as {k}" for k, v in aggs.items())
-        row = await conn.fetchrow(f"SELECT {agg_sql} FROM {table} WHERE {scope_col} = $1", self.user_id)
+        row = await conn.fetchrow(
+            f"SELECT {agg_sql} FROM {table} WHERE {scope_col} = $1", self.user_id
+        )
 
         lines = [f"# {self._domain['label']} Summary\n"]
         for key, config in aggs.items():
@@ -434,7 +491,10 @@ class SchemaPortfolioTool(BaseTool):
         rel = next((r for r in self._related if r["label"] == table_label), None)
         if not rel:
             available = ", ".join(r["label"] for r in self._related)
-            return ToolResult(content=f"Table '{table_label}' not found. Available: {available}", is_error=True)
+            return ToolResult(
+                content=f"Table '{table_label}' not found. Available: {available}",
+                is_error=True,
+            )
 
         table = self._main["name"]
         scope_col = self._main["user_scope_column"]
@@ -460,7 +520,9 @@ class SchemaPortfolioTool(BaseTool):
         )
 
         if not rows:
-            return ToolResult(content=f"No {rel['label'].lower()} found.", metadata={"count": 0})
+            return ToolResult(
+                content=f"No {rel['label'].lower()} found.", metadata={"count": 0}
+            )
 
         rel_configs = rel["columns"]
         lines = [f"{rel['label']} ({len(rows)}):\n"]
@@ -478,7 +540,9 @@ class SchemaPortfolioTool(BaseTool):
         rid = args.get("record_id", "")
         kv_tables = [r for r in self._related if r.get("is_kv_store")]
         if not kv_tables:
-            return ToolResult(content="No key-value data tables defined in this schema.")
+            return ToolResult(
+                content="No key-value data tables defined in this schema."
+            )
 
         table = self._main["name"]
         scope_col = self._main["user_scope_column"]
@@ -499,7 +563,8 @@ class SchemaPortfolioTool(BaseTool):
                     f" FROM {kv['name']} r JOIN {table} m ON r.{fk} = m.id"
                     f" WHERE r.{fk} = $1 AND m.{scope_col} = $2"
                     f" ORDER BY r.{section_col}, r.{key_col}",
-                    rid, self.user_id,
+                    rid,
+                    self.user_id,
                 )
             else:
                 type_sel = f", r.{type_col}" if type_col else ""
@@ -526,15 +591,23 @@ class SchemaPortfolioTool(BaseTool):
                     all_lines.append(f"\n### {current_section}")
                 field = r.get(key_col, "?")
                 if rid:
-                    conf = f" ({r.get(conf_col, 0):.0%})" if conf_col and r.get(conf_col) else ""
+                    conf = (
+                        f" ({r.get(conf_col, 0):.0%})"
+                        if conf_col and r.get(conf_col)
+                        else ""
+                    )
                     all_lines.append(f"- {field}{conf}")
                 else:
                     count = r.get("record_count", 0)
                     conf = f" ({r.get('avg_conf', 0):.0%})" if r.get("avg_conf") else ""
-                    all_lines.append(f"- {field} — in {count} {self._domain['record_noun_plural']}{conf}")
+                    all_lines.append(
+                        f"- {field} — in {count} {self._domain['record_noun_plural']}{conf}"
+                    )
 
         if not all_lines:
-            return ToolResult(content="No extracted fields found.", metadata={"count": 0})
+            return ToolResult(
+                content="No extracted fields found.", metadata={"count": 0}
+            )
 
         return ToolResult(content="\n".join(all_lines))
 
@@ -564,7 +637,9 @@ class SchemaPortfolioTool(BaseTool):
             idx = 2
 
             if query:
-                conditions.append(f"(r.{key_col} ILIKE ${idx} OR r.{val_col} ILIKE ${idx})")
+                conditions.append(
+                    f"(r.{key_col} ILIKE ${idx} OR r.{val_col} ILIKE ${idx})"
+                )
                 params.append(f"%{query}%")
                 idx += 1
             if section:
@@ -602,12 +677,14 @@ class SchemaPortfolioTool(BaseTool):
         if not all_lines:
             return ToolResult(content="No matching data found.", metadata={"count": 0})
 
-        return ToolResult(content=f"Query results:\n" + "\n".join(all_lines))
+        return ToolResult(content="Query results:\n" + "\n".join(all_lines))
 
     async def _compare_field(self, conn: Any, args: dict) -> ToolResult:
         field_name = args.get("query", "") or args.get("field_name", "")
         if not field_name:
-            return ToolResult(content="Error: query (field name) is required", is_error=True)
+            return ToolResult(
+                content="Error: query (field name) is required", is_error=True
+            )
 
         kv_tables = [r for r in self._related if r.get("is_kv_store")]
         if not kv_tables:
@@ -630,14 +707,22 @@ class SchemaPortfolioTool(BaseTool):
                 f" FROM {kv['name']} r JOIN {table} m ON r.{fk} = m.id"
                 f" WHERE m.{scope_col} = $1 AND r.{key_col} ILIKE $2"
                 f" ORDER BY m.{title_col}",
-                self.user_id, f"%{field_name}%",
+                self.user_id,
+                f"%{field_name}%",
             )
 
             for r in rows:
-                type_str = f" ({r.get(type_col)})" if type_col and r.get(type_col) else ""
-                all_lines.append(f"- **{r.get(title_col)}**{type_str}: {r.get(val_col)}")
+                type_str = (
+                    f" ({r.get(type_col)})" if type_col and r.get(type_col) else ""
+                )
+                all_lines.append(
+                    f"- **{r.get(title_col)}**{type_str}: {r.get(val_col)}"
+                )
 
         if len(all_lines) <= 1:
-            return ToolResult(content=f"Field '{field_name}' not found in any {self._domain['record_noun']}.", metadata={"count": 0})
+            return ToolResult(
+                content=f"Field '{field_name}' not found in any {self._domain['record_noun']}.",
+                metadata={"count": 0},
+            )
 
         return ToolResult(content="\n".join(all_lines))

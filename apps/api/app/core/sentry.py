@@ -2,6 +2,7 @@
 
 Enable by setting SENTRY_DSN environment variable.
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,7 +28,9 @@ def setup_sentry() -> None:
                 FastApiIntegration(transaction_style="endpoint"),
                 SqlalchemyIntegration(),
             ],
-            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            traces_sample_rate=float(
+                os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")
+            ),
             environment=os.environ.get("ENVIRONMENT", "development"),
             release=os.environ.get("IMAGE_TAG", "dev"),
             send_default_pii=False,

@@ -1,4 +1,5 @@
 """Pipeline validation — catch configuration errors before execution."""
+
 from __future__ import annotations
 
 import re
@@ -46,8 +47,15 @@ class ValidationResult:
 
 # Common context variables that the executor auto-injects
 _AUTO_INJECTED_CONTEXT_KEYS = {
-    "user_message", "message", "input", "prompt", "content",
-    "text", "ticket_content", "query", "request",
+    "user_message",
+    "message",
+    "input",
+    "prompt",
+    "content",
+    "text",
+    "ticket_content",
+    "query",
+    "request",
 }
 
 # Pipeline node tool names that don't have to appear in the agent's
@@ -55,9 +63,20 @@ _AUTO_INJECTED_CONTEXT_KEYS = {
 # Exposed for the AI builder so both the normalizer and the judge agree
 # on what "declared" means.
 BUILTIN_TOOLS: set[str] = {
-    "wait", "state_get", "state_set", "for_each", "while_loop",
-    "switch", "parallel", "merge", "conditional", "data_merger",
-    "loop", "branch", "__switch__", "__merge__",
+    "wait",
+    "state_get",
+    "state_set",
+    "for_each",
+    "while_loop",
+    "switch",
+    "parallel",
+    "merge",
+    "conditional",
+    "data_merger",
+    "loop",
+    "branch",
+    "__switch__",
+    "__merge__",
     # Engine DSL — `type: structured` parses to this tool_name. Pure
     # output-assembly node, no registry lookup. Validator must treat
     # it as a known tool or it reports "Unknown tool '__structured__'"
@@ -126,11 +145,14 @@ def validate_pipeline(
     warnings: list[ValidationError] = []
 
     if not nodes:
-        errors.append(ValidationError(
-            node_id="", field="nodes",
-            message="Pipeline has no nodes",
-            suggestion="Add at least one node to the pipeline.",
-        ))
+        errors.append(
+            ValidationError(
+                node_id="",
+                field="nodes",
+                message="Pipeline has no nodes",
+                suggestion="Add at least one node to the pipeline.",
+            )
+        )
         return ValidationResult(valid=False, errors=errors, warnings=warnings)
 
     nodes = [_normalise_dsl_node(n) for n in nodes]
@@ -139,37 +161,49 @@ def validate_pipeline(
     for idx, n in enumerate(nodes):
         nid = n.get("id") or ""
         if not nid:
-            errors.append(ValidationError(
-                node_id=f"node_{idx}", field="id",
-                message=f"Node at index {idx} is missing 'id'",
-                suggestion="Add a unique 'id' field like 'classify' or 'step_1'.",
-            ))
+            errors.append(
+                ValidationError(
+                    node_id=f"node_{idx}",
+                    field="id",
+                    message=f"Node at index {idx} is missing 'id'",
+                    suggestion="Add a unique 'id' field like 'classify' or 'step_1'.",
+                )
+            )
             continue
         if nid in node_ids:
-            errors.append(ValidationError(
-                node_id=nid, field="id",
-                message=f"Duplicate node id '{nid}'",
-                suggestion="Every node must have a unique id.",
-            ))
+            errors.append(
+                ValidationError(
+                    node_id=nid,
+                    field="id",
+                    message=f"Duplicate node id '{nid}'",
+                    suggestion="Every node must have a unique id.",
+                )
+            )
         node_ids.add(nid)
 
         tool_name = n.get("tool") or n.get("tool_name")
         if not tool_name:
-            errors.append(ValidationError(
-                node_id=nid, field="tool",
-                message="Node is missing 'tool' field",
-                suggestion="Specify which tool this node should use, e.g. 'tool: llm_call'.",
-            ))
+            errors.append(
+                ValidationError(
+                    node_id=nid,
+                    field="tool",
+                    message="Node is missing 'tool' field",
+                    suggestion="Specify which tool this node should use, e.g. 'tool: llm_call'.",
+                )
+            )
             continue
 
         # Built-ins live in the module-level BUILTIN_TOOLS constant so the
         # AI builder's normalizer + judge can import the same set.
         if tool_name not in BUILTIN_TOOLS and tool_registry.get(tool_name) is None:
-            errors.append(ValidationError(
-                node_id=nid, field="tool",
-                message=f"Unknown tool '{tool_name}'",
-                suggestion=f"Check spelling. Available tools: {', '.join(sorted(tool_registry.names())[:10])}...",
-            ))
+            errors.append(
+                ValidationError(
+                    node_id=nid,
+                    field="tool",
+                    message=f"Unknown tool '{tool_name}'",
+                    suggestion=f"Check spelling. Available tools: {', '.join(sorted(tool_registry.names())[:10])}...",
+                )
+            )
             continue
 
         tool = tool_registry.get(tool_name)
@@ -187,28 +221,37 @@ def validate_pipeline(
                 auto_injected = req_field in _AUTO_INJECTED_CONTEXT_KEYS
                 # agent_step required fields (system_prompt, input_message)
                 # are satisfied by agent_slug lookup / node-level input.
-                if tool_name == "agent_step" and req_field in ("system_prompt", "input_message"):
+                if tool_name == "agent_step" and req_field in (
+                    "system_prompt",
+                    "input_message",
+                ):
                     if has_agent_slug or has_node_input:
                         continue
                 if not has_arg and not auto_injected:
-                    errors.append(ValidationError(
-                        node_id=nid, field=f"arguments.{req_field}",
-                        message=f"Missing required argument '{req_field}' for tool '{tool_name}'",
-                        suggestion=f"Add '{req_field}: <value>' to this node's arguments. "
-                                   f"You can reference other nodes with {{{{node_id.field}}}} "
-                                   f"or context with {{{{context.var}}}}.",
-                    ))
+                    errors.append(
+                        ValidationError(
+                            node_id=nid,
+                            field=f"arguments.{req_field}",
+                            message=f"Missing required argument '{req_field}' for tool '{tool_name}'",
+                            suggestion=f"Add '{req_field}: <value>' to this node's arguments. "
+                            f"You can reference other nodes with {{{{node_id.field}}}} "
+                            f"or context with {{{{context.var}}}}.",
+                        )
+                    )
 
     for n in nodes:
         nid = n.get("id", "")
         depends = n.get("depends_on", []) or []
         for dep in depends:
             if dep not in node_ids:
-                errors.append(ValidationError(
-                    node_id=nid, field="depends_on",
-                    message=f"Node depends on '{dep}' which does not exist",
-                    suggestion=f"Check the node ID. Existing nodes: {', '.join(sorted(node_ids))}",
-                ))
+                errors.append(
+                    ValidationError(
+                        node_id=nid,
+                        field="depends_on",
+                        message=f"Node depends on '{dep}' which does not exist",
+                        suggestion=f"Check the node ID. Existing nodes: {', '.join(sorted(node_ids))}",
+                    )
+                )
 
     def _has_cycle() -> tuple[bool, list[str]]:
         color = {nid: "white" for nid in node_ids}
@@ -223,7 +266,7 @@ def validate_pipeline(
             path.append(nid)
             node = next((x for x in nodes if x.get("id") == nid), None)
             if node:
-                for dep in (node.get("depends_on") or []):
+                for dep in node.get("depends_on") or []:
                     if _visit(dep):
                         return True
             path.pop()
@@ -237,12 +280,14 @@ def validate_pipeline(
 
     cycle, cycle_path = _has_cycle()
     if cycle:
-        errors.append(ValidationError(
-            node_id=cycle_path[-1] if cycle_path else "",
-            field="depends_on",
-            message=f"Circular dependency detected: {' -> '.join(cycle_path)}",
-            suggestion="Remove the dependency that creates the cycle. Pipelines must be acyclic (DAG).",
-        ))
+        errors.append(
+            ValidationError(
+                node_id=cycle_path[-1] if cycle_path else "",
+                field="depends_on",
+                message=f"Circular dependency detected: {' -> '.join(cycle_path)}",
+                suggestion="Remove the dependency that creates the cycle. Pipelines must be acyclic (DAG).",
+            )
+        )
 
     ctx_keys = _AUTO_INJECTED_CONTEXT_KEYS | (available_context_keys or set())
     for n in nodes:
@@ -254,26 +299,32 @@ def validate_pipeline(
             if target == "context":
                 # {{context.var}} — check the var name
                 if len(parts) > 1 and parts[1].split(".")[0] not in ctx_keys:
-                    warnings.append(ValidationError(
-                        node_id=nid, field="arguments",
-                        severity="warning",
-                        message=f"Template {{{{{ref}}}}} references unknown context variable '{parts[1].split('.')[0]}'",
-                        suggestion=f"Available context: {', '.join(sorted(ctx_keys))}. "
-                                   f"Define this variable in agent.input_variables or pass it at execution time.",
-                    ))
+                    warnings.append(
+                        ValidationError(
+                            node_id=nid,
+                            field="arguments",
+                            severity="warning",
+                            message=f"Template {{{{{ref}}}}} references unknown context variable '{parts[1].split('.')[0]}'",
+                            suggestion=f"Available context: {', '.join(sorted(ctx_keys))}. "
+                            f"Define this variable in agent.input_variables or pass it at execution time.",
+                        )
+                    )
             elif target in node_ids:
                 pass  # references a real node — OK
             elif target in ctx_keys:
                 pass  # flat context var (e.g. {{message}}) — OK, executor resolves these
             else:
-                errors.append(ValidationError(
-                    node_id=nid, field="arguments",
-                    message=f"Template {{{{{ref}}}}} references unknown node or context variable '{target}'",
-                    suggestion=(
-                        f"Known nodes: {', '.join(sorted(node_ids)) or '(none)'}. "
-                        f"Known context vars: {', '.join(sorted(ctx_keys))}. "
-                        f"If '{target}' is an input variable, add it to the agent's input_variables."
-                    ),
-                ))
+                errors.append(
+                    ValidationError(
+                        node_id=nid,
+                        field="arguments",
+                        message=f"Template {{{{{ref}}}}} references unknown node or context variable '{target}'",
+                        suggestion=(
+                            f"Known nodes: {', '.join(sorted(node_ids)) or '(none)'}. "
+                            f"Known context vars: {', '.join(sorted(ctx_keys))}. "
+                            f"If '{target}' is an input variable, add it to the agent's input_variables."
+                        ),
+                    )
+                )
 
     return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)

@@ -54,7 +54,7 @@ class ScenarioPlannerTool(BaseTool):
                     },
                 },
                 "description": (
-                    'Named scenario presets with parameter overrides. '
+                    "Named scenario presets with parameter overrides. "
                     'Example: [{"name": "bull", "overrides": {"revenue": 1500000}}]'
                 ),
             },
@@ -95,7 +95,9 @@ class ScenarioPlannerTool(BaseTool):
         pass
 
     def _tokenize(
-        self, expr: str, variables: dict[str, float],
+        self,
+        expr: str,
+        variables: dict[str, float],
     ) -> list[tuple[str, Any]]:
         tokens: list[tuple[str, Any]] = []
         pos = 0
@@ -163,7 +165,9 @@ class ScenarioPlannerTool(BaseTool):
 
         def add_sub(self) -> float:
             left = self.mul_div()
-            while self.peek()[0] == ScenarioPlannerTool._TOKEN_OP and self.peek()[1] in ("+", "-"):
+            while self.peek()[0] == ScenarioPlannerTool._TOKEN_OP and self.peek()[
+                1
+            ] in ("+", "-"):
                 op = self.consume()[1]
                 right = self.mul_div()
                 if op == "+":
@@ -174,7 +178,9 @@ class ScenarioPlannerTool(BaseTool):
 
         def mul_div(self) -> float:
             left = self.power()
-            while self.peek()[0] == ScenarioPlannerTool._TOKEN_OP and self.peek()[1] in ("*", "/"):
+            while self.peek()[0] == ScenarioPlannerTool._TOKEN_OP and self.peek()[
+                1
+            ] in ("*", "/"):
                 op = self.consume()[1]
                 right = self.power()
                 if op == "*":
@@ -187,17 +193,26 @@ class ScenarioPlannerTool(BaseTool):
 
         def power(self) -> float:
             base = self.unary()
-            if self.peek()[0] == ScenarioPlannerTool._TOKEN_OP and self.peek()[1] == "**":
+            if (
+                self.peek()[0] == ScenarioPlannerTool._TOKEN_OP
+                and self.peek()[1] == "**"
+            ):
                 self.consume()
                 exp = self.unary()
-                return base ** exp
+                return base**exp
             return base
 
         def unary(self) -> float:
-            if self.peek()[0] == ScenarioPlannerTool._TOKEN_OP and self.peek()[1] == "-":
+            if (
+                self.peek()[0] == ScenarioPlannerTool._TOKEN_OP
+                and self.peek()[1] == "-"
+            ):
                 self.consume()
                 return -self.atom()
-            if self.peek()[0] == ScenarioPlannerTool._TOKEN_OP and self.peek()[1] == "+":
+            if (
+                self.peek()[0] == ScenarioPlannerTool._TOKEN_OP
+                and self.peek()[1] == "+"
+            ):
                 self.consume()
                 return self.atom()
             return self.atom()
@@ -246,17 +261,15 @@ class ScenarioPlannerTool(BaseTool):
                 "log": lambda a: math.log(a[0]) if len(a) == 1 else None,
                 "exp": lambda a: math.exp(a[0]) if len(a) == 1 else None,
                 "round": lambda a: (
-                    round(a[0]) if len(a) == 1
-                    else round(a[0], int(a[1])) if len(a) == 2
-                    else None
+                    round(a[0])
+                    if len(a) == 1
+                    else round(a[0], int(a[1])) if len(a) == 2 else None
                 ),
             }
 
             fn = func_map.get(func_name)
             if not fn:
-                raise ScenarioPlannerTool._ParseError(
-                    f"Unknown function: {func_name}"
-                )
+                raise ScenarioPlannerTool._ParseError(f"Unknown function: {func_name}")
 
             result = fn(args)
             if result is None:
@@ -336,19 +349,23 @@ class ScenarioPlannerTool(BaseTool):
                     val = low + i * step_size
                     sweep_vars = {**base_vars, param_name: val}
                     outcome = self._safe_eval(formula, sweep_vars)
-                    values_list.append({
-                        "value": round(val, 4),
-                        output_name: round(outcome, 4),
-                    })
+                    values_list.append(
+                        {
+                            "value": round(val, 4),
+                            output_name: round(outcome, 4),
+                        }
+                    )
 
-                parameter_sweep.append({
-                    "param": param_name,
-                    "unit": spec["unit"],
-                    "base_value": spec["base"],
-                    "sweep_range": [round(low, 4), round(high, 4)],
-                    "steps": steps,
-                    "values": values_list,
-                })
+                parameter_sweep.append(
+                    {
+                        "param": param_name,
+                        "unit": spec["unit"],
+                        "base_value": spec["base"],
+                        "sweep_range": [round(low, 4), round(high, 4)],
+                        "steps": steps,
+                        "values": values_list,
+                    }
+                )
 
             # 3. Named scenarios
             named_results = []
@@ -362,32 +379,37 @@ class ScenarioPlannerTool(BaseTool):
                     if k in scenario_vars:
                         scenario_vars[k] = float(v)
                 outcome = self._safe_eval(formula, scenario_vars)
-                named_results.append({
-                    "name": name,
-                    "params": {
-                        k: {"value": v, "unit": validated[k]["unit"]}
-                        for k, v in scenario_vars.items()
-                        if k in validated
-                    },
-                    output_name: round(outcome, 4),
-                    "delta_from_base": round(outcome - base_outcome, 4),
-                    "delta_pct": (
-                        round((outcome - base_outcome) / abs(base_outcome) * 100, 2)
-                        if base_outcome != 0 else None
-                    ),
-                })
+                named_results.append(
+                    {
+                        "name": name,
+                        "params": {
+                            k: {"value": v, "unit": validated[k]["unit"]}
+                            for k, v in scenario_vars.items()
+                            if k in validated
+                        },
+                        output_name: round(outcome, 4),
+                        "delta_from_base": round(outcome - base_outcome, 4),
+                        "delta_pct": (
+                            round((outcome - base_outcome) / abs(base_outcome) * 100, 2)
+                            if base_outcome != 0
+                            else None
+                        ),
+                    }
+                )
 
             # 4. Sensitivity analysis (elasticity)
             sensitivity = []
             for param_name, spec in validated.items():
                 base_val = spec["base"]
                 if base_val == 0:
-                    sensitivity.append({
-                        "param": param_name,
-                        "elasticity": 0.0,
-                        "direction": "neutral",
-                        "note": "Base value is zero; elasticity undefined",
-                    })
+                    sensitivity.append(
+                        {
+                            "param": param_name,
+                            "elasticity": 0.0,
+                            "direction": "neutral",
+                            "note": "Base value is zero; elasticity undefined",
+                        }
+                    )
                     continue
 
                 # Compute elasticity: % change in outcome / % change in input
@@ -397,28 +419,32 @@ class ScenarioPlannerTool(BaseTool):
                 perturbed_outcome = self._safe_eval(formula, perturbed_vars)
 
                 if base_outcome != 0:
-                    outcome_pct_change = (perturbed_outcome - base_outcome) / abs(base_outcome)
+                    outcome_pct_change = (perturbed_outcome - base_outcome) / abs(
+                        base_outcome
+                    )
                     elasticity = outcome_pct_change / delta_pct
                 else:
                     elasticity = 0.0
 
                 direction = (
-                    "positive" if elasticity > 0.01
-                    else "negative" if elasticity < -0.01
-                    else "neutral"
+                    "positive"
+                    if elasticity > 0.01
+                    else "negative" if elasticity < -0.01 else "neutral"
                 )
 
-                sensitivity.append({
-                    "param": param_name,
-                    "unit": spec["unit"],
-                    "elasticity": round(elasticity, 4),
-                    "direction": direction,
-                    "interpretation": (
-                        f"A 1% increase in {param_name} causes a "
-                        f"{abs(elasticity) * 100:.2f}% "
-                        f"{'increase' if elasticity > 0 else 'decrease'} in {output_name}"
-                    ),
-                })
+                sensitivity.append(
+                    {
+                        "param": param_name,
+                        "unit": spec["unit"],
+                        "elasticity": round(elasticity, 4),
+                        "direction": direction,
+                        "interpretation": (
+                            f"A 1% increase in {param_name} causes a "
+                            f"{abs(elasticity) * 100:.2f}% "
+                            f"{'increase' if elasticity > 0 else 'decrease'} in {output_name}"
+                        ),
+                    }
+                )
 
             # Sort sensitivity by absolute elasticity (most sensitive first)
             sensitivity.sort(key=lambda x: abs(x.get("elasticity", 0)), reverse=True)

@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -17,7 +17,7 @@ from app.schemas.marketplace import CreateReviewRequest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent, AgentStatus, AgentType
+from models.agent import Agent, AgentStatus
 from models.marketplace import Review
 from models.user import User
 
@@ -85,9 +85,7 @@ async def list_reviews(
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
 ) -> JSONResponse:
-    result = await db.execute(
-        select(Agent).where(Agent.id == agent_id)
-    )
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
     if not result.scalar_one_or_none():
         return error("Agent not found", 404)
 

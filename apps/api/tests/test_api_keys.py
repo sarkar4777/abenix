@@ -8,11 +8,14 @@ from httpx import AsyncClient
 
 async def _register(client: AsyncClient) -> str:
     email = f"keys-{uuid.uuid4().hex[:8]}@test.com"
-    resp = await client.post("/api/auth/register", json={
-        "email": email,
-        "password": "securepass123",
-        "full_name": "Keys Tester",
-    })
+    resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": "securepass123",
+            "full_name": "Keys Tester",
+        },
+    )
     return resp.json()["data"]["access_token"]
 
 
@@ -23,9 +26,13 @@ def _auth(token: str) -> dict[str, str]:
 @pytest.mark.asyncio
 async def test_create_api_key(client: AsyncClient):
     token = await _register(client)
-    resp = await client.post("/api/api-keys", json={
-        "name": "Test Key",
-    }, headers=_auth(token))
+    resp = await client.post(
+        "/api/api-keys",
+        json={
+            "name": "Test Key",
+        },
+        headers=_auth(token),
+    )
     assert resp.status_code == 201
     data = resp.json()["data"]
     assert data["name"] == "Test Key"
@@ -51,7 +58,9 @@ async def test_list_api_keys(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_revoke_api_key(client: AsyncClient):
     token = await _register(client)
-    create_resp = await client.post("/api/api-keys", json={"name": "Revoke Me"}, headers=_auth(token))
+    create_resp = await client.post(
+        "/api/api-keys", json={"name": "Revoke Me"}, headers=_auth(token)
+    )
     key_id = create_resp.json()["data"]["id"]
 
     resp = await client.delete(f"/api/api-keys/{key_id}", headers=_auth(token))
@@ -72,7 +81,9 @@ async def test_api_keys_cross_tenant_isolation(client: AsyncClient):
     token_a = await _register(client)
     token_b = await _register(client)
 
-    create_resp = await client.post("/api/api-keys", json={"name": "Tenant A Key"}, headers=_auth(token_a))
+    create_resp = await client.post(
+        "/api/api-keys", json={"name": "Tenant A Key"}, headers=_auth(token_a)
+    )
     key_id = create_resp.json()["data"]["id"]
 
     resp = await client.delete(f"/api/api-keys/{key_id}", headers=_auth(token_b))
@@ -107,7 +118,9 @@ async def test_api_key_auth_via_header(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_api_key_auth_invalid_key(client: AsyncClient):
     """Invalid API key should return 401."""
-    resp = await client.get("/api/api-keys", headers={"X-API-Key": "af_invalidkey1234567890"})
+    resp = await client.get(
+        "/api/api-keys", headers={"X-API-Key": "af_invalidkey1234567890"}
+    )
     assert resp.status_code == 401
 
 

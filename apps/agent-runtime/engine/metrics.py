@@ -16,7 +16,10 @@ def _safe_metric(metric_cls, name: str, *args, **kwargs):
         # Race / shadow registration — fall back to whatever the registry
         # has now. Prefer a working metric over an exception.
         return getattr(REGISTRY, "_names_to_collectors", {}).get(name) or metric_cls(
-            name, *args, **kwargs, registry=None,
+            name,
+            *args,
+            **kwargs,
+            registry=None,
         )
 
 
@@ -63,7 +66,7 @@ tool_execution_duration_seconds = _safe_metric(
 # We expose short uppercase aliases so call sites stay readable without
 # the `_total` / `_seconds` boilerplate. Both names point at the same
 # Counter/Histogram instance — no double-counting.
-LLM_TOKENS   = _safe_metric(
+LLM_TOKENS = _safe_metric(
     Counter,
     "abenix_llm_tokens_provider_total",
     "LLM tokens broken out by provider + model + direction",

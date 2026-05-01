@@ -6,7 +6,6 @@ import csv
 import io
 import json
 import os
-from pathlib import Path
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
@@ -113,7 +112,9 @@ class DataExporterTool(BaseTool):
 
         fn = handlers.get(destination)
         if not fn:
-            return ToolResult(content=f"Unknown destination: {destination}", is_error=True)
+            return ToolResult(
+                content=f"Unknown destination: {destination}", is_error=True
+            )
 
         try:
             result = await fn(data, arguments)
@@ -160,7 +161,9 @@ class DataExporterTool(BaseTool):
             lines = ["| " + " | ".join(headers) + " |"]
             lines.append("| " + " | ".join("---" for _ in headers) + " |")
             for row in data:
-                lines.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
+                lines.append(
+                    "| " + " | ".join(str(row.get(h, "")) for h in headers) + " |"
+                )
             return "\n".join(lines)
         elif isinstance(data, dict):
             lines = []
@@ -202,7 +205,9 @@ class DataExporterTool(BaseTool):
 
         # Style definitions
         header_font = Font(bold=True, color="FFFFFF", size=11)
-        header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+        header_fill = PatternFill(
+            start_color="1F4E79", end_color="1F4E79", fill_type="solid"
+        )
         header_align = Alignment(horizontal="center", vertical="center")
         thin_border = Border(
             left=Side(style="thin", color="D9D9D9"),
@@ -210,28 +215,42 @@ class DataExporterTool(BaseTool):
             top=Side(style="thin", color="D9D9D9"),
             bottom=Side(style="thin", color="D9D9D9"),
         )
-        alt_fill = PatternFill(start_color="F2F7FB", end_color="F2F7FB", fill_type="solid")
+        alt_fill = PatternFill(
+            start_color="F2F7FB", end_color="F2F7FB", fill_type="solid"
+        )
 
         if isinstance(data, list) and data and isinstance(data[0], dict):
             # Array of objects → table with headers
             ws.title = "Data"
             headers = list(data[0].keys())
             for col_idx, header in enumerate(headers, 1):
-                cell = ws.cell(row=1, column=col_idx, value=str(header).replace("_", " ").title())
+                cell = ws.cell(
+                    row=1, column=col_idx, value=str(header).replace("_", " ").title()
+                )
                 cell.font = header_font
                 cell.fill = header_fill
                 cell.alignment = header_align
                 cell.border = thin_border
             for row_idx, row in enumerate(data, 2):
                 for col_idx, header in enumerate(headers, 1):
-                    cell = ws.cell(row=row_idx, column=col_idx, value=row.get(header, ""))
+                    cell = ws.cell(
+                        row=row_idx, column=col_idx, value=row.get(header, "")
+                    )
                     cell.border = thin_border
                     if row_idx % 2 == 0:
                         cell.fill = alt_fill
             # Auto-fit column widths
             for col_idx, header in enumerate(headers, 1):
-                max_len = max(len(str(header)), *(len(str(row.get(header, ""))) for row in data)) + 2
-                ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = min(max_len, 50)
+                max_len = (
+                    max(
+                        len(str(header)),
+                        *(len(str(row.get(header, ""))) for row in data),
+                    )
+                    + 2
+                )
+                ws.column_dimensions[
+                    openpyxl.utils.get_column_letter(col_idx)
+                ].width = min(max_len, 50)
         elif isinstance(data, dict):
             # Dict → key-value pairs, or multiple sheets for nested dicts
             ws.title = "Summary"
@@ -249,17 +268,29 @@ class DataExporterTool(BaseTool):
                         detail_ws = wb.create_sheet(title=str(key)[:31])
                         detail_headers = list(val[0].keys())
                         for ci, h in enumerate(detail_headers, 1):
-                            c = detail_ws.cell(row=1, column=ci, value=str(h).replace("_", " ").title())
+                            c = detail_ws.cell(
+                                row=1, column=ci, value=str(h).replace("_", " ").title()
+                            )
                             c.font = header_font
                             c.fill = header_fill
                             c.border = thin_border
                         for ri, r in enumerate(val, 2):
                             for ci, h in enumerate(detail_headers, 1):
-                                c = detail_ws.cell(row=ri, column=ci, value=r.get(h, ""))
+                                c = detail_ws.cell(
+                                    row=ri, column=ci, value=r.get(h, "")
+                                )
                                 c.border = thin_border
                     cell = ws.cell(row=row_num, column=1, value=str(key))
                     cell.border = thin_border
-                    ref_cell = ws.cell(row=row_num, column=2, value=f"See '{key}' sheet" if isinstance(val, list) else json.dumps(val, default=str)[:500])
+                    ref_cell = ws.cell(
+                        row=row_num,
+                        column=2,
+                        value=(
+                            f"See '{key}' sheet"
+                            if isinstance(val, list)
+                            else json.dumps(val, default=str)[:500]
+                        ),
+                    )
                     ref_cell.border = thin_border
                 else:
                     cell = ws.cell(row=row_num, column=1, value=str(key))
@@ -314,11 +345,15 @@ class DataExporterTool(BaseTool):
         text = "\n".join(lines)
 
         # Minimal valid PDF with text content
-        text_escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        text_escaped = (
+            text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        )
         # Split into pages of ~60 lines each
         all_lines = text_escaped.split("\n")
         page_size = 60
-        pages = [all_lines[i:i + page_size] for i in range(0, len(all_lines), page_size)]
+        pages = [
+            all_lines[i : i + page_size] for i in range(0, len(all_lines), page_size)
+        ]
         if not pages:
             pages = [[""]]
 
@@ -327,24 +362,32 @@ class DataExporterTool(BaseTool):
         objects.append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj")
         # Obj 2: Pages (placeholder, filled later)
         page_refs = " ".join(f"{3 + i * 2} 0 R" for i in range(len(pages)))
-        objects.append(f"2 0 obj\n<< /Type /Pages /Kids [{page_refs}] /Count {len(pages)} >>\nendobj")
+        objects.append(
+            f"2 0 obj\n<< /Type /Pages /Kids [{page_refs}] /Count {len(pages)} >>\nendobj"
+        )
         # Obj for each page + content
         obj_num = 3
         font_obj = obj_num + len(pages) * 2
         for page_lines in pages:
             content_obj = obj_num + 1
             y = 750
-            stream_lines = [f"BT /F1 10 Tf"]
+            stream_lines = ["BT /F1 10 Tf"]
             for line in page_lines:
                 stream_lines.append(f"1 0 0 1 50 {y} Tm ({line}) Tj")
                 y -= 14
             stream_lines.append("ET")
             stream = "\n".join(stream_lines)
-            objects.append(f"{obj_num} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_obj} 0 R /Resources << /Font << /F1 {font_obj} 0 R >> >> >>\nendobj")
-            objects.append(f"{content_obj} 0 obj\n<< /Length {len(stream)} >>\nstream\n{stream}\nendstream\nendobj")
+            objects.append(
+                f"{obj_num} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_obj} 0 R /Resources << /Font << /F1 {font_obj} 0 R >> >> >>\nendobj"
+            )
+            objects.append(
+                f"{content_obj} 0 obj\n<< /Length {len(stream)} >>\nstream\n{stream}\nendstream\nendobj"
+            )
             obj_num += 2
         # Font object
-        objects.append(f"{font_obj} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj")
+        objects.append(
+            f"{font_obj} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj"
+        )
 
         body = "\n".join(objects)
         xref_offset = len(f"%PDF-1.4\n{body}\n")
@@ -363,8 +406,16 @@ class DataExporterTool(BaseTool):
 
         if not filename:
             import uuid as _uuid
-            ext = {"json": ".json", "csv": ".csv", "txt": ".txt", "markdown": ".md",
-                   "html": ".html", "xlsx": ".xlsx", "pdf": ".pdf"}
+
+            ext = {
+                "json": ".json",
+                "csv": ".csv",
+                "txt": ".txt",
+                "markdown": ".md",
+                "html": ".html",
+                "xlsx": ".xlsx",
+                "pdf": ".pdf",
+            }
             filename = f"export_{_uuid.uuid4().hex[:8]}{ext.get(fmt, '.txt')}"
 
         # Generate file content
@@ -387,11 +438,15 @@ class DataExporterTool(BaseTool):
         download_url = f"/api/files/export/{filename}"
         try:
             from engine.storage import get_storage
+
             storage = get_storage()
             if storage.backend != "local":
                 content_type = {
-                    "json": "application/json", "csv": "text/csv", "txt": "text/plain",
-                    "markdown": "text/markdown", "html": "text/html",
+                    "json": "application/json",
+                    "csv": "text/csv",
+                    "txt": "text/plain",
+                    "markdown": "text/markdown",
+                    "html": "text/html",
                     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     "pdf": "application/pdf",
                 }.get(fmt, "application/octet-stream")
@@ -401,7 +456,9 @@ class DataExporterTool(BaseTool):
                     data=content_bytes,
                     content_type=content_type,
                 )
-                download_url = await storage.get_download_url(storage_uri, expires=86400)
+                download_url = await storage.get_download_url(
+                    storage_uri, expires=86400
+                )
         except Exception:
             pass  # Storage service unavailable — local file still works
 
@@ -448,7 +505,13 @@ class DataExporterTool(BaseTool):
         msg.attach(MIMEText(body, "plain"))
 
         content = self._format_data(data, fmt)
-        ext = {"json": ".json", "csv": ".csv", "txt": ".txt", "markdown": ".md", "html": ".html"}
+        ext = {
+            "json": ".json",
+            "csv": ".csv",
+            "txt": ".txt",
+            "markdown": ".md",
+            "html": ".html",
+        }
         filename = args.get("filename", f"export{ext.get(fmt, '.txt')}")
 
         attachment = MIMEBase("application", "octet-stream")
@@ -489,6 +552,7 @@ class DataExporterTool(BaseTool):
             }
 
         import boto3
+
         content = self._format_data(data, fmt)
         s3 = boto3.client("s3", region_name=AWS_REGION)
         s3.put_object(Bucket=bucket, Key=key, Body=content.encode("utf-8"))

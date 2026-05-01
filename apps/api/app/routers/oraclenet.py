@@ -1,21 +1,21 @@
 """OracleNet — Strategic Decision Analysis API."""
+
 from __future__ import annotations
 
 import json
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
-from app.schemas.oraclenet import AnalyzeRequest, BriefListItem
+from app.schemas.oraclenet import AnalyzeRequest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
@@ -35,17 +35,22 @@ async def analyze_decision(
     """Submit a decision for OracleNet analysis. Returns SSE stream of agent progress."""
     # Check per-user quota
     from app.core.usage import check_user_quota
+
     quota_error = await check_user_quota(user)
     if quota_error:
         return error(quota_error, 429)
 
     # Look up the OracleNet pipeline agent
     result = await db.execute(
-        select(Agent).where(Agent.slug == "oraclenet-pipeline", Agent.status == "active")
+        select(Agent).where(
+            Agent.slug == "oraclenet-pipeline", Agent.status == "active"
+        )
     )
     agent = result.scalar_one_or_none()
     if not agent:
-        return error("OracleNet pipeline agent not found. Run seed_agents.py first.", 404)
+        return error(
+            "OracleNet pipeline agent not found. Run seed_agents.py first.", 404
+        )
 
     model_cfg = agent.model_config_ or {}
     pipeline_config = model_cfg.get("pipeline_config")
@@ -167,20 +172,24 @@ async def get_session(
         except (json.JSONDecodeError, TypeError):
             brief = {"raw_output": execution.output_message}
 
-    return success({
-        "execution_id": str(execution.id),
-        "status": execution.status.value if execution.status else "unknown",
-        "decision_prompt": execution.input_message,
-        "brief": brief,
-        "node_results": execution.node_results,
-        "duration_ms": execution.duration_ms,
-        "cost": float(execution.cost) if execution.cost else None,
-        "tokens": {
-            "input": execution.input_tokens,
-            "output": execution.output_tokens,
-        },
-        "created_at": execution.created_at.isoformat() if execution.created_at else None,
-    })
+    return success(
+        {
+            "execution_id": str(execution.id),
+            "status": execution.status.value if execution.status else "unknown",
+            "decision_prompt": execution.input_message,
+            "brief": brief,
+            "node_results": execution.node_results,
+            "duration_ms": execution.duration_ms,
+            "cost": float(execution.cost) if execution.cost else None,
+            "tokens": {
+                "input": execution.input_tokens,
+                "output": execution.output_tokens,
+            },
+            "created_at": (
+                execution.created_at.isoformat() if execution.created_at else None
+            ),
+        }
+    )
 
 
 @router.get("/sessions/{execution_id}/export/{fmt}")
@@ -210,7 +219,9 @@ async def export_brief(
         return StreamingResponse(
             iter([brief_text.encode()]),
             media_type="text/markdown",
-            headers={"Content-Disposition": f'attachment; filename="decision-brief-{execution_id}.md"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="decision-brief-{execution_id}.md"'
+            },
         )
 
     if fmt == "pdf":
@@ -243,7 +254,9 @@ async def export_brief(
             return StreamingResponse(
                 iter([buffer.read()]),
                 media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="decision-brief-{execution_id}.pdf"'},
+                headers={
+                    "Content-Disposition": f'attachment; filename="decision-brief-{execution_id}.pdf"'
+                },
             )
         except ImportError:
             return error("reportlab not installed for PDF generation", 500)
@@ -270,7 +283,9 @@ async def export_brief(
             return StreamingResponse(
                 iter([buffer.read()]),
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                headers={"Content-Disposition": f'attachment; filename="decision-brief-{execution_id}.docx"'},
+                headers={
+                    "Content-Disposition": f'attachment; filename="decision-brief-{execution_id}.docx"'
+                },
             )
         except ImportError:
             return error("python-docx not installed for DOCX generation", 500)

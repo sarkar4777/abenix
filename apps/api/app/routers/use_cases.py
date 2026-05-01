@@ -15,6 +15,7 @@ Resolution order (first match wins):
         api-host   → ciq.<host> / st.<host> / iot.<host>
   4. Final fallback — `http://localhost:3001` / `3002` / `3003` (dev).
 """
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,6 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/use-cases", tags=["use-cases"])
@@ -109,11 +109,7 @@ def _current_host(request: Request) -> str:
 
 
 def _scheme(request: Request) -> str:
-    return (
-        request.headers.get("x-forwarded-proto")
-        or request.url.scheme
-        or "http"
-    )
+    return request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
 
 
 def _bulk_overrides() -> dict[str, str]:
@@ -167,13 +163,15 @@ async def list_use_cases(request: Request) -> JSONResponse:
     """
     data = []
     for entry in CATALOG:
-        data.append({
-            "key": entry["key"],
-            "label": entry["label"],
-            "description": entry["description"],
-            "icon": entry.get("icon"),
-            "color": entry.get("color"),
-            "url": _resolve(entry, request),
-            "inline": bool(entry.get("inline_path")),
-        })
+        data.append(
+            {
+                "key": entry["key"],
+                "label": entry["label"],
+                "description": entry["description"],
+                "icon": entry.get("icon"),
+                "color": entry.get("color"),
+                "url": _resolve(entry, request),
+                "inline": bool(entry.get("inline_path")),
+            }
+        )
     return JSONResponse({"data": data, "error": None, "meta": None})

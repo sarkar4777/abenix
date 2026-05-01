@@ -1,4 +1,5 @@
 """Enhanced audit logging — immutable, hash-chained activity log."""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,7 +8,6 @@ import uuid
 from typing import Any
 
 from fastapi import Request
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -27,6 +27,7 @@ async def log_action(
     """Write an immutable, hash-chained entry to the activity_logs table."""
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
     from models.activity_log import ActivityLog
 
@@ -41,14 +42,18 @@ async def log_action(
         ua = request.headers.get("user-agent", "")[:500]
 
     # Build integrity hash (chain with previous entry)
-    hash_input = json.dumps({
-        "tenant_id": str(tenant_id),
-        "user_id": str(user_id),
-        "action": action,
-        "details": details,
-        "resource_type": resource_type,
-        "resource_id": resource_id,
-    }, sort_keys=True, default=str)
+    hash_input = json.dumps(
+        {
+            "tenant_id": str(tenant_id),
+            "user_id": str(user_id),
+            "action": action,
+            "details": details,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+        },
+        sort_keys=True,
+        default=str,
+    )
     integrity_hash = hashlib.sha256(hash_input.encode()).hexdigest()
 
     entry = ActivityLog(

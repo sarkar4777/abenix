@@ -1,4 +1,5 @@
 """USPTO PatentsView — US patent search (free, no key)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -32,8 +33,14 @@ class PatentsTrademarksTool(BaseTool):
                 "type": "string",
                 "description": "Optional inventor name filter.",
             },
-            "from_date": {"type": "string", "description": "Earliest grant date YYYY-MM-DD."},
-            "to_date": {"type": "string", "description": "Latest grant date YYYY-MM-DD."},
+            "from_date": {
+                "type": "string",
+                "description": "Earliest grant date YYYY-MM-DD.",
+            },
+            "to_date": {
+                "type": "string",
+                "description": "Latest grant date YYYY-MM-DD.",
+            },
             "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
         },
     }
@@ -69,8 +76,12 @@ class PatentsTrademarksTool(BaseTool):
         body = {
             "q": q,
             "f": [
-                "patent_id", "patent_title", "patent_date", "patent_abstract",
-                "assignees.assignee_organization", "inventors.inventor_name_first",
+                "patent_id",
+                "patent_title",
+                "patent_date",
+                "patent_abstract",
+                "assignees.assignee_organization",
+                "inventors.inventor_name_first",
                 "inventors.inventor_name_last",
             ],
             "s": [{"patent_date": "desc"}],
@@ -93,13 +104,19 @@ class PatentsTrademarksTool(BaseTool):
         if not patents:
             return ToolResult(content="No matching patents.")
 
-        lines = [f"USPTO patents — {len(patents)} result{'s' if len(patents) != 1 else ''}:"]
+        lines = [
+            f"USPTO patents — {len(patents)} result{'s' if len(patents) != 1 else ''}:"
+        ]
         compact = []
         for p in patents:
-            assignees = ", ".join(
-                a.get("assignee_organization", "") for a in (p.get("assignees") or [])
-                if a.get("assignee_organization")
-            ) or "(unassigned)"
+            assignees = (
+                ", ".join(
+                    a.get("assignee_organization", "")
+                    for a in (p.get("assignees") or [])
+                    if a.get("assignee_organization")
+                )
+                or "(unassigned)"
+            )
             inventors = ", ".join(
                 f"{i.get('inventor_name_first', '')} {i.get('inventor_name_last', '')}".strip()
                 for i in (p.get("inventors") or [])
@@ -113,11 +130,13 @@ class PatentsTrademarksTool(BaseTool):
                 lines.append(f"    Inventors: {inventors[:200]}")
             if abstract:
                 lines.append(f"    Abstract: {abstract[:300]}")
-            compact.append({
-                "patent_id": p.get("patent_id"),
-                "title": p.get("patent_title"),
-                "date": p.get("patent_date"),
-                "assignees": assignees,
-                "abstract": abstract[:500],
-            })
+            compact.append(
+                {
+                    "patent_id": p.get("patent_id"),
+                    "title": p.get("patent_title"),
+                    "date": p.get("patent_date"),
+                    "assignees": assignees,
+                    "abstract": abstract[:500],
+                }
+            )
         return ToolResult(content="\n".join(lines), metadata={"patents": compact})

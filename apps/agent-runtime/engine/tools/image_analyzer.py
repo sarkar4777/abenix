@@ -1,4 +1,5 @@
 """Image Analysis Tool — AI-powered image understanding via Claude Vision or OpenAI"""
+
 from __future__ import annotations
 
 import base64
@@ -26,7 +27,15 @@ class ImageAnalyzerTool(BaseTool):
             },
             "operation": {
                 "type": "string",
-                "enum": ["describe", "ocr", "chart_data", "objects", "diagram", "compare", "question"],
+                "enum": [
+                    "describe",
+                    "ocr",
+                    "chart_data",
+                    "objects",
+                    "diagram",
+                    "compare",
+                    "question",
+                ],
                 "description": "Type of analysis to perform",
                 "default": "describe",
             },
@@ -69,21 +78,29 @@ class ImageAnalyzerTool(BaseTool):
         # Try Claude Vision first, then OpenAI
         result = await self._analyze_with_claude(image_url, prompt, compare_url)
         if result:
-            return ToolResult(content=json.dumps({
-                "status": "success",
-                "operation": operation,
-                "analysis": result,
-                "model": "claude-vision",
-            }))
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "success",
+                        "operation": operation,
+                        "analysis": result,
+                        "model": "claude-vision",
+                    }
+                )
+            )
 
         result = await self._analyze_with_openai(image_url, prompt, compare_url)
         if result:
-            return ToolResult(content=json.dumps({
-                "status": "success",
-                "operation": operation,
-                "analysis": result,
-                "model": "openai-vision",
-            }))
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "success",
+                        "operation": operation,
+                        "analysis": result,
+                        "model": "openai-vision",
+                    }
+                )
+            )
 
         return ToolResult(
             content="Error: No vision API available. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.",
@@ -95,6 +112,7 @@ class ImageAnalyzerTool(BaseTool):
         try:
             if url.startswith(("http://", "https://")):
                 import httpx
+
                 async with httpx.AsyncClient(timeout=30) as client:
                     resp = await client.get(url)
                     if resp.status_code != 200:
@@ -108,14 +126,22 @@ class ImageAnalyzerTool(BaseTool):
                 if not path.exists():
                     return None
                 ext = path.suffix.lower()
-                media_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+                media_types = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".gif": "image/gif",
+                    ".webp": "image/webp",
+                }
                 media_type = media_types.get(ext, "image/png")
                 data = base64.b64encode(path.read_bytes()).decode()
                 return data, media_type
         except Exception:
             return None
 
-    async def _analyze_with_claude(self, image_url: str, prompt: str, compare_url: str = "") -> str | None:
+    async def _analyze_with_claude(
+        self, image_url: str, prompt: str, compare_url: str = ""
+    ) -> str | None:
         """Analyze image using Anthropic Claude Vision API."""
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
@@ -123,6 +149,7 @@ class ImageAnalyzerTool(BaseTool):
 
         try:
             import anthropic
+
             client = anthropic.AsyncAnthropic(api_key=api_key)
 
             content: list[dict[str, Any]] = []
@@ -133,20 +160,32 @@ class ImageAnalyzerTool(BaseTool):
                 return None
             b64_data, media_type = img
 
-            content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": media_type, "data": b64_data},
-            })
+            content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": b64_data,
+                    },
+                }
+            )
 
             # Load comparison image if provided
             if compare_url:
                 img2 = await self._load_image_base64(compare_url)
                 if img2:
                     b64_2, mt_2 = img2
-                    content.append({
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": mt_2, "data": b64_2},
-                    })
+                    content.append(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mt_2,
+                                "data": b64_2,
+                            },
+                        }
+                    )
 
             content.append({"type": "text", "text": prompt})
 
@@ -158,10 +197,12 @@ class ImageAnalyzerTool(BaseTool):
 
             return resp.content[0].text if resp.content else None
 
-        except Exception as e:
+        except Exception:
             return None
 
-    async def _analyze_with_openai(self, image_url: str, prompt: str, compare_url: str = "") -> str | None:
+    async def _analyze_with_openai(
+        self, image_url: str, prompt: str, compare_url: str = ""
+    ) -> str | None:
         """Analyze image using OpenAI Vision API."""
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -169,6 +210,7 @@ class ImageAnalyzerTool(BaseTool):
 
         try:
             import openai
+
             client = openai.AsyncOpenAI(api_key=api_key)
 
             content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
@@ -181,14 +223,18 @@ class ImageAnalyzerTool(BaseTool):
                 if not img:
                     return None
                 b64_data, media_type = img
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{media_type};base64,{b64_data}"},
-                })
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{b64_data}"},
+                    }
+                )
 
             if compare_url:
                 if compare_url.startswith(("http://", "https://")):
-                    content.append({"type": "image_url", "image_url": {"url": compare_url}})
+                    content.append(
+                        {"type": "image_url", "image_url": {"url": compare_url}}
+                    )
 
             resp = await client.chat.completions.create(
                 model="gpt-4o",

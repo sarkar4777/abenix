@@ -6,7 +6,7 @@ import json
 import os
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from engine.tools.email_sender import EmailSenderTool
 
@@ -52,21 +52,15 @@ class TestEmailSenderTool:
     @pytest.mark.asyncio
     async def test_missing_to_returns_error(self, tool: EmailSenderTool) -> None:
         """An empty 'to' field returns an error."""
-        result = await tool.execute(
-            {"to": "", "subject": "Hi", "body": "Test"}
-        )
+        result = await tool.execute({"to": "", "subject": "Hi", "body": "Test"})
 
         assert result.is_error is True
         assert "to" in result.content.lower()
 
     @pytest.mark.asyncio
-    async def test_missing_subject_returns_error(
-        self, tool: EmailSenderTool
-    ) -> None:
+    async def test_missing_subject_returns_error(self, tool: EmailSenderTool) -> None:
         """An empty 'subject' field returns an error."""
-        result = await tool.execute(
-            {"to": "a@b.com", "subject": "", "body": "Test"}
-        )
+        result = await tool.execute({"to": "a@b.com", "subject": "", "body": "Test"})
 
         assert result.is_error is True
         assert "subject" in result.content.lower()
@@ -153,24 +147,34 @@ class TestEmailSenderSmtp:
     @pytest.mark.asyncio
     async def test_smtp_send_success(self, tool: EmailSenderTool) -> None:
         """SMTP send succeeds with mocked aiosmtplib."""
-        with patch.dict(os.environ, {
-            "SMTP_HOST": "smtp.test.com",
-            "SMTP_PORT": "587",
-            "SMTP_USER": "user@test.com",
-            "SMTP_PASS": "password123",
-            "SMTP_FROM": "noreply@test.com",
-        }), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), \
-             patch("engine.tools.email_sender.SMTP_PORT", 587), \
-             patch("engine.tools.email_sender.SMTP_USER", "user@test.com"), \
-             patch("engine.tools.email_sender.SMTP_PASS", "password123"), \
-             patch("engine.tools.email_sender.SMTP_FROM", "noreply@test.com"), \
-             patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        with patch.dict(
+            os.environ,
+            {
+                "SMTP_HOST": "smtp.test.com",
+                "SMTP_PORT": "587",
+                "SMTP_USER": "user@test.com",
+                "SMTP_PASS": "password123",
+                "SMTP_FROM": "noreply@test.com",
+            },
+        ), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), patch(
+            "engine.tools.email_sender.SMTP_PORT", 587
+        ), patch(
+            "engine.tools.email_sender.SMTP_USER", "user@test.com"
+        ), patch(
+            "engine.tools.email_sender.SMTP_PASS", "password123"
+        ), patch(
+            "engine.tools.email_sender.SMTP_FROM", "noreply@test.com"
+        ), patch(
+            "aiosmtplib.send", new_callable=AsyncMock
+        ) as mock_send:
             mock_send.return_value = ({}, "OK")
-            result = await tool.execute({
-                "to": "recipient@example.com",
-                "subject": "Test",
-                "body": "Hello",
-            })
+            result = await tool.execute(
+                {
+                    "to": "recipient@example.com",
+                    "subject": "Test",
+                    "body": "Hello",
+                }
+            )
 
         assert not result.is_error
         mock_send.assert_called_once()
@@ -182,78 +186,111 @@ class TestEmailSenderSmtp:
     @pytest.mark.asyncio
     async def test_smtp_auth_failure(self, tool: EmailSenderTool) -> None:
         """SMTP authentication failure returns an error."""
-        with patch.dict(os.environ, {
-            "SMTP_HOST": "smtp.test.com",
-            "SMTP_PORT": "587",
-            "SMTP_USER": "bad_user",
-            "SMTP_PASS": "bad_pass",
-            "SMTP_FROM": "noreply@test.com",
-        }), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), \
-             patch("engine.tools.email_sender.SMTP_PORT", 587), \
-             patch("engine.tools.email_sender.SMTP_USER", "bad_user"), \
-             patch("engine.tools.email_sender.SMTP_PASS", "bad_pass"), \
-             patch("engine.tools.email_sender.SMTP_FROM", "noreply@test.com"), \
-             patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        with patch.dict(
+            os.environ,
+            {
+                "SMTP_HOST": "smtp.test.com",
+                "SMTP_PORT": "587",
+                "SMTP_USER": "bad_user",
+                "SMTP_PASS": "bad_pass",
+                "SMTP_FROM": "noreply@test.com",
+            },
+        ), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), patch(
+            "engine.tools.email_sender.SMTP_PORT", 587
+        ), patch(
+            "engine.tools.email_sender.SMTP_USER", "bad_user"
+        ), patch(
+            "engine.tools.email_sender.SMTP_PASS", "bad_pass"
+        ), patch(
+            "engine.tools.email_sender.SMTP_FROM", "noreply@test.com"
+        ), patch(
+            "aiosmtplib.send", new_callable=AsyncMock
+        ) as mock_send:
             mock_send.side_effect = Exception(
                 "SMTP Authentication failed: (535, 'Authentication credentials invalid')"
             )
-            result = await tool.execute({
-                "to": "user@example.com",
-                "subject": "Auth test",
-                "body": "This should fail",
-            })
+            result = await tool.execute(
+                {
+                    "to": "user@example.com",
+                    "subject": "Auth test",
+                    "body": "This should fail",
+                }
+            )
 
         assert result.is_error
-        assert "failed" in result.content.lower() or "authentication" in result.content.lower()
+        assert (
+            "failed" in result.content.lower()
+            or "authentication" in result.content.lower()
+        )
 
     @pytest.mark.asyncio
-    async def test_smtp_connection_failure(
-        self, tool: EmailSenderTool
-    ) -> None:
+    async def test_smtp_connection_failure(self, tool: EmailSenderTool) -> None:
         """SMTP connection refused returns an error."""
-        with patch.dict(os.environ, {
-            "SMTP_HOST": "smtp.unreachable.com",
-            "SMTP_PORT": "587",
-        }), patch("engine.tools.email_sender.SMTP_HOST", "smtp.unreachable.com"), \
-             patch("engine.tools.email_sender.SMTP_PORT", 587), \
-             patch("engine.tools.email_sender.SMTP_USER", ""), \
-             patch("engine.tools.email_sender.SMTP_PASS", ""), \
-             patch("engine.tools.email_sender.SMTP_FROM", "noreply@test.com"), \
-             patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        with patch.dict(
+            os.environ,
+            {
+                "SMTP_HOST": "smtp.unreachable.com",
+                "SMTP_PORT": "587",
+            },
+        ), patch("engine.tools.email_sender.SMTP_HOST", "smtp.unreachable.com"), patch(
+            "engine.tools.email_sender.SMTP_PORT", 587
+        ), patch(
+            "engine.tools.email_sender.SMTP_USER", ""
+        ), patch(
+            "engine.tools.email_sender.SMTP_PASS", ""
+        ), patch(
+            "engine.tools.email_sender.SMTP_FROM", "noreply@test.com"
+        ), patch(
+            "aiosmtplib.send", new_callable=AsyncMock
+        ) as mock_send:
             mock_send.side_effect = ConnectionRefusedError(
                 "Connection refused by smtp.unreachable.com:587"
             )
-            result = await tool.execute({
-                "to": "user@example.com",
-                "subject": "Connection test",
-                "body": "This should fail too",
-            })
+            result = await tool.execute(
+                {
+                    "to": "user@example.com",
+                    "subject": "Connection test",
+                    "body": "This should fail too",
+                }
+            )
 
         assert result.is_error
-        assert "failed" in result.content.lower() or "connection" in result.content.lower()
+        assert (
+            "failed" in result.content.lower() or "connection" in result.content.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_smtp_html_email(self, tool: EmailSenderTool) -> None:
         """HTML email is sent with correct content type via SMTP."""
-        with patch.dict(os.environ, {
-            "SMTP_HOST": "smtp.test.com",
-            "SMTP_PORT": "587",
-            "SMTP_USER": "user@test.com",
-            "SMTP_PASS": "password123",
-            "SMTP_FROM": "noreply@test.com",
-        }), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), \
-             patch("engine.tools.email_sender.SMTP_PORT", 587), \
-             patch("engine.tools.email_sender.SMTP_USER", "user@test.com"), \
-             patch("engine.tools.email_sender.SMTP_PASS", "password123"), \
-             patch("engine.tools.email_sender.SMTP_FROM", "noreply@test.com"), \
-             patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        with patch.dict(
+            os.environ,
+            {
+                "SMTP_HOST": "smtp.test.com",
+                "SMTP_PORT": "587",
+                "SMTP_USER": "user@test.com",
+                "SMTP_PASS": "password123",
+                "SMTP_FROM": "noreply@test.com",
+            },
+        ), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), patch(
+            "engine.tools.email_sender.SMTP_PORT", 587
+        ), patch(
+            "engine.tools.email_sender.SMTP_USER", "user@test.com"
+        ), patch(
+            "engine.tools.email_sender.SMTP_PASS", "password123"
+        ), patch(
+            "engine.tools.email_sender.SMTP_FROM", "noreply@test.com"
+        ), patch(
+            "aiosmtplib.send", new_callable=AsyncMock
+        ) as mock_send:
             mock_send.return_value = ({}, "OK")
-            result = await tool.execute({
-                "to": "recipient@example.com",
-                "subject": "HTML Report",
-                "body": "<h1>Report</h1><p>Data analysis complete.</p>",
-                "format": "html",
-            })
+            result = await tool.execute(
+                {
+                    "to": "recipient@example.com",
+                    "subject": "HTML Report",
+                    "body": "<h1>Report</h1><p>Data analysis complete.</p>",
+                    "format": "html",
+                }
+            )
 
         assert not result.is_error
         mock_send.assert_called_once()

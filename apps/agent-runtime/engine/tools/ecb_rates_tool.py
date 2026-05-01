@@ -13,11 +13,26 @@ _BASE_URL = "https://data-api.ecb.europa.eu/service/data"
 
 # Common currency ISO codes for the EUR cross-rate lookup
 _CURRENCY_MAP: dict[str, str] = {
-    "USD": "USD", "GBP": "GBP", "JPY": "JPY", "CHF": "CHF",
-    "CAD": "CAD", "AUD": "AUD", "NZD": "NZD", "SEK": "SEK",
-    "NOK": "NOK", "DKK": "DKK", "PLN": "PLN", "CZK": "CZK",
-    "HUF": "HUF", "TRY": "TRY", "CNY": "CNY", "INR": "INR",
-    "BRL": "BRL", "ZAR": "ZAR", "MXN": "MXN", "KRW": "KRW",
+    "USD": "USD",
+    "GBP": "GBP",
+    "JPY": "JPY",
+    "CHF": "CHF",
+    "CAD": "CAD",
+    "AUD": "AUD",
+    "NZD": "NZD",
+    "SEK": "SEK",
+    "NOK": "NOK",
+    "DKK": "DKK",
+    "PLN": "PLN",
+    "CZK": "CZK",
+    "HUF": "HUF",
+    "TRY": "TRY",
+    "CNY": "CNY",
+    "INR": "INR",
+    "BRL": "BRL",
+    "ZAR": "ZAR",
+    "MXN": "MXN",
+    "KRW": "KRW",
 }
 
 
@@ -66,7 +81,7 @@ class ECBRatesTool(BaseTool):
         if not handler:
             return ToolResult(
                 content=f"Error: unknown data_type '{data_type}'. "
-                        f"Available: {list(handlers.keys())}",
+                f"Available: {list(handlers.keys())}",
                 is_error=True,
             )
 
@@ -100,7 +115,7 @@ class ECBRatesTool(BaseTool):
         if target_currency not in _CURRENCY_MAP:
             return ToolResult(
                 content=f"Error: unsupported currency '{target_currency}'. "
-                        f"Available: {list(_CURRENCY_MAP.keys())}",
+                f"Available: {list(_CURRENCY_MAP.keys())}",
                 is_error=True,
             )
 

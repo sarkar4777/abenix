@@ -1,4 +1,5 @@
 """OntologySchema — typing prior + governance for a KnowledgeProject."""
+
 from __future__ import annotations
 
 import uuid
@@ -30,5 +31,7 @@ class OntologySchema(UUIDMixin, TimestampMixin, Base):
     entity_types: Mapped[list] = mapped_column(JSONB, default=list)
     relationship_types: Mapped[list] = mapped_column(JSONB, default=list)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True,
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True,
     )

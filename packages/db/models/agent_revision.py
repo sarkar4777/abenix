@@ -1,4 +1,5 @@
 """Agent Revision model — tracks every change to an agent for history and rollback."""
+
 from __future__ import annotations
 
 import uuid
@@ -21,7 +22,9 @@ class AgentRevision(UUIDMixin, Base):
     changed_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )
-    change_type: Mapped[str] = mapped_column(String(50))  # config_update, prompt_update, tools_update, publish, revert
+    change_type: Mapped[str] = mapped_column(
+        String(50)
+    )  # config_update, prompt_update, tools_update, publish, revert
     previous_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     new_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     diff_summary: Mapped[str | None] = mapped_column(Text, nullable=True)

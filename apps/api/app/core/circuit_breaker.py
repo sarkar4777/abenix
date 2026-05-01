@@ -1,4 +1,5 @@
 """Provider-level circuit breaker for LLM + external-tool calls."""
+
 from __future__ import annotations
 
 import asyncio
@@ -73,8 +74,11 @@ class CircuitBreaker:
             raw = await self.redis.hgetall(self._key)
             if not raw:
                 return self._local
+
             # redis may return bytes or strings depending on decode_responses
-            get = lambda k, default=0: raw.get(k, raw.get(k.encode(), default))
+            def get(k, default=0):
+                return raw.get(k, raw.get(k.encode(), default))
+
             state_str = get("state", "closed")
             if isinstance(state_str, bytes):
                 state_str = state_str.decode()
@@ -94,7 +98,11 @@ class CircuitBreaker:
         try:
             await self.redis.hset(
                 self._key,
-                mapping={"state": s.state.value, "failures": s.failures, "opened_at": s.opened_at},
+                mapping={
+                    "state": s.state.value,
+                    "failures": s.failures,
+                    "opened_at": s.opened_at,
+                },
             )
             await self.redis.expire(self._key, 3600)
         except Exception as e:
@@ -112,8 +120,10 @@ class CircuitBreaker:
                 return True
             # Still cooling down
             if _FAILFAST is not None:
-                try: _FAILFAST.labels(provider=self.provider).inc()
-                except Exception: pass
+                try:
+                    _FAILFAST.labels(provider=self.provider).inc()
+                except Exception:
+                    pass
             return False
         return True
 
@@ -134,11 +144,15 @@ class CircuitBreaker:
                 s.state = State.OPEN
                 s.opened_at = time.time()
                 if _TRIPS is not None:
-                    try: _TRIPS.labels(provider=self.provider, reason=reason).inc()
-                    except Exception: pass
+                    try:
+                        _TRIPS.labels(provider=self.provider, reason=reason).inc()
+                    except Exception:
+                        pass
                 logger.warning(
                     "circuit_breaker OPEN for %s (reason=%s, cooldown=%ds)",
-                    self.provider, reason, self.cooldown_seconds,
+                    self.provider,
+                    reason,
+                    self.cooldown_seconds,
                 )
             await self._save(s)
 

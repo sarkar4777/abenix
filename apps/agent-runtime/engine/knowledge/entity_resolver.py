@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ResolvedEntity:
     """An entity after deduplication — has a canonical name and all aliases."""
+
     canonical_name: str
     entity_type: str
     description: str
@@ -29,6 +30,7 @@ class ResolvedEntity:
 @dataclass
 class ResolvedRelationship:
     """A relationship with resolved entity names."""
+
     source: str  # Canonical name
     target: str  # Canonical name
     relationship_type: str
@@ -68,7 +70,7 @@ async def resolve_entities(
     if existing_entities:
         for ex in existing_entities:
             existing_map[ex["canonical_name"].lower()] = ex
-            for alias in (ex.get("aliases") or []):
+            for alias in ex.get("aliases") or []:
                 existing_map[alias.lower()] = ex
 
     # Group entities whose names are very similar (within edit distance)
@@ -153,9 +155,14 @@ async def resolve_entities(
                             # Merge alias entity into canonical
                             if canonical in merged:
                                 merged[canonical].aliases.append(alias)
-                                merged[canonical].mention_count += merged[alias].mention_count
+                                merged[canonical].mention_count += merged[
+                                    alias
+                                ].mention_count
                                 merged[canonical].source_doc_ids = list(
-                                    set(merged[canonical].source_doc_ids + merged[alias].source_doc_ids)
+                                    set(
+                                        merged[canonical].source_doc_ids
+                                        + merged[alias].source_doc_ids
+                                    )
                                 )
                             name_to_canonical[alias] = canonical
                             del merged[alias]
@@ -189,7 +196,10 @@ async def resolve_entities(
 
     logger.info(
         "Entity resolution: %d raw → %d resolved (%d merges), %d relationships",
-        total_raw, len(merged), merges, len(rel_key_map),
+        total_raw,
+        len(merged),
+        merges,
+        len(rel_key_map),
     )
 
     return ResolutionResult(
@@ -202,7 +212,9 @@ async def resolve_entities(
     )
 
 
-def _find_ambiguous_groups(entities: list[ResolvedEntity]) -> list[list[ResolvedEntity]]:
+def _find_ambiguous_groups(
+    entities: list[ResolvedEntity],
+) -> list[list[ResolvedEntity]]:
     """Find groups of entities that might be duplicates based on name similarity."""
     from difflib import SequenceMatcher
 
@@ -218,7 +230,9 @@ def _find_ambiguous_groups(entities: list[ResolvedEntity]) -> list[list[Resolved
             e2 = sorted_entities[j]
             if e2.canonical_name in used:
                 continue
-            ratio = SequenceMatcher(None, e1.canonical_name.lower(), e2.canonical_name.lower()).ratio()
+            ratio = SequenceMatcher(
+                None, e1.canonical_name.lower(), e2.canonical_name.lower()
+            ).ratio()
             if ratio > 0.7 and e1.entity_type == e2.entity_type:
                 group.append(e2)
                 used.add(e2.canonical_name)
@@ -235,6 +249,7 @@ async def _llm_resolve(
 ) -> dict[str, Any]:
     """Use LLM to resolve ambiguous entity groups."""
     from engine.llm_router import LLMRouter
+
     llm = LLMRouter()
 
     entity_list = []
@@ -259,7 +274,7 @@ async def _llm_resolve(
         )
         text = response.content.strip()
         if "{" in text:
-            result = json.loads(text[text.index("{"):text.rindex("}") + 1])
+            result = json.loads(text[text.index("{") : text.rindex("}") + 1])
             result["tokens"] = response.input_tokens + response.output_tokens
             result["cost"] = response.cost
             return result

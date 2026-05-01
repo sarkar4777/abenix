@@ -3,7 +3,16 @@
 import uuid
 from typing import Optional
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,13 +46,16 @@ class SavedTool(Base, UUIDMixin, TenantMixin, TimestampMixin):
     review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Elevated permissions (require admin approval)
-    permissions: Mapped[dict] = mapped_column(JSONB, default={
-        "network": False,
-        "filesystem_read": False,
-        "filesystem_write": False,
-        "third_party": [],
-        "env_vars": [],
-    })
+    permissions: Mapped[dict] = mapped_column(
+        JSONB,
+        default={
+            "network": False,
+            "filesystem_read": False,
+            "filesystem_write": False,
+            "third_party": [],
+            "env_vars": [],
+        },
+    )
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "name", name="uq_saved_tool_tenant_name"),

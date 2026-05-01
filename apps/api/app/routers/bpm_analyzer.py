@@ -1,4 +1,5 @@
 """BPM Analyzer — multimodal chat for BPMN / flowchart artefacts."""
+
 from __future__ import annotations
 
 import base64
@@ -29,11 +30,13 @@ router = APIRouter(prefix="/api/bpm-analyzer", tags=["bpm-analyzer"])
 
 APP_SLUG = "bpm-analyzer"
 AGENT_SLUG = "bpm-process-analyst"
-MAX_PAGES = 20            # cap so a 200-page PDF doesn't blow the context window
-RENDER_DPI = 144          # diagram detail vs payload size sweet spot
+MAX_PAGES = 20  # cap so a 200-page PDF doesn't blow the context window
+RENDER_DPI = 144  # diagram detail vs payload size sweet spot
 
 
-def _render_pdf_pages(pdf_bytes: bytes, max_pages: int = MAX_PAGES) -> list[dict[str, str]]:
+def _render_pdf_pages(
+    pdf_bytes: bytes, max_pages: int = MAX_PAGES
+) -> list[dict[str, str]]:
     """Render up to `max_pages` of a PDF to (base64 PNG + text).
 
     Returns: [{"page": 1, "image_b64": "...", "text": "...", "width":, "height":}]
@@ -53,13 +56,15 @@ def _render_pdf_pages(pdf_bytes: bytes, max_pages: int = MAX_PAGES) -> list[dict
             page = doc.load_page(i)
             pix = page.get_pixmap(matrix=mat, alpha=False)
             png_bytes = pix.tobytes("png")
-            out.append({
-                "page": i + 1,
-                "image_b64": base64.b64encode(png_bytes).decode("ascii"),
-                "text": (page.get_text("text") or "").strip()[:4000],
-                "width": pix.width,
-                "height": pix.height,
-            })
+            out.append(
+                {
+                    "page": i + 1,
+                    "image_b64": base64.b64encode(png_bytes).decode("ascii"),
+                    "text": (page.get_text("text") or "").strip()[:4000],
+                    "width": pix.width,
+                    "height": pix.height,
+                }
+            )
     finally:
         doc.close()
     return out
@@ -83,7 +88,9 @@ def _extract_docx_text(file_bytes: bytes) -> str:
 
 
 def _process_upload(
-    file_bytes: bytes, content_type: str, filename: str,
+    file_bytes: bytes,
+    content_type: str,
+    filename: str,
 ) -> tuple[list[dict[str, Any]], str]:
     """Detect modality of the upload and return persistence-ready attachments."""
     ct = (content_type or "").lower()
@@ -95,92 +102,134 @@ def _process_upload(
         pages = _render_pdf_pages(file_bytes)
         if not pages:
             raise RuntimeError("PDF has no readable pages")
-        return ([
-            {
-                "type": "pdf_page",
-                "page": p["page"],
-                "image_b64": p["image_b64"],
-                "text": p["text"],
-                "width": p["width"],
-                "height": p["height"],
-                "filename": name,
-            } for p in pages
-        ], "")
+        return (
+            [
+                {
+                    "type": "pdf_page",
+                    "page": p["page"],
+                    "image_b64": p["image_b64"],
+                    "text": p["text"],
+                    "width": p["width"],
+                    "height": p["height"],
+                    "filename": name,
+                }
+                for p in pages
+            ],
+            "",
+        )
 
     # Images — pass straight through as base64 to all three providers.
-    if ct.startswith("image/") or fn.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")):
+    if ct.startswith("image/") or fn.endswith(
+        (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+    ):
         if not ct.startswith("image/"):
             ext = fn.rsplit(".", 1)[-1] if "." in fn else "png"
             ct = f"image/{'jpeg' if ext == 'jpg' else ext}"
-        return ([
-            {
-                "type": "image",
-                "image_b64": base64.b64encode(file_bytes).decode("ascii"),
-                "media_type": ct,
-                "filename": name,
-            }
-        ], "")
+        return (
+            [
+                {
+                    "type": "image",
+                    "image_b64": base64.b64encode(file_bytes).decode("ascii"),
+                    "media_type": ct,
+                    "filename": name,
+                }
+            ],
+            "",
+        )
 
     # Audio — Gemini-only.
-    if ct.startswith("audio/") or fn.endswith((".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac")):
+    if ct.startswith("audio/") or fn.endswith(
+        (".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac")
+    ):
         if not ct.startswith("audio/"):
             ext = fn.rsplit(".", 1)[-1] if "." in fn else "mpeg"
-            ext_map = {"mp3": "mpeg", "m4a": "mp4", "ogg": "ogg", "wav": "wav", "flac": "flac", "aac": "aac"}
-            ct = f"audio/{ext_map.get(ext, ext)}"
-        return ([
-            {
-                "type": "audio",
-                "audio_b64": base64.b64encode(file_bytes).decode("ascii"),
-                "media_type": ct,
-                "filename": name,
+            ext_map = {
+                "mp3": "mpeg",
+                "m4a": "mp4",
+                "ogg": "ogg",
+                "wav": "wav",
+                "flac": "flac",
+                "aac": "aac",
             }
-        ], "google")
+            ct = f"audio/{ext_map.get(ext, ext)}"
+        return (
+            [
+                {
+                    "type": "audio",
+                    "audio_b64": base64.b64encode(file_bytes).decode("ascii"),
+                    "media_type": ct,
+                    "filename": name,
+                }
+            ],
+            "google",
+        )
 
     # Video — Gemini-only.
-    if ct.startswith("video/") or fn.endswith((".mp4", ".webm", ".mov", ".avi", ".mkv")):
+    if ct.startswith("video/") or fn.endswith(
+        (".mp4", ".webm", ".mov", ".avi", ".mkv")
+    ):
         if not ct.startswith("video/"):
             ext = fn.rsplit(".", 1)[-1] if "." in fn else "mp4"
-            ext_map = {"mov": "quicktime", "mp4": "mp4", "webm": "webm", "avi": "x-msvideo", "mkv": "x-matroska"}
-            ct = f"video/{ext_map.get(ext, ext)}"
-        return ([
-            {
-                "type": "video",
-                "video_b64": base64.b64encode(file_bytes).decode("ascii"),
-                "media_type": ct,
-                "filename": name,
+            ext_map = {
+                "mov": "quicktime",
+                "mp4": "mp4",
+                "webm": "webm",
+                "avi": "x-msvideo",
+                "mkv": "x-matroska",
             }
-        ], "google")
+            ct = f"video/{ext_map.get(ext, ext)}"
+        return (
+            [
+                {
+                    "type": "video",
+                    "video_b64": base64.b64encode(file_bytes).decode("ascii"),
+                    "media_type": ct,
+                    "filename": name,
+                }
+            ],
+            "google",
+        )
 
     # DOCX — extract paragraphs into a single text doc.
-    if fn.endswith(".docx") or ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    if (
+        fn.endswith(".docx")
+        or ct
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ):
         try:
             text = _extract_docx_text(file_bytes)
         except Exception as e:
             raise RuntimeError(f"Could not parse DOCX: {e}") from e
         if not text.strip():
             raise RuntimeError("DOCX appears to be empty")
-        return ([
-            {
-                "type": "text_doc",
-                "text": text[:200000],
-                "filename": name,
-                "doc_kind": "docx",
-            }
-        ], "")
+        return (
+            [
+                {
+                    "type": "text_doc",
+                    "text": text[:200000],
+                    "filename": name,
+                    "doc_kind": "docx",
+                }
+            ],
+            "",
+        )
 
     # Plain text / markdown / csv.
     if ct.startswith("text/") or fn.endswith((".txt", ".md", ".csv")):
         text = file_bytes.decode("utf-8", errors="replace")
         if not text.strip():
             raise RuntimeError("Text file is empty")
-        return ([
-            {
-                "type": "text_doc",
-                "text": text[:200000],
-                "filename": name,
-                "doc_kind": (fn.rsplit(".", 1)[-1] if "." in fn else "txt"),
-            }
-        ], "")
+        return (
+            [
+                {
+                    "type": "text_doc",
+                    "text": text[:200000],
+                    "filename": name,
+                    "doc_kind": (fn.rsplit(".", 1)[-1] if "." in fn else "txt"),
+                }
+            ],
+            "",
+        )
 
     raise RuntimeError(f"Unsupported file type: {ct or fn}")
 
@@ -200,9 +249,13 @@ def _parse_agent_specs(raw: str) -> dict[str, Any] | None:
         s = fence.group(1).strip()
 
     # Normalize smart quotes + non-breaking spaces
-    s = (s.replace("“", '"').replace("”", '"')
-           .replace("‘", "'").replace("’", "'")
-           .replace(" ", " "))
+    s = (
+        s.replace("“", '"')
+        .replace("”", '"')
+        .replace("‘", "'")
+        .replace("’", "'")
+        .replace(" ", " ")
+    )
 
     # Walk the string and collect every balanced top-level {...} block,
     # respecting string literals and escapes.
@@ -234,7 +287,7 @@ def _parse_agent_specs(raw: str) -> dict[str, Any] | None:
             if depth > 0:
                 depth -= 1
                 if depth == 0 and start != -1:
-                    candidates.append(s[start:i + 1])
+                    candidates.append(s[start : i + 1])
                     start = -1
 
     # Prefer the longest candidate that mentions "agents"
@@ -290,26 +343,38 @@ def _parse_agent_specs(raw: str) -> dict[str, Any] | None:
 def _opening_for(primary_type: str) -> str:
     """Pick a context-appropriate opening prompt based on what was uploaded."""
     if primary_type == "pdf_page":
-        return ("Analyze this BPM diagram in detail. Produce the full Detailed "
-                "Agentification Report per your system prompt.")
+        return (
+            "Analyze this BPM diagram in detail. Produce the full Detailed "
+            "Agentification Report per your system prompt."
+        )
     if primary_type == "image":
-        return ("Analyze this process artifact image (diagram, screenshot, or "
-                "whiteboard photo). Produce the full Detailed Agentification "
-                "Report per your system prompt.")
+        return (
+            "Analyze this process artifact image (diagram, screenshot, or "
+            "whiteboard photo). Produce the full Detailed Agentification "
+            "Report per your system prompt."
+        )
     if primary_type == "audio":
-        return ("Listen to this recorded process walkthrough. Transcribe the "
-                "steps the speaker describes, then produce the full Detailed "
-                "Agentification Report per your system prompt.")
+        return (
+            "Listen to this recorded process walkthrough. Transcribe the "
+            "steps the speaker describes, then produce the full Detailed "
+            "Agentification Report per your system prompt."
+        )
     if primary_type == "video":
-        return ("Watch this recorded process walkthrough — both the visuals "
-                "and any spoken audio describe the workflow. Then produce the "
-                "full Detailed Agentification Report per your system prompt.")
+        return (
+            "Watch this recorded process walkthrough — both the visuals "
+            "and any spoken audio describe the workflow. Then produce the "
+            "full Detailed Agentification Report per your system prompt."
+        )
     if primary_type == "text_doc":
-        return ("Analyze this process document (SOP / runbook / specification). "
-                "Identify the workflow it describes, then produce the full "
-                "Detailed Agentification Report per your system prompt.")
-    return ("Analyze the attached process artifact. Produce the full Detailed "
-            "Agentification Report per your system prompt.")
+        return (
+            "Analyze this process document (SOP / runbook / specification). "
+            "Identify the workflow it describes, then produce the full "
+            "Detailed Agentification Report per your system prompt."
+        )
+    return (
+        "Analyze the attached process artifact. Produce the full Detailed "
+        "Agentification Report per your system prompt."
+    )
 
 
 def _serialize_thread(c: Conversation) -> dict[str, Any]:
@@ -327,7 +392,9 @@ def _serialize_thread(c: Conversation) -> dict[str, Any]:
     }
 
 
-def _serialize_message(m: Message, *, include_attachments: bool = False) -> dict[str, Any]:
+def _serialize_message(
+    m: Message, *, include_attachments: bool = False
+) -> dict[str, Any]:
     out = {
         "id": str(m.id),
         "role": m.role,
@@ -355,68 +422,92 @@ def _attachments_to_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, 
     for a in attachments or []:
         atype = a.get("type")
         if atype == "pdf_page":
-            blocks.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/png",
-                    "data": a.get("image_b64", ""),
-                },
-            })
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": a.get("image_b64", ""),
+                    },
+                }
+            )
             if a.get("text"):
-                blocks.append({
-                    "type": "text",
-                    "text": f"=== PAGE {a.get('page')} EXTRACTED TEXT ===\n{a['text']}",
-                })
+                blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"=== PAGE {a.get('page')} EXTRACTED TEXT ===\n{a['text']}",
+                    }
+                )
         elif atype == "image":
-            blocks.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": a.get("media_type", "image/png"),
-                    "data": a.get("image_b64", ""),
-                },
-            })
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": a.get("media_type", "image/png"),
+                        "data": a.get("image_b64", ""),
+                    },
+                }
+            )
             if a.get("filename"):
-                blocks.append({"type": "text", "text": f"=== IMAGE: {a['filename']} ==="})
+                blocks.append(
+                    {"type": "text", "text": f"=== IMAGE: {a['filename']} ==="}
+                )
         elif atype == "audio":
-            blocks.append({
-                "type": "audio",
-                "source": {
-                    "type": "base64",
-                    "media_type": a.get("media_type", "audio/mpeg"),
-                    "data": a.get("audio_b64", ""),
-                },
-            })
-            blocks.append({
-                "type": "text",
-                "text": (f"=== AUDIO: {a.get('filename') or 'recording'} === "
-                         "Listen to the recording, transcribe the process the "
-                         "speaker describes, then proceed with your normal analysis."),
-            })
+            blocks.append(
+                {
+                    "type": "audio",
+                    "source": {
+                        "type": "base64",
+                        "media_type": a.get("media_type", "audio/mpeg"),
+                        "data": a.get("audio_b64", ""),
+                    },
+                }
+            )
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"=== AUDIO: {a.get('filename') or 'recording'} === "
+                        "Listen to the recording, transcribe the process the "
+                        "speaker describes, then proceed with your normal analysis."
+                    ),
+                }
+            )
         elif atype == "video":
-            blocks.append({
-                "type": "video",
-                "source": {
-                    "type": "base64",
-                    "media_type": a.get("media_type", "video/mp4"),
-                    "data": a.get("video_b64", ""),
-                },
-            })
-            blocks.append({
-                "type": "text",
-                "text": (f"=== VIDEO: {a.get('filename') or 'recording'} === "
-                         "Watch carefully — both the visuals and any spoken "
-                         "audio describe the process. Then proceed with your "
-                         "normal analysis."),
-            })
+            blocks.append(
+                {
+                    "type": "video",
+                    "source": {
+                        "type": "base64",
+                        "media_type": a.get("media_type", "video/mp4"),
+                        "data": a.get("video_b64", ""),
+                    },
+                }
+            )
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"=== VIDEO: {a.get('filename') or 'recording'} === "
+                        "Watch carefully — both the visuals and any spoken "
+                        "audio describe the process. Then proceed with your "
+                        "normal analysis."
+                    ),
+                }
+            )
         elif atype == "text_doc":
             kind = a.get("doc_kind", "txt")
-            blocks.append({
-                "type": "text",
-                "text": (f"=== DOCUMENT: {a.get('filename') or 'attachment'} "
-                         f"({kind}) ===\n{a.get('text', '')}"),
-            })
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"=== DOCUMENT: {a.get('filename') or 'attachment'} "
+                        f"({kind}) ===\n{a.get('text', '')}"
+                    ),
+                }
+            )
     return blocks
 
 
@@ -438,10 +529,12 @@ def _build_anthropic_messages(
             if in_first and m.role == "user":
                 in_first = False
                 continue
-            msgs.append({
-                "role": m.role,
-                "content": m.content if m.role == "user" else (m.content or ""),
-            })
+            msgs.append(
+                {
+                    "role": m.role,
+                    "content": m.content if m.role == "user" else (m.content or ""),
+                }
+            )
         msgs.append({"role": "user", "content": new_user_question})
     else:
         first_content.append({"type": "text", "text": new_user_question})
@@ -460,20 +553,23 @@ DEFAULT_VISION_MODELS = [
 
 # Approximate per-1M-token pricing (USD). Used for cost attribution.
 MODEL_PRICING = {
-    "gemini-2.5-pro":              {"in": 1.25, "out": 10.0},
-    "gemini-2.5-flash":            {"in": 0.075, "out": 0.30},
-    "claude-sonnet-4-5-20250929":  {"in": 3.0, "out": 15.0},
-    "claude-haiku-4-5-20251001":   {"in": 1.0, "out": 5.0},
-    "gpt-4o":                      {"in": 2.5, "out": 10.0},
-    "gpt-4o-mini":                 {"in": 0.15, "out": 0.60},
+    "gemini-2.5-pro": {"in": 1.25, "out": 10.0},
+    "gemini-2.5-flash": {"in": 0.075, "out": 0.30},
+    "claude-sonnet-4-5-20250929": {"in": 3.0, "out": 15.0},
+    "claude-haiku-4-5-20251001": {"in": 1.0, "out": 5.0},
+    "gpt-4o": {"in": 2.5, "out": 10.0},
+    "gpt-4o-mini": {"in": 0.15, "out": 0.60},
 }
 
 
 def _provider_for(model: str) -> str:
     m = (model or "").lower()
-    if m.startswith("gemini"): return "google"
-    if m.startswith("claude"): return "anthropic"
-    if m.startswith("gpt-") or m.startswith("openai/"): return "openai"
+    if m.startswith("gemini"):
+        return "google"
+    if m.startswith("claude"):
+        return "anthropic"
+    if m.startswith("gpt-") or m.startswith("openai/"):
+        return "openai"
     raise RuntimeError(f"Unsupported model for vision dispatch: {model}")
 
 
@@ -483,11 +579,15 @@ def _cost_for(model: str, in_tok: int, out_tok: int) -> float:
 
 
 async def _run_anthropic(
-    *, system_prompt: str, messages: list[dict[str, Any]], model: str,
+    *,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    model: str,
     force_json: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Call Anthropic Messages API."""
     import anthropic
+
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY not configured on this pod")
@@ -524,14 +624,22 @@ async def _run_anthropic(
 
 
 async def _run_gemini(
-    *, system_prompt: str, messages: list[dict[str, Any]], model: str,
+    *,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    model: str,
     force_json: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Call Google Gemini Generative AI with multimodal content."""
     import google.generativeai as genai
-    api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+
+    api_key = (
+        os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
+    ).strip()
     if not api_key:
-        raise RuntimeError("GOOGLE_API_KEY (or GEMINI_API_KEY) not configured on this pod")
+        raise RuntimeError(
+            "GOOGLE_API_KEY (or GEMINI_API_KEY) not configured on this pod"
+        )
     genai.configure(api_key=api_key)
 
     contents: list[dict[str, Any]] = []
@@ -550,12 +658,16 @@ async def _run_gemini(
                 elif btype in ("image", "audio", "video"):
                     src = block.get("source", {})
                     if src.get("type") == "base64":
-                        parts.append({
-                            "inline_data": {
-                                "mime_type": src.get("media_type", "application/octet-stream"),
-                                "data": src.get("data", ""),
+                        parts.append(
+                            {
+                                "inline_data": {
+                                    "mime_type": src.get(
+                                        "media_type", "application/octet-stream"
+                                    ),
+                                    "data": src.get("data", ""),
+                                }
                             }
-                        })
+                        )
         contents.append({"role": role, "parts": parts})
 
     started = datetime.now(timezone.utc)
@@ -579,7 +691,8 @@ async def _run_gemini(
         for cand in getattr(resp, "candidates", []) or []:
             for p in getattr(getattr(cand, "content", None), "parts", []) or []:
                 t = getattr(p, "text", None)
-                if t: text += t
+                if t:
+                    text += t
 
     usage = getattr(resp, "usage_metadata", None)
     in_tok = int(getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
@@ -594,11 +707,15 @@ async def _run_gemini(
 
 
 async def _run_openai(
-    *, system_prompt: str, messages: list[dict[str, Any]], model: str,
+    *,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    model: str,
     force_json: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Call OpenAI Chat Completions with multimodal content (GPT-4o etc)."""
     import openai
+
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not configured on this pod")
@@ -618,12 +735,14 @@ async def _run_openai(
             elif btype == "image":
                 src = block.get("source", {})
                 if src.get("type") == "base64":
-                    parts.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{src.get('media_type','image/png')};base64,{src.get('data','')}",
-                        },
-                    })
+                    parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{src.get('media_type','image/png')};base64,{src.get('data','')}",
+                            },
+                        }
+                    )
         oa_messages.append({"role": m["role"], "content": parts})
 
     started = datetime.now(timezone.utc)
@@ -650,17 +769,35 @@ async def _run_openai(
 
 
 async def _run_vision_model(
-    *, system_prompt: str, messages: list[dict[str, Any]], model: str,
+    *,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    model: str,
     force_json: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Provider-route based on model name. `force_json` activates each"""
     provider = _provider_for(model)
     if provider == "anthropic":
-        return await _run_anthropic(system_prompt=system_prompt, messages=messages, model=model, force_json=force_json)
+        return await _run_anthropic(
+            system_prompt=system_prompt,
+            messages=messages,
+            model=model,
+            force_json=force_json,
+        )
     if provider == "google":
-        return await _run_gemini(system_prompt=system_prompt, messages=messages, model=model, force_json=force_json)
+        return await _run_gemini(
+            system_prompt=system_prompt,
+            messages=messages,
+            model=model,
+            force_json=force_json,
+        )
     if provider == "openai":
-        return await _run_openai(system_prompt=system_prompt, messages=messages, model=model, force_json=force_json)
+        return await _run_openai(
+            system_prompt=system_prompt,
+            messages=messages,
+            model=model,
+            force_json=force_json,
+        )
     raise RuntimeError(f"No dispatch path for provider {provider}")
 
 
@@ -671,13 +808,18 @@ async def list_vision_models(
 ) -> JSONResponse:
     """Vision-capable models for the BPM Analyzer's model picker."""
     from app.routers.admin_settings import AVAILABLE_MODELS
-    vision_models = [m for m in AVAILABLE_MODELS if "vision" in (m.get("capabilities") or [])]
+
+    vision_models = [
+        m for m in AVAILABLE_MODELS if "vision" in (m.get("capabilities") or [])
+    ]
     agent = await _get_agent(db)
     default = (agent.model_config_ if agent else {}).get("model") or "gemini-2.5-pro"
-    return success({
-        "models": vision_models,    # rich objects: {id, label, provider, family, capabilities}
-        "default": default,
-    })
+    return success(
+        {
+            "models": vision_models,  # rich objects: {id, label, provider, family, capabilities}
+            "default": default,
+        }
+    )
 
 
 @router.post("/upload")
@@ -698,7 +840,9 @@ async def upload_pdf(
 
     try:
         attachments, required_provider = _process_upload(
-            raw, file.content_type or "", file.filename or "",
+            raw,
+            file.content_type or "",
+            file.filename or "",
         )
     except Exception as e:
         logger.exception("BPM upload processing failed")
@@ -715,7 +859,11 @@ async def upload_pdf(
 
     # Pick a model. Audio/video force a Google model since the others
     # don't accept those modalities at the API level.
-    chosen_model = (model or "").strip() or (agent.model_config_ or {}).get("model") or "gemini-2.5-pro"
+    chosen_model = (
+        (model or "").strip()
+        or (agent.model_config_ or {}).get("model")
+        or "gemini-2.5-pro"
+    )
     if required_provider and _provider_for(chosen_model) != required_provider:
         chosen_model = "gemini-2.5-pro"
 
@@ -726,8 +874,14 @@ async def upload_pdf(
         agent_id=agent.id,
         agent_slug=agent.slug,
         app_slug=APP_SLUG,
-        subject_type=getattr(getattr(request.state, "acting_subject", None), "subject_type", None) or "user",
-        subject_id=getattr(getattr(request.state, "acting_subject", None), "subject_id", None) or str(user.id),
+        subject_type=getattr(
+            getattr(request.state, "acting_subject", None), "subject_type", None
+        )
+        or "user",
+        subject_id=getattr(
+            getattr(request.state, "acting_subject", None), "subject_id", None
+        )
+        or str(user.id),
         title=thread_title,
         model_used=chosen_model,
     )
@@ -751,8 +905,14 @@ async def upload_pdf(
     await db.refresh(conv)
 
     try:
-        anthro_msgs = _build_anthropic_messages(attachments, history_turns=[user_msg], new_user_question="")
-        if anthro_msgs and isinstance(anthro_msgs[-1].get("content"), str) and not anthro_msgs[-1]["content"]:
+        anthro_msgs = _build_anthropic_messages(
+            attachments, history_turns=[user_msg], new_user_question=""
+        )
+        if (
+            anthro_msgs
+            and isinstance(anthro_msgs[-1].get("content"), str)
+            and not anthro_msgs[-1]["content"]
+        ):
             anthro_msgs = anthro_msgs[:-1]
         text, meta = await _run_vision_model(
             system_prompt=agent.system_prompt or "",
@@ -790,7 +950,9 @@ async def upload_pdf(
     db.add(asst)
     conv.message_count = 2
     conv.last_message_preview = text[:200]
-    conv.total_tokens = (conv.total_tokens or 0) + meta["input_tokens"] + meta["output_tokens"]
+    conv.total_tokens = (
+        (conv.total_tokens or 0) + meta["input_tokens"] + meta["output_tokens"]
+    )
     conv.total_cost = float(conv.total_cost or 0.0) + meta["cost"]
     conv.model_used = meta["model"]
     conv.updated_at = datetime.now(timezone.utc)
@@ -798,13 +960,15 @@ async def upload_pdf(
     await db.refresh(conv)
     await db.refresh(asst)
 
-    return success({
-        "thread": _serialize_thread(conv),
-        "user_message": _serialize_message(user_msg),
-        "assistant_message": _serialize_message(asst),
-        "attachments_count": len(attachments),
-        "primary_type": primary_type,
-    })
+    return success(
+        {
+            "thread": _serialize_thread(conv),
+            "user_message": _serialize_message(user_msg),
+            "assistant_message": _serialize_message(asst),
+            "attachments_count": len(attachments),
+            "primary_type": primary_type,
+        }
+    )
 
 
 @router.post("/chat/{thread_id}/turn")
@@ -820,7 +984,9 @@ async def chat_turn(
         conv_uuid = uuid.UUID(thread_id)
     except ValueError:
         return error("Invalid thread id", 400)
-    conv = (await db.execute(select(Conversation).where(Conversation.id == conv_uuid))).scalar_one_or_none()
+    conv = (
+        await db.execute(select(Conversation).where(Conversation.id == conv_uuid))
+    ).scalar_one_or_none()
     if not conv:
         return error("Thread not found", 404)
     if conv.tenant_id != user.tenant_id:
@@ -834,9 +1000,17 @@ async def chat_turn(
     if not agent:
         return error(f"Agent {AGENT_SLUG} not seeded", 503)
 
-    history = (await db.execute(
-        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
-    )).scalars().all()
+    history = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
     # Pull the multimodal attachments off the first user turn (PDF
     # pages, images, audio/video, or extracted text — any modality the
     # upload route accepts).
@@ -846,7 +1020,9 @@ async def chat_turn(
             attachments = [a for a in m.attachments if isinstance(a, dict)]
             break
     if not attachments:
-        return error("No source artifact found on this thread — re-upload the file", 400)
+        return error(
+            "No source artifact found on this thread — re-upload the file", 400
+        )
 
     user_msg = Message(
         id=uuid.uuid4(),
@@ -860,14 +1036,28 @@ async def chat_turn(
     conv.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
-    history2 = (await db.execute(
-        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
-    )).scalars().all()
+    history2 = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     try:
-        anthro_msgs = _build_anthropic_messages(attachments, history_turns=history2[:-1], new_user_question=content)
+        anthro_msgs = _build_anthropic_messages(
+            attachments, history_turns=history2[:-1], new_user_question=content
+        )
         # Use the model the thread was opened with; fall back to the agent default
-        chosen_model = conv.model_used or (agent.model_config_ or {}).get("model") or "gemini-2.5-pro"
+        chosen_model = (
+            conv.model_used
+            or (agent.model_config_ or {}).get("model")
+            or "gemini-2.5-pro"
+        )
         text, meta = await _run_vision_model(
             system_prompt=agent.system_prompt or "",
             messages=anthro_msgs,
@@ -901,7 +1091,9 @@ async def chat_turn(
     db.add(asst)
     conv.message_count += 1
     conv.last_message_preview = text[:200]
-    conv.total_tokens = (conv.total_tokens or 0) + meta["input_tokens"] + meta["output_tokens"]
+    conv.total_tokens = (
+        (conv.total_tokens or 0) + meta["input_tokens"] + meta["output_tokens"]
+    )
     conv.total_cost = float(conv.total_cost or 0.0) + meta["cost"]
     conv.model_used = meta["model"]
     conv.updated_at = datetime.now(timezone.utc)
@@ -909,11 +1101,13 @@ async def chat_turn(
     await db.refresh(asst)
     await db.refresh(conv)
 
-    return success({
-        "thread": _serialize_thread(conv),
-        "user_message": _serialize_message(user_msg),
-        "assistant_message": _serialize_message(asst),
-    })
+    return success(
+        {
+            "thread": _serialize_thread(conv),
+            "user_message": _serialize_message(user_msg),
+            "assistant_message": _serialize_message(asst),
+        }
+    )
 
 
 @router.get("/threads")
@@ -944,18 +1138,30 @@ async def get_thread(
         cid = uuid.UUID(thread_id)
     except ValueError:
         return error("Invalid thread id", 400)
-    conv = (await db.execute(select(Conversation).where(Conversation.id == cid))).scalar_one_or_none()
+    conv = (
+        await db.execute(select(Conversation).where(Conversation.id == cid))
+    ).scalar_one_or_none()
     if not conv or conv.tenant_id != user.tenant_id:
         return error("Thread not found", 404)
-    msgs = (await db.execute(
-        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
-    )).scalars().all()
-    return success({
-        "thread": _serialize_thread(conv),
-        # Don't ship attachments back — they're huge base64 PNGs and the
-        # UI doesn't need them. Backend re-loads them on every turn.
-        "messages": [_serialize_message(m) for m in msgs],
-    })
+    msgs = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return success(
+        {
+            "thread": _serialize_thread(conv),
+            # Don't ship attachments back — they're huge base64 PNGs and the
+            # UI doesn't need them. Backend re-loads them on every turn.
+            "messages": [_serialize_message(m) for m in msgs],
+        }
+    )
 
 
 @router.post("/threads/{thread_id}/suggest-agents")
@@ -971,7 +1177,9 @@ async def suggest_agents(
         cid = uuid.UUID(thread_id)
     except ValueError:
         return error("Invalid thread id", 400)
-    conv = (await db.execute(select(Conversation).where(Conversation.id == cid))).scalar_one_or_none()
+    conv = (
+        await db.execute(select(Conversation).where(Conversation.id == cid))
+    ).scalar_one_or_none()
     if not conv or conv.tenant_id != user.tenant_id:
         return error("Thread not found", 404)
 
@@ -979,9 +1187,17 @@ async def suggest_agents(
     if not agent:
         return error(f"Agent {AGENT_SLUG} not seeded", 503)
 
-    history = (await db.execute(
-        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
-    )).scalars().all()
+    history = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
     attachments: list[dict[str, Any]] = []
     for m in history:
         if m.role == "user" and m.attachments:
@@ -1019,7 +1235,11 @@ async def suggest_agents(
         "the JSON object."
     )
 
-    model = (body or {}).get("model") or (agent.model_config_ or {}).get("model") or "gemini-2.5-pro"
+    model = (
+        (body or {}).get("model")
+        or (agent.model_config_ or {}).get("model")
+        or "gemini-2.5-pro"
+    )
 
     parsed: dict[str, Any] | None = None
     text: str = ""
@@ -1027,16 +1247,22 @@ async def suggest_agents(
     last_error: str | None = None
     attempts: list[tuple[str, bool]] = [
         (extraction_prompt, False),
-        (extraction_prompt + (
-            "\n\nIMPORTANT: Reply with PURE JSON only — no prose, no "
-            "markdown fences, no JS-style comments. First character `{`, "
-            "last character `}`."
-        ), True),
+        (
+            extraction_prompt
+            + (
+                "\n\nIMPORTANT: Reply with PURE JSON only — no prose, no "
+                "markdown fences, no JS-style comments. First character `{`, "
+                "last character `}`."
+            ),
+            True,
+        ),
     ]
     for prompt_text, force_json in attempts:
         try:
             anthro_msgs = _build_anthropic_messages(
-                attachments, history_turns=history, new_user_question=prompt_text,
+                attachments,
+                history_turns=history,
+                new_user_question=prompt_text,
             )
             text, meta = await _run_vision_model(
                 system_prompt=agent.system_prompt or "",
@@ -1046,8 +1272,9 @@ async def suggest_agents(
             )
         except Exception as e:
             last_error = str(e)
-            logger.warning("BPM suggest-agents attempt failed (force_json=%s): %s",
-                           force_json, e)
+            logger.warning(
+                "BPM suggest-agents attempt failed (force_json=%s): %s", force_json, e
+            )
             continue
         parsed = _parse_agent_specs(text)
         if parsed:
@@ -1075,7 +1302,9 @@ async def suggest_agents(
         )
         try:
             anthro_msgs = _build_anthropic_messages(
-                attachments, history_turns=history, new_user_question=repair_prompt,
+                attachments,
+                history_turns=history,
+                new_user_question=repair_prompt,
             )
             text, meta = await _run_vision_model(
                 system_prompt=agent.system_prompt or "",
@@ -1089,20 +1318,25 @@ async def suggest_agents(
             logger.warning("BPM suggest-agents repair attempt failed: %s", e)
 
     if not parsed:
-        logger.warning("BPM suggest-agents exhausted retries head=%r last_error=%s",
-                       (text or "")[:300], last_error)
+        logger.warning(
+            "BPM suggest-agents exhausted retries head=%r last_error=%s",
+            (text or "")[:300],
+            last_error,
+        )
         return error(
             f"Agent could not produce parseable agent specs after 3 attempts on {model} — "
             f"try a different model or simplify the source artifact",
             502,
         )
 
-    return success({
-        "agents": parsed["agents"],
-        "model": meta.get("model") or model,
-        "cost": meta.get("cost", 0.0),
-        "duration_ms": meta.get("duration_ms", 0),
-    })
+    return success(
+        {
+            "agents": parsed["agents"],
+            "model": meta.get("model") or model,
+            "cost": meta.get("cost", 0.0),
+            "duration_ms": meta.get("duration_ms", 0),
+        }
+    )
 
 
 @router.post("/threads/{thread_id}/build-and-test")
@@ -1118,7 +1352,9 @@ async def build_and_test_agent(
         cid = uuid.UUID(thread_id)
     except ValueError:
         return error("Invalid thread id", 400)
-    conv = (await db.execute(select(Conversation).where(Conversation.id == cid))).scalar_one_or_none()
+    conv = (
+        await db.execute(select(Conversation).where(Conversation.id == cid))
+    ).scalar_one_or_none()
     if not conv or conv.tenant_id != user.tenant_id:
         return error("Thread not found", 404)
 
@@ -1128,9 +1364,17 @@ async def build_and_test_agent(
 
     # Pull attachments off the thread for grounded synthetic data —
     # any modality (PDF, image, audio, video, text doc) is fine here.
-    history = (await db.execute(
-        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
-    )).scalars().all()
+    history = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
     attachments: list[dict[str, Any]] = []
     for m in history:
         if m.role == "user" and m.attachments:
@@ -1138,7 +1382,9 @@ async def build_and_test_agent(
             break
 
     bpm_agent = await _get_agent(db)
-    bpm_model = (bpm_agent.model_config_ or {}).get("model") if bpm_agent else "gemini-2.5-pro"
+    bpm_model = (
+        (bpm_agent.model_config_ or {}).get("model") if bpm_agent else "gemini-2.5-pro"
+    )
 
     synth_prompt = (
         f"For the agent below, generate ONE realistic synthetic test "
@@ -1167,7 +1413,9 @@ async def build_and_test_agent(
             # Reuse the robust parser so smart quotes / fences / comments
             # / trailing commas don't break synthetic-input extraction.
             wrapped = _parse_agent_specs(
-                '{"agents":[' + (synth_text or "").strip().lstrip("[").rstrip("]") + "]}"
+                '{"agents":['
+                + (synth_text or "").strip().lstrip("[").rstrip("]")
+                + "]}"
             )
             if wrapped and wrapped.get("agents"):
                 cand = wrapped["agents"][0]
@@ -1179,12 +1427,17 @@ async def build_and_test_agent(
                 # shape `_parse_agent_specs` requires.
                 import json
                 import re as _re
+
                 cleaned = (synth_text or "").strip()
                 mm = _re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", cleaned)
                 if mm:
                     cleaned = mm.group(1).strip()
-                cleaned = (cleaned.replace("“", '"').replace("”", '"')
-                                  .replace("‘", "'").replace("’", "'"))
+                cleaned = (
+                    cleaned.replace("“", '"')
+                    .replace("”", '"')
+                    .replace("‘", "'")
+                    .replace("’", "'")
+                )
                 cleaned = _re.sub(r",(\s*[}\]])", r"\1", cleaned)
                 cleaned = _re.sub(r"/\*[\s\S]*?\*/", "", cleaned)
                 try:
@@ -1193,7 +1446,7 @@ async def build_and_test_agent(
                     s, e = cleaned.find("{"), cleaned.rfind("}")
                     if s != -1 and e > s:
                         try:
-                            synth_input = json.loads(cleaned[s:e + 1])
+                            synth_input = json.loads(cleaned[s : e + 1])
                         except Exception:
                             synth_input = None
     except Exception as e:
@@ -1208,12 +1461,17 @@ async def build_and_test_agent(
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
     from models.agent import Agent as AgentModel, AgentStatus, AgentType  # type: ignore
 
-    base_slug = (spec.get("slug") or spec.get("name") or "").strip().lower().replace(" ", "-") or "untitled-agent"
+    base_slug = (spec.get("slug") or spec.get("name") or "").strip().lower().replace(
+        " ", "-"
+    ) or "untitled-agent"
     slug = base_slug
     suffix = 0
     while True:
-        existing = (await db.execute(select(AgentModel).where(AgentModel.slug == slug))).scalar_one_or_none()
-        if not existing: break
+        existing = (
+            await db.execute(select(AgentModel).where(AgentModel.slug == slug))
+        ).scalar_one_or_none()
+        if not existing:
+            break
         suffix += 1
         slug = f"{base_slug}-{suffix}"
 
@@ -1245,19 +1503,30 @@ async def build_and_test_agent(
     try:
         from abenix_sdk import Abenix  # type: ignore
     except ImportError:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "sdk" / "python"))
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parents[4] / "packages" / "sdk" / "python")
+        )
         from abenix_sdk import Abenix  # type: ignore
 
-    api_key = os.environ.get("ABENIX_PLATFORM_API_KEY") or os.environ.get("ABENIX_API_KEY", "")
+    api_key = os.environ.get("ABENIX_PLATFORM_API_KEY") or os.environ.get(
+        "ABENIX_API_KEY", ""
+    )
     api_base = os.environ.get("ABENIX_INTERNAL_URL", "http://localhost:8000")
 
     test_result: dict[str, Any] = {"ok": False}
     if not api_key:
-        test_result = {"ok": False, "error": "ABENIX_API_KEY not set on this pod — agent created but smoke test skipped"}
+        test_result = {
+            "ok": False,
+            "error": "ABENIX_API_KEY not set on this pod — agent created but smoke test skipped",
+        }
     else:
         try:
-            async with Abenix(api_key=api_key, base_url=api_base, timeout=180.0) as forge:
-                exec_result = await forge.execute(new_agent.slug, str(synth_input["input"]))
+            async with Abenix(
+                api_key=api_key, base_url=api_base, timeout=180.0
+            ) as forge:
+                exec_result = await forge.execute(
+                    new_agent.slug, str(synth_input["input"])
+                )
             test_result = {
                 "ok": True,
                 "output": (exec_result.output or "")[:4000],
@@ -1272,18 +1541,24 @@ async def build_and_test_agent(
             logger.exception("Smoke-test execution failed")
             test_result = {"ok": False, "error": str(e)[:500]}
 
-    return success({
-        "agent": {
-            "id": str(new_agent.id),
-            "slug": new_agent.slug,
-            "name": new_agent.name,
-            "status": new_agent.status.value if hasattr(new_agent.status, "value") else str(new_agent.status),
-            "model": (new_agent.model_config_ or {}).get("model"),
-            "tools": (new_agent.model_config_ or {}).get("tools"),
-        },
-        "synthetic_input": synth_input,
-        "test_result": test_result,
-    })
+    return success(
+        {
+            "agent": {
+                "id": str(new_agent.id),
+                "slug": new_agent.slug,
+                "name": new_agent.name,
+                "status": (
+                    new_agent.status.value
+                    if hasattr(new_agent.status, "value")
+                    else str(new_agent.status)
+                ),
+                "model": (new_agent.model_config_ or {}).get("model"),
+                "tools": (new_agent.model_config_ or {}).get("tools"),
+            },
+            "synthetic_input": synth_input,
+            "test_result": test_result,
+        }
+    )
 
 
 @router.post("/threads/{thread_id}/create-agent")
@@ -1299,7 +1574,9 @@ async def create_suggested_agent(
         cid = uuid.UUID(thread_id)
     except ValueError:
         return error("Invalid thread id", 400)
-    conv = (await db.execute(select(Conversation).where(Conversation.id == cid))).scalar_one_or_none()
+    conv = (
+        await db.execute(select(Conversation).where(Conversation.id == cid))
+    ).scalar_one_or_none()
     if not conv or conv.tenant_id != user.tenant_id:
         return error("Thread not found", 404)
 
@@ -1317,7 +1594,9 @@ async def create_suggested_agent(
     suffix = 0
     base_slug = slug
     while True:
-        existing = (await db.execute(select(AgentModel).where(AgentModel.slug == slug))).scalar_one_or_none()
+        existing = (
+            await db.execute(select(AgentModel).where(AgentModel.slug == slug))
+        ).scalar_one_or_none()
         if not existing:
             break
         suffix += 1
@@ -1348,12 +1627,18 @@ async def create_suggested_agent(
     await db.commit()
     await db.refresh(new_agent)
 
-    return success({
-        "id": str(new_agent.id),
-        "slug": new_agent.slug,
-        "name": new_agent.name,
-        "status": new_agent.status.value if hasattr(new_agent.status, "value") else str(new_agent.status),
-    })
+    return success(
+        {
+            "id": str(new_agent.id),
+            "slug": new_agent.slug,
+            "name": new_agent.name,
+            "status": (
+                new_agent.status.value
+                if hasattr(new_agent.status, "value")
+                else str(new_agent.status)
+            ),
+        }
+    )
 
 
 _PDF_CSS = """
@@ -1471,8 +1756,10 @@ def _md_to_html(md: str) -> str:
             if in_code:
                 flush_list()
                 flush_table()
-                out.append(f'<pre><code class="lang-{html_lib.escape(code_lang)}">'
-                           f'{html_lib.escape(chr(10).join(code_buf))}</code></pre>')
+                out.append(
+                    f'<pre><code class="lang-{html_lib.escape(code_lang)}">'
+                    f"{html_lib.escape(chr(10).join(code_buf))}</code></pre>"
+                )
                 code_buf = []
                 code_lang = ""
                 in_code = False
@@ -1534,7 +1821,9 @@ def _md_to_html(md: str) -> str:
         # Blockquote
         if stripped.startswith(">"):
             flush_list()
-            out.append(f"<blockquote>{render_inline(stripped.lstrip('>').strip())}</blockquote>")
+            out.append(
+                f"<blockquote>{render_inline(stripped.lstrip('>').strip())}</blockquote>"
+            )
             i += 1
             continue
 
@@ -1566,6 +1855,7 @@ def _md_to_html(md: str) -> str:
 def _safe_filename(s: str) -> str:
     """Make a thread title safe for a `Content-Disposition` filename."""
     import re
+
     s = re.sub(r"[^A-Za-z0-9._\- ]+", "", s).strip().replace(" ", "_")
     return (s or "bpm-analysis")[:80]
 
@@ -1582,26 +1872,46 @@ async def export_thread_pdf(
     except ValueError:
         return error("Invalid thread id", 400)
 
-    conv = (await db.execute(select(Conversation).where(Conversation.id == cid))).scalar_one_or_none()
+    conv = (
+        await db.execute(select(Conversation).where(Conversation.id == cid))
+    ).scalar_one_or_none()
     if not conv or conv.tenant_id != user.tenant_id:
         return error("Thread not found", 404)
 
-    msgs = (await db.execute(
-        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
-    )).scalars().all()
+    msgs = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     import html as html_lib
 
     parts: list[str] = []
     parts.append('<div class="cover">')
-    parts.append(f'<div class="cover-title">{html_lib.escape(conv.title or "BPM Analysis")}</div>')
+    parts.append(
+        f'<div class="cover-title">{html_lib.escape(conv.title or "BPM Analysis")}</div>'
+    )
     parts.append('<div class="cover-sub">Detailed Agentification Report</div>')
-    parts.append(f'<div class="cover-meta">Generated by Abenix BPM Process Analyst</div>')
-    parts.append(f'<div class="cover-meta">{datetime.now(timezone.utc).strftime("%B %d, %Y")}</div>')
-    parts.append(f'<div class="cover-meta">{conv.message_count or 0} messages · ${float(conv.total_cost or 0):.4f} run cost</div>')
+    parts.append(
+        '<div class="cover-meta">Generated by Abenix BPM Process Analyst</div>'
+    )
+    parts.append(
+        f'<div class="cover-meta">{datetime.now(timezone.utc).strftime("%B %d, %Y")}</div>'
+    )
+    parts.append(
+        f'<div class="cover-meta">{conv.message_count or 0} messages · ${float(conv.total_cost or 0):.4f} run cost</div>'
+    )
     if conv.model_used:
-        parts.append(f'<div class="cover-meta">Model: {html_lib.escape(conv.model_used)}</div>')
-    parts.append('</div>')
+        parts.append(
+            f'<div class="cover-meta">Model: {html_lib.escape(conv.model_used)}</div>'
+        )
+    parts.append("</div>")
     parts.append('<div class="divider"></div>')
 
     for m in msgs:
@@ -1665,7 +1975,9 @@ async def delete_thread(
         cid = uuid.UUID(thread_id)
     except ValueError:
         return error("Invalid thread id", 400)
-    conv = (await db.execute(select(Conversation).where(Conversation.id == cid))).scalar_one_or_none()
+    conv = (
+        await db.execute(select(Conversation).where(Conversation.id == cid))
+    ).scalar_one_or_none()
     if not conv or conv.tenant_id != user.tenant_id:
         return error("Thread not found", 404)
     await db.delete(conv)

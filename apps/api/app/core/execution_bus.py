@@ -1,4 +1,5 @@
 """Execution event bus — Redis pub/sub with a bounded replay log."""
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _EVENT_TTL_SECONDS = 3600  # 1h — long enough for a UI to reconnect
-_LOG_MAX_LEN = 500         # cap replay log so a chatty executor can't OOM Redis
+_LOG_MAX_LEN = 500  # cap replay log so a chatty executor can't OOM Redis
 
 _pool: aioredis.Redis | None = None
 

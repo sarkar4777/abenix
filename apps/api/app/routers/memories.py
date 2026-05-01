@@ -1,9 +1,9 @@
 """Agent Memory Management — browse, inspect, and delete stored memories."""
+
 from __future__ import annotations
 
 import sys
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
@@ -14,6 +14,7 @@ from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.agent import Agent
@@ -59,19 +60,25 @@ async def list_memories(
     result = await db.execute(query)
     memories = result.scalars().all()
 
-    return success([
-        {
-            "id": str(m.id),
-            "key": m.key,
-            "value": str(m.value)[:500] if m.value else None,
-            "memory_type": m.memory_type.value if hasattr(m.memory_type, "value") else str(m.memory_type),
-            "importance": float(m.importance) if m.importance else None,
-            "access_count": m.access_count,
-            "created_at": m.created_at.isoformat() if m.created_at else None,
-            "updated_at": m.updated_at.isoformat() if m.updated_at else None,
-        }
-        for m in memories
-    ])
+    return success(
+        [
+            {
+                "id": str(m.id),
+                "key": m.key,
+                "value": str(m.value)[:500] if m.value else None,
+                "memory_type": (
+                    m.memory_type.value
+                    if hasattr(m.memory_type, "value")
+                    else str(m.memory_type)
+                ),
+                "importance": float(m.importance) if m.importance else None,
+                "access_count": m.access_count,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+                "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+            }
+            for m in memories
+        ]
+    )
 
 
 @router.delete("/{agent_id}/memories/{memory_id}")
@@ -109,6 +116,7 @@ async def bulk_delete_memories(
         return error("Set all=true to confirm bulk deletion", 400)
 
     from sqlalchemy import delete
+
     result = await db.execute(
         delete(AgentMemory).where(AgentMemory.agent_id == agent_id)
     )

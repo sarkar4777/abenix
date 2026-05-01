@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,9 +19,12 @@ from models.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 class PortfolioSchema(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """User-defined schema for SchemaPortfolioTool."""
+
     __tablename__ = "portfolio_schemas"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "domain_name", name="uq_portfolio_schemas_tenant_domain"),
+        UniqueConstraint(
+            "tenant_id", "domain_name", name="uq_portfolio_schemas_tenant_domain"
+        ),
     )
 
     domain_name: Mapped[str] = mapped_column(String(100), index=True)

@@ -1,4 +1,5 @@
 """WebSocket fan-out across API pods."""
+
 from __future__ import annotations
 
 import asyncio
@@ -42,7 +43,9 @@ class ConnectionManager:
             self._subscriber_task = asyncio.create_task(self._run_subscriber())
             logger.info("ws_manager: subscribed to Redis channel '%s'", _FANOUT_CHANNEL)
         except Exception as e:
-            logger.warning("ws_manager: Redis subscribe failed (%s), single-pod mode", e)
+            logger.warning(
+                "ws_manager: Redis subscribe failed (%s), single-pod mode", e
+            )
             self._redis = None
 
     async def stop(self) -> None:
@@ -75,7 +78,9 @@ class ConnectionManager:
                     except Exception:
                         continue
                     await self._deliver_local(
-                        env.get("user_id", ""), env.get("event", ""), env.get("data", {})
+                        env.get("user_id", ""),
+                        env.get("event", ""),
+                        env.get("data", {}),
                     )
             except asyncio.CancelledError:
                 raise
@@ -93,7 +98,9 @@ class ConnectionManager:
             except Exception:
                 stale.append(ws)
         for ws in stale:
-            self._connections[user_id] = [c for c in self._connections[user_id] if c is not ws]
+            self._connections[user_id] = [
+                c for c in self._connections[user_id] if c is not ws
+            ]
             if not self._connections[user_id]:
                 self._connections.pop(user_id, None)
 
@@ -104,15 +111,11 @@ class ConnectionManager:
     def disconnect(self, user_id: uuid.UUID, ws: WebSocket) -> None:
         key = str(user_id)
         if key in self._connections:
-            self._connections[key] = [
-                c for c in self._connections[key] if c is not ws
-            ]
+            self._connections[key] = [c for c in self._connections[key] if c is not ws]
             if not self._connections[key]:
                 del self._connections[key]
 
-    async def send_to_user(
-        self, user_id: uuid.UUID, event: str, data: dict
-    ) -> None:
+    async def send_to_user(self, user_id: uuid.UUID, event: str, data: dict) -> None:
         """Publish to fan-out if Redis is available; otherwise deliver
         to local sockets directly (single-pod mode)."""
         key = str(user_id)

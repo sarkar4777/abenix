@@ -156,7 +156,9 @@ class UnitConverterTool(BaseTool):
         category = arguments.get("category", "")
 
         if not from_unit or not to_unit:
-            return ToolResult(content="Error: from_unit and to_unit are required", is_error=True)
+            return ToolResult(
+                content="Error: from_unit and to_unit are required", is_error=True
+            )
 
         if from_unit in ("C", "F", "K") or to_unit in ("C", "F", "K"):
             return self._convert_temperature(value, from_unit, to_unit)
@@ -178,13 +180,17 @@ class UnitConverterTool(BaseTool):
 
         return ToolResult(
             content=f"Cannot find conversion path from '{from_unit}' to '{to_unit}'. "
-                    f"Available categories: {list(CONVERSIONS.keys())}",
+            f"Available categories: {list(CONVERSIONS.keys())}",
             is_error=True,
         )
 
     def _convert(
-        self, value: float, from_unit: str, to_unit: str,
-        category: str, units: dict[str, float]
+        self,
+        value: float,
+        from_unit: str,
+        to_unit: str,
+        category: str,
+        units: dict[str, float],
     ) -> ToolResult:
         from_factor = units.get(from_unit)
         to_factor = units.get(to_unit)
@@ -223,7 +229,9 @@ class UnitConverterTool(BaseTool):
             metadata={"category": category},
         )
 
-    def _convert_temperature(self, value: float, from_unit: str, to_unit: str) -> ToolResult:
+    def _convert_temperature(
+        self, value: float, from_unit: str, to_unit: str
+    ) -> ToolResult:
         if from_unit == to_unit:
             result = value
         elif from_unit == "C" and to_unit == "F":
@@ -239,9 +247,16 @@ class UnitConverterTool(BaseTool):
         elif from_unit == "K" and to_unit == "F":
             result = (value - 273.15) * 9 / 5 + 32
         else:
-            return ToolResult(content=f"Unknown temperature conversion: {from_unit} -> {to_unit}", is_error=True)
+            return ToolResult(
+                content=f"Unknown temperature conversion: {from_unit} -> {to_unit}",
+                is_error=True,
+            )
 
-        celsius = value if from_unit == "C" else ((value - 32) * 5 / 9 if from_unit == "F" else value - 273.15)
+        celsius = (
+            value
+            if from_unit == "C"
+            else ((value - 32) * 5 / 9 if from_unit == "F" else value - 273.15)
+        )
 
         output = {
             "value": value,
@@ -256,4 +271,6 @@ class UnitConverterTool(BaseTool):
                 "K": round(celsius + 273.15, 4),
             },
         }
-        return ToolResult(content=json.dumps(output, indent=2), metadata={"category": "temperature"})
+        return ToolResult(
+            content=json.dumps(output, indent=2), metadata={"category": "temperature"}
+        )

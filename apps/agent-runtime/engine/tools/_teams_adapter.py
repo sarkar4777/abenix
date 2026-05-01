@@ -1,19 +1,30 @@
 """Teams MeetingAdapter stub."""
+
 from __future__ import annotations
 
 import os
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
 from engine.tools.meeting_adapter import (
-    AudioFrame, ChatMessage, JoinRequest, JoinResult, MeetingAdapter,
+    AudioFrame,
+    ChatMessage,
+    JoinRequest,
+    JoinResult,
+    MeetingAdapter,
 )
 
 
 def _missing_creds() -> str:
-    missing = [k for k in (
-        "TEAMS_GRAPH_TENANT_ID", "TEAMS_GRAPH_CLIENT_ID",
-        "TEAMS_GRAPH_CLIENT_SECRET", "TEAMS_BOT_CERT_PATH",
-    ) if not os.environ.get(k)]
+    missing = [
+        k
+        for k in (
+            "TEAMS_GRAPH_TENANT_ID",
+            "TEAMS_GRAPH_CLIENT_ID",
+            "TEAMS_GRAPH_CLIENT_SECRET",
+            "TEAMS_BOT_CERT_PATH",
+        )
+        if not os.environ.get(k)
+    ]
     return ", ".join(missing) if missing else ""
 
 
@@ -42,6 +53,7 @@ class TeamsAdapter(MeetingAdapter):
         async def _empty():
             if False:
                 yield  # type: ignore[unreachable]
+
         return _empty()
 
     async def post_chat(self, text: str) -> None:
@@ -51,6 +63,7 @@ class TeamsAdapter(MeetingAdapter):
         async def _empty():
             if False:
                 yield  # type: ignore[unreachable]
+
         return _empty()
 
     async def list_participants(self) -> list[str]:

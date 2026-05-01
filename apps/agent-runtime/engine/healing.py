@@ -1,4 +1,5 @@
 """Self-healing pipelines — failure-diff capture + surgeon-prompt builder."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,7 @@ def _to_asyncpg_dsn(url: str) -> tuple[str, dict[str, Any]]:
     if not url:
         return url, {}
     if url.startswith("postgresql+asyncpg://"):
-        url = "postgresql://" + url[len("postgresql+asyncpg://"):]
+        url = "postgresql://" + url[len("postgresql+asyncpg://") :]
     parsed = urlparse(url)
     qs = {k: v[-1] for k, v in parse_qs(parsed.query).items()}
     kwargs: dict[str, Any] = {}
@@ -72,12 +73,15 @@ def _infer_shape(value: Any, depth: int = 0) -> Any:
     return type(value).__name__
 
 
-async def _count_recent(conn: Any, pipeline_id: UUID, status: str,
-                        since: datetime) -> int:
+async def _count_recent(
+    conn: Any, pipeline_id: UUID, status: str, since: datetime
+) -> int:
     row = await conn.fetchrow(
         "SELECT COUNT(*) AS c FROM executions "
         "WHERE agent_id = $1 AND status = $2 AND created_at >= $3",
-        pipeline_id, status, since,
+        pipeline_id,
+        status,
+        since,
     )
     return int(row["c"]) if row else 0
 
@@ -121,14 +125,24 @@ async def capture_failure(
         # Telemetry over the past 24h
         since = datetime.now(timezone.utc) - timedelta(days=1)
         try:
-            success_count = await _count_recent(conn, UUID(pipeline_id), "completed", since)
-            failure_count = await _count_recent(conn, UUID(pipeline_id), "failed", since)
+            success_count = await _count_recent(
+                conn, UUID(pipeline_id), "completed", since
+            )
+            failure_count = await _count_recent(
+                conn, UUID(pipeline_id), "failed", since
+            )
         except Exception:
             success_count = 0
             failure_count = 0
 
-        observed_shape = _infer_shape(observed_sample) if observed_sample is not None else None
-        expected_shape = _infer_shape(last_success_sample) if last_success_sample is not None else None
+        observed_shape = (
+            _infer_shape(observed_sample) if observed_sample is not None else None
+        )
+        expected_shape = (
+            _infer_shape(last_success_sample)
+            if last_success_sample is not None
+            else None
+        )
 
         row = await conn.fetchrow(
             """
@@ -143,16 +157,32 @@ async def capture_failure(
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING id::text
             """,
-            UUID(tenant_id), UUID(pipeline_id), UUID(execution_id),
-            node_id[:255], node_kind[:64], (node_target or "")[:255] or None,
+            UUID(tenant_id),
+            UUID(pipeline_id),
+            UUID(execution_id),
+            node_id[:255],
+            node_kind[:64],
+            (node_target or "")[:255] or None,
             (error_class or "Unknown")[:128],
             (error_message or "")[:8000],
             (error_traceback or "")[:_MAX_TRACEBACK_BYTES] if error_traceback else None,
             json.dumps(expected_shape) if expected_shape is not None else None,
             json.dumps(observed_shape) if observed_shape is not None else None,
-            json.dumps(_truncate_json(last_success_sample, _MAX_SAMPLE_BYTES)) if last_success_sample is not None else None,
-            json.dumps(_truncate_json(observed_sample, _MAX_SAMPLE_BYTES)) if observed_sample is not None else None,
-            json.dumps(_truncate_json(upstream_inputs, _MAX_INPUTS_BYTES)) if upstream_inputs is not None else None,
+            (
+                json.dumps(_truncate_json(last_success_sample, _MAX_SAMPLE_BYTES))
+                if last_success_sample is not None
+                else None
+            ),
+            (
+                json.dumps(_truncate_json(observed_sample, _MAX_SAMPLE_BYTES))
+                if observed_sample is not None
+                else None
+            ),
+            (
+                json.dumps(_truncate_json(upstream_inputs, _MAX_INPUTS_BYTES))
+                if upstream_inputs is not None
+                else None
+            ),
             success_count,
             failure_count,
         )

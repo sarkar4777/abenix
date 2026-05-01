@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.1 — 2026-05-01
+
+### Fixed
+- Pipeline failures now return 200 with `data.status="failed"` + `data.execution_id` (was 500 + no id). Both queue and inline paths converged on the same envelope so callers can drill into the persisted execution row.
+- Self-signup tenants get a default moderation policy auto-seeded on tenant creation (BLOCK at 0.5 threshold, omni-moderation-latest, pre_llm + post_llm hooks). Previously the gate was a no-op for new tenants because no policy existed.
+- Soft-deleted agents now 404 from `GET /api/agents/{id}` (was returning the row with `status=archived`).
+- `/api/auth/me` and signup responses correctly echo `role` under `data.user.role`.
+- Chat first-time UX: textarea is no longer disabled; auto-selects `code-assistant` or first available agent.
+- Pipeline runs that completed-with-failed-nodes were leaving `failure_code` null on the inline path; now backfilled to `PIPELINE_NODE_FAILED` so dashboards group them correctly.
+- Real `react-hooks/rules-of-hooks` bug in `useIsTablet` (short-circuit could skip the second `useMediaQuery` call).
+
+### Changed
+- CI lint job now passes end-to-end. Black formatting applied across `apps/api`, `apps/agent-runtime`, `apps/worker`, `packages/db` (360 files reformatted, behaviour unchanged). Ruff went 341 → 0 (real fixes for F821/F823/F811/E741/E721 + auto-fixes for F841/F401).
+- README + `/help` now document the third SDK (Java/JVM under `claimsiq/sdk`) alongside the Python and TypeScript SDKs.
+- README claim of "100+ built-in tools" softened to "85+" (registry returns 87).
+- Sidebar: bumped Abenix logo + wordmark size in the post-login layout for better presence.
+- `packages/shared` lint script switched from `eslint src/` (which failed under ESLint 8 because no `--ext .ts`) to `tsc --noEmit` — gives a real type-check on this types-only package.
+- `apps/web` now ships an `.eslintrc.json` extending `next/core-web-vitals` so `next lint` runs non-interactively in CI; `react/no-unescaped-entities` disabled (cosmetic rule, 46 pre-existing JSX strings).
+- `your-org` placeholder in README replaced with `sarkar4777` for the real GitHub clone URLs.
+
+### Added
+- `ruff.toml` at repo root + per-app `[tool.ruff.lint]` config codifying the project's lint policy (`select = ["E","F","W"]`, `ignore = ["E402","E501"]` since `sys.path.insert(...)` is structural and Black already owns line-length).
+
 
 ## v1.0.0 — 2026-04-30
 

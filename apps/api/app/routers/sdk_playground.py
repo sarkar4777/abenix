@@ -10,7 +10,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -43,9 +43,19 @@ class GenerateRequest(BaseModel):
     asset: AssetRef
     sdk: Literal["typescript", "python"]
     use_case: Literal[
-        "one_shot", "stream", "batch", "kb_search", "kb_cognify", "kb_subject",
-        "chat_create", "chat_send", "chat_list", "chat_history", "chat_delegated",
-        "hitl", "custom",
+        "one_shot",
+        "stream",
+        "batch",
+        "kb_search",
+        "kb_cognify",
+        "kb_subject",
+        "chat_create",
+        "chat_send",
+        "chat_list",
+        "chat_history",
+        "chat_delegated",
+        "hitl",
+        "custom",
     ]
     user_prompt: str = Field("", max_length=2000)
     include_comments: bool = True
@@ -75,33 +85,35 @@ def _load_sdk_source(sdk: str) -> str:
 # printable ASCII becomes a plain ASCII fallback (see _sanitize_generated_code).
 _EMOJI_REPLACEMENTS: dict[str, str] = {
     # Check / cross / warning — these break Windows stdout the most.
-    "\u2713": "[OK]",       # check mark
-    "\u2714": "[OK]",       # heavy check mark
-    "\u2717": "[X]",        # ballot X
-    "\u2718": "[X]",        # heavy ballot X
-    "\u2705": "[OK]",       # white heavy check mark
-    "\u274c": "[X]",        # cross mark
-    "\u26a0": "[!]",        # warning sign
-    "\u2139": "[i]",        # information source
+    "\u2713": "[OK]",  # check mark
+    "\u2714": "[OK]",  # heavy check mark
+    "\u2717": "[X]",  # ballot X
+    "\u2718": "[X]",  # heavy ballot X
+    "\u2705": "[OK]",  # white heavy check mark
+    "\u274c": "[X]",  # cross mark
+    "\u26a0": "[!]",  # warning sign
+    "\u2139": "[i]",  # information source
     # Arrows
     "\u2192": "->",
     "\u2190": "<-",
     "\u2194": "<->",
     "\u21d2": "=>",
     # Dashes / quotes / ellipsis
-    "\u2014": "-",          # em dash
-    "\u2013": "-",          # en dash
-    "\u2026": "...",        # ellipsis
-    "\u2018": "'", "\u2019": "'",
-    "\u201c": '"', "\u201d": '"',
+    "\u2014": "-",  # em dash
+    "\u2013": "-",  # en dash
+    "\u2026": "...",  # ellipsis
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201c": '"',
+    "\u201d": '"',
     # Popular decorative symbols
-    "\u2022": "*",          # bullet
-    "\u2728": "",           # sparkles emoji
-    "\U0001f680": "",       # rocket
-    "\U0001f4ca": "",       # bar chart
-    "\U0001f4c8": "",       # chart up
-    "\U0001f389": "",       # party popper
-    "\U0001f6a8": "[!]",    # police light
+    "\u2022": "*",  # bullet
+    "\u2728": "",  # sparkles emoji
+    "\U0001f680": "",  # rocket
+    "\U0001f4ca": "",  # bar chart
+    "\U0001f4c8": "",  # chart up
+    "\U0001f389": "",  # party popper
+    "\U0001f6a8": "[!]",  # police light
 }
 
 _NON_ASCII_RE = re.compile(r"[^\x00-\x7f]")
@@ -121,7 +133,7 @@ def _sanitize_generated_code(code: str) -> str:
 
 
 PYTHON_TEMPLATES = {
-    "one_shot": '''import asyncio
+    "one_shot": """import asyncio
 import os
 from abenix_sdk import Abenix
 
@@ -139,8 +151,8 @@ async def main():
         print(f"Cost: ${{result.cost:.4f}}")
 
 asyncio.run(main())
-''',
-    "stream": '''import asyncio
+""",
+    "stream": """import asyncio
 import os
 from abenix_sdk import Abenix
 
@@ -158,8 +170,8 @@ async def main():
                 print(f"\\n[done] cost=${{event.cost:.4f}}")
 
 asyncio.run(main())
-''',
-    "kb_search": '''import asyncio
+""",
+    "kb_search": """import asyncio
 import os
 from abenix_sdk import Abenix
 
@@ -176,8 +188,8 @@ async def main():
             print(f"Text: {{r.get('text')[:200]}}")
 
 asyncio.run(main())
-''',
-    "kb_cognify": '''import asyncio
+""",
+    "kb_cognify": """import asyncio
 import os
 from abenix_sdk import Abenix
 
@@ -192,8 +204,8 @@ async def main():
         print(f"Status: {{result.get('status')}}")
 
 asyncio.run(main())
-''',
-    "kb_subject": '''import asyncio
+""",
+    "kb_subject": """import asyncio
 import os
 from abenix_sdk import Abenix, ActingSubject
 
@@ -214,8 +226,8 @@ async def main():
         print("KB id:", coll["id"])
 
 asyncio.run(main())
-''',
-    "chat_create": '''import asyncio
+""",
+    "chat_create": """import asyncio
 import os
 from abenix_sdk import Abenix
 
@@ -232,8 +244,8 @@ async def main():
         print("Bound to:", thread.get("agent_slug"))
 
 asyncio.run(main())
-''',
-    "chat_send": '''import asyncio
+""",
+    "chat_send": """import asyncio
 import os
 from abenix_sdk import Abenix
 
@@ -253,8 +265,8 @@ async def main():
         print(f"Cost: ${{turn['assistant_message']['cost']:.4f}}")
 
 asyncio.run(main())
-''',
-    "chat_list": '''import asyncio
+""",
+    "chat_list": """import asyncio
 import os
 from abenix_sdk import Abenix
 
@@ -266,8 +278,8 @@ async def main():
             print(f"  {{t['title']:40}}  {{t['message_count']}} msgs  {{t['updated_at']}}")
 
 asyncio.run(main())
-''',
-    "chat_history": '''import asyncio
+""",
+    "chat_history": """import asyncio
 import os
 from abenix_sdk import Abenix
 
@@ -280,8 +292,8 @@ async def main():
             print(f"[{{m['role'].upper()}}] {{m['content'][:200]}}")
 
 asyncio.run(main())
-''',
-    "chat_delegated": '''import asyncio
+""",
+    "chat_delegated": """import asyncio
 import os
 from abenix_sdk import Abenix, ActingSubject
 
@@ -309,11 +321,11 @@ async def main():
         print(turn["assistant_message"]["content"])
 
 asyncio.run(main())
-''',
+""",
 }
 
 TYPESCRIPT_TEMPLATES = {
-    "one_shot": '''import {{ Abenix }} from '@abenix/sdk';
+    "one_shot": """import {{ Abenix }} from '@abenix/sdk';
 
 const forge = new Abenix({{
   apiKey: process.env.ABENIX_API_KEY!,
@@ -327,8 +339,8 @@ async function main() {{
 }}
 
 main().catch(console.error);
-''',
-    "stream": '''import {{ Abenix }} from '@abenix/sdk';
+""",
+    "stream": """import {{ Abenix }} from '@abenix/sdk';
 
 const forge = new Abenix({{
   apiKey: process.env.ABENIX_API_KEY!,
@@ -343,8 +355,8 @@ async function main() {{
 }}
 
 main().catch(console.error);
-''',
-    "kb_search": '''import {{ Abenix }} from '@abenix/sdk';
+""",
+    "kb_search": """import {{ Abenix }} from '@abenix/sdk';
 
 const forge = new Abenix({{ apiKey: process.env.ABENIX_API_KEY! }});
 
@@ -360,8 +372,8 @@ async function main() {{
 }}
 
 main().catch(console.error);
-''',
-    "kb_cognify": '''import {{ Abenix }} from '@abenix/sdk';
+""",
+    "kb_cognify": """import {{ Abenix }} from '@abenix/sdk';
 
 const forge = new Abenix({{ apiKey: process.env.ABENIX_API_KEY! }});
 
@@ -374,7 +386,7 @@ async function main() {{
 }}
 
 main().catch(console.error);
-''',
+""",
 }
 
 
@@ -388,7 +400,9 @@ def _build_template_code(sdk: str, use_case: str, asset: AssetRef) -> str:
     )
 
 
-def _build_system_prompt(sdk: str, asset: AssetRef, asset_context: dict, use_case: str) -> str:
+def _build_system_prompt(
+    sdk: str, asset: AssetRef, asset_context: dict, use_case: str
+) -> str:
     sdk_source = _load_sdk_source(sdk)
     template = _build_template_code(sdk, use_case, asset)
     lang = sdk
@@ -466,30 +480,37 @@ async def get_asset_context(
             return error("Agent not found", 404)
 
         cfg = agent.model_config or {}
-        return success({
-            "id": str(agent.id),
-            "name": agent.name,
-            "slug": agent.slug,
-            "description": agent.description or "",
-            "mode": getattr(agent, "agent_type", "agent"),
-            "tools": cfg.get("tools", []),
-            "model": cfg.get("model", ""),
-            "input_variables": getattr(agent, "input_variables", []) or [],
-        })
+        return success(
+            {
+                "id": str(agent.id),
+                "name": agent.name,
+                "slug": agent.slug,
+                "description": agent.description or "",
+                "mode": getattr(agent, "agent_type", "agent"),
+                "tools": cfg.get("tools", []),
+                "model": cfg.get("model", ""),
+                "input_variables": getattr(agent, "input_variables", []) or [],
+            }
+        )
     elif asset_type == "knowledge_base":
         try:
             from models.knowledge_base import KnowledgeBase
+
             kb_uuid = uuid.UUID(asset_id)
-            result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_uuid))
+            result = await db.execute(
+                select(KnowledgeBase).where(KnowledgeBase.id == kb_uuid)
+            )
             kb = result.scalar_one_or_none()
             if not kb:
                 return error("Knowledge base not found", 404)
-            return success({
-                "id": str(kb.id),
-                "name": kb.name,
-                "description": getattr(kb, "description", "") or "",
-                "type": "knowledge_base",
-            })
+            return success(
+                {
+                    "id": str(kb.id),
+                    "name": kb.name,
+                    "description": getattr(kb, "description", "") or "",
+                    "type": "knowledge_base",
+                }
+            )
         except Exception as e:
             return error(f"Failed to load KB: {e}", 500)
     return error("Unknown asset type", 400)
@@ -525,23 +546,30 @@ async def generate_code(
     # Try LLM generation
     try:
         import anthropic
+
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             # Fallback: return template directly
             code = _build_template_code(body.sdk, body.use_case, body.asset)
-            return success({
-                "code": code,
-                "language": body.sdk,
-                "explanation": f"Template-based code for {body.use_case}. Set ANTHROPIC_API_KEY for AI-generated code.",
-                "imports": ["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"],
-                "env_vars": ["ABENIX_API_KEY", "ABENIX_BASE_URL"],
-                "model_used": "template",
-                "generation_cost": 0.0,
-                "template_source": body.use_case,
-            })
+            return success(
+                {
+                    "code": code,
+                    "language": body.sdk,
+                    "explanation": f"Template-based code for {body.use_case}. Set ANTHROPIC_API_KEY for AI-generated code.",
+                    "imports": (
+                        ["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"]
+                    ),
+                    "env_vars": ["ABENIX_API_KEY", "ABENIX_BASE_URL"],
+                    "model_used": "template",
+                    "generation_cost": 0.0,
+                    "template_source": body.use_case,
+                }
+            )
 
         client = anthropic.Anthropic(api_key=api_key)
-        system_prompt = _build_system_prompt(body.sdk, body.asset, asset_context, body.use_case)
+        system_prompt = _build_system_prompt(
+            body.sdk, body.asset, asset_context, body.use_case
+        )
 
         user_msg = f"Generate the code. {body.user_prompt or 'Make it production-ready with good error handling.'}"
 
@@ -554,7 +582,9 @@ async def generate_code(
         text = response.content[0].text if response.content else ""
 
         # Extract code block
-        code_match = re.search(r"```(?:python|typescript|ts|js)?\n(.*?)```", text, re.DOTALL)
+        code_match = re.search(
+            r"```(?:python|typescript|ts|js)?\n(.*?)```", text, re.DOTALL
+        )
         code = code_match.group(1).strip() if code_match else text
         # Non-negotiable: the generated code is ASCII-only before it ever
         # reaches the user or the sandbox. See rule 8 in the system prompt.
@@ -566,36 +596,49 @@ async def generate_code(
 
         # Extract imports & env vars
         imp_match = re.search(r"IMPORTS:\s*(.+?)(?:ENV_VARS:|$)", text, re.DOTALL)
-        imports = [s.strip() for s in (imp_match.group(1) if imp_match else "").split(",") if s.strip()]
+        imports = [
+            s.strip()
+            for s in (imp_match.group(1) if imp_match else "").split(",")
+            if s.strip()
+        ]
 
         env_match = re.search(r"ENV_VARS:\s*(.+?)$", text, re.DOTALL)
-        env_vars = [s.strip() for s in (env_match.group(1) if env_match else "ABENIX_API_KEY").split(",") if s.strip()]
+        env_vars = [
+            s.strip()
+            for s in (env_match.group(1) if env_match else "ABENIX_API_KEY").split(",")
+            if s.strip()
+        ]
 
-        return success({
-            "code": code,
-            "language": body.sdk,
-            "explanation": explanation,
-            "imports": imports or (["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"]),
-            "env_vars": env_vars,
-            "model_used": "claude-sonnet-4-5-20250929",
-            "generation_cost": 0.02,
-            "template_source": body.use_case,
-        })
+        return success(
+            {
+                "code": code,
+                "language": body.sdk,
+                "explanation": explanation,
+                "imports": imports
+                or (["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"]),
+                "env_vars": env_vars,
+                "model_used": "claude-sonnet-4-5-20250929",
+                "generation_cost": 0.02,
+                "template_source": body.use_case,
+            }
+        )
 
     except Exception as e:
         logger.error("SDK code generation failed: %s", e)
         # Fallback to template
         code = _build_template_code(body.sdk, body.use_case, body.asset)
-        return success({
-            "code": code,
-            "language": body.sdk,
-            "explanation": f"LLM generation failed ({e}). Returning template.",
-            "imports": ["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"],
-            "env_vars": ["ABENIX_API_KEY"],
-            "model_used": "template",
-            "generation_cost": 0.0,
-            "template_source": body.use_case,
-        })
+        return success(
+            {
+                "code": code,
+                "language": body.sdk,
+                "explanation": f"LLM generation failed ({e}). Returning template.",
+                "imports": ["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"],
+                "env_vars": ["ABENIX_API_KEY"],
+                "model_used": "template",
+                "generation_cost": 0.0,
+                "template_source": body.use_case,
+            }
+        )
 
 
 @router.post("/execute")
@@ -608,6 +651,7 @@ async def execute_code(
 
     JavaScript execution is not yet supported — copy the code and run it locally.
     """
+
     async def stream_execution():
         if body.language != "python":
             yield f"event: error\ndata: {json.dumps({'message': 'Only Python execution is supported in v1. Copy the code and run it locally.'})}\n\n"
@@ -655,7 +699,10 @@ async def execute_code(
             # encoding — on Windows that's cp1252 and non-ASCII source
             # would fail to write. Force utf-8 explicitly.
             with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".py", delete=False, encoding="utf-8",
+                mode="w",
+                suffix=".py",
+                delete=False,
+                encoding="utf-8",
             ) as f:
                 # Inject env vars at top
                 f.write("import os\n")
@@ -677,13 +724,16 @@ async def execute_code(
             }
 
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, tmp_path,
+                sys.executable,
+                tmp_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=body.timeout_seconds)
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=body.timeout_seconds
+                )
             except asyncio.TimeoutError:
                 proc.kill()
                 yield f"event: error\ndata: {json.dumps({'message': f'Execution timed out after {body.timeout_seconds}s'})}\n\n"
@@ -717,12 +767,42 @@ async def execute_code(
 @router.get("/use-cases")
 async def list_use_cases() -> JSONResponse:
     """Return supported use case templates."""
-    return success([
-        {"id": "one_shot", "label": "One-Shot Execution", "description": "Simple execute() call, returns final result"},
-        {"id": "stream", "label": "Streaming", "description": "Stream events (tokens, tool calls, done)"},
-        {"id": "kb_search", "label": "Knowledge Base Search", "description": "Hybrid vector + graph search"},
-        {"id": "kb_cognify", "label": "Cognify (Build Graph)", "description": "Build knowledge graph from documents"},
-        {"id": "batch", "label": "Batch Processing", "description": "Process multiple inputs in a loop"},
-        {"id": "hitl", "label": "Human-in-the-Loop", "description": "Execute with approval gates"},
-        {"id": "custom", "label": "Custom (Free-Form)", "description": "Describe what you want, AI generates it"},
-    ])
+    return success(
+        [
+            {
+                "id": "one_shot",
+                "label": "One-Shot Execution",
+                "description": "Simple execute() call, returns final result",
+            },
+            {
+                "id": "stream",
+                "label": "Streaming",
+                "description": "Stream events (tokens, tool calls, done)",
+            },
+            {
+                "id": "kb_search",
+                "label": "Knowledge Base Search",
+                "description": "Hybrid vector + graph search",
+            },
+            {
+                "id": "kb_cognify",
+                "label": "Cognify (Build Graph)",
+                "description": "Build knowledge graph from documents",
+            },
+            {
+                "id": "batch",
+                "label": "Batch Processing",
+                "description": "Process multiple inputs in a loop",
+            },
+            {
+                "id": "hitl",
+                "label": "Human-in-the-Loop",
+                "description": "Execute with approval gates",
+            },
+            {
+                "id": "custom",
+                "label": "Custom (Free-Form)",
+                "description": "Describe what you want, AI generates it",
+            },
+        ]
+    )

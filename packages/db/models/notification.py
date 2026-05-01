@@ -20,9 +20,7 @@ class NotificationType(str, enum.Enum):
 
 class Notification(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "notifications"
-    __table_args__ = (
-        Index("ix_notifications_user_unread", "user_id", "is_read"),
-    )
+    __table_args__ = (Index("ix_notifications_user_unread", "user_id", "is_read"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), index=True
@@ -32,6 +30,4 @@ class Notification(UUIDMixin, TenantMixin, TimestampMixin, Base):
     message: Mapped[str] = mapped_column(Text)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     link: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    metadata_: Mapped[dict | None] = mapped_column(
-        "metadata", JSONB, nullable=True
-    )
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)

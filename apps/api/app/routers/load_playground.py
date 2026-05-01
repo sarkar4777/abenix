@@ -1,4 +1,5 @@
 """Load Test Playground — AI-generated load test scripts that target a"""
+
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.responses import error, success
+from app.core.responses import success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
@@ -59,7 +60,9 @@ SCENARIOS = {
 }
 
 
-def _build_system_prompt(target: LoadTarget, scenario: str, requests: int, concurrency: int) -> str:
+def _build_system_prompt(
+    target: LoadTarget, scenario: str, requests: int, concurrency: int
+) -> str:
     agent_ref = target.slug or target.id or target.name or "<agent>"
     return f"""You are a senior SRE who writes Python load tests.
 
@@ -99,12 +102,18 @@ async def _llm_generate(system_prompt: str, user_prompt: str) -> tuple[str, str]
         return "", "none"
     try:
         import anthropic
+
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=6000,
             system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt or "Generate the load test script."}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": user_prompt or "Generate the load test script.",
+                }
+            ],
         )
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
         # Strip code fences if the model included them
@@ -120,7 +129,9 @@ async def _llm_generate(system_prompt: str, user_prompt: str) -> tuple[str, str]
         return "", "error"
 
 
-def _template_script(target: LoadTarget, scenario: str, requests: int, concurrency: int, sample_msg: str) -> str:
+def _template_script(
+    target: LoadTarget, scenario: str, requests: int, concurrency: int, sample_msg: str
+) -> str:
     """Deterministic fallback — used when no ANTHROPIC_API_KEY is set."""
     return f'''#!/usr/bin/env python3
 """Abenix load test — {target.slug or target.id} ({scenario})
@@ -224,27 +235,41 @@ async def generate_load_script(
             if agent:
                 body.target.slug = body.target.slug or agent.slug
                 body.target.name = body.target.name or agent.name
-                body.target.type = "pipeline" if (agent.model_config_ or {}).get("mode") == "pipeline" else "agent"
+                body.target.type = (
+                    "pipeline"
+                    if (agent.model_config_ or {}).get("mode") == "pipeline"
+                    else "agent"
+                )
         except ValueError:
             pass
 
-    system_prompt = _build_system_prompt(body.target, body.scenario, body.requests, body.concurrency)
+    system_prompt = _build_system_prompt(
+        body.target, body.scenario, body.requests, body.concurrency
+    )
     extra = body.user_prompt or f"Use message sample: {body.message_sample!r}"
     code, model_used = await _llm_generate(system_prompt, extra)
     if not code:
-        code = _template_script(body.target, body.scenario, body.requests, body.concurrency, body.message_sample)
+        code = _template_script(
+            body.target,
+            body.scenario,
+            body.requests,
+            body.concurrency,
+            body.message_sample,
+        )
         model_used = "template"
 
-    return success({
-        "code": code,
-        "language": "python",
-        "model_used": model_used,
-        "scenario": body.scenario,
-        "requests": body.requests,
-        "concurrency": body.concurrency,
-        "env_vars": ["ABENIX_API_URL", "ABENIX_API_KEY"],
-        "target": body.target.dict(),
-    })
+    return success(
+        {
+            "code": code,
+            "language": "python",
+            "model_used": model_used,
+            "scenario": body.scenario,
+            "requests": body.requests,
+            "concurrency": body.concurrency,
+            "env_vars": ["ABENIX_API_URL", "ABENIX_API_KEY"],
+            "target": body.target.dict(),
+        }
+    )
 
 
 @router.post("/execute")
@@ -260,6 +285,7 @@ async def execute_load_script(
         # Mint an ephemeral API key
         try:
             from models.api_key import ApiKey
+
             raw_key = f"af_load_{secrets.token_urlsafe(24)}"
             key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
             key = ApiKey(
@@ -291,7 +317,8 @@ async def execute_load_script(
         yield f"event: status\ndata: {json.dumps({'message': f'Executing {script_path.name}'})}\n\n"
 
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, str(script_path),
+            sys.executable,
+            str(script_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=env,
@@ -315,7 +342,11 @@ async def execute_load_script(
             except Exception:
                 pass
 
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-    })
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

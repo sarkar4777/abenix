@@ -2,7 +2,17 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, func
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,16 +51,24 @@ class Execution(UUIDMixin, TenantMixin, Base):
     # Per-provider subtotals so dashboards can split "we spent $X on
     # Anthropic, $Y on OpenAI fallback, $Z on Google." The plain `cost`
     # column is still the total — these four sum to it.
-    anthropic_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
-    openai_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
-    google_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
+    anthropic_cost: Mapped[float] = mapped_column(
+        Numeric(10, 6), default=0, nullable=False
+    )
+    openai_cost: Mapped[float] = mapped_column(
+        Numeric(10, 6), default=0, nullable=False
+    )
+    google_cost: Mapped[float] = mapped_column(
+        Numeric(10, 6), default=0, nullable=False
+    )
     other_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
     model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     node_results: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    failure_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

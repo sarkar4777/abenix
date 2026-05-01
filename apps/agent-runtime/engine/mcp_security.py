@@ -67,7 +67,9 @@ class MCPSecurityContext:
 
         if self.requires_approval(tool) and tool.name not in self._approved_tools:
             if self.policy.block_unapproved_destructive:
-                return False, "Tool '{}' is destructive and requires approval".format(tool.name)
+                return False, "Tool '{}' is destructive and requires approval".format(
+                    tool.name
+                )
 
         return True, ""
 
@@ -94,6 +96,7 @@ class MCPSecurityContext:
         start = time.monotonic()
         try:
             import asyncio
+
             result = await asyncio.wait_for(
                 client.call_tool(tool.name, arguments),
                 timeout=self.policy.call_timeout,
@@ -112,7 +115,9 @@ class MCPSecurityContext:
             self.audit_log.append(record)
             self.call_count += 1
             return MCPToolResult(
-                content="Tool call timed out after {}s".format(self.policy.call_timeout),
+                content="Tool call timed out after {}s".format(
+                    self.policy.call_timeout
+                ),
                 is_error=True,
             )
         except Exception as exc:
@@ -183,7 +188,9 @@ def validate_tool_annotations(tool: MCPTool) -> list[str]:
 
     if not ann:
         warnings.append(
-            "Tool '{}' has no annotations; treating as potentially dangerous".format(tool.name)
+            "Tool '{}' has no annotations; treating as potentially dangerous".format(
+                tool.name
+            )
         )
 
     return warnings

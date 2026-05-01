@@ -7,18 +7,16 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, func, or_, and_, select, update
+from sqlalchemy import delete, func, or_, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 from app.schemas.conversations import (
-    CreateConversationRequest,
     SaveMessageRequest,
     UpdateConversationRequest,
 )
@@ -165,7 +163,9 @@ async def create_conversation(
             agent_uuid = uuid.UUID(body["agent_id"])
         except (ValueError, TypeError):
             return error("Invalid agent_id", 400)
-        agent_row = (await db.execute(select(Agent).where(Agent.id == agent_uuid))).scalar_one_or_none()
+        agent_row = (
+            await db.execute(select(Agent).where(Agent.id == agent_uuid))
+        ).scalar_one_or_none()
         if not agent_row:
             return error("Agent not found", 404)
         agent_slug = agent_slug or agent_row.slug
@@ -193,15 +193,22 @@ async def create_conversation(
     return success(_serialize_conversation(conv), status_code=201)
 
 
-def _check_thread_access(conv: Conversation, request: Request, user: User) -> str | None:
+def _check_thread_access(
+    conv: Conversation, request: Request, user: User
+) -> str | None:
     """Return error string if access denied, None if OK."""
     if conv.tenant_id != user.tenant_id:
         return "Forbidden"
     subject_type, subject_id = _resolve_subject(request, user)
-    if conv.subject_type and (conv.subject_type, conv.subject_id) != (subject_type, subject_id):
+    if conv.subject_type and (conv.subject_type, conv.subject_id) != (
+        subject_type,
+        subject_id,
+    ):
         if user.role.value != "admin":
             return "Forbidden"
-    elif not conv.subject_type and conv.user_id != user.id and user.role.value != "admin":
+    elif (
+        not conv.subject_type and conv.user_id != user.id and user.role.value != "admin"
+    ):
         return "Forbidden"
     return None
 
@@ -229,11 +236,10 @@ async def get_conversation(
     conv = result.scalar_one_or_none()
     if not conv:
         return error("Conversation not found", 404)
-    if (denied := _check_thread_access(conv, request, user)):
+    if denied := _check_thread_access(conv, request, user):
         return error(denied, 403)
 
     return success(_serialize_conversation(conv, include_messages=True))
-
 
 
 @router.post("/{conversation_id}/turn")
@@ -249,10 +255,12 @@ async def send_turn(
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError:
         return error("Invalid conversation ID", 400)
-    conv = (await db.execute(select(Conversation).where(Conversation.id == conv_uuid))).scalar_one_or_none()
+    conv = (
+        await db.execute(select(Conversation).where(Conversation.id == conv_uuid))
+    ).scalar_one_or_none()
     if not conv:
         return error("Conversation not found", 404)
-    if (denied := _check_thread_access(conv, request, user)):
+    if denied := _check_thread_access(conv, request, user):
         return error(denied, 403)
 
     content = (body.get("content") or "").strip()
@@ -287,12 +295,20 @@ async def send_turn(
     await db.commit()
     await db.refresh(conv)
 
-    history = (await db.execute(
-        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
-    )).scalars().all()
+    history = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
     history_text = "\n\n".join(f"[{m.role.upper()}] {m.content}" for m in history[-20:])
     composed = ""
-    if (ctx := (body.get("context") or "").strip()):
+    if ctx := (body.get("context") or "").strip():
         composed += f"=== CONTEXT (fresh, this turn) ===\n{ctx}\n\n"
     if history_text:
         composed += f"=== CONVERSATION SO FAR ===\n{history_text}\n\n"
@@ -301,30 +317,46 @@ async def send_turn(
     try:
         from abenix_sdk import Abenix, ActingSubject  # type: ignore
     except ImportError:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "sdk" / "python"))
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parents[4] / "packages" / "sdk" / "python")
+        )
         from abenix_sdk import Abenix, ActingSubject  # type: ignore
 
-    api_key = os.environ.get("ABENIX_PLATFORM_API_KEY") or os.environ.get("ABENIX_API_KEY", "")
+    api_key = os.environ.get("ABENIX_PLATFORM_API_KEY") or os.environ.get(
+        "ABENIX_API_KEY", ""
+    )
     api_base = os.environ.get("ABENIX_INTERNAL_URL", "http://localhost:8000")
     subject_type, subject_id = _resolve_subject(request, user)
-    subject = ActingSubject(
-        subject_type=subject_type, subject_id=subject_id,
-        email=user.email, display_name=getattr(user, "full_name", None),
-    ) if subject_type != "user" else None
+    subject = (
+        ActingSubject(
+            subject_type=subject_type,
+            subject_id=subject_id,
+            email=user.email,
+            display_name=getattr(user, "full_name", None),
+        )
+        if subject_type != "user"
+        else None
+    )
 
     started = datetime.now(timezone.utc)
     try:
-        async with Abenix(api_key=api_key, base_url=api_base, act_as=subject, timeout=300.0) as forge:
+        async with Abenix(
+            api_key=api_key, base_url=api_base, act_as=subject, timeout=300.0
+        ) as forge:
             result = await forge.execute(agent_slug, composed)
         assistant = Message(
             id=uuid.uuid4(),
             conversation_id=conv.id,
             role="assistant",
             content=result.output or "",
-            tool_calls=[
-                {"name": t.get("name"), "duration_ms": t.get("duration_ms")}
-                for t in (result.tool_calls or [])
-            ] if result.tool_calls else None,
+            tool_calls=(
+                [
+                    {"name": t.get("name"), "duration_ms": t.get("duration_ms")}
+                    for t in (result.tool_calls or [])
+                ]
+                if result.tool_calls
+                else None
+            ),
             input_tokens=int(getattr(result, "input_tokens", 0) or 0),
             output_tokens=int(getattr(result, "output_tokens", 0) or 0),
             cost=float(result.cost or 0.0),
@@ -335,17 +367,21 @@ async def send_turn(
         conv.model_used = result.model
         conv.message_count += 1
         conv.last_message_preview = (result.output or "")[:200]
-        conv.total_tokens = (conv.total_tokens or 0) + assistant.input_tokens + assistant.output_tokens
+        conv.total_tokens = (
+            (conv.total_tokens or 0) + assistant.input_tokens + assistant.output_tokens
+        )
         conv.total_cost = float(conv.total_cost or 0.0) + float(result.cost or 0.0)
         conv.updated_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(conv)
         await db.refresh(assistant)
-        return success({
-            "thread": _serialize_conversation(conv),
-            "user_message": _serialize_message(user_msg),
-            "assistant_message": _serialize_message(assistant),
-        })
+        return success(
+            {
+                "thread": _serialize_conversation(conv),
+                "user_message": _serialize_message(user_msg),
+                "assistant_message": _serialize_message(assistant),
+            }
+        )
     except Exception as exc:
         logger.exception("conversations.turn: agent execution failed")
         # Persist a failure marker so the UI can show what happened
@@ -354,7 +390,9 @@ async def send_turn(
             conversation_id=conv.id,
             role="assistant",
             content=f"[error] {exc}",
-            duration_ms=int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
+            duration_ms=int(
+                (datetime.now(timezone.utc) - started).total_seconds() * 1000
+            ),
         )
         db.add(err_msg)
         conv.message_count += 1
@@ -466,7 +504,9 @@ async def save_message(
     db.add(msg)
 
     conv.message_count = (conv.message_count or 0) + 1
-    conv.total_tokens = (conv.total_tokens or 0) + body.input_tokens + body.output_tokens
+    conv.total_tokens = (
+        (conv.total_tokens or 0) + body.input_tokens + body.output_tokens
+    )
     conv.total_cost = float(conv.total_cost or 0) + body.cost
     if body.model_used:
         conv.model_used = body.model_used
@@ -506,10 +546,12 @@ async def share_conversation(
     await db.commit()
     await db.refresh(conv)
 
-    return success({
-        "share_token": conv.share_token,
-        "share_url": f"/chat/shared/{conv.share_token}",
-    })
+    return success(
+        {
+            "share_token": conv.share_token,
+            "share_url": f"/chat/shared/{conv.share_token}",
+        }
+    )
 
 
 @router.delete("/{conversation_id}/share")

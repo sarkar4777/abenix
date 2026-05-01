@@ -1,4 +1,5 @@
 """Database Writer Tool — INSERT/UPSERT rows into PostgreSQL."""
+
 from __future__ import annotations
 
 import json
@@ -63,9 +64,12 @@ class DatabaseWriterTool(BaseTool):
 
         if not conn_str:
             import os
+
             conn_str = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
             if not conn_str:
-                return ToolResult(content="Error: No database connection available", is_error=True)
+                return ToolResult(
+                    content="Error: No database connection available", is_error=True
+                )
         else:
             conn_str = conn_str.replace("+asyncpg", "")
 
@@ -77,27 +81,47 @@ class DatabaseWriterTool(BaseTool):
                 if operation == "create_table":
                     columns = arguments.get("columns", {})
                     if not columns:
-                        return ToolResult(content="Error: columns required for create_table", is_error=True)
-                    col_defs = ", ".join(f"{name} {dtype}" for name, dtype in columns.items())
-                    await conn.execute(f"CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, {col_defs}, created_at TIMESTAMPTZ DEFAULT now())")
-                    return ToolResult(content=json.dumps({"status": "success", "table": table, "action": "created"}))
+                        return ToolResult(
+                            content="Error: columns required for create_table",
+                            is_error=True,
+                        )
+                    col_defs = ", ".join(
+                        f"{name} {dtype}" for name, dtype in columns.items()
+                    )
+                    await conn.execute(
+                        f"CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, {col_defs}, created_at TIMESTAMPTZ DEFAULT now())"
+                    )
+                    return ToolResult(
+                        content=json.dumps(
+                            {"status": "success", "table": table, "action": "created"}
+                        )
+                    )
 
                 elif operation in ("insert", "upsert"):
                     rows = arguments.get("rows", [])
                     if not rows:
-                        return ToolResult(content="Error: rows array is required", is_error=True)
+                        return ToolResult(
+                            content="Error: rows array is required", is_error=True
+                        )
                     if len(rows) > 10000:
-                        return ToolResult(content="Error: Max 10,000 rows per call", is_error=True)
+                        return ToolResult(
+                            content="Error: Max 10,000 rows per call", is_error=True
+                        )
 
                     # Auto-create table if it doesn't exist
                     cols = list(rows[0].keys())
                     col_types = []
                     for k, v in rows[0].items():
-                        if isinstance(v, int): col_types.append(f"{k} BIGINT")
-                        elif isinstance(v, float): col_types.append(f"{k} DOUBLE PRECISION")
-                        elif isinstance(v, bool): col_types.append(f"{k} BOOLEAN")
-                        elif isinstance(v, dict) or isinstance(v, list): col_types.append(f"{k} JSONB")
-                        else: col_types.append(f"{k} TEXT")
+                        if isinstance(v, int):
+                            col_types.append(f"{k} BIGINT")
+                        elif isinstance(v, float):
+                            col_types.append(f"{k} DOUBLE PRECISION")
+                        elif isinstance(v, bool):
+                            col_types.append(f"{k} BOOLEAN")
+                        elif isinstance(v, dict) or isinstance(v, list):
+                            col_types.append(f"{k} JSONB")
+                        else:
+                            col_types.append(f"{k} TEXT")
 
                     await conn.execute(
                         f"CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, {', '.join(col_types)}, created_at TIMESTAMPTZ DEFAULT now())"
@@ -109,10 +133,14 @@ class DatabaseWriterTool(BaseTool):
 
                     if operation == "upsert" and arguments.get("conflict_column"):
                         conflict_col = arguments["conflict_column"]
-                        update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != conflict_col)
+                        update_set = ", ".join(
+                            f"{c} = EXCLUDED.{c}" for c in cols if c != conflict_col
+                        )
                         sql = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}) ON CONFLICT ({conflict_col}) DO UPDATE SET {update_set}"
                     else:
-                        sql = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders})"
+                        sql = (
+                            f"INSERT INTO {table} ({col_names}) VALUES ({placeholders})"
+                        )
 
                     inserted = 0
                     for row in rows:
@@ -125,12 +153,21 @@ class DatabaseWriterTool(BaseTool):
                         await conn.execute(sql, *values)
                         inserted += 1
 
-                    return ToolResult(content=json.dumps({
-                        "status": "success", "table": table, "operation": operation,
-                        "rows_written": inserted, "columns": cols,
-                    }))
+                    return ToolResult(
+                        content=json.dumps(
+                            {
+                                "status": "success",
+                                "table": table,
+                                "operation": operation,
+                                "rows_written": inserted,
+                                "columns": cols,
+                            }
+                        )
+                    )
 
-                return ToolResult(content=f"Error: Unknown operation: {operation}", is_error=True)
+                return ToolResult(
+                    content=f"Error: Unknown operation: {operation}", is_error=True
+                )
 
             finally:
                 await conn.close()
@@ -138,4 +175,6 @@ class DatabaseWriterTool(BaseTool):
         except ImportError:
             return ToolResult(content="Error: asyncpg not installed", is_error=True)
         except Exception as e:
-            return ToolResult(content=f"Database write error: {str(e)[:500]}", is_error=True)
+            return ToolResult(
+                content=f"Database write error: {str(e)[:500]}", is_error=True
+            )

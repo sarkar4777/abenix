@@ -2,6 +2,7 @@
 
 Supports: MP3, MP4, WAV, M4A, WebM. Max 25MB file size.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,7 +42,10 @@ class SpeechToTextTool(BaseTool):
 
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            return ToolResult(content="Error: OPENAI_API_KEY required for speech-to-text", is_error=True)
+            return ToolResult(
+                content="Error: OPENAI_API_KEY required for speech-to-text",
+                is_error=True,
+            )
 
         try:
             import httpx
@@ -56,17 +60,24 @@ class SpeechToTextTool(BaseTool):
             else:
                 path = Path(audio_url)
                 if not path.exists():
-                    return ToolResult(content=f"Error: File not found: {audio_url}", is_error=True)
+                    return ToolResult(
+                        content=f"Error: File not found: {audio_url}", is_error=True
+                    )
                 audio_data = path.read_bytes()
                 filename = path.name
 
             if len(audio_data) > 25 * 1024 * 1024:
-                return ToolResult(content="Error: Audio file exceeds 25MB limit", is_error=True)
+                return ToolResult(
+                    content="Error: Audio file exceeds 25MB limit", is_error=True
+                )
 
             # Call Whisper API
             async with httpx.AsyncClient(timeout=120) as client:
                 files = {"file": (filename, audio_data)}
-                data: dict[str, Any] = {"model": "whisper-1", "response_format": "verbose_json"}
+                data: dict[str, Any] = {
+                    "model": "whisper-1",
+                    "response_format": "verbose_json",
+                }
                 if language:
                     data["language"] = language
 
@@ -78,18 +89,28 @@ class SpeechToTextTool(BaseTool):
                 )
 
                 if resp.status_code != 200:
-                    return ToolResult(content=f"Whisper API error: {resp.text[:500]}", is_error=True)
+                    return ToolResult(
+                        content=f"Whisper API error: {resp.text[:500]}", is_error=True
+                    )
 
                 result = resp.json()
-                return ToolResult(content=json.dumps({
-                    "status": "success",
-                    "text": result.get("text", ""),
-                    "language": result.get("language", ""),
-                    "duration_seconds": result.get("duration"),
-                    "segments": result.get("segments", [])[:20],  # First 20 segments
-                }))
+                return ToolResult(
+                    content=json.dumps(
+                        {
+                            "status": "success",
+                            "text": result.get("text", ""),
+                            "language": result.get("language", ""),
+                            "duration_seconds": result.get("duration"),
+                            "segments": result.get("segments", [])[
+                                :20
+                            ],  # First 20 segments
+                        }
+                    )
+                )
 
         except ImportError:
             return ToolResult(content="Error: httpx not installed", is_error=True)
         except Exception as e:
-            return ToolResult(content=f"Speech-to-text error: {str(e)[:500]}", is_error=True)
+            return ToolResult(
+                content=f"Speech-to-text error: {str(e)[:500]}", is_error=True
+            )

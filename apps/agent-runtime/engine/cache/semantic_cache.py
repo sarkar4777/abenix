@@ -52,9 +52,7 @@ class SemanticCache:
             return json.loads(raw)
         return raw
 
-    async def set(
-        self, prompt: str, response: dict[str, Any], agent_id: str
-    ) -> None:
+    async def set(self, prompt: str, response: dict[str, Any], agent_id: str) -> None:
         await self._cache.astore(
             prompt=prompt,
             response=json.dumps(response, default=str),

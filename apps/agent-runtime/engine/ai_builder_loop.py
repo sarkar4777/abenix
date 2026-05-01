@@ -1,4 +1,5 @@
 """Iterative AI agent/pipeline builder."""
+
 from __future__ import annotations
 
 import json
@@ -56,7 +57,9 @@ class IterationState:
         """Stable fingerprint of failures — used to detect 'same error twice'."""
         parts: list[str] = []
         for e in self.tier1_errors + self.tier2_errors:
-            parts.append(f"{e.get('node_id', '')}::{e.get('field', '')}::{e.get('message', '')[:120]}")
+            parts.append(
+                f"{e.get('node_id', '')}::{e.get('field', '')}::{e.get('message', '')[:120]}"
+            )
         for f in self.dry_run_failures:
             parts.append(f"dry::{f.get('node_id', '')}::{f.get('reason', '')[:120]}")
         for c in self.critic_concerns:
@@ -119,19 +122,35 @@ async def _judge(
         )
     except Exception as e:
         return {
-            "passed": False, "score": 0, "missing_steps": [],
-            "wrong_nodes": [], "suggestions": [], "summary": f"judge failed: {e}",
+            "passed": False,
+            "score": 0,
+            "missing_steps": [],
+            "wrong_nodes": [],
+            "suggestions": [],
+            "summary": f"judge failed: {e}",
             "error": str(e),
         }
     text = resp.content.strip()
     if "{" not in text:
-        return {"passed": False, "score": 0, "missing_steps": [], "wrong_nodes": [],
-                "suggestions": [], "summary": f"judge returned no JSON: {text[:200]}"}
+        return {
+            "passed": False,
+            "score": 0,
+            "missing_steps": [],
+            "wrong_nodes": [],
+            "suggestions": [],
+            "summary": f"judge returned no JSON: {text[:200]}",
+        }
     try:
-        data = json.loads(text[text.index("{"):text.rindex("}") + 1])
+        data = json.loads(text[text.index("{") : text.rindex("}") + 1])
     except Exception as e:
-        return {"passed": False, "score": 0, "missing_steps": [], "wrong_nodes": [],
-                "suggestions": [], "summary": f"judge returned bad JSON: {e}"}
+        return {
+            "passed": False,
+            "score": 0,
+            "missing_steps": [],
+            "wrong_nodes": [],
+            "suggestions": [],
+            "summary": f"judge returned bad JSON: {e}",
+        }
     data.setdefault("passed", False)
     data.setdefault("score", 0)
     data.setdefault("missing_steps", [])
@@ -151,11 +170,15 @@ def _build_repair_context(state: IterationState) -> str:
     if state.tier1_errors:
         lines.append("Structural errors:")
         for e in state.tier1_errors[:8]:
-            lines.append(f"  • {e.get('node_id', '')}/{e.get('field', '')}: {e.get('message', '')}")
+            lines.append(
+                f"  • {e.get('node_id', '')}/{e.get('field', '')}: {e.get('message', '')}"
+            )
     if state.tier2_errors:
         lines.append("Semantic errors:")
         for e in state.tier2_errors[:8]:
-            lines.append(f"  • {e.get('node_id', '')}/{e.get('field', '')}: {e.get('message', '')}")
+            lines.append(
+                f"  • {e.get('node_id', '')}/{e.get('field', '')}: {e.get('message', '')}"
+            )
     if state.dry_run_failures:
         lines.append("Dry-run failures:")
         for f in state.dry_run_failures[:6]:
@@ -169,7 +192,9 @@ def _build_repair_context(state: IterationState) -> str:
         for s in state.judge_suggestions[:6]:
             lines.append(f"  • {s}")
     if state.critic_concerns:
-        lines.append(f"Adversarial critic ({state.critic_severity or 'minor'}) still concerned about:")
+        lines.append(
+            f"Adversarial critic ({state.critic_severity or 'minor'}) still concerned about:"
+        )
         for c in state.critic_concerns[:8]:
             lines.append(f"  • {c}")
     if state.test_error:
@@ -238,9 +263,13 @@ async def _critic(
         return {"severity": "minor", "concerns": [], "verdict": f"critic failed: {e}"}
     text = resp.content.strip()
     if "{" not in text:
-        return {"severity": "minor", "concerns": [], "verdict": "critic returned no JSON"}
+        return {
+            "severity": "minor",
+            "concerns": [],
+            "verdict": "critic returned no JSON",
+        }
     try:
-        data = json.loads(text[text.index("{"):text.rindex("}") + 1])
+        data = json.loads(text[text.index("{") : text.rindex("}") + 1])
     except Exception as e:
         return {"severity": "minor", "concerns": [], "verdict": f"critic bad JSON: {e}"}
     data.setdefault("severity", "minor")
@@ -280,7 +309,11 @@ async def run_iterative_build(
         try:
             config = await generator_fn(user_request, mode, repair)
         except Exception as e:
-            yield {"event": "final_blocked", "reason": f"generation_failed: {e}", "iteration": i}
+            yield {
+                "event": "final_blocked",
+                "reason": f"generation_failed: {e}",
+                "iteration": i,
+            }
             return
         state.config = config
         yield {
@@ -296,30 +329,54 @@ async def run_iterative_build(
         try:
             val = await validator_fn(config)
         except Exception as e:
-            yield {"event": "final_blocked", "reason": f"validator_failed: {e}", "iteration": i}
+            yield {
+                "event": "final_blocked",
+                "reason": f"validator_failed: {e}",
+                "iteration": i,
+            }
             return
         tier1 = val.get("tier1") or {}
         tier2 = val.get("tier2") or {}
         state.tier1_errors = tier1.get("errors") or []
         state.tier2_errors = tier2.get("errors") or []
         state.tier2_warnings = tier2.get("warnings") or []
-        yield {"event": "validation_result", "iteration": i, "tier1": tier1, "tier2": tier2}
+        yield {
+            "event": "validation_result",
+            "iteration": i,
+            "tier1": tier1,
+            "tier2": tier2,
+        }
 
-        if dry_run_fn is not None and config.get("mode") == "pipeline" and not state.tier1_errors:
+        if (
+            dry_run_fn is not None
+            and config.get("mode") == "pipeline"
+            and not state.tier1_errors
+        ):
             yield {"event": "dry_running", "iteration": i}
             try:
                 dry = await dry_run_fn(config)
             except Exception as e:
-                dry = {"ok": False, "failures": [{"node_id": "", "reason": str(e)}], "trace": ""}
+                dry = {
+                    "ok": False,
+                    "failures": [{"node_id": "", "reason": str(e)}],
+                    "trace": "",
+                }
             state.dry_run_failures = dry.get("failures") or []
-            yield {"event": "dry_run_result", "iteration": i,
-                   "ok": bool(dry.get("ok")),
-                   "failures": state.dry_run_failures,
-                   "trace_excerpt": (dry.get("trace") or "")[:2000]}
+            yield {
+                "event": "dry_run_result",
+                "iteration": i,
+                "ok": bool(dry.get("ok")),
+                "failures": state.dry_run_failures,
+                "trace_excerpt": (dry.get("trace") or "")[:2000],
+            }
         else:
             dry = {"ok": True, "trace": ""}
 
-        has_blocking = bool(state.tier1_errors) or bool(state.tier2_errors) or bool(state.dry_run_failures)
+        has_blocking = (
+            bool(state.tier1_errors)
+            or bool(state.tier2_errors)
+            or bool(state.dry_run_failures)
+        )
 
         if not has_blocking:
             yield {"event": "judging", "iteration": i}
@@ -336,18 +393,28 @@ async def run_iterative_build(
                     try:
                         crit = await critic_fn(config, judge.get("summary", ""))
                     except Exception as e:
-                        crit = {"severity": "minor", "concerns": [], "verdict": f"critic error: {e}"}
+                        crit = {
+                            "severity": "minor",
+                            "concerns": [],
+                            "verdict": f"critic error: {e}",
+                        }
                     state.critic_severity = crit.get("severity", "minor")
-                    state.critic_concerns = [str(c) for c in (crit.get("concerns") or [])]
+                    state.critic_concerns = [
+                        str(c) for c in (crit.get("concerns") or [])
+                    ]
                     yield {"event": "critic_result", "iteration": i, **crit}
                     if state.critic_severity in ("major", "blocker"):
                         # Don't accept yet — feed concerns into repair context
                         previous_sig = state.error_signature()
                         previous_state = state
-                        yield {"event": "iteration_end", "iteration": i,
-                               "has_blocking": True, "judge_passed": True,
-                               "judge_score": state.judge_score,
-                               "critic_severity": state.critic_severity}
+                        yield {
+                            "event": "iteration_end",
+                            "iteration": i,
+                            "has_blocking": True,
+                            "judge_passed": True,
+                            "judge_score": state.judge_score,
+                            "critic_severity": state.critic_severity,
+                        }
                         continue
 
                 if execute_fn is not None:
@@ -363,16 +430,27 @@ async def run_iterative_build(
                     if not state.test_ok:
                         previous_sig = state.error_signature()
                         previous_state = state
-                        yield {"event": "iteration_end", "iteration": i,
-                               "has_blocking": True, "judge_passed": True,
-                               "test_ran": True, "test_ok": False}
+                        yield {
+                            "event": "iteration_end",
+                            "iteration": i,
+                            "has_blocking": True,
+                            "judge_passed": True,
+                            "test_ran": True,
+                            "test_ok": False,
+                        }
                         continue
 
                 # All gates passed.
-                yield {"event": "final_success", "iteration": i, "config": config,
-                       "summary": judge.get("summary", ""), "score": state.judge_score,
-                       "critic_severity": state.critic_severity,
-                       "test_ran": state.test_ran, "test_ok": state.test_ok}
+                yield {
+                    "event": "final_success",
+                    "iteration": i,
+                    "config": config,
+                    "summary": judge.get("summary", ""),
+                    "score": state.judge_score,
+                    "critic_severity": state.critic_severity,
+                    "test_ran": state.test_ran,
+                    "test_ok": state.test_ok,
+                }
                 return
 
         sig = state.error_signature()
@@ -389,13 +467,19 @@ async def run_iterative_build(
             return
         previous_sig = sig
 
-        yield {"event": "iteration_end", "iteration": i,
-               "has_blocking": has_blocking,
-               "judge_passed": state.judge_passed,
-               "judge_score": state.judge_score}
+        yield {
+            "event": "iteration_end",
+            "iteration": i,
+            "has_blocking": has_blocking,
+            "judge_passed": state.judge_passed,
+            "judge_score": state.judge_score,
+        }
         previous_state = state
 
     # Max iterations exhausted.
-    yield {"event": "final_blocked", "iteration": max_iterations,
-           "reason": "max_iterations_exhausted",
-           "config": state.config}
+    yield {
+        "event": "final_blocked",
+        "iteration": max_iterations,
+        "reason": "max_iterations_exhausted",
+        "config": state.config,
+    }

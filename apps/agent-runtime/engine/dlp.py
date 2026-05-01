@@ -1,4 +1,5 @@
 """Data Loss Prevention (DLP) — PII detection and masking for agent I/O."""
+
 from __future__ import annotations
 
 import re
@@ -14,7 +15,9 @@ PII_PATTERNS = {
     "ip_address": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
     "aws_access_key": re.compile(r"\b(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b"),
     "aws_secret_key": re.compile(r"(?i)aws_secret_access_key\s*[=:]\s*[\w/+=]{40}"),
-    "generic_api_key": re.compile(r"(?i)(?:api[_-]?key|token|secret|password)\s*[=:]\s*['\"]?[\w-]{20,}['\"]?"),
+    "generic_api_key": re.compile(
+        r"(?i)(?:api[_-]?key|token|secret|password)\s*[=:]\s*['\"]?[\w-]{20,}['\"]?"
+    ),
     "bearer_token": re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*"),
 }
 
@@ -34,6 +37,7 @@ MASK_REPLACEMENTS = {
 @dataclass
 class DLPResult:
     """Result of DLP scan."""
+
     has_pii: bool = False
     findings: list[dict[str, Any]] = field(default_factory=list)
     masked_text: str = ""
@@ -44,8 +48,11 @@ class DLPResult:
 @dataclass
 class DLPPolicy:
     """DLP configuration for a tenant/agent."""
+
     mode: str = "detect"  # detect, mask, block
-    enabled_patterns: list[str] = field(default_factory=lambda: list(PII_PATTERNS.keys()))
+    enabled_patterns: list[str] = field(
+        default_factory=lambda: list(PII_PATTERNS.keys())
+    )
     custom_patterns: dict[str, str] = field(default_factory=dict)  # name → regex
     whitelist_patterns: list[str] = field(default_factory=list)  # patterns to skip
 
@@ -71,11 +78,13 @@ def scan_text(text: str, policy: DLPPolicy | None = None) -> DLPResult:
         if matches:
             result.has_pii = True
             for match in matches[:10]:  # Cap at 10 findings per pattern
-                result.findings.append({
-                    "type": pattern_name,
-                    "value": match[:4] + "..." if len(match) > 4 else match,
-                    "count": len(matches),
-                })
+                result.findings.append(
+                    {
+                        "type": pattern_name,
+                        "value": match[:4] + "..." if len(match) > 4 else match,
+                        "count": len(matches),
+                    }
+                )
             # Mask in text
             replacement = MASK_REPLACEMENTS.get(pattern_name, "[MASKED]")
             masked = regex.sub(replacement, masked)
@@ -87,10 +96,12 @@ def scan_text(text: str, policy: DLPPolicy | None = None) -> DLPResult:
             matches = custom_re.findall(text)
             if matches:
                 result.has_pii = True
-                result.findings.append({
-                    "type": f"custom:{name}",
-                    "count": len(matches),
-                })
+                result.findings.append(
+                    {
+                        "type": f"custom:{name}",
+                        "count": len(matches),
+                    }
+                )
                 masked = custom_re.sub(f"[{name.upper()}_MASKED]", masked)
         except re.error:
             pass  # Invalid regex, skip

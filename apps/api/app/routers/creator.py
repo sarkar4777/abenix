@@ -47,7 +47,9 @@ async def onboard_creator(
         user.role = UserRole.CREATOR
 
     link_result = await create_connect_onboarding_link(
-        account_id, body.refresh_url, body.return_url,
+        account_id,
+        body.refresh_url,
+        body.return_url,
     )
 
     if link_result.get("mode") == "mock":
@@ -55,11 +57,13 @@ async def onboard_creator(
 
     await db.commit()
 
-    return success({
-        "account_id": account_id,
-        "onboarding_url": link_result["url"],
-        "mode": link_result.get("mode", "live"),
-    })
+    return success(
+        {
+            "account_id": account_id,
+            "onboarding_url": link_result["url"],
+            "mode": link_result.get("mode", "live"),
+        }
+    )
 
 
 @router.get("/status")
@@ -67,23 +71,27 @@ async def creator_status(
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
     if not user.stripe_connect_id:
-        return success({
-            "is_onboarded": False,
-            "stripe_connect_id": None,
-            "charges_enabled": False,
-            "payouts_enabled": False,
-            "details_submitted": False,
-        })
+        return success(
+            {
+                "is_onboarded": False,
+                "stripe_connect_id": None,
+                "charges_enabled": False,
+                "payouts_enabled": False,
+                "details_submitted": False,
+            }
+        )
 
     account_status = await get_connect_account_status(user.stripe_connect_id)
 
-    return success({
-        "is_onboarded": user.stripe_connect_onboarded,
-        "stripe_connect_id": user.stripe_connect_id,
-        "charges_enabled": account_status["charges_enabled"],
-        "payouts_enabled": account_status["payouts_enabled"],
-        "details_submitted": account_status["details_submitted"],
-    })
+    return success(
+        {
+            "is_onboarded": user.stripe_connect_onboarded,
+            "stripe_connect_id": user.stripe_connect_id,
+            "charges_enabled": account_status["charges_enabled"],
+            "payouts_enabled": account_status["payouts_enabled"],
+            "details_submitted": account_status["details_submitted"],
+        }
+    )
 
 
 @router.get("/dashboard")
@@ -92,7 +100,10 @@ async def creator_dashboard(
     db: AsyncSession = Depends(get_db),
     period: str = Query(default="30d"),
 ) -> JSONResponse:
-    if not user.stripe_connect_id and user.role not in (UserRole.CREATOR, UserRole.ADMIN):
+    if not user.stripe_connect_id and user.role not in (
+        UserRole.CREATOR,
+        UserRole.ADMIN,
+    ):
         return error("Not a creator", 403)
 
     period_days = {"7d": 7, "30d": 30, "90d": 90}.get(period, 30)
@@ -196,18 +207,20 @@ async def creator_dashboard(
         for p in recent_payouts_result.scalars().all()
     ]
 
-    return success({
-        "period": period,
-        "total_revenue": total_revenue,
-        "total_platform_fees": total_platform_fees,
-        "creator_earnings": creator_earnings,
-        "subscriber_count": subscriber_count,
-        "published_agents_count": published_agents_count,
-        "balance": balance,
-        "revenue_by_day": revenue_by_day,
-        "top_agents": top_agents,
-        "recent_payouts": recent_payouts,
-    })
+    return success(
+        {
+            "period": period,
+            "total_revenue": total_revenue,
+            "total_platform_fees": total_platform_fees,
+            "creator_earnings": creator_earnings,
+            "subscriber_count": subscriber_count,
+            "published_agents_count": published_agents_count,
+            "balance": balance,
+            "revenue_by_day": revenue_by_day,
+            "top_agents": top_agents,
+            "recent_payouts": recent_payouts,
+        }
+    )
 
 
 @router.get("/login-link")

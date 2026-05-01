@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -28,6 +26,7 @@ router = APIRouter(prefix="/api/access-control", tags=["access-control"])
 
 class PolicyRules(BaseModel):
     """Subject policy rules schema."""
+
     agents: dict | None = None
     knowledge_bases: list[dict] | None = None
     tools: dict | None = None
@@ -80,12 +79,20 @@ async def list_policies(
     """List subject policies under the user's API keys."""
     # Get user's API keys
     keys_result = await db.execute(
-        select(ApiKey.id).where(ApiKey.tenant_id == user.tenant_id, ApiKey.is_active.is_(True))
+        select(ApiKey.id).where(
+            ApiKey.tenant_id == user.tenant_id, ApiKey.is_active.is_(True)
+        )
     )
     user_key_ids = [r[0] for r in keys_result.all()]
 
     if not user_key_ids:
-        return JSONResponse(content={"data": [], "error": None, "meta": {"total": 0, "limit": limit, "offset": offset}})
+        return JSONResponse(
+            content={
+                "data": [],
+                "error": None,
+                "meta": {"total": 0, "limit": limit, "offset": offset},
+            }
+        )
 
     query = select(SubjectPolicy).where(SubjectPolicy.api_key_id.in_(user_key_ids))
 
@@ -98,10 +105,13 @@ async def list_policies(
         query = query.where(SubjectPolicy.subject_type == subject_type)
     if search:
         from sqlalchemy import or_
-        query = query.where(or_(
-            SubjectPolicy.subject_id.ilike(f"%{search}%"),
-            SubjectPolicy.display_name.ilike(f"%{search}%"),
-        ))
+
+        query = query.where(
+            or_(
+                SubjectPolicy.subject_id.ilike(f"%{search}%"),
+                SubjectPolicy.display_name.ilike(f"%{search}%"),
+            )
+        )
 
     count_q = select(func.count()).select_from(query.subquery())
     total = await db.scalar(count_q) or 0
@@ -110,11 +120,13 @@ async def list_policies(
     result = await db.execute(query)
     policies = result.scalars().all()
 
-    return JSONResponse(content={
-        "data": [_serialize_policy(p) for p in policies],
-        "error": None,
-        "meta": {"total": total, "limit": limit, "offset": offset},
-    })
+    return JSONResponse(
+        content={
+            "data": [_serialize_policy(p) for p in policies],
+            "error": None,
+            "meta": {"total": total, "limit": limit, "offset": offset},
+        }
+    )
 
 
 @router.post("/policies")
@@ -234,25 +246,35 @@ async def list_delegation_keys(
 ) -> JSONResponse:
     """List API keys with delegation enabled."""
     result = await db.execute(
-        select(ApiKey).where(
+        select(ApiKey)
+        .where(
             ApiKey.tenant_id == user.tenant_id,
             ApiKey.is_active.is_(True),
-        ).order_by(ApiKey.created_at.desc())
+        )
+        .order_by(ApiKey.created_at.desc())
     )
     keys = result.scalars().all()
 
     data = []
     for k in keys:
         scopes = k.scopes or {}
-        can_delegate = scopes.get("can_delegate", False) if isinstance(scopes, dict) else False
-        data.append({
-            "id": str(k.id),
-            "name": k.name,
-            "key_prefix": k.key_prefix,
-            "can_delegate": can_delegate,
-            "subject_types_allowed": scopes.get("subject_types_allowed", []) if isinstance(scopes, dict) else [],
-            "created_at": k.created_at.isoformat() if k.created_at else None,
-        })
+        can_delegate = (
+            scopes.get("can_delegate", False) if isinstance(scopes, dict) else False
+        )
+        data.append(
+            {
+                "id": str(k.id),
+                "name": k.name,
+                "key_prefix": k.key_prefix,
+                "can_delegate": can_delegate,
+                "subject_types_allowed": (
+                    scopes.get("subject_types_allowed", [])
+                    if isinstance(scopes, dict)
+                    else []
+                ),
+                "created_at": k.created_at.isoformat() if k.created_at else None,
+            }
+        )
 
     return success(data)
 
@@ -271,12 +293,14 @@ async def list_policy_templates() -> JSONResponse:
                     "mode": "allowlist",
                     "slugs": ["example_app-chat", "example_app-pipeline"],
                 },
-                "knowledge_bases": [{
-                    "kb_id": "*",
-                    "access_mode": "namespace",
-                    "namespace_pattern": "example_app-{subject_id}",
-                    "allowed_actions": ["read", "search"],
-                }],
+                "knowledge_bases": [
+                    {
+                        "kb_id": "*",
+                        "access_mode": "namespace",
+                        "namespace_pattern": "example_app-{subject_id}",
+                        "allowed_actions": ["read", "search"],
+                    }
+                ],
                 "data_scopes": {
                     "example_app.contracts.user_id": "{subject_id}",
                 },
@@ -290,12 +314,14 @@ async def list_policy_templates() -> JSONResponse:
             "subject_type": "example_app",
             "rules": {
                 "agents": {"mode": "allowlist", "slugs": ["example_app-chat"]},
-                "knowledge_bases": [{
-                    "kb_id": "*",
-                    "access_mode": "namespace",
-                    "namespace_pattern": "example_app-team-{subject_id}",
-                    "allowed_actions": ["read", "search"],
-                }],
+                "knowledge_bases": [
+                    {
+                        "kb_id": "*",
+                        "access_mode": "namespace",
+                        "namespace_pattern": "example_app-team-{subject_id}",
+                        "allowed_actions": ["read", "search"],
+                    }
+                ],
                 "denied_actions": ["delete"],
             },
         },
@@ -306,11 +332,13 @@ async def list_policy_templates() -> JSONResponse:
             "subject_type": "external",
             "rules": {
                 "agents": {"mode": "denylist", "slugs": []},
-                "knowledge_bases": [{
-                    "kb_id": "*",
-                    "access_mode": "full",
-                    "allowed_actions": ["read", "search"],
-                }],
+                "knowledge_bases": [
+                    {
+                        "kb_id": "*",
+                        "access_mode": "full",
+                        "allowed_actions": ["read", "search"],
+                    }
+                ],
                 "denied_actions": ["delete", "admin", "write"],
             },
         },
@@ -320,12 +348,16 @@ async def list_policy_templates() -> JSONResponse:
             "description": "Subject can only see KB documents tagged with their department",
             "subject_type": "external",
             "rules": {
-                "knowledge_bases": [{
-                    "kb_id": "*",
-                    "access_mode": "document_filter",
-                    "document_filters": {"department": "{subject_metadata.department}"},
-                    "allowed_actions": ["read", "search"],
-                }],
+                "knowledge_bases": [
+                    {
+                        "kb_id": "*",
+                        "access_mode": "document_filter",
+                        "document_filters": {
+                            "department": "{subject_metadata.department}"
+                        },
+                        "allowed_actions": ["read", "search"],
+                    }
+                ],
             },
         },
     ]
@@ -364,11 +396,13 @@ async def test_policy(
     policies = result.scalars().all()
 
     if not policies:
-        return success({
-            "allowed": False,
-            "reason": "No policy found for this subject",
-            "matched_policy": None,
-        })
+        return success(
+            {
+                "allowed": False,
+                "reason": "No policy found for this subject",
+                "matched_policy": None,
+            }
+        )
 
     # Use the most specific policy (subject_id over wildcard)
     policy = sorted(policies, key=lambda p: 0 if p.subject_id == subject_id else 1)[0]
@@ -402,8 +436,10 @@ async def test_policy(
                     reason = f"KB access mode: {kb_rule.get('access_mode')}"
                     break
 
-    return success({
-        "allowed": allowed,
-        "reason": reason,
-        "matched_policy": _serialize_policy(policy),
-    })
+    return success(
+        {
+            "allowed": allowed,
+            "reason": reason,
+            "matched_policy": _serialize_policy(policy),
+        }
+    )

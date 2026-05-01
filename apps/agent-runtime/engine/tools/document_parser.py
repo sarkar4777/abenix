@@ -70,9 +70,7 @@ class DocumentParserTool(BaseTool):
         page_range: str | None = arguments.get("page_range")
 
         if not file_path:
-            return ToolResult(
-                content="Error: file_path is required", is_error=True
-            )
+            return ToolResult(content="Error: file_path is required", is_error=True)
 
         path = Path(file_path)
         if not path.exists():
@@ -103,9 +101,7 @@ class DocumentParserTool(BaseTool):
 
         try:
             if file_type == "pdf":
-                text, page_count, pdf_warnings = self._read_pdf(
-                    path, page_range
-                )
+                text, page_count, pdf_warnings = self._read_pdf(path, page_range)
                 warnings.extend(pdf_warnings)
             elif file_type == "docx":
                 text, docx_warnings = self._read_docx(path)
@@ -183,9 +179,7 @@ class DocumentParserTool(BaseTool):
         try:
             from PyPDF2 import PdfReader
         except ImportError:
-            warnings.append(
-                "PyPDF2 is not installed -- PDF parsing unavailable"
-            )
+            warnings.append("PyPDF2 is not installed -- PDF parsing unavailable")
             return "", 0, warnings
 
         reader = PdfReader(str(path))
@@ -227,7 +221,9 @@ class DocumentParserTool(BaseTool):
         except ImportError:
             return (
                 "",
-                ["DOCX support requires python-docx. Install with: pip install python-docx"],
+                [
+                    "DOCX support requires python-docx. Install with: pip install python-docx"
+                ],
             )
 
         doc = Document(str(path))
@@ -286,7 +282,9 @@ class DocumentParserTool(BaseTool):
             r"<(script|style)[^>]*>.*?</\1>", "", raw, flags=re.DOTALL | re.IGNORECASE
         )
         # Replace <br>, <p>, <div>, <li>, <tr> with newlines for readability
-        text = re.sub(r"<(?:br|p|div|li|tr|h[1-6])[^>]*>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"<(?:br|p|div|li|tr|h[1-6])[^>]*>", "\n", text, flags=re.IGNORECASE
+        )
         # Strip remaining tags
         text = re.sub(r"<[^>]+>", "", text)
         # Decode common HTML entities

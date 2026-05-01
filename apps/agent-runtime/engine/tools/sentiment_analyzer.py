@@ -306,11 +306,37 @@ class SentimentAnalyzerTool(BaseTool):
 
     # Negation words that flip the following keyword's sentiment
     _NEGATION_WORDS = {
-        "not", "no", "never", "neither", "nor", "none", "nobody",
-        "nothing", "nowhere", "hardly", "barely", "scarcely", "doesn't",
-        "don't", "didn't", "isn't", "wasn't", "aren't", "weren't",
-        "won't", "wouldn't", "shouldn't", "couldn't", "can't", "cannot",
-        "without", "despite", "lack", "fail", "failed", "fails",
+        "not",
+        "no",
+        "never",
+        "neither",
+        "nor",
+        "none",
+        "nobody",
+        "nothing",
+        "nowhere",
+        "hardly",
+        "barely",
+        "scarcely",
+        "doesn't",
+        "don't",
+        "didn't",
+        "isn't",
+        "wasn't",
+        "aren't",
+        "weren't",
+        "won't",
+        "wouldn't",
+        "shouldn't",
+        "couldn't",
+        "can't",
+        "cannot",
+        "without",
+        "despite",
+        "lack",
+        "fail",
+        "failed",
+        "fails",
     }
 
     # Intensifier words that amplify sentiment
@@ -358,26 +384,32 @@ class SentimentAnalyzerTool(BaseTool):
             breakdown = []
             for text in texts:
                 if not isinstance(text, str) or not text.strip():
-                    breakdown.append({
-                        "text": str(text)[:120],
-                        "score": 0.0,
-                        "keywords_matched": [],
-                    })
+                    breakdown.append(
+                        {
+                            "text": str(text)[:120],
+                            "score": 0.0,
+                            "keywords_matched": [],
+                        }
+                    )
                     continue
 
                 score, matched = self._score_text(text, domain)
-                breakdown.append({
-                    "text": text[:200] + ("..." if len(text) > 200 else ""),
-                    "score": round(score, 3),
-                    "keywords_matched": matched,
-                })
+                breakdown.append(
+                    {
+                        "text": text[:200] + ("..." if len(text) > 200 else ""),
+                        "score": round(score, 3),
+                        "keywords_matched": matched,
+                    }
+                )
 
             scores = [b["score"] for b in breakdown]
             overall = self._aggregate_scores(scores, aggregation)
             confidence = self._compute_confidence(breakdown)
             trend = self._determine_trend(scores, aggregation)
             volatility = self._compute_volatility(scores)
-            summary = self._generate_summary(overall, trend, volatility, confidence, domain)
+            summary = self._generate_summary(
+                overall, trend, volatility, confidence, domain
+            )
 
             output = {
                 "overall_score": round(overall, 3),
@@ -397,7 +429,9 @@ class SentimentAnalyzerTool(BaseTool):
 
     # Text scoring
     def _score_text(
-        self, text: str, domain: str,
+        self,
+        text: str,
+        domain: str,
     ) -> tuple[float, list[str]]:
         lower = text.lower()
         words = re.findall(r"[a-z'-]+", lower)
@@ -418,7 +452,7 @@ class SentimentAnalyzerTool(BaseTool):
                 if keyword in lower:
                     # Check for negation before the phrase
                     idx = lower.index(keyword)
-                    prefix = lower[max(0, idx - 30):idx]
+                    prefix = lower[max(0, idx - 30) : idx]
                     prefix_words = re.findall(r"[a-z'-]+", prefix)
                     negated = any(w in self._NEGATION_WORDS for w in prefix_words[-3:])
 
@@ -468,7 +502,9 @@ class SentimentAnalyzerTool(BaseTool):
 
     # Aggregation strategies
     def _aggregate_scores(
-        self, scores: list[float], method: str,
+        self,
+        scores: list[float],
+        method: str,
     ) -> float:
         if not scores:
             return 0.0
@@ -530,15 +566,15 @@ class SentimentAnalyzerTool(BaseTool):
 
         # Weighted combination
         confidence = (
-            0.3 * count_factor
-            + 0.35 * keyword_factor
-            + 0.35 * agreement_factor
+            0.3 * count_factor + 0.35 * keyword_factor + 0.35 * agreement_factor
         )
         return min(1.0, max(0.0, confidence))
 
     # Trend determination
     def _determine_trend(
-        self, scores: list[float], aggregation: str,
+        self,
+        scores: list[float],
+        aggregation: str,
     ) -> str:
         if not scores:
             return "neutral"
@@ -605,7 +641,9 @@ class SentimentAnalyzerTool(BaseTool):
         else:
             strength = ""
 
-        direction = "positive" if overall > 0 else "negative" if overall < 0 else "neutral"
+        direction = (
+            "positive" if overall > 0 else "negative" if overall < 0 else "neutral"
+        )
         domain_label = f" {domain}" if domain else ""
 
         if strength:
@@ -614,9 +652,7 @@ class SentimentAnalyzerTool(BaseTool):
             sentiment_desc = "neutral"
 
         conf_desc = (
-            "high" if confidence > 0.7
-            else "moderate" if confidence > 0.4
-            else "low"
+            "high" if confidence > 0.7 else "moderate" if confidence > 0.4 else "low"
         )
 
         parts = [

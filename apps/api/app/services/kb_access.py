@@ -1,4 +1,5 @@
 """Collection (KnowledgeBase) access resolution."""
+
 from __future__ import annotations
 
 import sys
@@ -27,7 +28,10 @@ _WRITE_PERMS = {"edit", "admin"}
 
 
 async def user_can_edit_collection(
-    db: AsyncSession, *, user, kb: KnowledgeBase,
+    db: AsyncSession,
+    *,
+    user,
+    kb: KnowledgeBase,
 ) -> bool:
     """Can this user mutate this collection (update / delete / upload)?"""
     if kb.tenant_id != user.tenant_id:
@@ -37,12 +41,16 @@ async def user_can_edit_collection(
     if getattr(kb, "created_by", None) == user.id:
         return True
 
-    grant = (await db.execute(
-        select(UserCollectionGrant.permission).where(
-            UserCollectionGrant.collection_id == kb.id,
-            UserCollectionGrant.user_id == user.id,
-        ).limit(1)
-    )).scalar_one_or_none()
+    grant = (
+        await db.execute(
+            select(UserCollectionGrant.permission)
+            .where(
+                UserCollectionGrant.collection_id == kb.id,
+                UserCollectionGrant.user_id == user.id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     if grant is None:
         return False
     perm = grant.value if hasattr(grant, "value") else str(grant)
@@ -50,7 +58,10 @@ async def user_can_edit_collection(
 
 
 async def user_can_access_collection(
-    db: AsyncSession, *, user, kb: KnowledgeBase,
+    db: AsyncSession,
+    *,
+    user,
+    kb: KnowledgeBase,
 ) -> bool:
     """Authoritative check: can this user read this collection?"""
     if kb.tenant_id != user.tenant_id:
@@ -69,23 +80,32 @@ async def user_can_access_collection(
         if kb.project_id is None:
             return True  # legacy: no project → tenant-wide
         proj_ids = await visible_project_ids(
-            db, user_id=user.id, tenant_id=user.tenant_id,
+            db,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
         )
         if kb.project_id in proj_ids:
             return True
 
     # private OR project-member-missing → require explicit grant
-    grant = (await db.execute(
-        select(UserCollectionGrant.id).where(
-            UserCollectionGrant.collection_id == kb.id,
-            UserCollectionGrant.user_id == user.id,
-        ).limit(1)
-    )).scalar_one_or_none()
+    grant = (
+        await db.execute(
+            select(UserCollectionGrant.id)
+            .where(
+                UserCollectionGrant.collection_id == kb.id,
+                UserCollectionGrant.user_id == user.id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     return grant is not None
 
 
 async def accessible_collection_ids(
-    db: AsyncSession, *, user, tenant_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    user,
+    tenant_id: uuid.UUID,
 ) -> set[uuid.UUID] | None:
     """Return the set of KB ids this user can read within the tenant."""
     if _is_tenant_admin(user):
@@ -93,23 +113,33 @@ async def accessible_collection_ids(
 
     # Collect project ids visible to the user (membership + creator).
     proj_ids = await visible_project_ids(
-        db, user_id=user.id, tenant_id=tenant_id,
+        db,
+        user_id=user.id,
+        tenant_id=tenant_id,
     )
 
     # Direct grants (covers private collections explicitly shared).
-    grant_rows: Iterable[uuid.UUID] = (await db.execute(
-        select(UserCollectionGrant.collection_id).where(
-            UserCollectionGrant.user_id == user.id,
+    grant_rows: Iterable[uuid.UUID] = (
+        await db.execute(
+            select(UserCollectionGrant.collection_id).where(
+                UserCollectionGrant.user_id == user.id,
+            )
         )
-    )).scalars()
+    ).scalars()
     grant_ids = set(grant_rows)
 
     # Collections visible via tenant/project visibility OR direct grant.
-    rows = (await db.execute(
-        select(KnowledgeBase.id, KnowledgeBase.default_visibility, KnowledgeBase.project_id).where(
-            KnowledgeBase.tenant_id == tenant_id,
+    rows = (
+        await db.execute(
+            select(
+                KnowledgeBase.id,
+                KnowledgeBase.default_visibility,
+                KnowledgeBase.project_id,
+            ).where(
+                KnowledgeBase.tenant_id == tenant_id,
+            )
         )
-    )).all()
+    ).all()
 
     visible: set[uuid.UUID] = set()
     for kb_id, visibility, project_id in rows:

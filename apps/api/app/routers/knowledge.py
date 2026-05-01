@@ -29,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 from models.knowledge_base import Document, DocumentStatus, KBStatus, KnowledgeBase
 from models.knowledge_project import CollectionVisibility, KnowledgeProject
 from models.collection_grant import (
-    CollectionPermission, UserCollectionGrant,
+    CollectionPermission,
+    UserCollectionGrant,
 )
 from models.user import User
 
@@ -116,7 +117,9 @@ def _serialize_doc(d: Document) -> dict[str, Any]:
 
 @router.get("")
 async def list_knowledge_bases(
-    search: str = Query("", max_length=255, description="Search by name or description"),
+    search: str = Query(
+        "", max_length=255, description="Search by name or description"
+    ),
     status: str = Query("", description="Filter by status"),
     sort: str = Query("newest", description="Sort: newest, oldest, name"),
     limit: int = Query(20, ge=1, le=100),
@@ -128,7 +131,9 @@ async def list_knowledge_bases(
     # else only sees collections whose visibility lets them in (tenant /
     # project-member / explicit grant).
     allowed_ids = await accessible_collection_ids(
-        db, user=user, tenant_id=user.tenant_id,
+        db,
+        user=user,
+        tenant_id=user.tenant_id,
     )
 
     query = (
@@ -143,6 +148,7 @@ async def list_knowledge_bases(
 
     if search:
         from sqlalchemy import or_
+
         query = query.where(
             or_(
                 KnowledgeBase.name.ilike(f"%{search}%"),
@@ -166,6 +172,7 @@ async def list_knowledge_bases(
         count_base = count_base.where(KnowledgeBase.id.in_(allowed_ids))
     if search:
         from sqlalchemy import or_
+
         count_base = count_base.where(
             or_(
                 KnowledgeBase.name.ilike(f"%{search}%"),
@@ -187,15 +194,20 @@ async def list_knowledge_bases(
 
 
 async def _ensure_default_project(
-    db: AsyncSession, *, tenant_id: uuid.UUID, user_id: uuid.UUID,
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
 ) -> KnowledgeProject:
     """Find-or-create the tenant's Default project."""
-    p = (await db.execute(
-        select(KnowledgeProject).where(
-            KnowledgeProject.tenant_id == tenant_id,
-            KnowledgeProject.slug == "default",
+    p = (
+        await db.execute(
+            select(KnowledgeProject).where(
+                KnowledgeProject.tenant_id == tenant_id,
+                KnowledgeProject.slug == "default",
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if p is not None:
         return p
     p = KnowledgeProject(
@@ -237,13 +249,16 @@ async def create_knowledge_base(
             return error("Project not found", 404)
     else:
         proj = await _ensure_default_project(
-            db, tenant_id=user.tenant_id, user_id=user.id,
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
         )
         project_uuid = proj.id
 
     visibility = (
         CollectionVisibility(body.default_visibility)
-        if body.default_visibility else CollectionVisibility.PROJECT
+        if body.default_visibility
+        else CollectionVisibility.PROJECT
     )
 
     kb = KnowledgeBase(
@@ -268,12 +283,14 @@ async def create_knowledge_base(
 
     # Auto-grant the creator ADMIN on their own collection so the share
     # query path (which reads grants) doesn't pretend they don't own it.
-    db.add(UserCollectionGrant(
-        user_id=user.id,
-        collection_id=kb.id,
-        permission=CollectionPermission.ADMIN,
-        granted_by=user.id,
-    ))
+    db.add(
+        UserCollectionGrant(
+            user_id=user.id,
+            collection_id=kb.id,
+            permission=CollectionPermission.ADMIN,
+            granted_by=user.id,
+        )
+    )
     await db.commit()
     await db.refresh(kb)
     return success(_serialize_kb(kb), status_code=201)
@@ -400,7 +417,9 @@ async def upload_document(
     file_size = len(content)
 
     if file_size > MAX_FILE_SIZE:
-        return error(f"File too large. Max size: {MAX_FILE_SIZE // (1024*1024)} MB", 400)
+        return error(
+            f"File too large. Max size: {MAX_FILE_SIZE // (1024*1024)} MB", 400
+        )
 
     if file_size == 0:
         return error("Empty file", 400)
@@ -412,6 +431,7 @@ async def upload_document(
     storage_url = ""
     try:
         from engine.storage import get_storage
+
         storage = get_storage()
         storage_url = await storage.upload(
             tenant_id=str(user.tenant_id),
@@ -458,6 +478,7 @@ async def upload_document(
     # SCAN + DEL; failure is silent (cache layer is best-effort).
     try:
         from app.services.kb_cache import invalidate_tenant_search_cache
+
         await invalidate_tenant_search_cache(str(user.tenant_id))
     except Exception:
         pass
@@ -508,7 +529,9 @@ async def delete_document(
     if not kb or not await user_can_access_collection(db, user=user, kb=kb):
         return error("Knowledge base not found", 404)
     if not await user_can_edit_collection(db, user=user, kb=kb):
-        return error("You don't have permission to delete documents in this collection", 403)
+        return error(
+            "You don't have permission to delete documents in this collection", 403
+        )
 
     result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.kb_id == kb_id)
@@ -549,11 +572,20 @@ def _dispatch_processing(
         app = Celery(broker=broker_url)
         app.send_task(
             "worker.tasks.document_processor.process_document",
-            args=[doc_id, kb_id, file_path, filename, file_type, chunk_size, chunk_overlap],
+            args=[
+                doc_id,
+                kb_id,
+                file_path,
+                filename,
+                file_type,
+                chunk_size,
+                chunk_overlap,
+            ],
             queue="documents",
         )
     except Exception:
         import logging
+
         logging.getLogger(__name__).warning(
             "Celery not available, document %s will need manual processing", doc_id
         )

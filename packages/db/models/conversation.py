@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import enum
 import uuid
 
 from sqlalchemy import Boolean, ForeignKey, Index, Integer, Numeric, String, Text
@@ -14,7 +13,13 @@ class Conversation(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "conversations"
     __table_args__ = (
         Index("ix_conversations_user_updated", "user_id", "updated_at"),
-        Index("ix_conversations_app_subject", "app_slug", "subject_type", "subject_id", "updated_at"),
+        Index(
+            "ix_conversations_app_subject",
+            "app_slug",
+            "subject_type",
+            "subject_id",
+            "updated_at",
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -35,14 +40,18 @@ class Conversation(UUIDMixin, TenantMixin, TimestampMixin, Base):
     model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False)
-    share_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    share_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True
+    )
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0)
     message_count: Mapped[int] = mapped_column(Integer, default=0)
     last_message_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     messages: Mapped[list[Message]] = relationship(
-        back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan"
+        back_populates="conversation",
+        order_by="Message.created_at",
+        cascade="all, delete-orphan",
     )
 
 
@@ -53,7 +62,9 @@ class Message(UUIDMixin, TimestampMixin, Base):
     )
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
     )
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text, default="")

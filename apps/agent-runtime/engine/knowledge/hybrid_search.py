@@ -52,16 +52,21 @@ async def hybrid_search(
 ) -> HybridSearchResponse:
     """Execute hybrid search across vector store and knowledge graph."""
     import time
+
     start = time.monotonic()
 
     # KB v2 query cache (5-min TTL). Best-effort: redis miss/failure
     # falls through to live search.
     from engine.knowledge import search_cache
+
     cache_k: str | None = None
     if use_cache and tenant_id and kb_ids:
         cache_k = search_cache.cache_key(
-            tenant_id=tenant_id, kb_ids=kb_ids,
-            query=query, mode=mode.value, top_k=top_k,
+            tenant_id=tenant_id,
+            kb_ids=kb_ids,
+            query=query,
+            mode=mode.value,
+            top_k=top_k,
         )
         cached = await search_cache.get(cache_k)
         if cached:
@@ -97,7 +102,9 @@ async def hybrid_search(
 
         if query_entities:
             graph_results, graph_entities = await _graph_search(
-                query_entities, kb_ids, depth=graph_depth,
+                query_entities,
+                kb_ids,
+                depth=graph_depth,
             )
             response.graph_results_count = len(graph_results)
             response.graph_hops = graph_depth
@@ -117,20 +124,26 @@ async def hybrid_search(
     # avoid burning Redis on empty-corpus misses.
     if cache_k and response.results:
         try:
-            await search_cache.set(cache_k, {
-                "results": [
-                    {
-                        "content": r.content, "score": r.score,
-                        "source": r.source, "source_type": r.source_type,
-                        "metadata": r.metadata,
-                    } for r in response.results
-                ],
-                "mode_used": response.mode_used,
-                "vector_results_count": response.vector_results_count,
-                "graph_results_count": response.graph_results_count,
-                "entities_found": response.entities_found,
-                "graph_hops": response.graph_hops,
-            })
+            await search_cache.set(
+                cache_k,
+                {
+                    "results": [
+                        {
+                            "content": r.content,
+                            "score": r.score,
+                            "source": r.source,
+                            "source_type": r.source_type,
+                            "metadata": r.metadata,
+                        }
+                        for r in response.results
+                    ],
+                    "mode_used": response.mode_used,
+                    "vector_results_count": response.vector_results_count,
+                    "graph_results_count": response.graph_results_count,
+                    "entities_found": response.entities_found,
+                    "graph_hops": response.graph_hops,
+                },
+            )
         except Exception:
             pass
     return response
@@ -145,10 +158,9 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
         import uuid as _uuid
         from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
         from sqlalchemy import text as _t
+
         db_url = (
-            os.environ.get("DATABASE_URL")
-            or os.environ.get("ASYNC_DATABASE_URL")
-            or ""
+            os.environ.get("DATABASE_URL") or os.environ.get("ASYNC_DATABASE_URL") or ""
         )
         if not db_url:
             return {kb: "pinecone" for kb in kb_ids}
@@ -168,10 +180,14 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
             return result
         engine = create_async_engine(db_url, pool_pre_ping=True)
         async with AsyncSession(engine) as session:
-            rows = (await session.execute(_t(
-                "SELECT id::text, vector_backend FROM knowledge_collections "
-                "WHERE id = ANY(:ids)"
-            ).bindparams(ids=uuid_inputs))).all()
+            rows = (
+                await session.execute(
+                    _t(
+                        "SELECT id::text, vector_backend FROM knowledge_collections "
+                        "WHERE id = ANY(:ids)"
+                    ).bindparams(ids=uuid_inputs)
+                )
+            ).all()
         await engine.dispose()
         for r in rows:
             result[r[0]] = r[1] or "pinecone"
@@ -181,7 +197,9 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
 
 
 async def _vector_search_pgvector(
-    query: str, kb_ids: list[str], top_k: int,
+    query: str,
+    kb_ids: list[str],
+    top_k: int,
 ) -> list[SearchResult]:
     """Vector search via Postgres+pgvector for collections opted into it."""
     try:
@@ -195,23 +213,21 @@ async def _vector_search_pgvector(
             return []
         client = AsyncOpenAI(api_key=api_key)
         embedding_resp = await client.embeddings.create(
-            model="text-embedding-3-small", input=query,
+            model="text-embedding-3-small",
+            input=query,
         )
         emb = embedding_resp.data[0].embedding
         emb_str = "[" + ",".join(f"{x:.7f}" for x in emb) + "]"
 
         db_url = (
-            os.environ.get("DATABASE_URL")
-            or os.environ.get("ASYNC_DATABASE_URL")
-            or ""
+            os.environ.get("DATABASE_URL") or os.environ.get("ASYNC_DATABASE_URL") or ""
         )
         if db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
             db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         engine = create_async_engine(db_url, pool_pre_ping=True)
         results: list[SearchResult] = []
         async with AsyncSession(engine) as session:
-            rows = (await session.execute(_t(
-                """
+            rows = (await session.execute(_t("""
                 SELECT id::text, collection_id::text, document_id::text,
                        chunk_index, content, metadata,
                        1 - (embedding <=> :emb::vector) AS score
@@ -219,31 +235,34 @@ async def _vector_search_pgvector(
                 WHERE collection_id = ANY(:ids)
                 ORDER BY embedding <=> :emb::vector
                 LIMIT :k
-                """
-            ).bindparams(emb=emb_str, ids=kb_ids, k=top_k))).all()
+                """).bindparams(emb=emb_str, ids=kb_ids, k=top_k))).all()
         await engine.dispose()
         for r in rows:
             meta = r[5] or {}
             filename = meta.get("filename") if isinstance(meta, dict) else "unknown"
-            results.append(SearchResult(
-                content=r[4],
-                score=float(r[6]),
-                source=filename or "unknown",
-                source_type="chunk",
-                metadata={
-                    "kb_id": r[1],
-                    "doc_id": r[2],
-                    "chunk_index": r[3],
-                    "backend": "pgvector",
-                },
-            ))
+            results.append(
+                SearchResult(
+                    content=r[4],
+                    score=float(r[6]),
+                    source=filename or "unknown",
+                    source_type="chunk",
+                    metadata={
+                        "kb_id": r[1],
+                        "doc_id": r[2],
+                        "chunk_index": r[3],
+                        "backend": "pgvector",
+                    },
+                )
+            )
         return results
     except Exception as e:
         logger.error("pgvector search failed: %s", e)
         return []
 
 
-async def _vector_search(query: str, kb_ids: list[str], top_k: int = 20) -> list[SearchResult]:
+async def _vector_search(
+    query: str, kb_ids: list[str], top_k: int = 20
+) -> list[SearchResult]:
     """Perform vector similarity search across kb_ids."""
     backends = await _classify_kb_backends(kb_ids)
     pgv_ids = [k for k in kb_ids if backends.get(k) == "pgvector"]
@@ -301,26 +320,46 @@ async def _vector_search(query: str, kb_ids: list[str], top_k: int = 20) -> list
                     include_metadata=True,
                 )
             # Pinecone v7 returns QueryResponse with .matches attribute
-            matches = getattr(response, 'matches', None) or response.get("matches", []) if isinstance(response, dict) else []
+            matches = (
+                getattr(response, "matches", None) or response.get("matches", [])
+                if isinstance(response, dict)
+                else []
+            )
             for m in matches:
-                meta = getattr(m, 'metadata', None) or (m.get("metadata", {}) if isinstance(m, dict) else {})
+                meta = getattr(m, "metadata", None) or (
+                    m.get("metadata", {}) if isinstance(m, dict) else {}
+                )
                 # Defense-in-depth: drop any persona chunk that made it past
                 # the Pinecone filter (e.g. older SDK ignored the filter
                 # arg). Generic search must NEVER surface persona data.
                 if isinstance(meta, dict) and meta.get("persona_scope"):
                     continue
-                score = getattr(m, 'score', None) or (m.get("score", 0.0) if isinstance(m, dict) else 0.0)
-                results.append(SearchResult(
-                    content=meta.get("text", "") if isinstance(meta, dict) else str(meta),
-                    score=float(score),
-                    source=meta.get("filename", "unknown") if isinstance(meta, dict) else "unknown",
-                    source_type="chunk",
-                    metadata={
-                        "kb_id": kb_id,
-                        "doc_id": meta.get("doc_id", "") if isinstance(meta, dict) else "",
-                        "chunk_index": meta.get("chunk_index", 0),
-                    },
-                ))
+                score = getattr(m, "score", None) or (
+                    m.get("score", 0.0) if isinstance(m, dict) else 0.0
+                )
+                results.append(
+                    SearchResult(
+                        content=(
+                            meta.get("text", "")
+                            if isinstance(meta, dict)
+                            else str(meta)
+                        ),
+                        score=float(score),
+                        source=(
+                            meta.get("filename", "unknown")
+                            if isinstance(meta, dict)
+                            else "unknown"
+                        ),
+                        source_type="chunk",
+                        metadata={
+                            "kb_id": kb_id,
+                            "doc_id": (
+                                meta.get("doc_id", "") if isinstance(meta, dict) else ""
+                            ),
+                            "chunk_index": meta.get("chunk_index", 0),
+                        },
+                    )
+                )
 
         # Merge pgvector results from collections that opted in
         # before sort, so the top_k cut sees both backends together.
@@ -338,6 +377,7 @@ async def _extract_query_entities(query: str) -> list[str]:
     """Use LLM to extract entity names from a search query."""
     try:
         from engine.llm_router import LLMRouter
+
         llm = LLMRouter()
 
         prompt = SEARCH_ENTITY_EXTRACTION.format(query=query)
@@ -350,7 +390,7 @@ async def _extract_query_entities(query: str) -> list[str]:
 
         text = response.content.strip()
         if "[" in text:
-            entities = json.loads(text[text.index("["):text.rindex("]") + 1])
+            entities = json.loads(text[text.index("[") : text.rindex("]") + 1])
             return [e for e in entities if isinstance(e, str)]
     except Exception as e:
         logger.debug("Query entity extraction failed: %s", e)
@@ -385,20 +425,27 @@ async def _graph_search(
                        e.description AS description, e.mention_count AS mentions,
                        e.pg_id AS pg_id
                 """,
-                kb_id=kb_id, names=entity_names,
+                kb_id=kb_id,
+                names=entity_names,
             )
 
             matched_names = []
             async for record in entity_match:
                 matched_names.append(record["name"])
                 found_entities.append(record["name"])
-                results.append(SearchResult(
-                    content=f"{record['name']} ({record['type']}): {record['description'] or 'No description'}",
-                    score=0.8 + min(0.2, (record["mentions"] or 1) / 100),
-                    source=record["name"],
-                    source_type="entity",
-                    metadata={"kb_id": kb_id, "entity_type": record["type"], "pg_id": record["pg_id"]},
-                ))
+                results.append(
+                    SearchResult(
+                        content=f"{record['name']} ({record['type']}): {record['description'] or 'No description'}",
+                        score=0.8 + min(0.2, (record["mentions"] or 1) / 100),
+                        source=record["name"],
+                        source_type="entity",
+                        metadata={
+                            "kb_id": kb_id,
+                            "entity_type": record["type"],
+                            "pg_id": record["pg_id"],
+                        },
+                    )
+                )
 
             if not matched_names:
                 continue
@@ -422,24 +469,30 @@ async def _graph_search(
                 ORDER BY hops ASC, connected.mention_count DESC
                 LIMIT 30
                 """,
-                kb_id=kb_id, names=matched_names,
+                kb_id=kb_id,
+                names=matched_names,
             )
 
             async for record in traversal:
                 # Score decreases with hops
                 hop_penalty = 1.0 / (1 + record["hops"] * 0.3)
-                rel_chain = " → ".join(record["rel_types"]) if record["rel_types"] else ""
+                rel_chain = (
+                    " → ".join(record["rel_types"]) if record["rel_types"] else ""
+                )
 
-                results.append(SearchResult(
-                    content=f"{record['name']} ({record['type']}): {record['description'] or 'No description'} [via: {rel_chain}]",
-                    score=0.7 * hop_penalty,
-                    source=record["name"],
-                    source_type="graph_context",
-                    metadata={
-                        "kb_id": kb_id, "hops": record["hops"],
-                        "relationship_chain": rel_chain,
-                    },
-                ))
+                results.append(
+                    SearchResult(
+                        content=f"{record['name']} ({record['type']}): {record['description'] or 'No description'} [via: {rel_chain}]",
+                        score=0.7 * hop_penalty,
+                        source=record["name"],
+                        source_type="graph_context",
+                        metadata={
+                            "kb_id": kb_id,
+                            "hops": record["hops"],
+                            "relationship_chain": rel_chain,
+                        },
+                    )
+                )
 
             # Get direct relationships between matched entities
             rel_query = await session.run(
@@ -452,22 +505,25 @@ async def _graph_search(
                 ORDER BY r.weight DESC
                 LIMIT 20
                 """,
-                kb_id=kb_id, names=matched_names,
+                kb_id=kb_id,
+                names=matched_names,
             )
 
             async for record in rel_query:
                 weight = record["weight"] or 1.0
-                results.append(SearchResult(
-                    content=f"{record['source']} —[{record['rel_type']}]→ {record['target']}: {record['description'] or ''}",
-                    score=0.75 * min(1.0, weight),
-                    source=f"{record['source']}→{record['target']}",
-                    source_type="relationship",
-                    metadata={
-                        "kb_id": kb_id,
-                        "relationship_type": record["rel_type"],
-                        "weight": weight,
-                    },
-                ))
+                results.append(
+                    SearchResult(
+                        content=f"{record['source']} —[{record['rel_type']}]→ {record['target']}: {record['description'] or ''}",
+                        score=0.75 * min(1.0, weight),
+                        source=f"{record['source']}→{record['target']}",
+                        source_type="relationship",
+                        metadata={
+                            "kb_id": kb_id,
+                            "relationship_type": record["rel_type"],
+                            "weight": weight,
+                        },
+                    )
+                )
 
     results.sort(key=lambda r: r.score, reverse=True)
     return results, found_entities
@@ -500,7 +556,7 @@ def _merge_results(
     for r in vector_results:
         key = r.content[:100].lower().strip()
         if key not in seen_content:
-            r.score *= (1 - graph_weight)
+            r.score *= 1 - graph_weight
             merged.append(r)
             seen_content.add(key)
 

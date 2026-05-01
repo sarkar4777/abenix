@@ -1,11 +1,12 @@
 """LiveKit concrete MeetingAdapter."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
 import time
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator
 
 from engine.tools.meeting_adapter import (
     AudioFrame,
@@ -27,9 +28,9 @@ class LiveKitAdapter(MeetingAdapter):
     provider = "livekit"
 
     def __init__(self) -> None:
-        self._room: Any = None          # rtc.Room
+        self._room: Any = None  # rtc.Room
         self._audio_source: Any = None  # rtc.AudioSource
-        self._audio_track: Any = None   # rtc.LocalAudioTrack
+        self._audio_track: Any = None  # rtc.LocalAudioTrack
         self._audio_q = _BoundedQueue(maxsize=500)
         self._chat_q = _BoundedQueue(maxsize=500)
         self._session_id: str = ""
@@ -114,9 +115,7 @@ class LiveKitAdapter(MeetingAdapter):
 
         self._room = room
         self._session_id = f"lk-{req.meeting_id or req.room}-{int(time.time())}"
-        logger.info(
-            "LiveKit: joined room=%s session_id=%s", req.room, self._session_id
-        )
+        logger.info("LiveKit: joined room=%s session_id=%s", req.room, self._session_id)
         return JoinResult(
             ok=True,
             session_id=self._session_id,
@@ -158,12 +157,15 @@ class LiveKitAdapter(MeetingAdapter):
                 )
             except TypeError:
                 # Older SDK signature — fall back to .create() + cast
-                frame = rtc.AudioFrame.create(_TARGET_RATE, _TARGET_CHANNELS, len(chunk) // 2)
+                frame = rtc.AudioFrame.create(
+                    _TARGET_RATE, _TARGET_CHANNELS, len(chunk) // 2
+                )
                 try:
-                    memoryview(frame.data).cast("B")[:len(chunk)] = chunk
+                    memoryview(frame.data).cast("B")[: len(chunk)] = chunk
                 except Exception:
                     # Last-ditch: convert bytes -> int16 array, assign element-wise
                     import array
+
                     samples = array.array("h")
                     samples.frombytes(chunk)
                     for idx, s in enumerate(samples):
@@ -198,8 +200,11 @@ class LiveKitAdapter(MeetingAdapter):
                 continue
             if af.sample_rate != _TARGET_RATE or af.num_channels != _TARGET_CHANNELS:
                 pcm = _resample_pcm(
-                    pcm, af.sample_rate, _TARGET_RATE,
-                    channels_in=af.num_channels, channels_out=_TARGET_CHANNELS,
+                    pcm,
+                    af.sample_rate,
+                    _TARGET_RATE,
+                    channels_in=af.num_channels,
+                    channels_out=_TARGET_CHANNELS,
                 )
             await self._audio_q.put(
                 AudioFrame(
@@ -254,9 +259,13 @@ def _mint_token(req: JoinRequest, *, ttl_seconds: int = 3600) -> str:
         try:
             from livekit import api
             from datetime import timedelta
+
             grant = api.VideoGrants(
-                room_join=True, room=req.room,
-                can_publish=True, can_subscribe=True, can_publish_data=True,
+                room_join=True,
+                room=req.room,
+                can_publish=True,
+                can_subscribe=True,
+                can_publish_data=True,
             )
             return (
                 api.AccessToken(api_key, api_secret)
@@ -269,6 +278,7 @@ def _mint_token(req: JoinRequest, *, ttl_seconds: int = 3600) -> str:
         except ImportError:
             return ""
     import time as _time
+
     now = int(_time.time())
     claims = {
         "iss": api_key,
@@ -277,8 +287,11 @@ def _mint_token(req: JoinRequest, *, ttl_seconds: int = 3600) -> str:
         "nbf": now - 60,  # clock-skew tolerance
         "exp": now + ttl_seconds,
         "video": {
-            "roomJoin": True, "room": req.room,
-            "canPublish": True, "canSubscribe": True, "canPublishData": True,
+            "roomJoin": True,
+            "room": req.room,
+            "canPublish": True,
+            "canSubscribe": True,
+            "canPublishData": True,
         },
     }
     return pyjwt.encode(claims, api_secret, algorithm="HS256")
@@ -299,6 +312,7 @@ def _resample_pcm(
         return pcm
     # Interpret as s16le
     import array
+
     samples = array.array("h")
     samples.frombytes(pcm)
     # Downmix to mono if needed

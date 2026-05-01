@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import pytest
 from httpx import AsyncClient
-from prometheus_client import REGISTRY
-
-from app.core.telemetry import http_request_duration_seconds, http_requests_total
 
 
 @pytest.mark.asyncio

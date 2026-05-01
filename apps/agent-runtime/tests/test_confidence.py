@@ -1,6 +1,5 @@
 """Tests for confidence scoring."""
 
-import pytest
 from engine.confidence import ConfidenceFactors, ExecutionTrace, calculate_confidence
 
 

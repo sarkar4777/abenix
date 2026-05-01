@@ -60,24 +60,40 @@ class NewsFeedTool(BaseTool):
             try:
                 if is_event_registry:
                     return await self._newsapi_ai(
-                        news_api_key, query, language, max_results,
+                        news_api_key,
+                        query,
+                        language,
+                        max_results,
                     )
                 else:
                     return await self._newsapi(
-                        news_api_key, query, category, language,
-                        from_date, max_results, sort_by,
+                        news_api_key,
+                        query,
+                        category,
+                        language,
+                        from_date,
+                        max_results,
+                        sort_by,
                     )
             except Exception:
                 # Try the other format as fallback
                 try:
                     if is_event_registry:
                         return await self._newsapi(
-                            news_api_key, query, category, language,
-                            from_date, max_results, sort_by,
+                            news_api_key,
+                            query,
+                            category,
+                            language,
+                            from_date,
+                            max_results,
+                            sort_by,
                         )
                     else:
                         return await self._newsapi_ai(
-                            news_api_key, query, language, max_results,
+                            news_api_key,
+                            query,
+                            language,
+                            max_results,
                         )
                 except Exception:
                     pass
@@ -87,7 +103,11 @@ class NewsFeedTool(BaseTool):
         if mediastack_key:
             try:
                 return await self._mediastack(
-                    mediastack_key, query, category, language, max_results,
+                    mediastack_key,
+                    query,
+                    category,
+                    language,
+                    max_results,
                 )
             except Exception:
                 pass
@@ -102,11 +122,11 @@ class NewsFeedTool(BaseTool):
         lines = [f"[Provider: {provider}]", ""]
         for i, a in enumerate(articles, 1):
             lines.append(f"{i}. {a.get('title', 'Untitled')}")
-            if a.get('source'):
+            if a.get("source"):
                 lines.append(f"   Source: {a['source']} | {a.get('published', '')}")
-            if a.get('url'):
+            if a.get("url"):
                 lines.append(f"   URL: {a['url']}")
-            if a.get('description'):
+            if a.get("description"):
                 lines.append(f"   {a['description'][:300]}")
             lines.append("")
         return ToolResult(
@@ -193,7 +213,11 @@ class NewsFeedTool(BaseTool):
                 {
                     "title": a.get("title", ""),
                     "url": a.get("url", ""),
-                    "source": a.get("source", {}).get("title", "") if isinstance(a.get("source"), dict) else str(a.get("source", "")),
+                    "source": (
+                        a.get("source", {}).get("title", "")
+                        if isinstance(a.get("source"), dict)
+                        else str(a.get("source", ""))
+                    ),
                     "published": a.get("dateTime", a.get("date", "")),
                     "description": (a.get("body", "") or "")[:500],
                 }
@@ -221,7 +245,8 @@ class NewsFeedTool(BaseTool):
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
-                "http://api.mediastack.com/v1/news", params=params,
+                "http://api.mediastack.com/v1/news",
+                params=params,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -249,13 +274,15 @@ class NewsFeedTool(BaseTool):
             articles = []
             with DDGS() as ddgs:
                 for r in ddgs.news(query, max_results=max_results):
-                    articles.append({
-                        "title": r.get("title", ""),
-                        "url": r.get("url", ""),
-                        "source": r.get("source", ""),
-                        "published": r.get("date", ""),
-                        "description": r.get("body", ""),
-                    })
+                    articles.append(
+                        {
+                            "title": r.get("title", ""),
+                            "url": r.get("url", ""),
+                            "source": r.get("source", ""),
+                            "published": r.get("date", ""),
+                            "description": r.get("body", ""),
+                        }
+                    )
 
             if not articles:
                 return ToolResult(content=f"No news found for: {query}")
@@ -280,7 +307,8 @@ class NewsFeedTool(BaseTool):
 
     @staticmethod
     def _format_articles(
-        articles: list[dict[str, str]], provider: str,
+        articles: list[dict[str, str]],
+        provider: str,
     ) -> ToolResult:
         if not articles:
             return ToolResult(content="No news articles found.")

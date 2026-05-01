@@ -1,10 +1,11 @@
 """KnowledgeProject — tenant-scoped governance container for collections."""
+
 from __future__ import annotations
 
 import enum
 import uuid
 
-from sqlalchemy import Enum, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +14,7 @@ from models.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 class CollectionVisibility(str, enum.Enum):
     """Default visibility for collections inside a project."""
+
     PRIVATE = "private"
     PROJECT = "project"
     TENANT = "tenant"
@@ -40,9 +42,11 @@ class KnowledgeProject(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
     # Optional FK to the active ontology schema (Phase 3). Nullable so
     ontology_schema_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True,
+        UUID(as_uuid=True),
+        nullable=True,
     )
 
     created_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"),
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
     )

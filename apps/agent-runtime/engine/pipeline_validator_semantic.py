@@ -1,7 +1,7 @@
 """Tier 2 semantic validation — deterministic checks beyond the structural pass."""
+
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,7 +11,6 @@ from engine.pipeline_validator import (
     _extract_template_refs,
 )
 from engine.tools.base import ToolRegistry
-
 
 # Rough per-call cost hints (USD). These are heuristics for budgeting, not billing.
 _TOOL_COST_HINTS: dict[str, float] = {
@@ -35,6 +34,7 @@ _TOOL_COST_HINTS: dict[str, float] = {
 @dataclass
 class SemanticReport:
     """Output of the Tier 2 pass, layered on top of Tier 1."""
+
     errors: list[ValidationError] = field(default_factory=list)
     warnings: list[ValidationError] = field(default_factory=list)
     suggestions: list[ValidationError] = field(default_factory=list)
@@ -48,7 +48,9 @@ class SemanticReport:
             "warnings": [w.to_dict() for w in self.warnings],
             "suggestions": [s.to_dict() for s in self.suggestions],
             "cost_estimate_usd": round(self.cost_estimate_usd, 4),
-            "node_cost_breakdown": {k: round(v, 4) for k, v in self.node_cost_breakdown.items()},
+            "node_cost_breakdown": {
+                k: round(v, 4) for k, v in self.node_cost_breakdown.items()
+            },
             "unused_nodes": self.unused_nodes,
         }
 
@@ -93,7 +95,9 @@ def validate_semantic(
 ) -> SemanticReport:
     """Run the Tier 2 checks. Tier 1 is assumed to have already run."""
     report = SemanticReport()
-    node_by_id: dict[str, dict[str, Any]] = {n.get("id", ""): n for n in nodes if n.get("id")}
+    node_by_id: dict[str, dict[str, Any]] = {
+        n.get("id", ""): n for n in nodes if n.get("id")
+    }
 
     for n in nodes:
         nid = n.get("id", "")
@@ -116,11 +120,14 @@ def validate_semantic(
                 if expected == "number" and actual == "number":
                     continue
                 if expected != actual:
-                    report.errors.append(ValidationError(
-                        node_id=nid, field=f"arguments.{k}",
-                        message=f"Argument '{k}' should be {expected} but got {actual}",
-                        suggestion=f"Update the value so its JSON type matches the tool schema.",
-                    ))
+                    report.errors.append(
+                        ValidationError(
+                            node_id=nid,
+                            field=f"arguments.{k}",
+                            message=f"Argument '{k}' should be {expected} but got {actual}",
+                            suggestion="Update the value so its JSON type matches the tool schema.",
+                        )
+                    )
 
         # A string like "Run for {{parse.response.features}}" that expects a
         # literal but references an object — flag it as a likely bug.
@@ -136,26 +143,33 @@ def validate_semantic(
             for ref in refs:
                 tail = ref.split(".")[-1]
                 if tail in {"features", "items", "messages", "probabilities", "nodes"}:
-                    report.warnings.append(ValidationError(
-                        node_id=nid, field=f"arguments.{k}",
-                        severity="warning",
-                        message=f"Template {{{{{ref}}}}} is interpolated into a string but likely references a container",
-                        suggestion=f"If '{tail}' is a list/object, use it as the whole value "
-                                   f"(e.g. {k}: \"{{{{{ref}}}}}\") or serialize it via a code_executor step first.",
-                    ))
+                    report.warnings.append(
+                        ValidationError(
+                            node_id=nid,
+                            field=f"arguments.{k}",
+                            severity="warning",
+                            message=f"Template {{{{{ref}}}}} is interpolated into a string but likely references a container",
+                            suggestion=f"If '{tail}' is a list/object, use it as the whole value "
+                            f'(e.g. {k}: "{{{{{ref}}}}}") or serialize it via a code_executor step first.',
+                        )
+                    )
 
         cost = _TOOL_COST_HINTS.get(tool_name)
         if cost is None:
             cost = 0.01  # Unknown custom tool — budget a small default.
         if tool_name == "agent_step":
             # Sub-agents burn more budget.
-            cost = float(cost) * float(n.get("arguments", {}).get("max_iterations", 5)) / 5.0
+            cost = (
+                float(cost)
+                * float(n.get("arguments", {}).get("max_iterations", 5))
+                / 5.0
+            )
         report.node_cost_breakdown[nid] = cost
         report.cost_estimate_usd += cost
 
     referenced: set[str] = set()
     for n in nodes:
-        for dep in (n.get("depends_on") or []):
+        for dep in n.get("depends_on") or []:
             referenced.add(dep)
         refs = _extract_template_refs(n.get("arguments", {}))
         for r in refs:
@@ -168,12 +182,15 @@ def validate_semantic(
         referenced.add(all_ids[-1])
     for nid in all_ids:
         if nid not in referenced:
-            report.warnings.append(ValidationError(
-                node_id=nid, field="",
-                severity="warning",
-                message=f"Node '{nid}' output is never consumed by any downstream node",
-                suggestion="Either wire this node into a downstream node via depends_on or a template, or remove it.",
-            ))
+            report.warnings.append(
+                ValidationError(
+                    node_id=nid,
+                    field="",
+                    severity="warning",
+                    message=f"Node '{nid}' output is never consumed by any downstream node",
+                    suggestion="Either wire this node into a downstream node via depends_on or a template, or remove it.",
+                )
+            )
             report.unused_nodes.append(nid)
 
     for n in nodes:
@@ -181,26 +198,39 @@ def validate_semantic(
         tool_name = n.get("tool") or n.get("tool_name") or ""
         if tool_name in {"http_client", "web_request"}:
             url = (n.get("arguments", {}) or {}).get("url", "")
-            if isinstance(url, str) and url and not url.startswith(("http://", "https://", "{{")):
-                report.errors.append(ValidationError(
-                    node_id=nid, field="arguments.url",
-                    message=f"URL '{url}' does not use http(s) — likely a typo or SSRF risk",
-                    suggestion="URLs must start with http:// or https://. Templates are allowed: {{node.url}}.",
-                ))
+            if (
+                isinstance(url, str)
+                and url
+                and not url.startswith(("http://", "https://", "{{"))
+            ):
+                report.errors.append(
+                    ValidationError(
+                        node_id=nid,
+                        field="arguments.url",
+                        message=f"URL '{url}' does not use http(s) — likely a typo or SSRF risk",
+                        suggestion="URLs must start with http:// or https://. Templates are allowed: {{node.url}}.",
+                    )
+                )
             if isinstance(url, str) and url.startswith("http://localhost"):
-                report.warnings.append(ValidationError(
-                    node_id=nid, field="arguments.url",
-                    severity="warning",
-                    message="URL points at localhost — fine for dev but will break in production",
-                    suggestion="Use a configurable env var or the gateway URL so the pipeline is portable.",
-                ))
+                report.warnings.append(
+                    ValidationError(
+                        node_id=nid,
+                        field="arguments.url",
+                        severity="warning",
+                        message="URL points at localhost — fine for dev but will break in production",
+                        suggestion="Use a configurable env var or the gateway URL so the pipeline is portable.",
+                    )
+                )
 
     if report.cost_estimate_usd > 0.5:
-        report.warnings.append(ValidationError(
-            node_id="", field="__pipeline__",
-            severity="warning",
-            message=f"Estimated cost per run: ${report.cost_estimate_usd:.2f}",
-            suggestion="Consider consolidating LLM calls, caching results, or using smaller models.",
-        ))
+        report.warnings.append(
+            ValidationError(
+                node_id="",
+                field="__pipeline__",
+                severity="warning",
+                message=f"Estimated cost per run: ${report.cost_estimate_usd:.2f}",
+                suggestion="Consider consolidating LLM calls, caching results, or using smaller models.",
+            )
+        )
 
     return report

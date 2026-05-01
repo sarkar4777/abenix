@@ -1,4 +1,5 @@
 """Agent-callable moderation tool."""
+
 from __future__ import annotations
 
 import json
@@ -35,10 +36,15 @@ class ModerationVetTool(BaseTool):
         "required": ["content"],
     }
 
-    def __init__(self, *, tenant_id: str = "", user_id: str = "",
-                 thresholds: dict | None = None,
-                 custom_patterns: list | None = None,
-                 default_action: str = "block") -> None:
+    def __init__(
+        self,
+        *,
+        tenant_id: str = "",
+        user_id: str = "",
+        thresholds: dict | None = None,
+        custom_patterns: list | None = None,
+        default_action: str = "block",
+    ) -> None:
         self._tenant_id = tenant_id
         self._user_id = user_id
         # Copy policy-provided defaults so the tool reflects the same
@@ -81,7 +87,10 @@ class ModerationVetTool(BaseTool):
         }
         if decision.error:
             body["provider_error"] = decision.error
-        if decision.redacted_content is not None and decision.redacted_content != content:
+        if (
+            decision.redacted_content is not None
+            and decision.redacted_content != content
+        ):
             body["redacted_content"] = decision.redacted_content
 
         return ToolResult(

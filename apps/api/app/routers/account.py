@@ -1,12 +1,10 @@
 """Account management — GDPR data export, account deletion, privacy settings."""
+
 from __future__ import annotations
 
-import json
 import sys
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -14,7 +12,7 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.responses import error, success
+from app.core.responses import success
 from app.core.audit import log_action
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -24,7 +22,6 @@ from models.agent import Agent
 from models.execution import Execution
 from models.conversation import Conversation
 from models.api_key import ApiKey
-from models.activity_log import ActivityLog
 
 router = APIRouter(prefix="/api/account", tags=["account"])
 
@@ -50,9 +47,7 @@ async def export_user_data(
     }
 
     # Collect agents
-    result = await db.execute(
-        select(Agent).where(Agent.user_id == user.id).limit(1000)
-    )
+    result = await db.execute(select(Agent).where(Agent.user_id == user.id).limit(1000))
     agents = [
         {
             "id": str(a.id),
@@ -67,8 +62,10 @@ async def export_user_data(
 
     # Collect executions (last 1000)
     result = await db.execute(
-        select(Execution).where(Execution.user_id == user.id)
-        .order_by(Execution.created_at.desc()).limit(1000)
+        select(Execution)
+        .where(Execution.user_id == user.id)
+        .order_by(Execution.created_at.desc())
+        .limit(1000)
     )
     executions = [
         {
@@ -85,8 +82,10 @@ async def export_user_data(
 
     # Collect conversations (last 500)
     result = await db.execute(
-        select(Conversation).where(Conversation.user_id == user.id)
-        .order_by(Conversation.created_at.desc()).limit(500)
+        select(Conversation)
+        .where(Conversation.user_id == user.id)
+        .order_by(Conversation.created_at.desc())
+        .limit(500)
     )
     conversations = [
         {
@@ -98,9 +97,7 @@ async def export_user_data(
     ]
 
     # Collect API keys metadata (never export the hash)
-    result = await db.execute(
-        select(ApiKey).where(ApiKey.user_id == user.id)
-    )
+    result = await db.execute(select(ApiKey).where(ApiKey.user_id == user.id))
     api_keys = [
         {
             "id": str(k.id),
@@ -114,8 +111,13 @@ async def export_user_data(
     ]
 
     await log_action(
-        db, user.tenant_id, user.id, "account.data_export",
-        request=request, resource_type="user", resource_id=str(user.id),
+        db,
+        user.tenant_id,
+        user.id,
+        "account.data_export",
+        request=request,
+        resource_type="user",
+        resource_id=str(user.id),
     )
     await db.commit()
 
@@ -149,21 +151,26 @@ async def delete_account(
 
     # Anonymize executions (keep for analytics, remove PII)
     await db.execute(
-        update(Execution).where(Execution.user_id == user_id).values(
+        update(Execution)
+        .where(Execution.user_id == user_id)
+        .values(
             input_message="[deleted]",
             output_message="[deleted]",
         )
     )
 
     # Delete conversations
-    await db.execute(
-        delete(Conversation).where(Conversation.user_id == user_id)
-    )
+    await db.execute(delete(Conversation).where(Conversation.user_id == user_id))
 
     # Log the deletion before deactivating
     await log_action(
-        db, tenant_id, user_id, "account.deleted",
-        request=request, resource_type="user", resource_id=str(user_id),
+        db,
+        tenant_id,
+        user_id,
+        "account.deleted",
+        request=request,
+        resource_type="user",
+        resource_id=str(user_id),
     )
 
     # Soft-delete user (anonymize PII)
@@ -175,7 +182,9 @@ async def delete_account(
 
     await db.commit()
 
-    return success({"message": "Account deleted successfully. This action cannot be undone."})
+    return success(
+        {"message": "Account deleted successfully. This action cannot be undone."}
+    )
 
 
 @router.get("/privacy")
@@ -185,6 +194,7 @@ async def get_privacy_settings(
 ) -> JSONResponse:
     """Get privacy and data processing configuration for audit purposes."""
     from models.tenant import Tenant
+
     result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
     tenant = result.scalar_one_or_none()
 
@@ -192,19 +202,21 @@ async def get_privacy_settings(
     retention = settings_data.get("retention", {})
     dlp = settings_data.get("dlp", {})
 
-    return success({
-        "data_processing": {
-            "encryption_at_rest": "AES-256 (database-level)",
-            "encryption_in_transit": "TLS 1.2+",
-            "data_location": "tenant-scoped isolation",
-            "password_hashing": "bcrypt",
-            "api_key_hashing": "SHA-256",
-        },
-        "retention_policy": retention,
-        "dlp_policy": dlp,
-        "gdpr_endpoints": {
-            "data_export": "POST /api/account/export",
-            "account_deletion": "DELETE /api/account",
-            "privacy_settings": "GET /api/account/privacy",
-        },
-    })
+    return success(
+        {
+            "data_processing": {
+                "encryption_at_rest": "AES-256 (database-level)",
+                "encryption_in_transit": "TLS 1.2+",
+                "data_location": "tenant-scoped isolation",
+                "password_hashing": "bcrypt",
+                "api_key_hashing": "SHA-256",
+            },
+            "retention_policy": retention,
+            "dlp_policy": dlp,
+            "gdpr_endpoints": {
+                "data_export": "POST /api/account/export",
+                "account_deletion": "DELETE /api/account",
+                "privacy_settings": "GET /api/account/privacy",
+            },
+        }
+    )

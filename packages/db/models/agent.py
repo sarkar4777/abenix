@@ -48,9 +48,7 @@ class Agent(UUIDMixin, TenantMixin, TimestampMixin, Base):
     slug: Mapped[str] = mapped_column(String(255), index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     system_prompt: Mapped[str] = mapped_column(Text, default="")
-    model_config_: Mapped[dict] = mapped_column(
-        "model_config", JSONB, default=dict
-    )
+    model_config_: Mapped[dict] = mapped_column("model_config", JSONB, default=dict)
     agent_type: Mapped[AgentType] = mapped_column(
         Enum(AgentType, name="agent_type"), default=AgentType.CUSTOM
     )
@@ -83,35 +81,47 @@ class Agent(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # reads these on every execute to route to the right pool and apply
     # rate-limits.
     runtime_pool: Mapped[str] = mapped_column(
-        String(40), server_default="default", nullable=False,
+        String(40),
+        server_default="default",
+        nullable=False,
         doc="Pool this agent routes to: default|chat|heavy-reasoning|gpu|long-running",
     )
     min_replicas: Mapped[int] = mapped_column(
-        Integer, server_default="1", nullable=False,
+        Integer,
+        server_default="1",
+        nullable=False,
         doc="KEDA floor; pool keeps at least this many replicas warm",
     )
     max_replicas: Mapped[int] = mapped_column(
-        Integer, server_default="10", nullable=False,
+        Integer,
+        server_default="10",
+        nullable=False,
         doc="KEDA ceiling; cost guardrail",
     )
     concurrency_per_replica: Mapped[int] = mapped_column(
-        Integer, server_default="3", nullable=False,
+        Integer,
+        server_default="3",
+        nullable=False,
         doc="How many simultaneous executions one pod accepts",
     )
     rate_limit_qps: Mapped[int | None] = mapped_column(
-        Integer, nullable=True,
+        Integer,
+        nullable=True,
         doc="Token-bucket qps per (tenant, agent); null = unlimited",
     )
     daily_budget_usd: Mapped[float | None] = mapped_column(
-        Numeric(10, 2), nullable=True,
+        Numeric(10, 2),
+        nullable=True,
         doc="Daily $ cap per tenant; P4 alert auto-pauses on breach",
     )
     dedicated_mode: Mapped[bool] = mapped_column(
-        Boolean, server_default="false", nullable=False,
+        Boolean,
+        server_default="false",
+        nullable=False,
         doc="Opt-in per-agent pod scaling. Helm materialises a dedicated "
-            "Deployment + KEDA ScaledObject keyed off the per-agent NATS "
-            "subject. Use for noisy-neighbour isolation, custom resource "
-            "limits, or distinct image dependencies.",
+        "Deployment + KEDA ScaledObject keyed off the per-agent NATS "
+        "subject. Use for noisy-neighbour isolation, custom resource "
+        "limits, or distinct image dependencies.",
     )
 
     tenant: Mapped["Tenant"] = relationship(back_populates="agents")

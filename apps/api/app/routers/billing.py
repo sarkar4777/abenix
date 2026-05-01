@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,15 +40,21 @@ async def list_plans(
 ) -> JSONResponse:
     plans = []
     for key, plan in PLANS.items():
-        has_checkout = key in ("pro", "business") if is_mock_mode() else _has_real_price(key)
-        plans.append({
-            "key": key,
-            "name": plan["name"],
-            "price_monthly": plan["price_monthly"],
-            "exec_per_day": plan["exec_per_day"],
-            "has_checkout": has_checkout,
-        })
-    return success({"plans": plans, "stripe_mode": "mock" if is_mock_mode() else "live"})
+        has_checkout = (
+            key in ("pro", "business") if is_mock_mode() else _has_real_price(key)
+        )
+        plans.append(
+            {
+                "key": key,
+                "name": plan["name"],
+                "price_monthly": plan["price_monthly"],
+                "exec_per_day": plan["exec_per_day"],
+                "has_checkout": has_checkout,
+            }
+        )
+    return success(
+        {"plans": plans, "stripe_mode": "mock" if is_mock_mode() else "live"}
+    )
 
 
 @router.post("/checkout")
@@ -60,15 +66,16 @@ async def create_checkout(
     if body.plan not in PLANS:
         return error("Invalid plan", 400)
 
-    plan = PLANS[body.plan]
+    PLANS[body.plan]
     if body.plan in ("free", "enterprise"):
         return error("This plan does not support checkout", 400)
     if not is_mock_mode() and not _has_real_price(body.plan):
-        return error("Missing Stripe price ID for this plan. Configure STRIPE_PRO_PRICE_ID or STRIPE_BUSINESS_PRICE_ID.", 400)
+        return error(
+            "Missing Stripe price ID for this plan. Configure STRIPE_PRO_PRICE_ID or STRIPE_BUSINESS_PRICE_ID.",
+            400,
+        )
 
-    result = await db.execute(
-        select(Tenant).where(Tenant.id == user.tenant_id)
-    )
+    result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
     tenant = result.scalar_one_or_none()
     if not tenant:
         return error("Tenant not found", 404)
@@ -97,9 +104,7 @@ async def create_portal(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    result = await db.execute(
-        select(Tenant).where(Tenant.id == user.tenant_id)
-    )
+    result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
     tenant = result.scalar_one_or_none()
     if not tenant:
         return error("Tenant not found", 404)
@@ -170,7 +175,9 @@ async def _handle_checkout_completed(
     data: dict[str, Any],
 ) -> None:
     customer_id = data.get("customer")
-    customer_email = data.get("customer_email") or data.get("customer_details", {}).get("email")
+    customer_email = data.get("customer_email") or data.get("customer_details", {}).get(
+        "email"
+    )
 
     if not customer_email:
         return
@@ -204,9 +211,7 @@ async def _handle_invoice_paid(
 
     # Look up the subscription
     result = await db.execute(
-        select(Subscription).where(
-            Subscription.stripe_subscription_id == stripe_sub_id
-        )
+        select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
     )
     subscription = result.scalar_one_or_none()
     if not subscription:
@@ -222,9 +227,7 @@ async def _handle_invoice_paid(
             )
 
     # Get user for tenant info
-    user_result = await db.execute(
-        select(User).where(User.id == subscription.user_id)
-    )
+    user_result = await db.execute(select(User).where(User.id == subscription.user_id))
     user = user_result.scalar_one_or_none()
     if not user:
         await db.commit()
@@ -344,13 +347,13 @@ async def _handle_marketplace_checkout(
     if not agent_id:
         return
 
-    customer_email = data.get("customer_email") or data.get("customer_details", {}).get("email")
+    customer_email = data.get("customer_email") or data.get("customer_details", {}).get(
+        "email"
+    )
     if not customer_email:
         return
 
-    user_result = await db.execute(
-        select(User).where(User.email == customer_email)
-    )
+    user_result = await db.execute(select(User).where(User.email == customer_email))
     user = user_result.scalar_one_or_none()
     if not user:
         return
@@ -377,6 +380,7 @@ async def _handle_marketplace_checkout(
 
     price = float(agent.marketplace_price) if agent.marketplace_price else 0
     from app.core.stripe import PLATFORM_FEE_PERCENT
+
     platform_fee = round(price * PLATFORM_FEE_PERCENT / 100, 2)
     creator_amount = round(price - platform_fee, 2)
 
@@ -403,9 +407,7 @@ async def _handle_connect_account_updated(
     if not account_id:
         return
 
-    result = await db.execute(
-        select(User).where(User.stripe_connect_id == account_id)
-    )
+    result = await db.execute(select(User).where(User.stripe_connect_id == account_id))
     user = result.scalar_one_or_none()
     if not user:
         return

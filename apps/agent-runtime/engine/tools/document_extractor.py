@@ -92,6 +92,7 @@ class DocumentExtractorTool(BaseTool):
         try:
             if path.suffix.lower() == ".pdf":
                 from PyPDF2 import PdfReader
+
                 reader = PdfReader(str(path))
                 pages = []
                 for page in reader.pages:
@@ -101,6 +102,7 @@ class DocumentExtractorTool(BaseTool):
                 return "\n\n".join(pages)
             elif path.suffix.lower() == ".docx":
                 from docx import Document
+
                 doc = Document(str(path))
                 return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
             else:
@@ -111,9 +113,7 @@ class DocumentExtractorTool(BaseTool):
     def _extract_tables(self, text: str) -> list[dict[str, Any]]:
         tables: list[dict[str, Any]] = []
 
-        pipe_pattern = re.compile(
-            r"((?:\|[^\n]+\|\n){2,})", re.MULTILINE
-        )
+        pipe_pattern = re.compile(r"((?:\|[^\n]+\|\n){2,})", re.MULTILINE)
         for match in pipe_pattern.finditer(text):
             rows = []
             for line in match.group(0).strip().split("\n"):
@@ -124,7 +124,9 @@ class DocumentExtractorTool(BaseTool):
             if len(rows) >= 2:
                 headers = rows[0]
                 data = rows[1:]
-                tables.append({"headers": headers, "rows": data, "row_count": len(data)})
+                tables.append(
+                    {"headers": headers, "rows": data, "row_count": len(data)}
+                )
 
         tab_pattern = re.compile(r"((?:[^\n]*\t[^\n]*\n){2,})", re.MULTILINE)
         for match in tab_pattern.finditer(text):
@@ -133,11 +135,13 @@ class DocumentExtractorTool(BaseTool):
                 cells = [c.strip() for c in line.split("\t")]
                 rows.append(cells)
             if len(rows) >= 2:
-                tables.append({
-                    "headers": rows[0],
-                    "rows": rows[1:],
-                    "row_count": len(rows) - 1,
-                })
+                tables.append(
+                    {
+                        "headers": rows[0],
+                        "rows": rows[1:],
+                        "row_count": len(rows) - 1,
+                    }
+                )
 
         csv_like = re.compile(r"((?:[^\n]*,[^\n]*\n){3,})", re.MULTILINE)
         for match in csv_like.finditer(text):
@@ -145,11 +149,13 @@ class DocumentExtractorTool(BaseTool):
                 reader = csv.reader(io.StringIO(match.group(0).strip()))
                 rows = list(reader)
                 if len(rows) >= 2 and all(len(r) == len(rows[0]) for r in rows):
-                    tables.append({
-                        "headers": rows[0],
-                        "rows": rows[1:],
-                        "row_count": len(rows) - 1,
-                    })
+                    tables.append(
+                        {
+                            "headers": rows[0],
+                            "rows": rows[1:],
+                            "row_count": len(rows) - 1,
+                        }
+                    )
             except csv.Error:
                 pass
 
@@ -185,10 +191,12 @@ class DocumentExtractorTool(BaseTool):
         for pattern in money_patterns:
             for m in re.finditer(pattern, text, re.IGNORECASE):
                 context = self._get_context(text, m.start(), m.end())
-                results["monetary_amounts"].append({
-                    "value": m.group(0).strip(),
-                    "context": context,
-                })
+                results["monetary_amounts"].append(
+                    {
+                        "value": m.group(0).strip(),
+                        "context": context,
+                    }
+                )
 
         pct_patterns = [
             r"([\d.]+)\s*%",
@@ -197,10 +205,12 @@ class DocumentExtractorTool(BaseTool):
         for pattern in pct_patterns:
             for m in re.finditer(pattern, text, re.IGNORECASE):
                 context = self._get_context(text, m.start(), m.end())
-                results["percentages"].append({
-                    "value": m.group(0).strip(),
-                    "context": context,
-                })
+                results["percentages"].append(
+                    {
+                        "value": m.group(0).strip(),
+                        "context": context,
+                    }
+                )
 
         duration_patterns = [
             r"(\d+)\s*(?:year|yr)s?",
@@ -285,9 +295,7 @@ class DocumentExtractorTool(BaseTool):
             r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Inc|LLC|Ltd|Corp|Corporation|Company|Co|Group|Partners|LP|LLP|GmbH|AG|SA|NV|PLC|Pty)\.?)",
         ]
         for pattern in org_patterns:
-            entities["organizations"].extend(
-                list(set(re.findall(pattern, text)))
-            )
+            entities["organizations"].extend(list(set(re.findall(pattern, text))))
 
         return entities
 
@@ -296,11 +304,13 @@ class DocumentExtractorTool(BaseTool):
         for pattern in patterns:
             try:
                 matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
-                results.append({
-                    "pattern": pattern,
-                    "matches": matches[:50],
-                    "count": len(matches),
-                })
+                results.append(
+                    {
+                        "pattern": pattern,
+                        "matches": matches[:50],
+                        "count": len(matches),
+                    }
+                )
             except re.error as e:
                 results.append({"pattern": pattern, "error": str(e)})
         return results

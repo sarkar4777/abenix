@@ -92,7 +92,11 @@ async def execute_pipeline(
 
     # Build tool registry and execute pipeline
     from engine.agent_executor import build_tool_registry
-    from engine.pipeline import PipelineExecutor, parse_pipeline_nodes, serialize_pipeline_result
+    from engine.pipeline import (
+        PipelineExecutor,
+        parse_pipeline_nodes,
+        serialize_pipeline_result,
+    )
 
     tool_registry = build_tool_registry(tool_names)
     executor = PipelineExecutor(
@@ -228,7 +232,11 @@ async def execute_saved_pipeline(
 
     # Build tool registry and execute saved pipeline
     from engine.agent_executor import build_tool_registry
-    from engine.pipeline import PipelineExecutor, parse_pipeline_nodes, serialize_pipeline_result
+    from engine.pipeline import (
+        PipelineExecutor,
+        parse_pipeline_nodes,
+        serialize_pipeline_result,
+    )
 
     tool_registry = build_tool_registry(tool_names)
     executor = PipelineExecutor(
@@ -322,7 +330,11 @@ async def execute_pipeline_stream(
     await db.commit()
 
     from engine.agent_executor import build_tool_registry
-    from engine.pipeline import PipelineExecutor, parse_pipeline_nodes, serialize_pipeline_result
+    from engine.pipeline import (
+        PipelineExecutor,
+        parse_pipeline_nodes,
+        serialize_pipeline_result,
+    )
 
     tool_registry = build_tool_registry(tool_names)
 
@@ -335,11 +347,14 @@ async def execute_pipeline_stream(
     async def on_node_complete(
         node_id: str, status: str, duration_ms: int, output: Any
     ) -> None:
-        event_data = json_module.dumps({
-            "node_id": node_id,
-            "status": status,
-            "duration_ms": duration_ms,
-        }, default=str)
+        event_data = json_module.dumps(
+            {
+                "node_id": node_id,
+                "status": status,
+                "duration_ms": duration_ms,
+            },
+            default=str,
+        )
         await event_queue.put(f"event: node_complete\ndata: {event_data}\n\n")
 
     executor = PipelineExecutor(
@@ -417,7 +432,10 @@ async def get_pipeline_state(
     from models.pipeline_state import PipelineState
 
     result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB))
+        select(Agent).where(
+            Agent.id == agent_id,
+            or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB),
+        )
     )
     if not result.scalar_one_or_none():
         return error("Agent not found", 404)
@@ -440,7 +458,10 @@ async def update_pipeline_state(
     from models.pipeline_state import PipelineState
 
     result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB))
+        select(Agent).where(
+            Agent.id == agent_id,
+            or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB),
+        )
     )
     if not result.scalar_one_or_none():
         return error("Agent not found", 404)
@@ -456,12 +477,14 @@ async def update_pipeline_state(
         if state:
             state.value = value
         else:
-            db.add(PipelineState(
-                agent_id=agent_id,
-                tenant_id=str(user.tenant_id),
-                key=key,
-                value=value,
-            ))
+            db.add(
+                PipelineState(
+                    agent_id=agent_id,
+                    tenant_id=str(user.tenant_id),
+                    key=key,
+                    value=value,
+                )
+            )
     await db.commit()
     return success({"updated": len(body)})
 
@@ -477,7 +500,11 @@ async def replay_pipeline(
 
     Body: { "execution_id": str, "start_from_node": str, "context": dict }
     """
-    from engine.pipeline import PipelineExecutor, parse_pipeline_nodes, serialize_pipeline_result
+    from engine.pipeline import (
+        PipelineExecutor,
+        parse_pipeline_nodes,
+        serialize_pipeline_result,
+    )
     from engine.agent_executor import build_tool_registry
 
     execution_id = body.get("execution_id")
@@ -500,7 +527,10 @@ async def replay_pipeline(
 
     # Load agent config
     agent_result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB))
+        select(Agent).where(
+            Agent.id == agent_id,
+            or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB),
+        )
     )
     agent = agent_result.scalar_one_or_none()
     if not agent:
@@ -541,7 +571,11 @@ async def replay_pipeline(
         agent_id=agent.id,
         user_id=user.id,
         input_message=f"Replay from {start_from} (original: {execution_id})",
-        status=ExecutionStatus.COMPLETED if result.status == "completed" else ExecutionStatus.FAILED,
+        status=(
+            ExecutionStatus.COMPLETED
+            if result.status == "completed"
+            else ExecutionStatus.FAILED
+        ),
         model_used="pipeline",
         duration_ms=result.total_duration_ms,
         node_results=serialized.get("node_results"),
@@ -583,7 +617,9 @@ async def validate_pipeline_endpoint(
     except Exception as e:
         return error(f"Failed to build tool registry: {e}", 500)
 
-    result = validate_pipeline(nodes, tool_registry, available_context_keys=context_keys)
+    result = validate_pipeline(
+        nodes, tool_registry, available_context_keys=context_keys
+    )
     return success(result.to_dict())
 
 
@@ -632,13 +668,17 @@ async def validate_pipeline_smart(
         severity = "ok"
     else:
         severity = "error"
-    score = (tier3_dict or {}).get("coherence_score") if tier3_dict else (
-        10 if severity == "ok" else 6 if severity == "warn" else 2
+    score = (
+        (tier3_dict or {}).get("coherence_score")
+        if tier3_dict
+        else (10 if severity == "ok" else 6 if severity == "warn" else 2)
     )
 
-    return success({
-        "tier1": tier1.to_dict(),
-        "tier2": tier2.to_dict(),
-        "tier3": tier3_dict,
-        "overall": {"valid": valid, "severity": severity, "score": score},
-    })
+    return success(
+        {
+            "tier1": tier1.to_dict(),
+            "tier2": tier2.to_dict(),
+            "tier3": tier3_dict,
+            "overall": {"valid": valid, "severity": severity, "score": score},
+        }
+    )

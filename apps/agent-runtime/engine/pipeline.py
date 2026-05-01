@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class NodeCondition:
     """Gate a node's execution on a previous node's output."""
+
     source_node: str
     field: str
     operator: str  # eq, neq, gt, lt, gte, lte, contains, not_contains, in, not_in
@@ -60,6 +61,7 @@ class NodeCondition:
 @dataclass
 class InputMapping:
     """Pipe a field from a previous node's output into this node's arguments."""
+
     source_node: str
     source_field: str  # dot-path key, or "__all__" for entire output
 
@@ -67,6 +69,7 @@ class InputMapping:
 @dataclass
 class ForEachConfig:
     """Configure iteration over a list from an upstream node's output."""
+
     source_node: str
     source_field: str
     item_variable: str = "current_item"
@@ -76,6 +79,7 @@ class ForEachConfig:
 @dataclass
 class WhileLoopConfig:
     """Loop a set of body nodes while a condition is true."""
+
     condition: NodeCondition
     body_nodes: list[str]  # node IDs to re-execute each iteration
     max_iterations: int = 50
@@ -84,6 +88,7 @@ class WhileLoopConfig:
 @dataclass
 class SwitchCase:
     """A single case in a switch routing decision."""
+
     operator: str
     value: Any
     target_node: str  # node ID to activate when this case matches
@@ -92,6 +97,7 @@ class SwitchCase:
 @dataclass
 class SwitchConfig:
     """Route to one of N branches based on an upstream value."""
+
     source_node: str
     field: str
     cases: list[SwitchCase] = field(default_factory=list)
@@ -101,6 +107,7 @@ class SwitchConfig:
 @dataclass
 class MergeConfig:
     """Recombine outputs from multiple upstream branches."""
+
     mode: str = "append"  # "append" | "zip" | "join"
     join_field: str | None = None  # for "join" mode
     source_nodes: list[str] = field(default_factory=list)
@@ -109,6 +116,7 @@ class MergeConfig:
 @dataclass
 class PipelineNode:
     """A single node in the pipeline DAG."""
+
     id: str
     tool_name: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -135,13 +143,16 @@ class PipelineNode:
 @dataclass
 class NodeResult:
     """Outcome of a single pipeline node."""
+
     node_id: str
     status: str  # completed, skipped, failed, timeout
     output: Any = None
     duration_ms: int = 0
     error: str | None = None
     error_message: str | None = None  # Detailed error text
-    error_type: str | None = None     # "timeout" | "tool_error" | "llm_error" | "validation" | exception class name
+    error_type: str | None = (
+        None  # "timeout" | "tool_error" | "llm_error" | "validation" | exception class name
+    )
     condition_evaluated: bool = False
     condition_met: bool | None = None
     tool_name: str = ""
@@ -152,6 +163,7 @@ class NodeResult:
 @dataclass
 class PipelineResult:
     """Outcome of the full pipeline."""
+
     status: str  # completed, partial, failed
     node_results: dict[str, NodeResult] = field(default_factory=dict)
     execution_path: list[str] = field(default_factory=list)
@@ -216,7 +228,9 @@ def _try_parse_json_ish(text: str) -> Any:
 def _extract_field(data: Any, field_path: str) -> Any:
     """Extract a value from nested dict/str using dot-notation path."""
     if field_path == "__all__":
-        if isinstance(data, dict) and isinstance(data.get("response"), (str, dict, list)):
+        if isinstance(data, dict) and isinstance(
+            data.get("response"), (str, dict, list)
+        ):
             resp = data["response"]
             if isinstance(resp, str):
                 parsed = _try_parse_json_ish(resp)
@@ -271,7 +285,7 @@ def _extract_field(data: Any, field_path: str) -> Any:
 
 def _topological_sort(nodes: list[PipelineNode]) -> list[list[str]]:
     """Return layers of node IDs that can be executed in parallel."""
-    node_map = {n.id: n for n in nodes}
+    {n.id: n for n in nodes}
     in_degree: dict[str, int] = {n.id: 0 for n in nodes}
     adjacency: dict[str, list[str]] = {n.id: [] for n in nodes}
 
@@ -296,7 +310,9 @@ def _topological_sort(nodes: list[PipelineNode]) -> list[list[str]]:
 
     executed = sum(len(layer) for layer in layers)
     if executed != len(nodes):
-        missing = set(n.id for n in nodes) - set(nid for layer in layers for nid in layer)
+        missing = set(n.id for n in nodes) - set(
+            nid for layer in layers for nid in layer
+        )
         raise ValueError(f"Cycle detected in pipeline DAG. Nodes in cycle: {missing}")
 
     return layers
@@ -343,12 +359,8 @@ def _resolve_templates(
                 node_id = parts[0]
                 field = parts[1] if len(parts) > 1 else "__all__"
                 source = node_outputs.get(node_id)
-                extracted = (
-                    None if source is None else _extract_field(source, field)
-                )
-                resolved[key] = (
-                    "[not available]" if extracted is None else extracted
-                )
+                extracted = None if source is None else _extract_field(source, field)
+                resolved[key] = "[not available]" if extracted is None else extracted
                 continue
 
             def _replacer(match: _re.Match) -> str:
@@ -464,7 +476,8 @@ class PipelineExecutor:
             if elapsed > self.timeout_seconds:
                 for nid in layer:
                     results[nid] = NodeResult(
-                        node_id=nid, status="failed",
+                        node_id=nid,
+                        status="failed",
                         error="Pipeline timeout exceeded",
                         error_message=f"Pipeline timeout exceeded after {int(elapsed)}s (limit: {self.timeout_seconds}s)",
                         error_type="timeout",
@@ -486,7 +499,9 @@ class PipelineExecutor:
                     for_each_tasks.append((nid, task))
                 elif node.while_loop is not None:
                     task = asyncio.create_task(
-                        self._execute_while_loop_node(node, node_outputs, node_map, results)
+                        self._execute_while_loop_node(
+                            node, node_outputs, node_map, results
+                        )
                     )
                     regular_tasks.append((nid, task))
                 else:
@@ -539,7 +554,10 @@ class PipelineExecutor:
                             "tool_name": result.tool_name,
                         }
                         # Schedule error branch node for next layer if not already scheduled
-                        if node.error_branch_node in node_map and node.error_branch_node not in results:
+                        if (
+                            node.error_branch_node in node_map
+                            and node.error_branch_node not in results
+                        ):
                             dynamic_next.append(node.error_branch_node)
                     else:
                         failed_nodes.append(nid)
@@ -547,21 +565,40 @@ class PipelineExecutor:
                         # so a slow DB never delays the user-visible error.
                         if self._db_url and self._tenant_id and self._agent_id:
                             try:
-                                from engine.healing import capture_failure, fire_and_forget
-                                fire_and_forget(capture_failure(
-                                    db_url=self._db_url,
-                                    tenant_id=self._tenant_id,
-                                    pipeline_id=self._agent_id,
-                                    execution_id=context.get("__execution_id", "00000000-0000-0000-0000-000000000000"),
-                                    node_id=nid,
-                                    node_kind=("agent" if node.agent_slug else "tool"),
-                                    node_target=(node.agent_slug or node.tool_name),
-                                    error_class=(result.error_type or "PipelineError"),
-                                    error_message=(result.error_message or result.error or ""),
-                                    error_traceback=None,
-                                    upstream_inputs={k: node_outputs.get(k) for k in node.depends_on if k in node_outputs},
-                                    observed_sample=result.output,
-                                ))
+                                from engine.healing import (
+                                    capture_failure,
+                                    fire_and_forget,
+                                )
+
+                                fire_and_forget(
+                                    capture_failure(
+                                        db_url=self._db_url,
+                                        tenant_id=self._tenant_id,
+                                        pipeline_id=self._agent_id,
+                                        execution_id=context.get(
+                                            "__execution_id",
+                                            "00000000-0000-0000-0000-000000000000",
+                                        ),
+                                        node_id=nid,
+                                        node_kind=(
+                                            "agent" if node.agent_slug else "tool"
+                                        ),
+                                        node_target=(node.agent_slug or node.tool_name),
+                                        error_class=(
+                                            result.error_type or "PipelineError"
+                                        ),
+                                        error_message=(
+                                            result.error_message or result.error or ""
+                                        ),
+                                        error_traceback=None,
+                                        upstream_inputs={
+                                            k: node_outputs.get(k)
+                                            for k in node.depends_on
+                                            if k in node_outputs
+                                        },
+                                        observed_sample=result.output,
+                                    )
+                                )
                             except Exception as _he:
                                 logger.debug("healing capture skipped: %s", _he)
 
@@ -632,10 +669,13 @@ class PipelineExecutor:
                 break
 
             # Wait with exponential backoff before retrying
-            delay_s = (node.retry_delay_ms / 1000) * (2 ** attempt)
+            delay_s = (node.retry_delay_ms / 1000) * (2**attempt)
             logger.debug(
                 "Retrying node %s (attempt %d/%d) after %.2fs",
-                node.id, attempt + 2, max_attempts, delay_s,
+                node.id,
+                attempt + 2,
+                max_attempts,
+                delay_s,
             )
             await asyncio.sleep(delay_s)
 
@@ -667,14 +707,17 @@ class PipelineExecutor:
             if dep_result is None:
                 continue
             if dep_result.status == "failed":
-                dep_node = None
                 for n in [n for n in prior_results]:
                     pass  # node_map not available here, check via depends_on
                 # If the failed dependency has on_error="continue", propagate error info instead of skipping
                 # We check the original node config via the id match in prior_results
                 # For simplicity, we use a convention: if the failed dep's output contains
                 # {"__error_continue": True}, it means on_error=continue was set
-                if dep_result.output and isinstance(dep_result.output, dict) and dep_result.output.get("__error_continue"):
+                if (
+                    dep_result.output
+                    and isinstance(dep_result.output, dict)
+                    and dep_result.output.get("__error_continue")
+                ):
                     continue  # Allow this node to proceed with error info available
                 return NodeResult(
                     node_id=node.id,
@@ -713,24 +756,45 @@ class PipelineExecutor:
         )
         if user_msg and isinstance(user_msg, str):
             _INPUT_KEYS = {
-                "input_message", "input", "message", "prompt",
-                "text", "content", "user_message",
+                "input_message",
+                "input",
+                "message",
+                "prompt",
+                "text",
+                "content",
+                "user_message",
             }
             for k, v in list(resolved_args.items()):
-                if k in _INPUT_KEYS and isinstance(v, str) and v.strip() in (
-                    "", "[not available]",
+                if (
+                    k in _INPUT_KEYS
+                    and isinstance(v, str)
+                    and v.strip()
+                    in (
+                        "",
+                        "[not available]",
+                    )
                 ):
                     resolved_args[k] = user_msg
             # Inject content/text if not present and first node of the pipeline
             if "content" not in resolved_args and node.tool_name in (
-                "structured_analyzer", "text_analyzer", "document_analyzer",
+                "structured_analyzer",
+                "text_analyzer",
+                "document_analyzer",
             ):
                 resolved_args["content"] = user_msg
 
         req_if = resolved_args.pop("__required_if__", None)
         if req_if is not None:
             val = str(req_if).strip().lower()
-            is_false = val in ("", "false", "0", "none", "null", "[]", "[not available]")
+            is_false = val in (
+                "",
+                "false",
+                "0",
+                "none",
+                "null",
+                "[]",
+                "[not available]",
+            )
             if is_false:
                 return NodeResult(
                     node_id=node.id,
@@ -752,7 +816,11 @@ class PipelineExecutor:
                 if isinstance(v, str):
                     stripped = _strip_markdown_fence(v).strip()
                     # Try to parse JSON so e.g. citations=[...] stays a list
-                    if stripped and stripped[:1] in ("{", "[") and stripped[-1:] in ("}", "]"):
+                    if (
+                        stripped
+                        and stripped[:1] in ("{", "[")
+                        and stripped[-1:] in ("}", "]")
+                    ):
                         try:
                             out[k] = json.loads(stripped)
                             continue
@@ -762,7 +830,8 @@ class PipelineExecutor:
                 else:
                     out[k] = v
             return NodeResult(
-                node_id=node.id, status="completed",
+                node_id=node.id,
+                status="completed",
                 output=out,
                 duration_ms=int((time.monotonic() - node_start) * 1000),
                 tool_name="__structured__",
@@ -790,13 +859,23 @@ class PipelineExecutor:
             # Agent's own system_prompt + model config beat pipeline-local
             # overrides so the agent behaves identically in pipeline or
             # direct-invoke mode.
-            resolved_args.setdefault("system_prompt", agent_row.get("system_prompt") or "")
-            resolved_args.setdefault("model", mcfg.get("model") or "claude-sonnet-4-5-20250929")
+            resolved_args.setdefault(
+                "system_prompt", agent_row.get("system_prompt") or ""
+            )
+            resolved_args.setdefault(
+                "model", mcfg.get("model") or "claude-sonnet-4-5-20250929"
+            )
             if mcfg.get("tools") and "tools" not in resolved_args:
                 resolved_args["tools"] = mcfg["tools"]
-            if mcfg.get("max_iterations") is not None and "max_iterations" not in resolved_args:
+            if (
+                mcfg.get("max_iterations") is not None
+                and "max_iterations" not in resolved_args
+            ):
                 resolved_args["max_iterations"] = mcfg["max_iterations"]
-            if mcfg.get("temperature") is not None and "temperature" not in resolved_args:
+            if (
+                mcfg.get("temperature") is not None
+                and "temperature" not in resolved_args
+            ):
                 resolved_args["temperature"] = mcfg["temperature"]
             # Fold node-level `context: {...}` into the input_message so
             # the agent sees upstream fields it was promised. agent_step's
@@ -806,8 +885,9 @@ class PipelineExecutor:
                 ctx_block = json.dumps(node_ctx, default=str, indent=2)
                 im = resolved_args.get("input_message", "")
                 resolved_args["input_message"] = (
-                    f"{im}\n\n[Pipeline context]\n{ctx_block}" if im else
-                    f"[Pipeline context]\n{ctx_block}"
+                    f"{im}\n\n[Pipeline context]\n{ctx_block}"
+                    if im
+                    else f"[Pipeline context]\n{ctx_block}"
                 )
             # Default input_message from the first user_msg if the pipeline
             # didn't declare one explicitly.
@@ -819,7 +899,8 @@ class PipelineExecutor:
             seconds = min(float(resolved_args.get("seconds", 1)), 300)
             await asyncio.sleep(seconds)
             return NodeResult(
-                node_id=node.id, status="completed",
+                node_id=node.id,
+                status="completed",
                 output={"waited_seconds": seconds},
                 duration_ms=int(seconds * 1000),
                 tool_name="wait",
@@ -830,7 +911,8 @@ class PipelineExecutor:
             state_key = str(resolved_args.get("key", ""))
             state_val = await self._state_get(state_key)
             return NodeResult(
-                node_id=node.id, status="completed",
+                node_id=node.id,
+                status="completed",
                 output=state_val,
                 duration_ms=int((time.monotonic() - node_start) * 1000),
                 tool_name="state_get",
@@ -843,7 +925,8 @@ class PipelineExecutor:
             state_value = resolved_args.get("value")
             await self._state_set(state_key, state_value)
             return NodeResult(
-                node_id=node.id, status="completed",
+                node_id=node.id,
+                status="completed",
                 output={"key": state_key, "stored": True},
                 duration_ms=int((time.monotonic() - node_start) * 1000),
                 tool_name="state_set",
@@ -854,7 +937,8 @@ class PipelineExecutor:
         if node.tool_name == "__merge__" and node.merge is not None:
             merge_output = self._execute_merge(node.merge, node_outputs)
             return NodeResult(
-                node_id=node.id, status="completed",
+                node_id=node.id,
+                status="completed",
                 output=merge_output,
                 duration_ms=int((time.monotonic() - node_start) * 1000),
                 tool_name="__merge__",
@@ -865,7 +949,8 @@ class PipelineExecutor:
         if node.tool_name == "__switch__" and node.switch is not None:
             switch_result = self._execute_switch(node.switch, node_outputs)
             return NodeResult(
-                node_id=node.id, status="completed",
+                node_id=node.id,
+                status="completed",
                 output=switch_result,
                 duration_ms=int((time.monotonic() - node_start) * 1000),
                 tool_name="__switch__",
@@ -878,6 +963,7 @@ class PipelineExecutor:
             # Try dynamic tool generation as last resort
             try:
                 from engine.tools.dynamic_tool import generate_dynamic_tool
+
                 dyn = await generate_dynamic_tool(
                     f"A tool called '{node.tool_name}' that performs: {node.tool_name.replace('_', ' ')}",
                     node.tool_name,
@@ -904,7 +990,8 @@ class PipelineExecutor:
         # Inject pipeline context for code_executor nodes
         if node.tool_name == "code_executor":
             resolved_args["__pipeline_context__"] = {
-                k: v for k, v in node_outputs.items()
+                k: v
+                for k, v in node_outputs.items()
                 if not k.startswith("__") and k != "context"
             }
 
@@ -912,7 +999,8 @@ class PipelineExecutor:
             # Check cost budget before executing
             if self.cost_limit and self.accumulated_cost >= self.cost_limit:
                 return NodeResult(
-                    node_id=node.id, status="failed",
+                    node_id=node.id,
+                    status="failed",
                     error=f"Cost budget exceeded (${self.accumulated_cost:.4f} >= ${self.cost_limit:.4f})",
                     error_message=f"Cost budget exceeded (${self.accumulated_cost:.4f} >= ${self.cost_limit:.4f})",
                     error_type="validation",
@@ -922,7 +1010,9 @@ class PipelineExecutor:
                 )
 
             if node.timeout_seconds:
-                result = await asyncio.wait_for(tool.execute(resolved_args), timeout=node.timeout_seconds)
+                result = await asyncio.wait_for(
+                    tool.execute(resolved_args), timeout=node.timeout_seconds
+                )
             else:
                 result = await tool.execute(resolved_args)
             duration = int((time.monotonic() - node_start) * 1000)
@@ -930,6 +1020,7 @@ class PipelineExecutor:
             # Normalize result — some tools return raw dicts instead of ToolResult
             if isinstance(result, dict):
                 from engine.tools.base import ToolResult
+
                 is_err = "error" in result and result.get("error")
                 result = ToolResult(
                     content=json.dumps(result, default=str),
@@ -937,8 +1028,8 @@ class PipelineExecutor:
                 )
 
             # Track cost from tool execution metadata
-            if hasattr(result, 'metadata') and result.metadata.get('cost'):
-                self.accumulated_cost += float(result.metadata['cost'])
+            if hasattr(result, "metadata") and result.metadata.get("cost"):
+                self.accumulated_cost += float(result.metadata["cost"])
 
             if result.is_error:
                 return NodeResult(
@@ -946,7 +1037,11 @@ class PipelineExecutor:
                     status="failed",
                     output=result.content,
                     error=result.content,
-                    error_message=str(result.content)[:2000] if result.content else "Tool returned error",
+                    error_message=(
+                        str(result.content)[:2000]
+                        if result.content
+                        else "Tool returned error"
+                    ),
                     error_type="tool_error",
                     tool_name=node.tool_name,
                     resolved_arguments=resolved_args,
@@ -998,7 +1093,10 @@ class PipelineExecutor:
     async def _resolve_agent_by_slug(self, slug: str) -> dict[str, Any] | None:
         """Look up a seeded agent by slug and return its system_prompt +"""
         if not self._db_url:
-            logger.warning("_resolve_agent_by_slug: no DATABASE_URL set — cannot resolve '%s'", slug)
+            logger.warning(
+                "_resolve_agent_by_slug: no DATABASE_URL set — cannot resolve '%s'",
+                slug,
+            )
             return None
         cache = getattr(self, "_agent_slug_cache", None)
         if cache is None:
@@ -1009,11 +1107,13 @@ class PipelineExecutor:
         try:
             from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
             from sqlalchemy import text as _t
+
             engine = create_async_engine(self._db_url, echo=False)
             async with AsyncSession(engine) as session:
                 res = await session.execute(
-                    _t("SELECT system_prompt, model_config FROM agents WHERE slug = :slug LIMIT 1")
-                    .bindparams(slug=slug)
+                    _t(
+                        "SELECT system_prompt, model_config FROM agents WHERE slug = :slug LIMIT 1"
+                    ).bindparams(slug=slug)
                 )
                 row = res.first()
                 if row is None:
@@ -1038,13 +1138,18 @@ class PipelineExecutor:
         try:
             from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
             from sqlalchemy import select
+
             engine = create_async_engine(self._db_url, echo=False)
             async with AsyncSession(engine) as session:
                 # Import here to avoid circular deps
                 import sys
                 from pathlib import Path
-                sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "db"))
+
+                sys.path.insert(
+                    0, str(Path(__file__).resolve().parents[2] / "packages" / "db")
+                )
                 from models.pipeline_state import PipelineState
+
                 result = await session.execute(
                     select(PipelineState.value).where(
                         PipelineState.agent_id == self._agent_id,
@@ -1064,12 +1169,17 @@ class PipelineExecutor:
         try:
             from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
             from sqlalchemy import select
+
             engine = create_async_engine(self._db_url, echo=False)
             async with AsyncSession(engine) as session:
                 import sys
                 from pathlib import Path
-                sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "db"))
+
+                sys.path.insert(
+                    0, str(Path(__file__).resolve().parents[2] / "packages" / "db")
+                )
                 from models.pipeline_state import PipelineState
+
                 result = await session.execute(
                     select(PipelineState).where(
                         PipelineState.agent_id == self._agent_id,
@@ -1080,19 +1190,23 @@ class PipelineExecutor:
                 if existing:
                     existing.value = value
                 else:
-                    session.add(PipelineState(
-                        agent_id=self._agent_id,
-                        tenant_id=self._tenant_id,
-                        key=key,
-                        value=value,
-                    ))
+                    session.add(
+                        PipelineState(
+                            agent_id=self._agent_id,
+                            tenant_id=self._tenant_id,
+                            key=key,
+                            value=value,
+                        )
+                    )
                 await session.commit()
         except Exception as e:
             logger.warning("state_set failed for key=%s: %s", key, e)
 
     def _execute_merge(self, merge: MergeConfig, node_outputs: dict[str, Any]) -> Any:
         """Execute a merge operation combining outputs from multiple source nodes."""
-        sources = [node_outputs.get(src) for src in merge.source_nodes if src in node_outputs]
+        sources = [
+            node_outputs.get(src) for src in merge.source_nodes if src in node_outputs
+        ]
         # Filter out None (skipped nodes)
         sources = [s for s in sources if s is not None]
 
@@ -1118,7 +1232,9 @@ class PipelineExecutor:
                 return sources[0] if sources else []
             base = sources[0] if isinstance(sources[0], list) else [sources[0]]
             for other_source in sources[1:]:
-                other_list = other_source if isinstance(other_source, list) else [other_source]
+                other_list = (
+                    other_source if isinstance(other_source, list) else [other_source]
+                )
                 other_map: dict[Any, Any] = {}
                 for item in other_list:
                     if isinstance(item, dict):
@@ -1136,7 +1252,9 @@ class PipelineExecutor:
 
         return sources
 
-    def _execute_switch(self, switch: SwitchConfig, node_outputs: dict[str, Any]) -> dict[str, Any]:
+    def _execute_switch(
+        self, switch: SwitchConfig, node_outputs: dict[str, Any]
+    ) -> dict[str, Any]:
         """Evaluate switch cases and return routing decision."""
         source_output = node_outputs.get(switch.source_node)
         actual = _extract_field(source_output, switch.field)
@@ -1268,7 +1386,9 @@ class PipelineExecutor:
                 body_node = all_nodes.get(body_id)
                 if body_node is None:
                     continue
-                body_result = await self._execute_node_once(body_node, node_outputs, prior_results)
+                body_result = await self._execute_node_once(
+                    body_node, node_outputs, prior_results
+                )
                 if body_result.status == "completed":
                     node_outputs[body_id] = body_result.output
                     last_output = body_result.output
@@ -1364,11 +1484,13 @@ def parse_pipeline_nodes(raw_nodes: list[dict[str, Any]]) -> list[PipelineNode]:
             sw = raw["switch"]
             cases = []
             for case_raw in sw.get("cases", []):
-                cases.append(SwitchCase(
-                    operator=case_raw.get("operator", "eq"),
-                    value=case_raw["value"],
-                    target_node=case_raw["target_node"],
-                ))
+                cases.append(
+                    SwitchCase(
+                        operator=case_raw.get("operator", "eq"),
+                        value=case_raw["value"],
+                        target_node=case_raw["target_node"],
+                    )
+                )
             switch_config = SwitchConfig(
                 source_node=sw["source_node"],
                 field=sw["field"],
@@ -1438,25 +1560,27 @@ def parse_pipeline_nodes(raw_nodes: list[dict[str, Any]]) -> list[PipelineNode]:
             if dep not in declared_deps:
                 declared_deps.append(dep)
 
-        nodes.append(PipelineNode(
-            id=raw["id"],
-            tool_name=tool_name,
-            arguments=arguments,
-            depends_on=declared_deps,
-            condition=condition,
-            input_mappings=input_mappings,
-            max_retries=raw.get("max_retries", 0),
-            retry_delay_ms=raw.get("retry_delay_ms", 1000),
-            for_each=for_each_config,
-            while_loop=while_loop_config,
-            timeout_seconds=raw.get("timeout_seconds"),
-            on_error=raw.get("on_error", "stop"),
-            error_branch_node=raw.get("error_branch_node"),
-            switch=switch_config,
-            merge=merge_config,
-            agent_slug=agent_slug,
-            structured_output=structured_output,
-        ))
+        nodes.append(
+            PipelineNode(
+                id=raw["id"],
+                tool_name=tool_name,
+                arguments=arguments,
+                depends_on=declared_deps,
+                condition=condition,
+                input_mappings=input_mappings,
+                max_retries=raw.get("max_retries", 0),
+                retry_delay_ms=raw.get("retry_delay_ms", 1000),
+                for_each=for_each_config,
+                while_loop=while_loop_config,
+                timeout_seconds=raw.get("timeout_seconds"),
+                on_error=raw.get("on_error", "stop"),
+                error_branch_node=raw.get("error_branch_node"),
+                switch=switch_config,
+                merge=merge_config,
+                agent_slug=agent_slug,
+                structured_output=structured_output,
+            )
+        )
 
     return nodes
 

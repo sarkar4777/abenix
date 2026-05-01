@@ -47,7 +47,9 @@ def _user_dict(user: User) -> dict:
 
 
 @router.post("/register")
-async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+async def register(
+    body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)
+):
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
         return error("Email already registered", 409)
@@ -97,22 +99,29 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
     await db.commit()
     await db.refresh(user)
 
-    await log_action(db, tenant.id, user.id, "user.registered", {"email": user.email}, request)
+    await log_action(
+        db, tenant.id, user.id, "user.registered", {"email": user.email}, request
+    )
     await db.commit()
 
     access = create_access_token(user.id, tenant.id, user.role.value)
     refresh = create_refresh_token(user.id)
 
-    return success({
-        "access_token": access,
-        "refresh_token": refresh,
-        "token_type": "bearer",
-        "user": _user_dict(user),
-    }, status_code=201)
+    return success(
+        {
+            "access_token": access,
+            "refresh_token": refresh,
+            "token_type": "bearer",
+            "user": _user_dict(user),
+        },
+        status_code=201,
+    )
 
 
 @router.post("/login")
-async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+async def login(
+    body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)
+):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
@@ -128,12 +137,14 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     access = create_access_token(user.id, user.tenant_id, user.role.value)
     refresh = create_refresh_token(user.id)
 
-    return success({
-        "access_token": access,
-        "refresh_token": refresh,
-        "token_type": "bearer",
-        "user": _user_dict(user),
-    })
+    return success(
+        {
+            "access_token": access,
+            "refresh_token": refresh,
+            "token_type": "bearer",
+            "user": _user_dict(user),
+        }
+    )
 
 
 @router.post("/refresh")
@@ -148,17 +159,21 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     except ValueError:
         return error("Invalid refresh token", 401)
 
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.is_active.is_(True))
+    )
     user = result.scalar_one_or_none()
     if not user:
         return error("User not found", 401)
 
     access = create_access_token(user.id, user.tenant_id, user.role.value)
 
-    return success({
-        "access_token": access,
-        "token_type": "bearer",
-    })
+    return success(
+        {
+            "access_token": access,
+            "token_type": "bearer",
+        }
+    )
 
 
 @router.get("/me")

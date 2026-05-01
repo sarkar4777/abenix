@@ -96,9 +96,16 @@ class GitHubTool(BaseTool):
         # Public read-only operations work without auth (rate-limited to 60/hour/IP
         # for unauthenticated requests; 5000/hour with a token).
         PUBLIC_READ_OPS = {
-            "get_repo", "list_files", "read_file", "get_commits",
-            "get_languages", "get_workflows", "compare_branches",
-            "list_issues", "list_pull_requests", "search_code",
+            "get_repo",
+            "list_files",
+            "read_file",
+            "get_commits",
+            "get_languages",
+            "get_workflows",
+            "compare_branches",
+            "list_issues",
+            "list_pull_requests",
+            "search_code",
         }
         if not token and operation not in PUBLIC_READ_OPS:
             return ToolResult(
@@ -200,18 +207,14 @@ class GitHubTool(BaseTool):
             )
 
         if response.status_code == 404:
-            raise ValueError(
-                f"Repository/resource not found: {path}"
-            )
+            raise ValueError(f"Repository/resource not found: {path}")
         if response.status_code == 403:
             raise ValueError(
                 "GitHub API rate limit exceeded or insufficient permissions"
             )
         if response.status_code >= 400:
             text = response.text[:500]
-            raise ValueError(
-                f"GitHub API error ({response.status_code}): {text}"
-            )
+            raise ValueError(f"GitHub API error ({response.status_code}): {text}")
 
         return response.json()
 
@@ -303,7 +306,9 @@ class GitHubTool(BaseTool):
         content = ""
         if encoding == "base64" and raw_content:
             try:
-                content = base64.b64decode(raw_content).decode("utf-8", errors="replace")
+                content = base64.b64decode(raw_content).decode(
+                    "utf-8", errors="replace"
+                )
             except Exception:
                 content = "[Unable to decode file content]"
         else:
@@ -311,7 +316,10 @@ class GitHubTool(BaseTool):
 
         # Truncate oversized content
         if len(content) > MAX_CONTENT_LENGTH:
-            content = content[:MAX_CONTENT_LENGTH] + f"\n[Truncated at {MAX_CONTENT_LENGTH:,} characters]"
+            content = (
+                content[:MAX_CONTENT_LENGTH]
+                + f"\n[Truncated at {MAX_CONTENT_LENGTH:,} characters]"
+            )
 
         return {
             "path": path,
@@ -350,7 +358,9 @@ class GitHubTool(BaseTool):
                     "path": item.get("path"),
                     "name": item.get("name"),
                     "score": item.get("score"),
-                    "repository.full_name": (item.get("repository") or {}).get("full_name"),
+                    "repository.full_name": (item.get("repository") or {}).get(
+                        "full_name"
+                    ),
                     "html_url": item.get("html_url"),
                 }
                 for item in items

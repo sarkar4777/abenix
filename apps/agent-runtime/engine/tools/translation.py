@@ -1,4 +1,5 @@
 """Text translation via DeepL (preferred) with LibreTranslate fallback."""
+
 from __future__ import annotations
 
 import os
@@ -45,7 +46,9 @@ class TranslationTool(BaseTool):
         source = (arguments.get("source_lang") or "").lower().strip() or None
         formality = arguments.get("formality")
         if not text or not target:
-            return ToolResult(content="text and target_lang are required", is_error=True)
+            return ToolResult(
+                content="text and target_lang are required", is_error=True
+            )
 
         deepl_key = os.environ.get("DEEPL_API_KEY", "").strip()
         libre_url = os.environ.get("LIBRETRANSLATE_URL", "").strip()
@@ -55,10 +58,19 @@ class TranslationTool(BaseTool):
             if deepl_key:
                 # DeepL Free uses api-free.deepl.com; Pro uses api.deepl.com.
                 # The :fx suffix on free keys is the canonical signal.
-                base = "https://api-free.deepl.com" if deepl_key.endswith(":fx") else "https://api.deepl.com"
-                payload: dict[str, Any] = {"text": [text], "target_lang": target.upper()}
-                if source: payload["source_lang"] = source.upper()
-                if formality: payload["formality"] = formality
+                base = (
+                    "https://api-free.deepl.com"
+                    if deepl_key.endswith(":fx")
+                    else "https://api.deepl.com"
+                )
+                payload: dict[str, Any] = {
+                    "text": [text],
+                    "target_lang": target.upper(),
+                }
+                if source:
+                    payload["source_lang"] = source.upper()
+                if formality:
+                    payload["formality"] = formality
                 async with httpx.AsyncClient(timeout=20) as c:
                     r = await c.post(
                         f"{base}/v2/translate",
@@ -68,7 +80,9 @@ class TranslationTool(BaseTool):
                     r.raise_for_status()
                     out = r.json().get("translations") or []
                 if not out:
-                    return ToolResult(content="DeepL returned no translation.", is_error=True)
+                    return ToolResult(
+                        content="DeepL returned no translation.", is_error=True
+                    )
                 tr = out[0]
                 return ToolResult(
                     content=tr.get("text", ""),
@@ -80,7 +94,12 @@ class TranslationTool(BaseTool):
                 )
 
             if libre_url:
-                payload = {"q": text, "target": target, "source": source or "auto", "format": "text"}
+                payload = {
+                    "q": text,
+                    "target": target,
+                    "source": source or "auto",
+                    "format": "text",
+                }
                 if libre_key:
                     payload["api_key"] = libre_key
                 async with httpx.AsyncClient(timeout=20) as c:
@@ -89,8 +108,13 @@ class TranslationTool(BaseTool):
                     data = r.json()
                 return ToolResult(
                     content=data.get("translatedText", ""),
-                    metadata={"provider": "libretranslate", "target_lang": target,
-                              "detected_source": (data.get("detectedLanguage") or {}).get("language")},
+                    metadata={
+                        "provider": "libretranslate",
+                        "target_lang": target,
+                        "detected_source": (data.get("detectedLanguage") or {}).get(
+                            "language"
+                        ),
+                    },
                 )
 
             return ToolResult(
@@ -103,6 +127,9 @@ class TranslationTool(BaseTool):
                 },
             )
         except httpx.HTTPStatusError as e:
-            return ToolResult(content=f"Translation HTTP {e.response.status_code}: {e.response.text[:200]}", is_error=True)
+            return ToolResult(
+                content=f"Translation HTTP {e.response.status_code}: {e.response.text[:200]}",
+                is_error=True,
+            )
         except Exception as e:
             return ToolResult(content=f"Translation error: {e}", is_error=True)

@@ -13,7 +13,6 @@ from engine.mcp_security import (
 )
 from engine.sandbox import ExecutionSandbox, SandboxPolicy, run_with_timeout
 
-
 # ── Sandbox tests ────────────────────────────────────────────
 
 
@@ -51,9 +50,9 @@ def test_sandbox_output_size_limit():
 
 
 def test_sandbox_domain_allowlist():
-    sandbox = ExecutionSandbox(SandboxPolicy(
-        allowed_domains=["api.anthropic.com", "example.com"]
-    ))
+    sandbox = ExecutionSandbox(
+        SandboxPolicy(allowed_domains=["api.anthropic.com", "example.com"])
+    )
     assert sandbox.check_domain("https://api.anthropic.com/v1/messages") is True
     assert sandbox.check_domain("https://sub.example.com/path") is True
     assert sandbox.check_domain("https://evil.com/steal") is False
@@ -95,6 +94,7 @@ def test_sandbox_elapsed_seconds():
 async def test_run_with_timeout_succeeds():
     async def quick():
         return 42
+
     result = await run_with_timeout(quick(), timeout=5)
     assert result == 42
 
@@ -103,6 +103,7 @@ async def test_run_with_timeout_succeeds():
 async def test_run_with_timeout_raises():
     async def slow():
         await asyncio.sleep(10)
+
     with pytest.raises(asyncio.TimeoutError):
         await run_with_timeout(slow(), timeout=0)
 

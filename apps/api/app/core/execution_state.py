@@ -42,10 +42,12 @@ async def _get_redis() -> aioredis.Redis | None:
         _pool = None
         # Auto-retry after 30 seconds
         import asyncio
+
         async def _reset_flag():
             await asyncio.sleep(30)
             global _redis_available
             _redis_available = True
+
         asyncio.create_task(_reset_flag())
         return None
 
@@ -105,7 +107,9 @@ async def publish_state(
         "max_iterations": str(max_iterations),
         "error_message": error_message or "",
         "parent_execution_id": parent_execution_id or "",
-        "confidence_score": str(confidence_score) if confidence_score is not None else "",
+        "confidence_score": (
+            str(confidence_score) if confidence_score is not None else ""
+        ),
         "metadata": json.dumps(metadata or {}),
         "updated_at": now,
     }
@@ -146,11 +150,14 @@ async def fail_state(execution_id: str, tenant_id: str, error_message: str) -> N
     key = _live_key(execution_id)
 
     pipe = r.pipeline()
-    pipe.hset(key, mapping={
-        "status": "failed",
-        "error_message": error_message,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    })
+    pipe.hset(
+        key,
+        mapping={
+            "status": "failed",
+            "error_message": error_message,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
     pipe.expire(key, STATE_TTL)
     pipe.srem(_tenant_key(tenant_id), execution_id)
     await pipe.execute()

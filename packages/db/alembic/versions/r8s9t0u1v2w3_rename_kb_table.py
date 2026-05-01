@@ -1,6 +1,6 @@
 """KB v2 deviation fix — hard rename knowledge_bases → knowledge_collections."""
-from alembic import op
 
+from alembic import op
 
 revision = "r8s9t0u1v2w3"
 down_revision = "q7r8s9t0u1v2"

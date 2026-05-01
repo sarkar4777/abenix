@@ -1,4 +1,5 @@
 """Knowledge Projects — CRUD for the v2 governance container."""
+
 from __future__ import annotations
 
 import re
@@ -51,7 +52,9 @@ def _slugify(text: str) -> str:
     return s[:120] or "project"
 
 
-def _serialize_project(p: KnowledgeProject, collection_count: int = 0) -> dict[str, Any]:
+def _serialize_project(
+    p: KnowledgeProject, collection_count: int = 0
+) -> dict[str, Any]:
     return {
         "id": str(p.id),
         "tenant_id": str(p.tenant_id),
@@ -82,7 +85,9 @@ async def list_projects(
     )
     if not is_admin(user):
         ids = await visible_project_ids(
-            db, user_id=user.id, tenant_id=user.tenant_id,
+            db,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
         )
         if not ids:
             # Empty set short-circuit so the IN () doesn't generate
@@ -108,11 +113,14 @@ async def list_projects(
 
     data = [_serialize_project(p, counts.get(p.id, 0)) for p in rows]
 
-    total = await db.scalar(
-        select(func.count(KnowledgeProject.id)).where(
-            KnowledgeProject.tenant_id == user.tenant_id,
+    total = (
+        await db.scalar(
+            select(func.count(KnowledgeProject.id)).where(
+                KnowledgeProject.tenant_id == user.tenant_id,
+            )
         )
-    ) or 0
+        or 0
+    )
     return success(data, meta={"total": total, "limit": limit, "offset": offset})
 
 
@@ -149,10 +157,14 @@ async def create_project(
     # Auto-grant creator ADMIN on the new project. Mirror of the
     # collection-creation flow; ensures the creator can manage
     # membership without depending on the migration backfill.
-    db.add(ProjectMember(
-        project_id=p.id, user_id=user.id,
-        role=ProjectRole.ADMIN, granted_by=user.id,
-    ))
+    db.add(
+        ProjectMember(
+            project_id=p.id,
+            user_id=user.id,
+            role=ProjectRole.ADMIN,
+            granted_by=user.id,
+        )
+    )
     await db.commit()
     await db.refresh(p)
     return success(_serialize_project(p), status_code=201)
@@ -168,11 +180,14 @@ async def get_project(
     if p is None or p.tenant_id != user.tenant_id:
         return error("Project not found", 404)
 
-    cnt = await db.scalar(
-        select(func.count(KnowledgeBase.id)).where(
-            KnowledgeBase.project_id == p.id,
+    cnt = (
+        await db.scalar(
+            select(func.count(KnowledgeBase.id)).where(
+                KnowledgeBase.project_id == p.id,
+            )
         )
-    ) or 0
+        or 0
+    )
     return success(_serialize_project(p, cnt))
 
 
@@ -212,11 +227,14 @@ async def delete_project(
     # Refuse if the project still holds collections — protects from
     # accidental cascading deletes of working corpora. UI can surface
     # this as "move or delete the collections first".
-    cnt = await db.scalar(
-        select(func.count(KnowledgeBase.id)).where(
-            KnowledgeBase.project_id == p.id,
+    cnt = (
+        await db.scalar(
+            select(func.count(KnowledgeBase.id)).where(
+                KnowledgeBase.project_id == p.id,
+            )
         )
-    ) or 0
+        or 0
+    )
     if cnt > 0:
         return error(
             f"Project has {cnt} collection(s); delete or move them first",
@@ -238,11 +256,19 @@ async def list_project_collections(
     if p is None or p.tenant_id != user.tenant_id:
         return error("Project not found", 404)
 
-    rows = (await db.execute(
-        select(KnowledgeBase).where(
-            KnowledgeBase.project_id == project_id,
-        ).order_by(KnowledgeBase.created_at.desc())
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(KnowledgeBase)
+                .where(
+                    KnowledgeBase.project_id == project_id,
+                )
+                .order_by(KnowledgeBase.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     data = [
         {

@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from worker.celery_app import celery_app
@@ -15,7 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-run
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://abenix:abenix@localhost:5432/abenix")
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://abenix:abenix@localhost:5432/abenix"
+)
 
 
 def _get_db_url() -> str:
@@ -41,7 +42,9 @@ def _fetch_document_chunks(kb_id: str, doc_ids: list[str], config: dict) -> list
     with engine.connect() as conn:
         for doc_id in doc_ids:
             row = conn.execute(
-                text("SELECT id, filename, file_type, storage_url FROM documents WHERE id = :id AND kb_id = :kb_id"),
+                text(
+                    "SELECT id, filename, file_type, storage_url FROM documents WHERE id = :id AND kb_id = :kb_id"
+                ),
                 {"id": doc_id, "kb_id": kb_id},
             ).fetchone()
 
@@ -55,17 +58,20 @@ def _fetch_document_chunks(kb_id: str, doc_ids: list[str], config: dict) -> list
             # Extract text from document
             try:
                 from worker.tasks.document_processor import _extract_text, _chunk_text
+
                 text_content = _extract_text(storage_url, file_type)
                 chunks = _chunk_text(
                     text_content,
                     chunk_size=config.get("chunk_size", 1000),
                     chunk_overlap=config.get("chunk_overlap", 200),
                 )
-                documents.append({
-                    "id": doc_id,
-                    "filename": filename,
-                    "chunks": chunks,
-                })
+                documents.append(
+                    {
+                        "id": doc_id,
+                        "filename": filename,
+                        "chunks": chunks,
+                    }
+                )
             except Exception as e:
                 logger.error("Failed to process document %s: %s", doc_id, e)
 
@@ -92,7 +98,9 @@ def _update_job_status(job_id: str, status: str, **kwargs):
             params[key] = value
 
         conn.execute(
-            text(f"UPDATE cognify_jobs SET {', '.join(sets)} WHERE id = CAST(:job_id AS uuid)"),
+            text(
+                f"UPDATE cognify_jobs SET {', '.join(sets)} WHERE id = CAST(:job_id AS uuid)"
+            ),
             params,
         )
 
@@ -119,12 +127,16 @@ def run_cognify_job(
 
         # Fetch and chunk documents
         if not doc_ids:
-            _update_job_status(job_id, "failed", error_message="No document IDs provided")
+            _update_job_status(
+                job_id, "failed", error_message="No document IDs provided"
+            )
             return {"status": "failed", "error": "No document IDs"}
 
         documents = _fetch_document_chunks(kb_id, doc_ids, config)
         if not documents:
-            _update_job_status(job_id, "failed", error_message="No documents could be processed")
+            _update_job_status(
+                job_id, "failed", error_message="No documents could be processed"
+            )
             return {"status": "failed", "error": "No documents processed"}
 
         # Run the async cognify pipeline
@@ -168,6 +180,7 @@ def run_cognify_job(
         try:
             from sqlalchemy import create_engine, text as sa_text
             import uuid as uuid_mod
+
             engine = create_engine(_get_db_url())
             with engine.begin() as conn:
                 conn.execute(
@@ -180,7 +193,8 @@ def run_cognify_job(
                     """),
                     {
                         "id": str(uuid_mod.uuid4()),
-                        "job_id": job_id, "kb_id": kb_id,
+                        "job_id": job_id,
+                        "kb_id": kb_id,
                         "ent_types": json.dumps(result.entities_by_type),
                         "top_ent": json.dumps(result.top_entities),
                         "rel_types": json.dumps(result.relationship_types),

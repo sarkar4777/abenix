@@ -1,4 +1,5 @@
 """Integration Hub — unified interface for 20+ enterprise services."""
+
 from __future__ import annotations
 
 import json
@@ -6,7 +7,6 @@ import os
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
-
 
 # Service registry: name → {env_key, base_url, description}
 SERVICES = {
@@ -29,7 +29,10 @@ SERVICES = {
     "snowflake": {"env": "SNOWFLAKE_ACCOUNT", "desc": "Snowflake data warehouse"},
     "stripe": {"env": "STRIPE_SECRET_KEY", "desc": "Stripe payment operations"},
     "aws_ses": {"env": "AWS_ACCESS_KEY_ID", "desc": "AWS SES email service"},
-    "aws_lambda": {"env": "AWS_ACCESS_KEY_ID", "desc": "AWS Lambda function invocation"},
+    "aws_lambda": {
+        "env": "AWS_ACCESS_KEY_ID",
+        "desc": "AWS Lambda function invocation",
+    },
 }
 
 
@@ -92,8 +95,11 @@ class IntegrationHubTool(BaseTool):
         """Slack: send messages via webhook or API."""
         if action == "send_message":
             if not auth:
-                return ToolResult(content="Error: SLACK_WEBHOOK_URL not configured", is_error=True)
+                return ToolResult(
+                    content="Error: SLACK_WEBHOOK_URL not configured", is_error=True
+                )
             import httpx
+
             channel = data.get("channel", "#general")
             message = data.get("message", "")
             blocks = data.get("blocks")
@@ -106,10 +112,16 @@ class IntegrationHubTool(BaseTool):
             if auth.startswith("http"):
                 async with httpx.AsyncClient(timeout=15) as client:
                     resp = await client.post(auth, json=payload)
-                return ToolResult(content=json.dumps({
-                    "status": "success" if resp.status_code == 200 else "error",
-                    "service": "slack", "action": action, "channel": channel,
-                }))
+                return ToolResult(
+                    content=json.dumps(
+                        {
+                            "status": "success" if resp.status_code == 200 else "error",
+                            "service": "slack",
+                            "action": action,
+                            "channel": channel,
+                        }
+                    )
+                )
             # API token
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
@@ -118,59 +130,107 @@ class IntegrationHubTool(BaseTool):
                     json={"channel": channel, "text": message},
                 )
             result = resp.json()
-            return ToolResult(content=json.dumps({
-                "status": "success" if result.get("ok") else "error",
-                "service": "slack", "channel": channel,
-                "ts": result.get("ts"),
-            }))
-        return ToolResult(content=f"Slack action '{action}' not supported. Use: send_message", is_error=True)
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "success" if result.get("ok") else "error",
+                        "service": "slack",
+                        "channel": channel,
+                        "ts": result.get("ts"),
+                    }
+                )
+            )
+        return ToolResult(
+            content=f"Slack action '{action}' not supported. Use: send_message",
+            is_error=True,
+        )
 
     async def _handle_teams(self, action: str, data: dict, auth: str) -> ToolResult:
         """Microsoft Teams: send messages via webhook."""
         if action == "send_message":
             if not auth:
-                return ToolResult(content="Error: TEAMS_WEBHOOK_URL not configured", is_error=True)
+                return ToolResult(
+                    content="Error: TEAMS_WEBHOOK_URL not configured", is_error=True
+                )
             import httpx
+
             async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(auth, json={
-                    "text": data.get("message", ""),
-                    "title": data.get("title"),
-                })
-            return ToolResult(content=json.dumps({"status": "success" if resp.status_code == 200 else "error", "service": "teams"}))
-        return ToolResult(content=f"Teams action '{action}' not supported", is_error=True)
+                resp = await client.post(
+                    auth,
+                    json={
+                        "text": data.get("message", ""),
+                        "title": data.get("title"),
+                    },
+                )
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "success" if resp.status_code == 200 else "error",
+                        "service": "teams",
+                    }
+                )
+            )
+        return ToolResult(
+            content=f"Teams action '{action}' not supported", is_error=True
+        )
 
     async def _handle_jira(self, action: str, data: dict, auth: str) -> ToolResult:
         """Jira: create/search issues."""
         jira_url = os.environ.get("JIRA_URL", "")
         jira_email = os.environ.get("JIRA_EMAIL", "")
         if not auth or not jira_url:
-            return ToolResult(content="Error: JIRA_TOKEN and JIRA_URL required", is_error=True)
+            return ToolResult(
+                content="Error: JIRA_TOKEN and JIRA_URL required", is_error=True
+            )
 
         import httpx
         import base64
+
         auth_header = base64.b64encode(f"{jira_email}:{auth}".encode()).decode()
-        headers = {"Authorization": f"Basic {auth_header}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Basic {auth_header}",
+            "Content-Type": "application/json",
+        }
 
         if action == "create_issue":
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
                     f"{jira_url}/rest/api/3/issue",
                     headers=headers,
-                    json={"fields": {
-                        "project": {"key": data.get("project", "")},
-                        "summary": data.get("summary", ""),
-                        "description": {"type": "doc", "version": 1, "content": [
-                            {"type": "paragraph", "content": [{"type": "text", "text": data.get("description", "")}]}
-                        ]},
-                        "issuetype": {"name": data.get("type", "Task")},
-                        "priority": {"name": data.get("priority", "Medium")},
-                    }},
+                    json={
+                        "fields": {
+                            "project": {"key": data.get("project", "")},
+                            "summary": data.get("summary", ""),
+                            "description": {
+                                "type": "doc",
+                                "version": 1,
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": data.get("description", ""),
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                            "issuetype": {"name": data.get("type", "Task")},
+                            "priority": {"name": data.get("priority", "Medium")},
+                        }
+                    },
                 )
             result = resp.json()
-            return ToolResult(content=json.dumps({
-                "status": "success" if "key" in result else "error",
-                "key": result.get("key"), "id": result.get("id"),
-            }))
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "success" if "key" in result else "error",
+                        "key": result.get("key"),
+                        "id": result.get("id"),
+                    }
+                )
+            )
 
         elif action == "search":
             jql = data.get("jql", "")
@@ -181,20 +241,46 @@ class IntegrationHubTool(BaseTool):
                     params={"jql": jql, "maxResults": data.get("max_results", 20)},
                 )
             result = resp.json()
-            issues = [{"key": i["key"], "summary": i["fields"]["summary"], "status": i["fields"]["status"]["name"]}
-                      for i in result.get("issues", [])]
-            return ToolResult(content=json.dumps({"status": "success", "total": result.get("total", 0), "issues": issues}))
+            issues = [
+                {
+                    "key": i["key"],
+                    "summary": i["fields"]["summary"],
+                    "status": i["fields"]["status"]["name"],
+                }
+                for i in result.get("issues", [])
+            ]
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "success",
+                        "total": result.get("total", 0),
+                        "issues": issues,
+                    }
+                )
+            )
 
-        return ToolResult(content=f"Jira action '{action}' not supported. Use: create_issue, search", is_error=True)
+        return ToolResult(
+            content=f"Jira action '{action}' not supported. Use: create_issue, search",
+            is_error=True,
+        )
 
-    async def _handle_salesforce(self, action: str, data: dict, auth: str) -> ToolResult:
+    async def _handle_salesforce(
+        self, action: str, data: dict, auth: str
+    ) -> ToolResult:
         """Salesforce: query and create records."""
         instance_url = os.environ.get("SALESFORCE_INSTANCE_URL", "")
         if not auth or not instance_url:
-            return ToolResult(content="Error: SALESFORCE_TOKEN and SALESFORCE_INSTANCE_URL required", is_error=True)
+            return ToolResult(
+                content="Error: SALESFORCE_TOKEN and SALESFORCE_INSTANCE_URL required",
+                is_error=True,
+            )
 
         import httpx
-        headers = {"Authorization": f"Bearer {auth}", "Content-Type": "application/json"}
+
+        headers = {
+            "Authorization": f"Bearer {auth}",
+            "Content-Type": "application/json",
+        }
 
         if action == "query":
             soql = data.get("soql", "")
@@ -205,11 +291,15 @@ class IntegrationHubTool(BaseTool):
                     params={"q": soql},
                 )
             result = resp.json()
-            return ToolResult(content=json.dumps({
-                "status": "success",
-                "total": result.get("totalSize", 0),
-                "records": result.get("records", [])[:50],
-            }))
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "success",
+                        "total": result.get("totalSize", 0),
+                        "records": result.get("records", [])[:50],
+                    }
+                )
+            )
 
         elif action == "create_record":
             obj = data.get("object", "")
@@ -221,22 +311,35 @@ class IntegrationHubTool(BaseTool):
                     json=fields,
                 )
             result = resp.json()
-            return ToolResult(content=json.dumps({
-                "status": "success" if result.get("success") else "error",
-                "id": result.get("id"),
-            }))
+            return ToolResult(
+                content=json.dumps(
+                    {
+                        "status": "success" if result.get("success") else "error",
+                        "id": result.get("id"),
+                    }
+                )
+            )
 
-        return ToolResult(content=f"Salesforce action '{action}' not supported. Use: query, create_record", is_error=True)
+        return ToolResult(
+            content=f"Salesforce action '{action}' not supported. Use: query, create_record",
+            is_error=True,
+        )
 
-    async def _generic_handler(self, service: str, action: str, data: dict, auth: str) -> ToolResult:
+    async def _generic_handler(
+        self, service: str, action: str, data: dict, auth: str
+    ) -> ToolResult:
         """Generic handler for services not yet fully implemented."""
         svc = SERVICES.get(service, {})
-        return ToolResult(content=json.dumps({
-            "status": "info",
-            "service": service,
-            "description": svc.get("desc", ""),
-            "action_requested": action,
-            "message": f"Service '{service}' is available. Configure {svc.get('env', 'AUTH_TOKEN')} environment variable to enable live operations.",
-            "auth_configured": bool(auth),
-            "data_received": data,
-        }))
+        return ToolResult(
+            content=json.dumps(
+                {
+                    "status": "info",
+                    "service": service,
+                    "description": svc.get("desc", ""),
+                    "action_requested": action,
+                    "message": f"Service '{service}' is available. Configure {svc.get('env', 'AUTH_TOKEN')} environment variable to enable live operations.",
+                    "auth_configured": bool(auth),
+                    "data_received": data,
+                }
+            )
+        )

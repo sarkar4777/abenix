@@ -1,4 +1,5 @@
 """Code-asset tool — run a user-uploaded repo as a pipeline step."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,7 +7,6 @@ import json
 import logging
 import os
 import shlex
-import time
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 # Keyed by sha256(zip_content || build_command || image). The value is a
 # tar.gz of /tmp/app AFTER the build step completes. On cache hit we
 # inject the pre-built tree instead of the raw source + build command.
-_BUILD_CACHE_DIR = Path(os.environ.get("CODE_ASSET_BUILD_CACHE", "/data/code-asset-cache"))
+_BUILD_CACHE_DIR = Path(
+    os.environ.get("CODE_ASSET_BUILD_CACHE", "/data/code-asset-cache")
+)
 
 
 # Bumped when the cache-snapshot layout changes. Prior entries don't
@@ -39,7 +41,9 @@ def _cache_key(zip_bytes: bytes, build_cmd: str, image: str) -> str:
 def _cache_get(key: str) -> Path | None:
     p = _BUILD_CACHE_DIR / f"{key}.tgz"
     if p.exists() and p.stat().st_size > 0:
-        logger.info("code_asset build-cache HIT: %s (%d bytes)", key[:12], p.stat().st_size)
+        logger.info(
+            "code_asset build-cache HIT: %s (%d bytes)", key[:12], p.stat().st_size
+        )
         return p
     return None
 
@@ -49,7 +53,9 @@ def _cache_put(key: str, tgz_bytes: bytes) -> None:
         _BUILD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         p = _BUILD_CACHE_DIR / f"{key}.tgz"
         p.write_bytes(tgz_bytes)
-        logger.info("code_asset build-cache STORE: %s (%d bytes)", key[:12], len(tgz_bytes))
+        logger.info(
+            "code_asset build-cache STORE: %s (%d bytes)", key[:12], len(tgz_bytes)
+        )
     except Exception as e:
         logger.warning("code_asset build-cache store failed: %s", e)
 
@@ -73,29 +79,40 @@ class CodeAssetTool(BaseTool):
             "input": {
                 "type": "object",
                 "description": "JSON object passed to the asset on stdin. "
-                               "Shape must match the asset's declared "
-                               "input_schema. Always an object, never a "
-                               "bare string or number — wrap the payload "
-                               "in {field: value} form.",
+                "Shape must match the asset's declared "
+                "input_schema. Always an object, never a "
+                "bare string or number — wrap the payload "
+                "in {field: value} form.",
                 "additionalProperties": True,
             },
             "timeout_seconds": {
-                "type": "integer", "default": 120, "minimum": 10, "maximum": 900,
+                "type": "integer",
+                "default": 120,
+                "minimum": 10,
+                "maximum": 900,
             },
             "memory_mb": {
-                "type": "integer", "default": 1024, "minimum": 128, "maximum": 4096,
+                "type": "integer",
+                "default": 1024,
+                "minimum": 128,
+                "maximum": 4096,
             },
             "allow_network": {
-                "type": "boolean", "default": False,
+                "type": "boolean",
+                "default": False,
                 "description": "Needed if the asset calls external APIs "
-                               "(also requires SANDBOXED_JOB_ALLOW_NETWORK=true).",
+                "(also requires SANDBOXED_JOB_ALLOW_NETWORK=true).",
             },
         },
         "required": ["code_asset_id"],
     }
 
     def __init__(
-        self, *, tenant_id: str = "", redis_url: str = "", db_url: str = "",
+        self,
+        *,
+        tenant_id: str = "",
+        redis_url: str = "",
+        db_url: str = "",
     ):
         self._tenant_id = tenant_id
         self._redis_url = redis_url
@@ -119,7 +136,7 @@ class CodeAssetTool(BaseTool):
         if asset.get("status") != "ready":
             return ToolResult(
                 content=f"Code asset {asset_id} is {asset.get('status')} — wait for "
-                        f"analysis to complete or re-upload.",
+                f"analysis to complete or re-upload.",
                 is_error=True,
                 metadata={"status": asset.get("status")},
             )
@@ -145,6 +162,7 @@ class CodeAssetTool(BaseTool):
                 )
 
         import base64
+
         zip_path = asset.get("storage_uri") or ""
         max_inline = int(os.environ.get("CODE_ASSET_MAX_INLINE_BYTES", "400000"))
         want_network = bool(arguments.get("allow_network", False))
@@ -152,6 +170,7 @@ class CodeAssetTool(BaseTool):
         use_inline = False
         try:
             import pathlib as _p
+
             p = _p.Path(zip_path)
             if p.exists() and p.stat().st_size <= max_inline:
                 use_inline = True
@@ -165,7 +184,9 @@ class CodeAssetTool(BaseTool):
         # the command line — they live as env, so `ps` + logs never show
         # them. See _collect_secrets for the revealing-at-runtime path.
         run_env = await _collect_secrets(
-            self._db_url, self._tenant_id, asset_id,
+            self._db_url,
+            self._tenant_id,
+            asset_id,
         )
         # Mix in any caller-supplied env too (lowest priority — secrets win).
         for k, v in (arguments.get("env") or {}).items():
@@ -192,6 +213,7 @@ class CodeAssetTool(BaseTool):
                 return base64.b64encode(out.getvalue()).decode()
 
             import pathlib as _pathlib
+
             zip_bytes = _pathlib.Path(zip_path).read_bytes()
             cache_k = _cache_key(zip_bytes, build_cmd, image)
             cached_tgz = _cache_get(cache_k)
@@ -242,28 +264,36 @@ class CodeAssetTool(BaseTool):
             run_env["_ASSET_TGZ_B64"] = asset_tgz_b64
             run_env["_ASSET_INPUT_B64"] = input_b64
 
-            sandbox = SandboxedJobTool(tenant_id=self._tenant_id, redis_url=self._redis_url)
-            sandbox_result = await sandbox.execute({
-                "image": image,
-                "command": bash,
-                "timeout_seconds": int(arguments.get("timeout_seconds", 120)),
-                "memory_mb": int(arguments.get("memory_mb", 1024)),
-                "cpu_limit": 2.0,
-                "network": want_network,
-                "env": run_env,
-            })
+            sandbox = SandboxedJobTool(
+                tenant_id=self._tenant_id, redis_url=self._redis_url
+            )
+            sandbox_result = await sandbox.execute(
+                {
+                    "image": image,
+                    "command": bash,
+                    "timeout_seconds": int(arguments.get("timeout_seconds", 120)),
+                    "memory_mb": int(arguments.get("memory_mb", 1024)),
+                    "cpu_limit": 2.0,
+                    "network": want_network,
+                    "env": run_env,
+                }
+            )
 
             # Extract and store the build snapshot from stderr if this was
             # a cache miss and the sandbox succeeded.
             if cached_tgz is None and not sandbox_result.is_error:
                 try:
-                    logs = sandbox_result.metadata.get("logs") or sandbox_result.content or ""
+                    logs = (
+                        sandbox_result.metadata.get("logs")
+                        or sandbox_result.content
+                        or ""
+                    )
                     start_marker = "___BUILD_CACHE_START___"
                     end_marker = "___BUILD_CACHE_END___"
                     si = logs.find(start_marker)
                     ei = logs.find(end_marker)
                     if si >= 0 and ei > si:
-                        b64_blob = logs[si + len(start_marker):ei].strip()
+                        b64_blob = logs[si + len(start_marker) : ei].strip()
                         if b64_blob:
                             _cache_put(cache_k, base64.b64decode(b64_blob))
                 except Exception as e:
@@ -282,41 +312,41 @@ class CodeAssetTool(BaseTool):
             # Per-language bootstrap — matches the image ecosystem.
             if image.startswith(("python:", "python3:")):
                 boot = (
-                    'python - <<PYEOF\n'
-                    'import os, urllib.request, zipfile, io\n'
+                    "python - <<PYEOF\n"
+                    "import os, urllib.request, zipfile, io\n"
                     'req = urllib.request.Request(os.environ["_DL_URL"])\n'
                     'auth = os.environ.get("_DL_AUTH", "")\n'
                     'if auth: req.add_header("Authorization", auth)\n'
-                    'data = urllib.request.urlopen(req, timeout=60).read()\n'
+                    "data = urllib.request.urlopen(req, timeout=60).read()\n"
                     'zipfile.ZipFile(io.BytesIO(data)).extractall("/tmp/app")\n'
-                    'PYEOF'
+                    "PYEOF"
                 )
             elif image.startswith(("node:", "node")):
                 boot = (
                     'node -e "'
-                    'const https=require(\'http\'),url=new URL(process.env._DL_URL),'
-                    'fs=require(\'fs\'),{execSync}=require(\'child_process\');'
-                    'const buf=[];'
-                    'https.get(url,{headers:{Authorization:process.env._DL_AUTH||\'\'}},r=>{'
-                    'r.on(\'data\',c=>buf.push(c));'
-                    'r.on(\'end\',()=>{'
-                    'fs.writeFileSync(\'/tmp/asset.zip\',Buffer.concat(buf));'
-                    'try{execSync(\'cd /tmp/app && unzip -q -o /tmp/asset.zip\');}'
-                    'catch(e){console.error(\'no unzip; try a -slim image or pre-bake unzip\');process.exit(1);}'
-                    '});'
+                    "const https=require('http'),url=new URL(process.env._DL_URL),"
+                    "fs=require('fs'),{execSync}=require('child_process');"
+                    "const buf=[];"
+                    "https.get(url,{headers:{Authorization:process.env._DL_AUTH||''}},r=>{"
+                    "r.on('data',c=>buf.push(c));"
+                    "r.on('end',()=>{"
+                    "fs.writeFileSync('/tmp/asset.zip',Buffer.concat(buf));"
+                    "try{execSync('cd /tmp/app && unzip -q -o /tmp/asset.zip');}"
+                    "catch(e){console.error('no unzip; try a -slim image or pre-bake unzip');process.exit(1);}"
+                    "});"
                     '});"'
                 )
             else:
                 # Generic fallback: try wget+tar (if the asset is already
                 # repackaged as tar.gz) OR curl+tar, then finally error.
                 boot = (
-                    'if command -v wget >/dev/null 2>&1; then '
+                    "if command -v wget >/dev/null 2>&1; then "
                     '  wget -q --header="Authorization: $_DL_AUTH" -O /tmp/asset.zip "$_DL_URL"; '
-                    'elif command -v curl >/dev/null 2>&1; then '
+                    "elif command -v curl >/dev/null 2>&1; then "
                     '  curl -fsSL -H "Authorization: $_DL_AUTH" -o /tmp/asset.zip "$_DL_URL"; '
                     'else echo "no fetcher in this image" >&2; exit 1; fi; '
-                    'if command -v unzip >/dev/null 2>&1; then '
-                    '  cd /tmp/app && unzip -q -o /tmp/asset.zip; '
+                    "if command -v unzip >/dev/null 2>&1; then "
+                    "  cd /tmp/app && unzip -q -o /tmp/asset.zip; "
                     'else echo "no unzip in this image; switch to inline delivery by '
                     'shrinking the asset under CODE_ASSET_MAX_INLINE_BYTES" >&2; exit 1; fi'
                 )
@@ -336,16 +366,20 @@ class CodeAssetTool(BaseTool):
             # HTTP path requires network (by definition).
             want_network = True
 
-            sandbox = SandboxedJobTool(tenant_id=self._tenant_id, redis_url=self._redis_url)
-            sandbox_result = await sandbox.execute({
-                "image": image,
-                "command": bash,
-                "timeout_seconds": int(arguments.get("timeout_seconds", 120)),
-                "memory_mb": int(arguments.get("memory_mb", 1024)),
-                "cpu_limit": 2.0,
-                "network": want_network,
-                "env": run_env,
-            })
+            sandbox = SandboxedJobTool(
+                tenant_id=self._tenant_id, redis_url=self._redis_url
+            )
+            sandbox_result = await sandbox.execute(
+                {
+                    "image": image,
+                    "command": bash,
+                    "timeout_seconds": int(arguments.get("timeout_seconds", 120)),
+                    "memory_mb": int(arguments.get("memory_mb", 1024)),
+                    "cpu_limit": 2.0,
+                    "network": want_network,
+                    "env": run_env,
+                }
+            )
 
         if sandbox_result.is_error:
             return ToolResult(
@@ -376,7 +410,7 @@ class CodeAssetTool(BaseTool):
         s_start = stdout.find("___ASSET_OUT_START___")
         s_end = stdout.find("___ASSET_OUT_END___")
         if s_start >= 0 and s_end > s_start:
-            asset_out = stdout[s_start + len("___ASSET_OUT_START___"):s_end].strip()
+            asset_out = stdout[s_start + len("___ASSET_OUT_START___") : s_end].strip()
         # Fallback to the old heuristic — useful for legacy assets that
         # predate the sentinel wrapper.
         if not asset_out:
@@ -405,14 +439,18 @@ class CodeAssetTool(BaseTool):
                 schema_ok = False
                 schema_err = err
 
-        await _record_last_test(self._db_url, asset_id, input_payload, parsed, schema_ok)
+        await _record_last_test(
+            self._db_url, asset_id, input_payload, parsed, schema_ok
+        )
 
         return ToolResult(
-            content=json.dumps({
-                "result": parsed,
-                "schema_ok": schema_ok,
-                "schema_error": schema_err,
-            }),
+            content=json.dumps(
+                {
+                    "result": parsed,
+                    "schema_ok": schema_ok,
+                    "schema_error": schema_err,
+                }
+            ),
             metadata={
                 "code_asset_id": asset_id,
                 "exit_code": sandbox_result.metadata.get("exit_code"),
@@ -424,8 +462,11 @@ class CodeAssetTool(BaseTool):
 
 # ─── DB helpers (keep the tool importable without SQLAlchemy in the hot path) ─
 
+
 async def _load_asset(
-    db_url: str, tenant_id: str, asset_id: str,
+    db_url: str,
+    tenant_id: str,
+    asset_id: str,
 ) -> dict[str, Any] | None:
     if not db_url:
         return None
@@ -471,7 +512,11 @@ async def _load_asset(
 
 
 async def _record_last_test(
-    db_url: str, asset_id: str, input_payload: Any, output: Any, ok: bool,
+    db_url: str,
+    asset_id: str,
+    input_payload: Any,
+    output: Any,
+    ok: bool,
 ) -> None:
     if not db_url:
         return
@@ -511,6 +556,7 @@ def _validate_against_schema(payload: Any, schema: dict[str, Any]) -> str:
     # Try full JSON Schema validation first
     try:
         import jsonschema  # type: ignore
+
         try:
             jsonschema.validate(payload, schema)
             return ""
@@ -547,7 +593,9 @@ def _validate_against_schema(payload: Any, schema: dict[str, Any]) -> str:
 
 
 async def _collect_secrets(
-    db_url: str, tenant_id: str, asset_id: str,
+    db_url: str,
+    tenant_id: str,
+    asset_id: str,
 ) -> dict[str, str]:
     """Load per-asset secrets and return them as a {KEY: value} dict"""
     if not db_url:
@@ -586,7 +634,8 @@ async def _collect_secrets(
         logger.warning(
             "code_asset has %d stored secrets for asset %s but "
             "CODE_ASSET_SECRETS_KEY is not set — skipping decryption",
-            len(rows), asset_id[:8],
+            len(rows),
+            asset_id[:8],
         )
         return {}
     try:
@@ -595,6 +644,7 @@ async def _collect_secrets(
             logger.warning("CODE_ASSET_SECRETS_KEY must be 16/24/32 hex-bytes")
             return {}
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
         aes = AESGCM(key)
         out: dict[str, str] = {}
         for name, nonce, ct in rows:
