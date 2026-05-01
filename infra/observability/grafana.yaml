@@ -1,0 +1,143 @@
+# Grafana for Abenix — minikube-friendly single-replica deployment
+# with auto-provisioned Prometheus datasource and the Abenix
+# dashboards baked in via ConfigMap. Operators land on the dashboards
+# the moment they `kubectl port-forward` to port 3000.
+#
+# Default admin: admin / abenix-admin
+# Override `GF_SECURITY_ADMIN_PASSWORD` env or supply your own Secret.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: abenix-grafana-datasources
+  namespace: abenix
+  labels:
+    grafana_datasource: "1"
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://abenix-prometheus.abenix.svc.cluster.local:9090
+        isDefault: true
+        editable: false
+        jsonData:
+          timeInterval: "15s"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: abenix-grafana-dashboard-providers
+  namespace: abenix
+data:
+  providers.yaml: |
+    apiVersion: 1
+    providers:
+      - name: Abenix
+        orgId: 1
+        folder: Abenix
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+# The dashboards themselves are mounted from a ConfigMap maintained
+# alongside this manifest in infra/observability/dashboards/. The
+# bash one-liner in scripts/deploy.sh creates the ConfigMap from
+# every *.json file in that directory and rolls Grafana on change.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: abenix-grafana
+  namespace: abenix
+  labels:
+    app: abenix-grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: abenix-grafana
+  template:
+    metadata:
+      labels:
+        app: abenix-grafana
+    spec:
+      securityContext:
+        fsGroup: 472  # grafana group
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.0
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: abenix-admin
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            # We don't expose Grafana to the internet; turning off
+            # anonymous + allowing only the admin user keeps the
+            # dashboard private to whoever has cluster access.
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            # Skip the "what's new" splash so port-forward → instant
+            # dashboard.
+            - name: GF_NEWS_NEWS_FEED_ENABLED
+              value: "false"
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/grafana
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-providers
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: 500m, memory: 512Mi}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: storage
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: datasources
+          configMap:
+            name: abenix-grafana-datasources
+        - name: dashboard-providers
+          configMap:
+            name: abenix-grafana-dashboard-providers
+        - name: dashboards
+          configMap:
+            name: abenix-grafana-dashboards
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: abenix-grafana
+  namespace: abenix
+spec:
+  selector:
+    app: abenix-grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

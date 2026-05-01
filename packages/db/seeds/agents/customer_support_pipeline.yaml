@@ -1,0 +1,157 @@
+name: Customer Support Pipeline
+slug: customer-support-pipeline
+description: >-
+  Multi-stage customer support pipeline that classifies tickets, scores
+  priority, performs sentiment analysis, routes to the right team, and
+  generates draft responses — all in parallel stages with conditional
+  escalation. Produces structured triage output with SLA tracking.
+agent_type: oob
+version: "1.0.0"
+category: productivity
+status: active
+system_prompt: |
+  You orchestrate a multi-step customer support pipeline that classifies incoming tickets, scores priority, performs sentiment analysis, routes to the appropriate team, and generates draft responses with SLA tracking.
+example_prompts:
+  - "Triage this incoming ticket: 'Our API integration has been returning 500 errors since 3am and our production pipeline is down'"
+  - "Process this batch of 30 support tickets — classify, score priority, route to the right team, and draft responses for the top 5 urgent ones"
+  - "A critical enterprise customer (MRR $15K) just submitted a security-related ticket. Run full triage with escalation path and SLA tracking"
+
+mode: pipeline
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.3
+  tools:
+    - structured_analyzer
+    - code_executor
+    - llm_call
+    - text_analyzer
+    - database_query
+    - json_transformer
+    - data_merger
+    - email_sender
+    - human_approval
+pipeline_config:
+  nodes:
+    - id: classify
+      tool_name: structured_analyzer
+      arguments:
+        content: "{{context.ticket_content}}"
+        analysis_type: custom
+        custom_prompt: "Classify this support ticket. Output JSON: {category: string (bug|feature|billing|security|integration), severity: string (critical|high|medium|low), requires_engineering: boolean, estimated_effort: string (quick_fix|investigation|feature_work), key_entities: string[]}"
+      depends_on: []
+      position:
+        x: 100
+        y: 100
+    - id: sentiment
+      tool_name: text_analyzer
+      arguments:
+        operation: sentiment
+        text: "{{context.ticket_content}}"
+      depends_on: []
+      position:
+        x: 400
+        y: 100
+    - id: customer_context
+      tool_name: code_executor
+      arguments:
+        code: |
+          # Mock customer context lookup. In production this would query a CRM.
+          # Replace with database_query tool once a customers table is provisioned.
+          import json
+          customer_id = context.get('customer_id', 'unknown')
+          result = {
+              "customer_id": customer_id,
+              "plan": context.get('customer_tier', 'pro'),
+              "mrr": 2500,
+              "tickets_last_30d": 3,
+              "nps_score": 8,
+          }
+          print(json.dumps(result))
+      depends_on: []
+      position:
+        x: 700
+        y: 100
+    - id: priority_score
+      tool_name: code_executor
+      arguments:
+        code: |
+          import json
+          # Upstream node outputs are auto-injected into `context` by the pipeline engine.
+          # Each value is the raw output (dict, str, etc.) — no JSON parsing needed.
+          classify_raw = context.get('classify') or {}
+          sentiment_raw = context.get('sentiment') or {}
+          # Tools sometimes return JSON strings; parse if needed.
+          if isinstance(classify_raw, str):
+              try: classify = json.loads(classify_raw)
+              except: classify = {"severity": "medium"}
+          else:
+              classify = classify_raw if isinstance(classify_raw, dict) else {"severity": "medium"}
+          if isinstance(sentiment_raw, str):
+              try: sentiment_data = json.loads(sentiment_raw)
+              except: sentiment_data = {"sentiment": "neutral"}
+          else:
+              sentiment_data = sentiment_raw if isinstance(sentiment_raw, dict) else {"sentiment": "neutral"}
+          severity_w = {"critical": 1.0, "high": 0.7, "medium": 0.4, "low": 0.2}
+          tier_w = {"enterprise": 1.0, "pro": 0.6, "free": 0.3}
+          sent_w = {"negative": 0.3, "neutral": 0, "positive": -0.1}
+          sev = classify.get("severity", "medium")
+          tier = context.get("customer_tier", "pro")
+          sent = sentiment_data.get("sentiment", "neutral")
+          score = severity_w.get(sev, 0.4) * 0.4 + tier_w.get(tier, 0.3) * 0.3 + sent_w.get(sent, 0) * 0.15
+          routing = "engineering" if classify.get("requires_engineering") else "support_l1"
+          if score > 0.8: routing = "support_l2_urgent"
+          if classify.get("category") == "security": routing = "security_team"
+          result = {"priority_score": round(score, 3), "routing": routing, "sla_hours": 4 if score > 0.7 else 24}
+          print(json.dumps(result))
+      depends_on:
+        - classify
+        - sentiment
+        - customer_context
+      position:
+        x: 400
+        y: 250
+    - id: draft_response
+      tool_name: llm_call
+      arguments:
+        prompt: "Draft a helpful, empathetic customer support response for this ticket. Category: {{classify.category}}, Severity: {{classify.severity}}, Sentiment: {{sentiment.sentiment}}. Be professional and solution-oriented. Ticket: {{context.ticket_content}}"
+      depends_on:
+        - classify
+        - sentiment
+      position:
+        x: 100
+        y: 250
+    - id: merge_output
+      tool_name: data_merger
+      arguments:
+        sources:
+          - "{{classify.__all__}}"
+          - "{{priority_score.__all__}}"
+          - "{{draft_response.__all__}}"
+      depends_on:
+        - priority_score
+        - draft_response
+      position:
+        x: 400
+        y: 400
+  edges:
+    - id: e1
+      source: classify
+      target: priority_score
+    - id: e2
+      source: sentiment
+      target: priority_score
+    - id: e3
+      source: customer_context
+      target: priority_score
+    - id: e4
+      source: classify
+      target: draft_response
+    - id: e5
+      source: sentiment
+      target: draft_response
+    - id: e6
+      source: priority_score
+      target: merge_output
+    - id: e7
+      source: draft_response
+      target: merge_output

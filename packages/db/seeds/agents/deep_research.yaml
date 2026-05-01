@@ -1,0 +1,133 @@
+name: "Deep Research Agent"
+slug: deep-research
+description: >
+  Conducts thorough multi-source research on any topic. Performs parallel
+  web searches, cross-references findings, identifies consensus and
+  contradictions, and synthesizes a comprehensive research report with
+  citations. Ideal for market research, competitive analysis, technical
+  due diligence, and academic surveys.
+category: Research
+agent_type: OOB
+version: "1.0.0"
+icon_url: /icons/deep-research.svg
+status: active
+system_prompt: |
+  You are a world-class research analyst. Your methodology:
+
+  1. **Decompose**: Break the research question into 3-5 sub-questions
+  2. **Search**: Conduct parallel searches across multiple angles
+  3. **Extract**: Pull key facts, statistics, and quotes from each source
+  4. **Cross-reference**: Identify points of agreement and contradiction
+  5. **Synthesize**: Build a coherent narrative from diverse sources
+  6. **Cite**: Always attribute claims to specific sources
+
+  For each research task:
+  - Start with broad searches to map the landscape
+  - Follow up with targeted deep-dives on key findings
+  - Use the text analyzer for readability and sentiment of sources
+  - Use the HTTP client to fetch specific data from APIs when relevant
+  - Merge all findings and produce a structured report
+
+  Your output should include:
+  - Executive Summary
+  - Key Findings (bulleted, with source attribution)
+  - Analysis & Insights
+  - Areas of Uncertainty
+  - Recommendations
+  - Sources (numbered list with URLs)
+
+example_prompts:
+  - "Research the current state of solid-state battery technology — key players, timelines to commercialization, and investment landscape"
+  - "Conduct a deep dive into the European AI Act's impact on SaaS companies deploying foundation models in the EU"
+  - "Investigate the market opportunity for vertical AI agents in healthcare, including current startups, funding, and adoption barriers"
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.4
+  max_iterations: 20
+  tools:
+    - web_search
+    - llm_call
+    - text_analyzer
+    - json_transformer
+    - http_client
+    - data_merger
+    - code_executor
+    - calculator
+
+mode: pipeline
+pipeline_config:
+  nodes:
+    - id: search_primary
+      tool_name: web_search
+      arguments:
+        num_results: 10
+      position:
+        x: 100
+        y: 100
+    - id: search_academic
+      tool_name: web_search
+      arguments:
+        num_results: 10
+      position:
+        x: 400
+        y: 100
+    - id: search_news
+      tool_name: web_search
+      arguments:
+        num_results: 10
+      position:
+        x: 700
+        y: 100
+    - id: merge_sources
+      tool_name: data_merger
+      arguments:
+        merge_strategy: comparison
+      depends_on:
+        - search_primary
+        - search_academic
+        - search_news
+      input_mappings:
+        input_primary: { source_node: search_primary, source_field: __all__ }
+        input_academic: { source_node: search_academic, source_field: __all__ }
+        input_news: { source_node: search_news, source_field: __all__ }
+      position:
+        x: 400
+        y: 250
+    - id: synthesize
+      tool_name: llm_call
+      arguments:
+        model: claude-sonnet-4-5-20250929
+        temperature: 0.3
+        max_tokens: 8192
+        system_prompt: |
+          You are a research synthesizer. Given search results from multiple sources,
+          produce a comprehensive research report. Include: Executive Summary, Key Findings
+          with source attribution, Analysis, Areas of Uncertainty, and Recommendations.
+          Format as clean markdown with numbered citations.
+      depends_on:
+        - merge_sources
+      input_mappings:
+        prompt: { source_node: merge_sources, source_field: __all__ }
+      max_retries: 1
+      position:
+        x: 400
+        y: 400
+    - id: quality_check
+      tool_name: text_analyzer
+      arguments:
+        operation: readability
+      depends_on:
+        - synthesize
+      input_mappings:
+        text: { source_node: synthesize, source_field: response }
+      position:
+        x: 400
+        y: 550
+
+  edges:
+    - { source: search_primary, target: merge_sources }
+    - { source: search_academic, target: merge_sources }
+    - { source: search_news, target: merge_sources }
+    - { source: merge_sources, target: synthesize }
+    - { source: synthesize, target: quality_check }

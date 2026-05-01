@@ -1,0 +1,35 @@
+replicaCount: 2
+
+image:
+  repository: abenix/web
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+health:
+  path: /
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+env: {}
+envFrom: []
+
+nodeSelector: {}
+tolerations: []

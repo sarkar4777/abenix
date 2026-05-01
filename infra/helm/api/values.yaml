@@ -1,0 +1,35 @@
+replicaCount: 3
+
+image:
+  repository: abenix/api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+health:
+  path: /api/health
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+env: {}
+envFrom: []
+
+nodeSelector: {}
+tolerations: []

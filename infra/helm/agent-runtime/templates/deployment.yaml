@@ -1,0 +1,87 @@
+{{- if ne (toString .Values.enabled) "false" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-runtime.fullname" . }}
+  labels:
+    {{- include "agent-runtime.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "agent-runtime.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "agent-runtime.selectorLabels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: {{ .Values.health.path }}
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.health.path }}
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
+            periodSeconds: {{ .Values.health.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.health.path }}
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.env }}
+          env:
+            {{- range $key, $value := . }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

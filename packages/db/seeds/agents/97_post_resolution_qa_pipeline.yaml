@@ -1,0 +1,96 @@
+name: "ResolveAI — Post-Resolution QA"
+slug: resolveai-post-qa
+description: >-
+  Pipeline C. Fires on case-close (via trigger). Loads the case
+  transcript, runs the QA Reviewer to score tone/correctness + predict
+  CSAT, and for cases where predicted_csat < 3.5 fires a proactive
+  outreach email (apology + manager escalation) via the Action Executor.
+
+  Outputs are persisted to `csat_predictions` by the caller.
+agent_type: oob
+category: customer-service
+icon: ClipboardCheck
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  Post-Resolution QA pipeline for ResolveAI.
+  Load the closed case → QA Reviewer scores it → on low predicted CSAT,
+  Action Executor sends a proactive outreach and flags the case for
+  manager follow-up. Each node's JSON output flows to downstream via
+  `{{node.field}}` refs.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.1
+  max_iterations: 10
+  max_tokens: 4096
+  tools:
+    - database_query
+    - agent_step
+    - human_approval
+    - email_sender
+  pipeline_config:
+    nodes:
+      - id: load_case
+        type: tool
+        tool: database_query
+        input:
+          sql: >-
+            SELECT c.id, c.customer_id, c.tier, c.intent, c.sku,
+                   c.opened_at, c.closed_at,
+                   json_agg(e.* ORDER BY e.ts) AS timeline
+            FROM cases c
+            LEFT JOIN case_events e ON e.case_id = c.id
+            WHERE c.id = :case_id
+            GROUP BY c.id
+          params:
+            case_id: "{{input.case_id}}"
+
+      - id: qa_review
+        type: agent
+        agent_slug: resolveai-qa-reviewer
+        input: >-
+          Case:     {{load_case.rows[0]}}
+          Timeline: {{load_case.rows[0].timeline}}
+        context:
+          case_id:     "{{input.case_id}}"
+          customer_id: "{{load_case.rows[0].customer_id}}"
+
+      - id: outreach_plan
+        type: structured
+        output:
+          actions:
+            - type: "apology"
+              amount_usd: null
+              rationale: >-
+                Predicted CSAT {{qa_review.predicted_csat}} with
+                red_flags {{qa_review.red_flags}}; proactive apology.
+              cites: []
+              requires_approval: false
+              approval_tier: "none"
+              channel: "email"
+              escalate_to: "manager_inbox"
+        required_if: "{{qa_review.predicted_csat < 3.5 or qa_review.proactive_outreach_recommended}}"
+
+      - id: execute_outreach
+        type: agent
+        agent_slug: resolveai-action-executor
+        input: >-
+          case_id: {{input.case_id}}
+          actions: {{outreach_plan.actions}}
+        required_if: "{{qa_review.predicted_csat < 3.5 or qa_review.proactive_outreach_recommended}}"
+
+      - id: final_report
+        type: structured
+        output:
+          case_id:                        "{{input.case_id}}"
+          tone_score:                     "{{qa_review.tone_score}}"
+          correctness_score:              "{{qa_review.correctness_score}}"
+          policy_adherence:               "{{qa_review.policy_adherence}}"
+          predicted_csat:                 "{{qa_review.predicted_csat}}"
+          predicted_nps_bucket:           "{{qa_review.predicted_nps_bucket}}"
+          red_flags:                      "{{qa_review.red_flags}}"
+          proactive_outreach_recommended: "{{qa_review.proactive_outreach_recommended}}"
+          outreach_executions:            "{{execute_outreach.executions}}"

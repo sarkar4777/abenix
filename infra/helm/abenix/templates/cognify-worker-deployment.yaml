@@ -1,0 +1,170 @@
+{{- if .Values.cognifyWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "abenix.fullname" . }}-cognify-worker
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cognify-worker
+spec:
+  replicas: {{ .Values.cognifyWorker.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "abenix.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: cognify-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "abenix.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: cognify-worker
+    spec:
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z {{ .Release.Name }}-postgresql 5432; do echo waiting for postgres; sleep 2; done']
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+        - name: wait-for-redis
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z {{ .Release.Name }}-redis-master 6379; do echo waiting for redis; sleep 2; done']
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+      containers:
+        - name: cognify-worker
+          image: "{{ .Values.cognifyWorker.image.repository }}:{{ .Values.cognifyWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.cognifyWorker.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - celery
+            - -A
+            - worker.celery_app
+            - worker
+            - -Q
+            - {{ .Values.cognifyWorker.queue | default "cognify" }}
+            - -l
+            - info
+            - --concurrency={{ .Values.cognifyWorker.concurrency | default 2 }}
+          env:
+            - name: CELERY_TASK_ACKS_LATE
+              value: "true"
+          envFrom:
+            - secretRef:
+                name: abenix-secrets
+            - configMapRef:
+                name: abenix-config
+          resources:
+            {{- toYaml .Values.cognifyWorker.resources | nindent 12 }}
+          startupProbe:
+            # Startup: check that the process is alive (not that Celery can ping itself
+            # through the broker — that's heavyweight and racy during boot).
+            exec:
+              command: ["pgrep", "-f", "celery"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            # Use a process-alive check rather than `celery inspect ping` which
+            # connects to Redis, pings, and waits for a response. If the worker
+            # is busy processing a long task the ping times out → false positive
+            # → Kubernetes kills a healthy worker → cascade to other workers.
+            exec:
+              command: ["pgrep", "-f", "celery"]
+            initialDelaySeconds: 60
+            periodSeconds: 120
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command: ["pgrep", "-f", "celery"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # Graceful drain — tell THIS worker to stop consuming, NOT a
+              # broadcast shutdown that kills all workers on the broker.
+              exec:
+                command: ["celery", "-A", "worker.celery_app", "control", "cancel_consumer", "cognify"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              # Cognify reads source documents via _extract_text from
+              # /data/uploads (same path the API and general worker
+              # mount). Without this mount the cognify worker can't
+              # read what the API uploaded — fails with FileNotFound
+              # on every doc and the job ends up status='failed'
+              # before extracting anything.
+              mountPath: /data
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          hostPath:
+            path: {{ .Values.sharedDataHostPath | default "/var/lib/abenix/data" }}
+            type: DirectoryOrCreate
+      {{- if .Values.cognifyWorker.colocateWithApi | default true }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: api
+                  app.kubernetes.io/instance: {{ .Release.Name }}
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      restartPolicy: Always
+---
+{{- if .Values.cognifyWorker.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "abenix.fullname" . }}-cognify-worker
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cognify-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "abenix.fullname" . }}-cognify-worker
+  minReplicas: {{ .Values.cognifyWorker.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.cognifyWorker.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.cognifyWorker.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,63 @@
+{{- /* Pod Disruption Budgets — only created when replicas > 1 */}}
+{{- if gt (int (.Values.api.replicaCount | default 1)) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "abenix.fullname" . }}-api
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+      app.kubernetes.io/instance: {{ .Release.Name }}
+---
+{{- end }}
+{{- if gt (int (.Values.web.replicaCount | default 1)) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "abenix.fullname" . }}-web
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: web
+      app.kubernetes.io/instance: {{ .Release.Name }}
+---
+{{- end }}
+{{- $rt := (.Values).agentRuntime | default (index .Values "agent-runtime" | default dict) }}
+{{- $rtEnabled := ne (toString ($rt.enabled | default true)) "false" }}
+{{- if and $rtEnabled (gt (int ($rt.replicaCount | default 1)) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "abenix.fullname" . }}-agent-runtime
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-runtime
+      app.kubernetes.io/instance: {{ .Release.Name }}
+---
+{{- end }}
+{{- if and .Values.cognifyWorker.enabled (gt (int (.Values.cognifyWorker.replicaCount | default 1)) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "abenix.fullname" . }}-cognify-worker
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "abenix.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: cognify-worker
+{{- end }}

@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uat-mcp
+  namespace: abenix
+  labels:
+    app: uat-mcp
+    purpose: uat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: uat-mcp
+  template:
+    metadata:
+      labels:
+        app: uat-mcp
+    spec:
+      containers:
+        - name: server
+          image: your-acr.azurecr.io/uat-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "10m", memory: "32Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: uat-mcp
+  namespace: abenix
+  labels:
+    app: uat-mcp
+spec:
+  selector:
+    app: uat-mcp
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

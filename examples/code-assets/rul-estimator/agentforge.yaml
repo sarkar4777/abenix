@@ -1,0 +1,60 @@
+name: rul-estimator
+description: >-
+  Remaining-useful-life estimator for rotating machinery. Takes a
+  recent history of health-index readings and fits an exponential
+  degradation model — the same shape used in production PHM systems
+  on turbine blades, pump bearings, and compressor valves.
+
+input_schema:
+  type: object
+  required: [readings]
+  properties:
+    readings:
+      type: array
+      minItems: 4
+      description: >-
+        Chronological history of health observations. Newest last.
+      items:
+        type: object
+        required: [timestamp, health_score]
+        properties:
+          timestamp:    { type: string, description: "ISO-8601 UTC" }
+          health_score: { type: number, description: "0..1 — higher is healthier" }
+          rms:          { type: number, description: "Optional vibration RMS" }
+    failure_threshold:
+      type: number
+      default: 0.35
+      description: "Health level below which the asset is considered failed."
+
+output_schema:
+  type: object
+  required: [rul_hours, confidence, model, trend_slope, last_health]
+  properties:
+    rul_hours:
+      type: number
+      description: "Remaining useful life in hours. 0 if already below threshold."
+    confidence:
+      type: number
+      description: "0..1 — R² of the fit vs. history."
+    model:
+      type: string
+      description: "Which model won — 'exponential' or 'linear' fallback."
+    trend_slope:
+      type: number
+      description: "Per-hour rate of health change (negative = degrading)."
+    last_health:
+      type: number
+      description: "Most recent observed health score."
+    horizon_samples:
+      type: integer
+      description: "How many readings were used for the fit."
+
+example_input:
+  readings:
+    - { timestamp: "2026-04-15T12:00:00Z", health_score: 0.92 }
+    - { timestamp: "2026-04-16T12:00:00Z", health_score: 0.88 }
+    - { timestamp: "2026-04-17T12:00:00Z", health_score: 0.83 }
+    - { timestamp: "2026-04-18T12:00:00Z", health_score: 0.76 }
+    - { timestamp: "2026-04-19T12:00:00Z", health_score: 0.68 }
+    - { timestamp: "2026-04-20T12:00:00Z", health_score: 0.59 }
+  failure_threshold: 0.35

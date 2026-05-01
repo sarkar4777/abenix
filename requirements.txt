@@ -1,0 +1,92 @@
+# Abenix — Unified Python Dependencies
+# Install: pip install -r requirements.txt
+# Python >= 3.12 required
+
+# ── Web Framework & Server ────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# ── Database & ORM ────────────────────────────────────────
+sqlalchemy[asyncio]>=2.0.30
+asyncpg>=0.29.0
+jsonpatch>=1.33
+alembic>=1.13.0
+pgvector>=0.3.0
+psycopg2-binary>=2.9.0
+
+# ── Authentication & Security ─────────────────────────────
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+
+# ── Validation & Configuration ────────────────────────────
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+
+# ── HTTP Client ───────────────────────────────────────────
+httpx>=0.27.0
+aiohttp>=3.9.0
+
+# ── Redis & Caching ──────────────────────────────────────
+redis>=5.0.0
+redisvl>=0.14.0
+
+# ── LLM Providers ────────────────────────────────────────
+anthropic>=0.25.0
+openai>=1.30.0
+google-genai>=1.0.0
+
+# ── Agent Frameworks ─────────────────────────────────────
+langgraph>=0.2.0
+langchain-core>=0.2.0
+langchain-text-splitters>=0.2.0
+
+# ── Task Queue & Scheduling ──────────────────────────────
+celery[redis]>=5.4.0
+apscheduler>=3.10.0
+croniter>=1.4.0
+
+# ── Event Streaming ─────────────────────────────────────
+aiokafka>=0.10.0
+
+# ── Document Processing ──────────────────────────────────
+PyPDF2>=3.0.0
+python-docx>=1.0.0
+openpyxl>=3.1.0
+
+# ── Data Processing (enterprise tools) ───────────────────
+pandas>=2.2.0
+numpy>=1.26.0
+
+# ── Search & Web ─────────────────────────────────────────
+duckduckgo-search>=6.0.0
+
+# ── Vector Store ─────────────────────────────────────────
+pinecone>=7.0.0
+
+# ── Cloud Storage (enterprise tools) ─────────────────────
+boto3>=1.34.0
+# google-cloud-storage>=2.16.0  # Optional: for GCS support
+# azure-storage-blob>=12.19.0   # Optional: for Azure Blob support
+
+# ── Payment Processing ───────────────────────────────────
+stripe>=9.0.0
+
+# ── YAML & Config ────────────────────────────────────────
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+
+# ── Observability & Monitoring ───────────────────────────
+structlog>=24.1.0
+prometheus-client>=0.20.0
+langfuse>=2.0.0
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+opentelemetry-instrumentation-fastapi>=0.45b0
+opentelemetry-exporter-otlp-proto-grpc>=1.24.0
+
+# ── Development & Testing ────────────────────────────────
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+black>=24.4.0
+ruff>=0.4.0

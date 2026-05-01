@@ -1,0 +1,52 @@
+name: IoT Pump DSP Analyzer
+slug: iot-pump-dsp-analyzer
+description: >-
+  Deterministic vibration-signal analyzer. Takes one window of raw
+  accelerometer samples, calls the uploaded Go `pump-dsp-correction`
+  asset in a sandboxed k8s Job, and returns structured health
+  indicators: RMS, peak, crest factor, kurtosis, dominant FFT
+  frequencies, and per-fault scores (bearing / imbalance /
+  misalignment / cavitation). Used as the first stage of the
+  industrial IoT pump pipeline.
+agent_type: oob
+category: engineering
+icon: Activity
+version: "1.0.0"
+status: active
+runtime_pool: default
+
+model_config:
+  model: gemini-2.0-flash
+  temperature: 0.0
+  max_iterations: 2
+  tools:
+    - code_asset
+
+tool_config:
+  code_asset:
+    usage_instructions: >-
+      The code_asset tool is pre-wired at deploy time to the
+      uploaded pump-dsp-correction Go program. Call it exactly once
+      per window with the user-supplied `input` object. The
+      pre-configured parameter_defaults will inject code_asset_id;
+      you only need to pass `input`.
+    max_calls: 1
+    require_approval: false
+
+system_prompt: |
+  You are a deterministic vibration-analysis worker. For each
+  incoming window of accelerometer samples, you MUST:
+
+  1. Parse the user message as a JSON object with fields:
+       samples (array<number>), sample_rate_hz (int), sensor_id (str),
+       optional shaft_rpm (number).
+  2. Invoke the code_asset tool ONCE with `input` set to that JSON.
+     Do NOT re-invoke on non-empty responses.
+  3. Return the tool's `result` field verbatim as a JSON object.
+     Do NOT add prose, do NOT add markdown fences.
+
+  Never hallucinate frequencies or fault scores. If the tool errors,
+  return `{"error": "<message>"}` and stop.
+
+example_prompts:
+  - '{"samples":[0.01,0.03,...],"sample_rate_hz":2000,"sensor_id":"PUMP-A-01","shaft_rpm":1800}'

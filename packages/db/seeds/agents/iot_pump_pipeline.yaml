@@ -1,0 +1,349 @@
+name: "IoT Pump Health Pipeline"
+slug: iot-pump-pipeline
+description: >-
+  Industrial-IoT pipeline for rotating-machinery predictive
+  maintenance. Takes one window of raw vibration samples, runs
+  the uploaded Go DSP program in a sandboxed k8s Job, asks an LLM
+  to interpret the signature against a fault-mode knowledge base,
+  estimates remaining useful life with an inline exponential fit,
+  and routes to maintenance planning when severity crosses WARN
+  or CRITICAL.
+
+  Requires one uploaded code asset:
+    * pump_dsp_asset_id — Go pump-dsp-correction
+
+  This ID is passed in as pipeline context by the /industrial-iot
+  page once the "Deploy" buttons complete. Until then the pipeline
+  short-circuits with a clear error.
+agent_type: oob
+category: engineering
+icon: Activity
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  Industrial IoT pump-health pipeline. Orchestrates a Go DSP
+  program (sandboxed k8s job) plus an LLM diagnosis plus an
+  inline RUL fit plus conditional maintenance planning.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.2
+  max_iterations: 20
+  max_tokens: 4096
+  tools:
+    - code_asset
+    - code_executor
+    - agent_step
+    - database_query
+    - database_writer
+    - current_time
+    - knowledge_search
+    - email_sender
+
+input_variables:
+  - name: message
+    type: string
+    description: >-
+      JSON window with fields {samples, sample_rate_hz, sensor_id,
+      shaft_rpm}. Typically assembled by the /industrial-iot page.
+    required: true
+  - name: pump_dsp_asset_id
+    type: string
+    description: "UUID of the uploaded pump-dsp-correction code asset."
+    required: true
+  - name: asset_context
+    type: object
+    description: >-
+      Optional metadata used in the diagnosis + planner steps.
+    required: false
+
+example_prompts:
+  - '{"samples":[0.01,0.03,-0.02],"sample_rate_hz":2000,"sensor_id":"PUMP-A-01","shaft_rpm":1800}'
+
+pipeline_config:
+  nodes:
+    - id: timestamp
+      tool_name: current_time
+      label: "Timestamp"
+      arguments:
+        timezone: "UTC"
+      depends_on: []
+      position: { x: 80, y: 60 }
+
+    - id: validate_input
+      tool_name: code_executor
+      label: "1. Validate Window"
+      arguments:
+        code: |
+          # The pipeline engine injects a `context` dict that holds:
+          #   - user-supplied context keys (pump_dsp_asset_id, asset_context)
+          #   - the 'message' field (user message)
+          #   - every prior node's output by node_id
+          import json
+
+          raw = context.get("message", "{}")
+          asset_id = context.get("pump_dsp_asset_id", "")
+          if isinstance(raw, str):
+              try:
+                  data = json.loads(raw)
+              except Exception:
+                  data = {}
+          elif isinstance(raw, dict):
+              data = raw
+          else:
+              data = {}
+
+          if not asset_id:
+              result = {
+                  "ok": False,
+                  "error": "ASSET_NOT_DEPLOYED",
+                  "message": (
+                      "pump_dsp_asset_id missing from context. "
+                      "Deploy the pump-dsp-correction asset from the "
+                      "Industrial IoT page first."
+                  ),
+              }
+          elif not data.get("samples") or not data.get("sample_rate_hz"):
+              result = {
+                  "ok": False,
+                  "error": "BAD_INPUT",
+                  "message": "window requires samples[] and sample_rate_hz",
+              }
+          else:
+              result = {
+                  "ok": True,
+                  "window": data,
+                  "asset_id": asset_id,
+                  "sensor_id": data.get("sensor_id"),
+              }
+          print(json.dumps(result))
+      depends_on:
+        - timestamp
+      position: { x: 360, y: 60 }
+
+    - id: dsp
+      tool_name: code_asset
+      label: "2. Run Go DSP (k8s Job)"
+      arguments:
+        code_asset_id: "{{context.pump_dsp_asset_id}}"
+        timeout_seconds: 120
+        memory_mb: 512
+      input_mappings:
+        input:
+          source_node: validate_input
+          source_field: window
+      depends_on:
+        - validate_input
+      position: { x: 360, y: 220 }
+
+    - id: diagnose
+      tool_name: agent_step
+      label: "3. LLM Diagnosis"
+      arguments:
+        system_prompt: |
+          You are a predictive-maintenance diagnostician for
+          rotating machinery. Interpret the FFT + metric analyzer
+          output: bearing faults show broadband high-frequency
+          energy plus elevated kurtosis / crest factor; imbalance
+          dominates at 1x shaft RPM; misalignment has a strong 2x
+          component; cavitation is broadband without strong line
+          content.
+
+          Call knowledge_search AT MOST ONCE with a query like
+          "bearing fault 2x shaft frequency" only if the pattern is
+          ambiguous.
+
+          Return EXACTLY this JSON (no markdown):
+            {
+              "severity": "OK" | "WATCH" | "WARN" | "CRITICAL",
+              "root_cause": "bearing" | "imbalance" | "misalignment" | "cavitation" | "normal",
+              "confidence": 0.0-1.0,
+              "rationale": "2-3 sentences",
+              "recommended_next_reading_hours": 24 | 8 | 2 | 1
+            }
+        input_message: "Diagnose this window: {{dsp.result}}"
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 4
+        temperature: 0.2
+      depends_on:
+        - dsp
+      position: { x: 360, y: 380 }
+
+    - id: rul
+      tool_name: code_executor
+      label: "4. Remaining Useful Life (inline exponential fit)"
+      arguments:
+        code: |
+          # Use the pattern of dsp's fault_scores + diagnosis severity to
+          # assign a synthetic health score for THIS window, then fit an
+          # exponential through a short rolling buffer. In a real
+          # deployment this would call the uploaded rul-estimator asset
+          # against a 7-day history from the DB — kept inline here so
+          # the pipeline doesn't depend on historical rows existing.
+          import json, math
+
+          diag_node = context.get("diagnose", {}) or {}
+          resp = diag_node.get("response") if isinstance(diag_node, dict) else {}
+          if isinstance(resp, str):
+              try: resp = json.loads(resp)
+              except Exception: resp = {}
+          sev = (resp or {}).get("severity") or "OK"
+          current_health = {
+              "OK": 0.95, "WATCH": 0.78, "WARN": 0.55, "CRITICAL": 0.30,
+          }.get(sev, 0.9)
+
+          dsp_out = context.get("dsp", {}) or {}
+          if isinstance(dsp_out, str):
+              try: dsp_out = json.loads(dsp_out)
+              except Exception: dsp_out = {}
+          core = dsp_out.get("result") if isinstance(dsp_out, dict) else None
+          core = core if isinstance(core, dict) else dsp_out
+
+          # Single-window RUL based on severity + bearing score (proxy
+          # for damage-progression rate). Good enough for the showcase.
+          fs = (core.get("fault_scores") if isinstance(core, dict) else None) or {}
+          bearing = float(fs.get("bearing") or 0)
+          imbalance = float(fs.get("imbalance") or 0)
+          damage_rate_per_hour = max(bearing, imbalance) * 0.01 + 0.0005
+          if current_health > 0.35 and damage_rate_per_hour > 0:
+              rul_hours = (current_health - 0.35) / damage_rate_per_hour
+          else:
+              rul_hours = 0.0
+          result = {
+              "rul_hours": round(rul_hours, 2),
+              "confidence": round(0.5 + 0.1 * bearing + 0.1 * imbalance, 2),
+              "model": "rule_of_thumb",
+              "last_health": current_health,
+          }
+          print(json.dumps(result))
+      depends_on:
+        - diagnose
+      position: { x: 100, y: 540 }
+
+    - id: severity_router
+      tool_name: code_executor
+      label: "5. Route by Severity"
+      arguments:
+        code: |
+          import json
+          diag = context.get("diagnose", {}) or {}
+          resp = diag.get("response") if isinstance(diag, dict) else diag
+          if isinstance(resp, str):
+              try: resp = json.loads(resp)
+              except Exception: resp = {}
+          sev = (resp or {}).get("severity") or "OK"
+          result = {
+              "severity": sev,
+              "plan_required": sev in ("WARN", "CRITICAL"),
+              "alert_required": sev == "CRITICAL",
+          }
+          print(json.dumps(result))
+      depends_on:
+        - diagnose
+      position: { x: 620, y: 540 }
+
+    - id: plan_maintenance
+      tool_name: agent_step
+      label: "6. Maintenance Planner (CRITICAL/WARN only)"
+      condition:
+        source_node: severity_router
+        field: plan_required
+        operator: eq
+        value: true
+      arguments:
+        system_prompt: |
+          You are a maintenance planner. Produce a structured work
+          order. Priority: CRITICAL -> P1, WARN -> P2, WATCH -> P3;
+          bump one level tighter if rul_hours < 48.
+
+          Return JSON:
+            {
+              "work_order_id": "<short id>",
+              "priority": "P1" | "P2" | "P3",
+              "title": "<short>",
+              "description": "<1-2 sentences>",
+              "parts": ["..."],
+              "estimated_labour_hours": <number>,
+              "required_crew": ["..."],
+              "start_window": "ASAP" | "next_shift" | "within_7_days"
+            }
+        input_message: |
+          Plan work for:
+            diagnosis: {{diagnose.response}}
+            rul: {{rul.__all__}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 5
+        temperature: 0.3
+      depends_on:
+        - severity_router
+        - rul
+      position: { x: 620, y: 700 }
+
+    - id: final_report
+      tool_name: code_executor
+      label: "7. Assemble Final Report"
+      arguments:
+        code: |
+          import json
+
+          def as_dict(x):
+              if isinstance(x, dict): return x
+              if isinstance(x, str):
+                  try: return json.loads(x)
+                  except Exception: return {"raw": x}
+              return {}
+
+          validate = as_dict(context.get("validate_input"))
+          if not validate.get("ok"):
+              result = {
+                  "status": "blocked",
+                  "error": validate.get("error"),
+                  "message": validate.get("message"),
+              }
+          else:
+              dsp = as_dict(context.get("dsp"))
+              diag_env = as_dict(context.get("diagnose"))
+              diag = as_dict(diag_env.get("response") if isinstance(diag_env, dict) else {})
+              rul_out = as_dict(context.get("rul"))
+              router = as_dict(context.get("severity_router"))
+              plan_env = as_dict(context.get("plan_maintenance"))
+              plan = as_dict(plan_env.get("response") if isinstance(plan_env, dict) else {})
+
+              # dsp node produces {result: {...}} from the code_asset tool
+              dsp_core = as_dict(dsp.get("result") or dsp)
+
+              result = {
+                  "status": "ok",
+                  "timestamp": context.get("timestamp"),
+                  "sensor_id": (validate.get("window") or {}).get("sensor_id"),
+                  "dsp": dsp_core,
+                  "diagnosis": diag,
+                  "rul_hours": rul_out.get("rul_hours"),
+                  "rul_confidence": rul_out.get("confidence"),
+                  "severity": router.get("severity"),
+                  "work_order": plan or None,
+              }
+          print(json.dumps(result, default=str))
+      depends_on:
+        - severity_router
+        - rul
+        - plan_maintenance
+      position: { x: 360, y: 860 }
+
+  edges:
+    - { source: timestamp,        target: validate_input }
+    - { source: validate_input,   target: dsp }
+    - { source: dsp,              target: diagnose }
+    - { source: diagnose,         target: rul }
+    - { source: diagnose,         target: severity_router }
+    - { source: severity_router,  target: plan_maintenance }
+    - { source: rul,              target: plan_maintenance }
+    - { source: severity_router,  target: final_report }
+    - { source: rul,              target: final_report }
+    - { source: plan_maintenance, target: final_report }
+
+  viewport: { x: 0, y: 0, zoom: 0.7 }

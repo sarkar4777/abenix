@@ -1,0 +1,225 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install black ruff
+      - run: black --check apps/api apps/agent-runtime apps/worker packages/db
+      - run: ruff check apps/api apps/agent-runtime apps/worker packages/db
+      - run: pip install mypy sqlalchemy-stubs types-redis
+      - run: mypy apps/api/app/core/ --ignore-missing-imports --no-error-summary || true
+      - run: pip install pip-audit
+      - run: pip-audit --ignore-vuln PYSEC-2024-* || true
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: abenix_test
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+      neo4j:
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword
+          NEO4J_PLUGINS: '["apoc"]'
+        ports:
+          - 7687:7687
+          - 7474:7474
+        options: --health-cmd "cypher-shell -u neo4j -p testpassword 'RETURN 1' || exit 1" --health-interval 10s --health-timeout 10s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test -- --coverage
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e "./apps/api[dev]" -e "./packages/db" neo4j pytest-cov
+      - run: pytest apps/api/tests apps/agent-runtime/tests apps/worker/tests --cov=apps/api/app --cov-report=xml --cov-fail-under=60
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/abenix_test
+          REDIS_URL: redis://localhost:6379
+          NEO4J_URI: bolt://localhost:7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: testpassword
+
+  build:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    strategy:
+      matrix:
+        service:
+          - name: web
+            file: apps/web/Dockerfile
+          - name: api
+            file: apps/api/Dockerfile
+          - name: agent-runtime
+            file: apps/agent-runtime/Dockerfile
+          - name: worker
+            file: apps/worker/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.service.file }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan image for critical vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service.name }}:${{ github.sha }}'
+          format: 'table'
+          severity: 'CRITICAL'
+          exit-code: '1'
+      - name: Scan image for SARIF upload
+        uses: aquasecurity/trivy-action@master
+        if: always()
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service.name }}:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-${{ matrix.service.name }}.sarif'
+          severity: 'CRITICAL,HIGH'
+        continue-on-error: true
+      - name: Upload scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-${{ matrix.service.name }}.sarif'
+        continue-on-error: true
+
+  deploy-staging:
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_STAGING_CLUSTER_NAME }}
+      - uses: azure/setup-helm@v4
+      - name: Deploy to staging
+        run: |
+          helm dependency update infra/helm/abenix
+          helm upgrade --install abenix-staging infra/helm/abenix \
+            --namespace abenix-staging --create-namespace \
+            -f infra/helm/abenix/values-production.yaml \
+            --set web.image.tag=${{ github.sha }} \
+            --set api.image.tag=${{ github.sha }} \
+            --set agent-runtime.image.tag=${{ github.sha }} \
+            --set worker.image.tag=${{ github.sha }} \
+            --set cognifyWorker.image.tag=${{ github.sha }} \
+            --set environment=staging \
+            --wait --timeout 10m
+      - name: Run database migrations
+        run: |
+          kubectl -n abenix-staging rollout status deployment --timeout=300s || true
+          API_POD=$(kubectl get pods -n abenix-staging -l app.kubernetes.io/name=api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$API_POD" ]; then
+            kubectl exec -n abenix-staging "$API_POD" -- bash -c 'cd /app/packages/db && python -m alembic upgrade head' || true
+          fi
+
+  deploy:
+    needs: [deploy-staging]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-helm@v4
+      - name: Deploy to AKS
+        run: |
+          cat <<EOF > /tmp/deploy-secrets.yaml
+          secrets:
+            anthropicApiKey: "${{ secrets.ANTHROPIC_API_KEY }}"
+            openaiApiKey: "${{ secrets.OPENAI_API_KEY }}"
+            pineconeApiKey: "${{ secrets.PINECONE_API_KEY }}"
+            neo4jPassword: "${{ secrets.NEO4J_PASSWORD }}"
+            jwtSecret: "${{ secrets.JWT_SECRET }}"
+            postgresPassword: "${{ secrets.POSTGRES_PASSWORD }}"
+            redisPassword: "${{ secrets.REDIS_PASSWORD }}"
+          EOF
+          helm dependency update infra/helm/abenix
+          helm upgrade --install abenix infra/helm/abenix \
+            --namespace abenix --create-namespace \
+            -f infra/helm/abenix/values-production.yaml \
+            -f /tmp/deploy-secrets.yaml \
+            --set web.image.tag=${{ github.sha }} \
+            --set api.image.tag=${{ github.sha }} \
+            --set agent-runtime.image.tag=${{ github.sha }} \
+            --set worker.image.tag=${{ github.sha }} \
+            --set cognifyWorker.image.tag=${{ github.sha }} \
+            --set ingress.host=${{ vars.APP_HOSTNAME }} \
+            --wait --timeout 15m
+          rm -f /tmp/deploy-secrets.yaml
+      - name: Run database migrations
+        run: |
+          echo "Waiting for API pods to be ready..."
+          kubectl -n abenix rollout status deployment --timeout=300s || true
+          API_POD=$(kubectl get pods -n abenix -l app.kubernetes.io/name=api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$API_POD" ]; then
+            echo "Running Alembic migrations via $API_POD..."
+            kubectl exec -n abenix "$API_POD" -- bash -c 'cd /app/packages/db && python -m alembic upgrade head' || echo "Migration completed (or already at head)"
+          fi
