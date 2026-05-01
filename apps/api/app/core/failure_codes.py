@@ -26,12 +26,6 @@ _RULES: list[tuple[str, str]] = [
     (r"deadline\s*exceeded|timeout|timed\s*out", "SANDBOX_TIMEOUT"),
     (r"exit\s*code\s*[1-9]|non.?zero.*exit", "SANDBOX_NONZERO_EXIT"),
     (r"image.*not.*allow|allow.?list", "SANDBOX_IMAGE_BLOCKED"),
-    # Tool layer
-    (r"tool.*not.*found|unknown\s+tool", "TOOL_NOT_FOUND"),
-    (r"toolerror|tool.*error|tool.*exception", "TOOL_ERROR"),
-    # Budget / quota
-    (r"budget|quota|insufficient.*credit", "BUDGET_EXCEEDED"),
-    (r"rate.?limit.*user|too.*many.*requests", "RATE_LIMITED"),
     # Moderation — match BEFORE the generic tool-error rule so a
     # ModerationBlocked exception is classified by policy, not by the
     # fact that it raised from a tool context.
@@ -39,6 +33,12 @@ _RULES: list[tuple[str, str]] = [
         r"moderation\s*blocked|policy\s*triggered|content\s*violation",
         "MODERATION_BLOCKED",
     ),
+    # Tool layer
+    (r"tool.*not.*found|unknown\s+tool", "TOOL_NOT_FOUND"),
+    (r"toolerror|tool.*error|tool.*exception", "TOOL_ERROR"),
+    # Budget / quota
+    (r"budget|quota|insufficient.*credit", "BUDGET_EXCEEDED"),
+    (r"rate.?limit.*user|too.*many.*requests", "RATE_LIMITED"),
     # Infra
     (r"connection\s*(refused|reset)|broken.*pipe|server\s*disconnect", "INFRA_CRASH"),
     (r"unauthorized|forbidden|401|403", "INFRA_AUTH_ERROR"),
