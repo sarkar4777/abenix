@@ -635,6 +635,9 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <Hero src={SS('16-sdk-playground.png')} alt="SDK Playground" />
             <p><strong className="text-white">Use cases supported:</strong> one-shot, streaming, KB search, Cognify, batch, HITL.</p>
             <p><strong className="text-white">Run it in-browser:</strong> Python code can be executed in a sandbox with an ephemeral 1-hour API key minted automatically. TypeScript is copy-only in v1.</p>
+            <p className="pt-2 border-t border-slate-800/40 text-slate-400 text-[12.5px]">
+              <strong className="text-white">Three SDKs ship today.</strong> Python (<code className="text-cyan-300">packages/sdk/python</code>), TypeScript (<code className="text-cyan-300">packages/sdk/js</code>), and Java/JVM (<code className="text-cyan-300">claimsiq/sdk</code>). The Java SDK is stdlib-only on its public surface — JDK 21 <code>HttpClient</code> for HTTP+SSE, Jackson for JSON, SLF4J for logging — so Kotlin and Scala consumers get zero glue. Public types: <code className="text-cyan-300">Abenix</code> (entry point), <code className="text-cyan-300">ActingSubject</code>, <code className="text-cyan-300">ExecutionResult</code>, <code className="text-cyan-300">WatchStream</code> + <code className="text-cyan-300">SseWatchStream</code> for live DAG updates over SSE, <code className="text-cyan-300">DagSnapshot</code>, <code className="text-cyan-300">AbenixException</code>. ClaimsIQ's <code>ClaimsService</code> calls <code>forge.execute(...)</code> for every adjudication and the Live DAG view subscribes to <code>forge.watch(...)</code>.
+            </p>
           </div>
         ),
       },
