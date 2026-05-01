@@ -69,6 +69,7 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
 
 
 async def _mark_done(execution_id: str, status: str, output: str | None, error: str | None) -> None:
+    from datetime import datetime, timezone
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
@@ -82,11 +83,27 @@ async def _mark_done(execution_id: str, status: str, output: str | None, error: 
     Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     target_status = ExecutionStatus.COMPLETED if status == "completed" else ExecutionStatus.FAILED
+    values: dict[str, Any] = {
+        "status": target_status,
+        "output_message": output,
+        "error_message": error,
+        "completed_at": datetime.now(timezone.utc),
+    }
+    # On failure, classify the error_message into a stable failure_code so
+    # /alerts can group it and the Surgeon has something to act on.
+    if target_status == ExecutionStatus.FAILED and error:
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
+            from app.core.failure_codes import classify_exception  # type: ignore
+            values["failure_code"] = classify_exception(Exception(error))
+        except Exception:
+            # Fallback: a generic code so /alerts at least groups by something.
+            values["failure_code"] = "PIPELINE_NODE_FAILED"
     async with Session() as db:
         await db.execute(
             update(Execution)
             .where(Execution.id == uuid.UUID(execution_id))
-            .values(status=target_status, output_message=output, error_message=error)
+            .values(**values)
         )
         await db.commit()
 
@@ -195,18 +212,32 @@ async def _run_one(payload: dict) -> None:
             serialized = serialize_pipeline_result(result)
             final_text = ""
             if result.final_output:
-                # Pipeline outputs (especially structured reports with
-                # citations + action_plan) routinely exceed 4 KB, so we
-                # cap at 50 KB — same ceiling the DB output_message uses.
+                # 50 KB cap matches the DB output_message column.
                 final_text = (
                     result.final_output if isinstance(result.final_output, str)
                     else json.dumps(result.final_output, default=str)[:50_000]
                 )
 
-            await _mark_done(execution_id, "completed", final_text, None)
+            # Translate the executor's status to the DB row's status.
+            # Without this, every pipeline run shows status=completed even
+            # when one or more nodes failed — masking real failures from
+            # /executions, /alerts, and the Surgeon's failure-diff capture.
+            pipeline_status = "completed" if result.status == "completed" else "failed"
+            failed_nodes = serialized.get("failed_nodes") or []
+            err_text = None
+            if pipeline_status == "failed":
+                node_errs = []
+                for nid, nr in (serialized.get("node_results") or {}).items():
+                    if (nr.get("status") == "failed") and nr.get("error"):
+                        node_errs.append(f"{nid}: {nr['error']}")
+                err_text = ("; ".join(node_errs) or f"failed nodes: {','.join(failed_nodes)}")[:2000]
+
+            await _mark_done(execution_id, pipeline_status, final_text, err_text)
             await _publish(execution_id, {
-                "event": "done", "execution_id": execution_id,
+                "event": "done" if pipeline_status == "completed" else "error",
+                "execution_id": execution_id,
                 "output": final_text, "summary": serialized,
+                **({"error": err_text} if err_text else {}),
             })
         else:
             from engine.agent_executor import (
