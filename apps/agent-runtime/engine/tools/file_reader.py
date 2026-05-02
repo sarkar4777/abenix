@@ -14,28 +14,50 @@ MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
 class FileReaderTool(BaseTool):
     name = "file_reader"
     description = (
-        "Read and extract text content from uploaded files. "
-        "Supports PDF, DOCX, TXT, CSV, MD, and JSON formats."
+        "Read and extract text content from a file. Pass either `file_path` "
+        "(an on-disk file the agent has access to) OR `text` (inline content "
+        "that the tool will save to a temp file first). Supports PDF, DOCX, "
+        "TXT, CSV, MD, and JSON formats."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Path to the file to read",
+                "description": "Path to the file to read.",
+            },
+            "text": {
+                "type": "string",
+                "description": (
+                    "Inline content to read. Use this when the document is "
+                    "provided in the chat directly rather than as an upload. "
+                    "The tool writes it to a temp file before parsing."
+                ),
+            },
+            "format": {
+                "type": "string",
+                "description": "Format hint when supplying `text` (pdf, docx, txt, csv, md, json). Auto-detected from file_path otherwise.",
+                "enum": ["pdf", "docx", "txt", "csv", "md", "json"],
             },
         },
-        "required": ["file_path"],
+        "required": [],
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        file_path = arguments.get("file_path", "")
-        if not file_path:
-            return ToolResult(content="Error: file_path is required", is_error=True)
+        from engine.tools._inline_file import materialise_path
 
-        path = Path(file_path)
+        file_path = arguments.get("file_path") or arguments.get("path")
+        # materialise_path handles BOTH inline `text` and on-disk paths.
+        # Pass the existing arg dict but with a unified `path` key.
+        norm_args = dict(arguments)
+        if file_path and not norm_args.get("path"):
+            norm_args["path"] = file_path
+        resolved, err = materialise_path(norm_args, default_ext="txt")
+        if err:
+            return ToolResult(content=err, is_error=True)
+        path = Path(resolved)
         if not path.exists():
-            return ToolResult(content=f"File not found: {file_path}", is_error=True)
+            return ToolResult(content=f"File not found: {resolved}", is_error=True)
 
         if path.stat().st_size > MAX_FILE_SIZE:
             return ToolResult(content="File exceeds 50MB size limit", is_error=True)

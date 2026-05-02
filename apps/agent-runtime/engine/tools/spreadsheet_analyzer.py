@@ -78,15 +78,21 @@ class SpreadsheetAnalyzerTool(BaseTool):
                 "default": 100,
             },
         },
-        "required": ["file_path"],
+        "required": [],
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        file_path = arguments.get("file_path", "")
-        operation = arguments.get("operation", "overview")
+        from engine.tools._inline_file import materialise_path
 
-        if not file_path:
-            return ToolResult(content="Error: file_path is required", is_error=True)
+        operation = arguments.get("operation", "overview")
+        # Allow either `file_path` (legacy) or `path`/`text` (new).
+        norm = dict(arguments)
+        if arguments.get("file_path") and not norm.get("path"):
+            norm["path"] = arguments["file_path"]
+        resolved, err = materialise_path(norm, default_ext="csv")
+        if err:
+            return ToolResult(content=err, is_error=True)
+        file_path = resolved
 
         path = Path(file_path)
         if not path.exists():

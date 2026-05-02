@@ -158,9 +158,25 @@ class AtlasQueryTool(BaseTool):
         self.allowed_graph_ids = allowed_graph_ids or []
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        # Accept three input shapes — the LLM tends to pass `query` or
+        # `q`, the docs show `patterns: [{label_like: ...}]`, and some
+        # seeded pipelines used `patterns: ["Asset"]` (string list).
+        # Normalize all of them to the canonical {label_like} shape.
         patterns = arguments.get("patterns") or []
         if not patterns:
-            return ToolResult(content="No patterns supplied.", is_error=True)
+            single = arguments.get("query") or arguments.get("q")
+            if single:
+                patterns = [single]
+        if not patterns:
+            return ToolResult(
+                content=(
+                    "No patterns supplied. Pass either `patterns: [{label_like: 'Asset'}]` "
+                    "or `query: 'Asset'` to search the ontology."
+                ),
+                is_error=True,
+            )
+        # Coerce string patterns to the canonical {label_like} object.
+        patterns = [{"label_like": p} if isinstance(p, str) else p for p in patterns]
         graph_id = arguments.get("graph_id")
         limit = max(1, min(int(arguments.get("limit") or 25), 200))
 

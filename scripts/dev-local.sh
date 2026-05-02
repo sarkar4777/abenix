@@ -67,6 +67,21 @@ fi
 : "${SANDBOXED_JOB_ALLOWED_IMAGES:=alpine:3.20,busybox:1.36,python:3.12-slim,gcc:13,golang:1.22-alpine,rust:1.80-slim,eclipse-temurin:21-jdk,node:20-alpine,sbtscala/scala-sbt:eclipse-temurin-jammy-21.0.2_13_1.10.0_3.4.2,zenika/kotlin:1.9.24-jdk-jre-alpine-slim,mcr.microsoft.com/dotnet/sdk:8.0,ruby:3.3-alpine}"
 export SANDBOXED_JOB_ENABLED SANDBOXED_JOB_ALLOWED_IMAGES
 
+# ── Local data directories (k8s parity) ──────────────────────
+# In k8s these point to the /data PVC. Locally we use $ROOT_DIR/.data
+# so file-writing tools (code_executor, data_exporter, ml_model,
+# code_asset, sandboxed_job) work without the developer setting
+# anything. Each var is overridable via .env if a developer prefers
+# a different location.
+: "${EXPORT_DIR:=$ROOT_DIR/.data/exports}"
+: "${UPLOAD_DIR:=$ROOT_DIR/.data/uploads}"
+: "${ML_MODELS_DIR:=$ROOT_DIR/.data/ml-models}"
+: "${CODE_ASSET_STORE:=$ROOT_DIR/.data/code-assets}"
+: "${CODE_ASSET_BUILD_CACHE:=$ROOT_DIR/.data/code-asset-cache}"
+mkdir -p "$EXPORT_DIR" "$UPLOAD_DIR" "$ML_MODELS_DIR" \
+         "$CODE_ASSET_STORE" "$CODE_ASSET_BUILD_CACHE" 2>/dev/null || true
+export EXPORT_DIR UPLOAD_DIR ML_MODELS_DIR CODE_ASSET_STORE CODE_ASSET_BUILD_CACHE
+
 # ── Kill process on a port (cross-platform) ──────────────────
 kill_port() {
   local port=$1

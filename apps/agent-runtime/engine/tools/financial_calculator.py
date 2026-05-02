@@ -12,11 +12,18 @@ from engine.tools.base import BaseTool, ToolResult
 class FinancialCalculatorTool(BaseTool):
     name = "financial_calculator"
     description = (
-        "Perform advanced financial calculations including NPV (net present value), "
-        "IRR (internal rate of return), LCOE (levelized cost of energy), DCF (discounted "
-        "cash flow), loan amortization, price escalation modeling, bond pricing, "
-        "WACC, depreciation schedules, and breakeven analysis. Returns detailed "
-        "calculation breakdowns."
+        "Run a finance calculation immediately — never ask the user clarifying "
+        "questions about compounding/frequency; assume annual compounding and "
+        "frequency=1 unless they say otherwise.\n"
+        "Supported `calculation` values:\n"
+        "  • future_value  — params: {present, rate, years, [compounding=annual]}\n"
+        "  • present_value — params: {future, rate, years, [compounding=annual]}\n"
+        "  • compound_interest — params: {principal, rate, years, [n=1]}\n"
+        "  • npv  — params: {discount_rate, cash_flows[], initial_investment}\n"
+        "  • irr  — params: {cash_flows[]}\n"
+        "  • lcoe / dcf / amortization / escalation / bond_price / wacc /\n"
+        "    depreciation / breakeven / payback_period / roi / cagr — see schema.\n"
+        "Returns numeric result + breakdown."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -24,6 +31,9 @@ class FinancialCalculatorTool(BaseTool):
             "calculation": {
                 "type": "string",
                 "enum": [
+                    "future_value",
+                    "present_value",
+                    "compound_interest",
                     "npv",
                     "irr",
                     "lcoe",
@@ -58,6 +68,9 @@ class FinancialCalculatorTool(BaseTool):
             )
 
         calculators = {
+            "future_value": self._future_value,
+            "present_value": self._present_value,
+            "compound_interest": self._compound_interest,
             "npv": self._npv,
             "irr": self._irr,
             "lcoe": self._lcoe,
@@ -652,4 +665,93 @@ class FinancialCalculatorTool(BaseTool):
             "years": years,
             "total_growth": round((ending_value / beginning_value - 1) * 100, 2),
             "projections": projections,
+        }
+
+    @staticmethod
+    def _periods_per_year(compounding: str) -> int:
+        return {
+            "annual": 1,
+            "annually": 1,
+            "semi-annual": 2,
+            "semiannual": 2,
+            "quarterly": 4,
+            "monthly": 12,
+            "daily": 365,
+            "continuous": -1,
+        }.get((compounding or "annual").lower(), 1)
+
+    def _future_value(self, params: dict[str, Any]) -> dict[str, Any]:
+        """FV = PV * (1 + r/n)^(n*t)  (or PV * e^(rt) for continuous)."""
+        present = params.get("present", params.get("principal", params.get("pv", 0)))
+        rate = params.get("rate", params.get("r", 0))
+        years = params.get("years", params.get("t", 0))
+        n = params.get("n") or self._periods_per_year(
+            params.get("compounding", "annual")
+        )
+        if not present or years <= 0:
+            return {"error": "present (or principal) and years must be positive"}
+        if n == -1:
+            fv = present * math.exp(rate * years)
+        else:
+            fv = present * (1 + rate / n) ** (n * years)
+        return {
+            "future_value": round(fv, 2),
+            "present_value": present,
+            "annual_rate": rate,
+            "years": years,
+            "compounding_periods_per_year": n if n != -1 else "continuous",
+            "interest_earned": round(fv - present, 2),
+        }
+
+    def _present_value(self, params: dict[str, Any]) -> dict[str, Any]:
+        """PV = FV / (1 + r/n)^(n*t)."""
+        future = params.get("future", params.get("fv", 0))
+        rate = params.get("rate", params.get("r", 0))
+        years = params.get("years", params.get("t", 0))
+        n = params.get("n") or self._periods_per_year(
+            params.get("compounding", "annual")
+        )
+        if not future or years <= 0:
+            return {"error": "future (or fv) and years must be positive"}
+        if n == -1:
+            pv = future * math.exp(-rate * years)
+        else:
+            pv = future / ((1 + rate / n) ** (n * years))
+        return {
+            "present_value": round(pv, 2),
+            "future_value": future,
+            "annual_rate": rate,
+            "years": years,
+            "compounding_periods_per_year": n if n != -1 else "continuous",
+            "discount_amount": round(future - pv, 2),
+        }
+
+    def _compound_interest(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Convenience wrapper around future_value that returns just the
+        interest portion + the year-by-year balance schedule."""
+        principal = params.get("principal", params.get("present", 0))
+        rate = params.get("rate", params.get("r", 0))
+        years = params.get("years", params.get("t", 0))
+        n = params.get("n") or self._periods_per_year(
+            params.get("compounding", "annual")
+        )
+        if not principal or years <= 0:
+            return {"error": "principal and years must be positive"}
+        schedule = []
+        for y in range(1, int(years) + 1):
+            balance = (
+                principal * (1 + rate / n) ** (n * y)
+                if n != -1
+                else principal * math.exp(rate * y)
+            )
+            schedule.append({"year": y, "balance": round(balance, 2)})
+        final = schedule[-1]["balance"] if schedule else principal
+        return {
+            "principal": principal,
+            "annual_rate": rate,
+            "years": years,
+            "compounding_periods_per_year": n if n != -1 else "continuous",
+            "final_balance": round(final, 2),
+            "total_interest": round(final - principal, 2),
+            "schedule": schedule,
         }

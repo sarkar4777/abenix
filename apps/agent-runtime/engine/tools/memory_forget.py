@@ -42,13 +42,27 @@ class MemoryForgetTool(BaseTool):
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         key = arguments["key"]
 
+        from engine.tools._db_url import resolve_async_db_url
+
+        db_url = resolve_async_db_url(self._db_url)
+        if not db_url:
+            return ToolResult(
+                content="memory_forget: DATABASE_URL not configured.",
+                is_error=True,
+            )
+        if not self._agent_id or not self._tenant_id:
+            return ToolResult(
+                content="memory_forget needs agent_id and tenant_id.",
+                is_error=True,
+            )
+
         try:
             import uuid as uuid_mod
 
             from sqlalchemy import delete
             from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-            engine = create_async_engine(self._db_url, echo=False)
+            engine = create_async_engine(db_url, echo=False)
 
             import sys
             from pathlib import Path

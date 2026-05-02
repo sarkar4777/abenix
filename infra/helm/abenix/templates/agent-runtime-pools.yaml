@@ -44,6 +44,38 @@ spec:
       nodeSelector:
         abenix.io/node-pool: {{ .nodeAffinity }}
       {{- end }}
+      # Same security context as the standalone agent-runtime chart so
+      # the /data PVC (mounted below) is writable by the pod's appuser.
+      # Without fsGroup the kubelet leaves /data root-owned and the
+      # non-root container can't create /data/exports — every
+      # code_executor / data_exporter / sandboxed_job call dies with
+      # "Permission denied: '/data'".
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      # Pre-create the per-feature subdirectories on the PVC so first
+      # boot works regardless of who initialised the volume. Idempotent.
+      # Runs as root (overrides the pod-level runAsUser=1001 above) so
+      # it can chown /data to the runtime uid on multi-node hostPath +
+      # newly-bound PVC alike.
+      initContainers:
+        - name: init-data-dirs
+          image: busybox:1.36
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+          command: ["sh", "-c"]
+          args:
+            - |
+              mkdir -p /data/exports /data/uploads /data/ml-models \
+                       /data/code-assets /data/code-asset-cache
+              chown -R 1001:1001 /data
+              chmod -R u+rwX,g+rwX /data
+          volumeMounts:
+            - name: shared-data
+              mountPath: /data
       containers:
         - name: agent-runtime
           image: "{{ $img.repository }}:{{ $img.tag }}"
@@ -68,11 +100,32 @@ spec:
             - name: NATS_PASSWORD
               value: "abenix-dev"
             {{- end }}
+            # LiveKit URL — without this, every meeting_* tool fails
+            # at runtime even when the LiveKit server is reachable. The
+            # service-discovery vars k8s injects (LIVEKIT_SERVER_*) are
+            # NOT what the SDK reads; it reads LIVEKIT_URL specifically.
+            - name: LIVEKIT_URL
+              value: "ws://{{ $release }}-livekit-server.{{ $ns }}.svc.cluster.local:7880"
+            # Explicit data paths so tools never have to guess. These
+            # match the standalone chart and the local-mode dev-local.sh.
+            - name: EXPORT_DIR
+              value: "/data/exports"
+            - name: UPLOAD_DIR
+              value: "/data/uploads"
+            - name: ML_MODELS_DIR
+              value: "/data/ml-models"
+            - name: CODE_ASSET_STORE
+              value: "/data/code-assets"
+            - name: CODE_ASSET_BUILD_CACHE
+              value: "/data/code-asset-cache"
           envFrom:
             - secretRef:
                 name: {{ $release }}-secrets
             - configMapRef:
                 name: {{ $release }}-config
+          volumeMounts:
+            - name: shared-data
+              mountPath: /data
           ports:
             - containerPort: 8001
               name: http
@@ -86,6 +139,19 @@ spec:
             httpGet: { path: /health, port: 8001 }
             initialDelaySeconds: 30
             periodSeconds: 30
+      volumes:
+        - name: shared-data
+          {{- if $.Values.sharedData.usePVC }}
+          persistentVolumeClaim:
+            claimName: {{ $release }}-shared-data
+          {{- else }}
+          # On minikube / single-node dev clusters, hostPath works
+          # because every pod lands on the same node. Multi-node clusters
+          # MUST flip sharedData.usePVC=true and provide a RWX class.
+          hostPath:
+            path: /tmp/{{ $release }}-shared-data
+            type: DirectoryOrCreate
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

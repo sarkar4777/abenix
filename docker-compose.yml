@@ -104,7 +104,7 @@ services:
     image: neo4j:5-community
     container_name: abenix-neo4j
     environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-abenix}
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-abenix-neo4j-pass}
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_server_memory_heap_max__size: 1G
       NEO4J_server_memory_pagecache_size: 512M
@@ -115,7 +115,7 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-abenix} 'RETURN 1' || exit 1"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-abenix-neo4j-pass} 'RETURN 1' || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 5

@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import os
+import tempfile
 import traceback
 from typing import Any
 
@@ -16,7 +17,45 @@ logger = logging.getLogger(__name__)
 
 MAX_EXECUTION_TIME = 30  # Increased from 10s for complex operations
 MAX_OUTPUT_SIZE = 100_000
-EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
+
+
+def _resolve_export_dir() -> str:
+    """Pick a writable export directory.
+
+    Order of preference:
+      1. $EXPORT_DIR if set AND writable (k8s prod with PVC mounted).
+      2. <cwd>/.data/exports (dev-local.sh — writable + visible to dev).
+      3. <tempdir>/abenix_exports (last-resort — works on every OS,
+         every container, every fresh install).
+
+    Always creates the directory before returning. The fallback chain
+    rescues both broken k8s pods (where /data is set but unwritable)
+    and fresh local installs (where the env var is unset).
+    """
+    candidates = [
+        os.environ.get("EXPORT_DIR"),
+        os.path.join(os.getcwd(), ".data", "exports"),
+        os.path.join(tempfile.gettempdir(), "abenix_exports"),
+    ]
+    for cand in candidates:
+        if not cand:
+            continue
+        try:
+            os.makedirs(cand, exist_ok=True)
+            # Probe write — some PVC mounts succeed mkdir but reject writes.
+            probe = os.path.join(cand, ".write_probe")
+            with open(probe, "w") as f:
+                f.write("ok")
+            os.remove(probe)
+            return cand
+        except (OSError, PermissionError) as e:
+            logger.warning("EXPORT_DIR candidate %s unwritable: %s", cand, e)
+            continue
+    # Should never reach here — tempfile.gettempdir() is always writable.
+    return tempfile.gettempdir()
+
+
+EXPORT_DIR = _resolve_export_dir()
 
 CORE_MODULES = frozenset(
     {
