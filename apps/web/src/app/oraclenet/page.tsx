@@ -214,6 +214,45 @@ function parseSynthesizerOutput(raw: unknown, depth = 0): BriefData | null {
   return mapToBriefData(obj);
 }
 
+// Normalize enums at the parser boundary so unknown values don't crash badge components.
+// Logs a dev-only console.warn so synthesizer drift is caught early.
+const SENTIMENT_ALIASES: Record<string, 'positive' | 'negative' | 'neutral'> = {
+  positive: 'positive', supportive: 'positive', favorable: 'positive', good: 'positive',
+  negative: 'negative', opposed: 'negative', unfavorable: 'negative', hostile: 'negative', bad: 'negative',
+  neutral: 'neutral', mixed: 'neutral', '': 'neutral', undecided: 'neutral',
+};
+
+const SEVERITY_ALIASES: Record<string, 'low' | 'medium' | 'high' | 'critical'> = {
+  low: 'low', minor: 'low',
+  medium: 'medium', moderate: 'medium',
+  high: 'high', major: 'high', significant: 'high',
+  critical: 'critical', severe: 'critical',
+};
+
+function isDev(): boolean {
+  return typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production';
+}
+
+function normSentiment(raw: unknown): 'positive' | 'negative' | 'neutral' {
+  const key = String(raw ?? '').toLowerCase().trim();
+  const mapped = SENTIMENT_ALIASES[key];
+  if (mapped) return mapped;
+  if (isDev() && key) console.warn(`[oraclenet] unknown sentiment "${key}" coerced to "neutral"`);
+  return 'neutral';
+}
+
+function normRiskSeverity(raw: unknown): 'low' | 'medium' | 'high' {
+  const key = String(raw ?? '').toLowerCase().trim();
+  const mapped = SEVERITY_ALIASES[key];
+  if (!mapped) {
+    if (isDev() && key) console.warn(`[oraclenet] unknown severity "${key}" coerced to "medium"`);
+    return 'medium';
+  }
+  // Risk badge only supports high/medium/low — fold 'critical' into 'high'.
+  if (mapped === 'critical') return 'high';
+  return mapped;
+}
+
 function mapToBriefData(obj: Record<string, unknown>): BriefData {
 
   // Map the synthesizer's JSON schema to our BriefData interface
@@ -228,7 +267,7 @@ function mapToBriefData(obj: Record<string, unknown>): BriefData {
   const stakeholders = ((obj.stakeholder_impacts || obj.stakeholder_map || obj.stakeholders || []) as Array<Record<string, unknown>>).map((s: Record<string, unknown>) => ({
     name: String(s.stakeholder || s.name || s.group || 'Stakeholder'),
     impact: String(s.likely_actions?.toString() || s.impact || s.evidence || ''),
-    sentiment: (String(s.sentiment || 'neutral')) as 'positive' | 'negative' | 'neutral',
+    sentiment: normSentiment(s.sentiment),
     details: String(s.evidence || s.details || s.timeline || ''),
   }));
 
@@ -240,7 +279,7 @@ function mapToBriefData(obj: Record<string, unknown>): BriefData {
 
   const risks = ((obj.contrarian_analysis || obj.risks || []) as Array<Record<string, unknown>>).map((r: Record<string, unknown>) => ({
     title: String(r.argument || r.title || r.name || 'Risk'),
-    severity: (String(r.severity || 'medium')) as 'high' | 'medium' | 'low',
+    severity: normRiskSeverity(r.severity),
     probability: Math.round(Number(r.probability || 0) * (Number(r.probability) <= 1 ? 100 : 1)),
     description: String(r.evidence || r.description || r.mitigation || ''),
   }));
@@ -354,10 +393,12 @@ function SentimentBadge({ sentiment }: { sentiment: 'positive' | 'negative' | 'n
     negative: { color: 'bg-red-500/20 text-red-400 border-red-500/30', label: 'Negative' },
     neutral: { color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', label: 'Neutral' },
   };
-  const c = config[sentiment];
+  // Defensive default: synthesizer drift can return '' or 'mixed' — fall back to neutral.
+  const c = config[sentiment] ?? config.neutral;
+  const label = c === config[sentiment] ? c.label : 'Neutral';
   return (
     <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full border', c.color)}>
-      {c.label}
+      {label}
     </span>
   );
 }
@@ -368,9 +409,12 @@ function SeverityBadge({ severity }: { severity: 'high' | 'medium' | 'low' }) {
     medium: 'bg-amber-500/20 text-amber-400',
     low: 'bg-emerald-500/20 text-emerald-400',
   };
+  // Defensive default: synthesizer may emit 'critical', 'minor', 'moderate' — fall back to medium.
+  const cls = config[severity] ?? config.medium;
+  const label = config[severity] ? severity : 'medium';
   return (
-    <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase', config[severity])}>
-      {severity}
+    <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase', cls)}>
+      {label}
     </span>
   );
 }
@@ -712,6 +756,43 @@ function BriefView({ brief }: { brief: BriefData }) {
     URL.revokeObjectURL(url);
   }, [brief]);
 
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportingFmt, setExportingFmt] = useState<string | null>(null);
+
+  const handleServerExport = useCallback(async (fmt: 'pdf' | 'docx') => {
+    setExportError(null);
+    setExportingFmt(fmt);
+    try {
+      const res = await fetch(`${API_URL}/api/oraclenet/export?format=${fmt}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ brief }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${txt.slice(0, 200) || res.statusText}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `oraclenet-brief.${fmt}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(`${fmt.toUpperCase()} export failed: ${err instanceof Error ? err.message : 'unknown'}`);
+    } finally {
+      setExportingFmt(null);
+    }
+  }, [brief]);
+
+  // Auto-clear error toast after 5s
+  useEffect(() => {
+    if (!exportError) return;
+    const t = setTimeout(() => setExportError(null), 5000);
+    return () => clearTimeout(t);
+  }, [exportError]);
+
   return (
     <div>
       {/* Export buttons */}
@@ -735,7 +816,30 @@ function BriefView({ brief }: { brief: BriefData }) {
           {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
           {copied ? 'Copied!' : 'Copy to Clipboard'}
         </button>
+        <button
+          onClick={() => handleServerExport('pdf')}
+          disabled={exportingFmt === 'pdf'}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/50 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {exportingFmt === 'pdf' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+          Download PDF
+        </button>
+        <button
+          onClick={() => handleServerExport('docx')}
+          disabled={exportingFmt === 'docx'}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/50 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {exportingFmt === 'docx' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+          Download DOCX
+        </button>
       </div>
+
+      {exportError && (
+        <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-300 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>{exportError}</span>
+        </div>
+      )}
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 overflow-x-auto pb-1 -mx-1 px-1">
@@ -1126,6 +1230,31 @@ export default function OracleNetPage() {
       if (saved) setPastAnalyses(JSON.parse(saved));
     } catch {}
   }, []);
+
+  // Persist completed runs to localStorage (cap to 20, newest first).
+  // Triggered when we reach the brief phase with a successfully parsed brief.
+  const persistedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (phase !== 'brief' || !brief) return;
+    const id = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Dedupe: only persist once per (query+depth+confidence) transition.
+    const dedupeKey = `${query}|${depth}|${brief.confidence}`;
+    if (persistedKeyRef.current === dedupeKey) return;
+    persistedKeyRef.current = dedupeKey;
+
+    try {
+      const entry: PastAnalysis = {
+        id,
+        query,
+        date: new Date(),
+        confidence: brief.confidence,
+      };
+      const next = [entry, ...pastAnalyses].slice(0, 20);
+      setPastAnalyses(next);
+      localStorage.setItem('oraclenet_history', JSON.stringify(next));
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, brief]);
 
   // Close history dropdown on outside click
   useEffect(() => {

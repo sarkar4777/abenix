@@ -360,25 +360,98 @@ class Abenix:
         self, agent_slug_or_id: str, message: str,
         act_as: ActingSubject | None = None, **kwargs: Any,
     ) -> ExecutionResult:
-        """Execute an agent and return the final result."""
+        """Execute an agent and return the final result.
+
+        The Abenix execute endpoint, since the KEDA queue-depth scaling work,
+        is async-by-default — it returns ``{"execution_id": ..., "mode": "async"}``
+        immediately and the agent runs on a runtime pool. Callers that want the
+        synchronous result (the original SDK contract, and what every standalone
+        app expects) MUST pass ``wait=True``. We do that here by default. If a
+        caller has already passed ``wait`` or ``stream`` in ``kwargs`` we honour it.
+
+        If the server still returns an async response (e.g. because the API
+        version predates the ``wait`` flag, or the queue dispatcher fell back),
+        we poll the execution row until it terminates so the caller never gets
+        an empty ``output``. This is the industrial-strength path: a single SDK
+        fix repairs every standalone app (the example app insights, ResolveAI,
+        SauditTourism, IndustrialIoT, …) that depends on synchronous output.
+        """
         agent_id = await self._resolve_agent_id(agent_slug_or_id)
+
+        # Derive a wait timeout from the SDK's request timeout, clamped to the
+        # server-side bounds (5..1800s per ExecuteRequest schema).
+        try:
+            _t = float(self.timeout)
+        except (TypeError, ValueError):
+            _t = 180.0
+        wait_timeout = max(5, min(1800, int(_t) - 5)) if _t > 10 else 180
+
+        body: dict[str, Any] = {
+            "message": message,
+            "stream": False,
+            "wait": True,
+            "wait_timeout_seconds": wait_timeout,
+        }
+        # Caller-supplied kwargs win (e.g. context, explicit wait=False).
+        body.update(kwargs)
+
         res = await self._http.post(
             f"/api/agents/{agent_id}/execute",
-            json={"message": message, "stream": False, **kwargs},
+            json=body,
             headers=self._subject_headers(act_as),
         )
         res.raise_for_status()
-        data = res.json().get("data", {})
+        data = res.json().get("data", {}) or {}
+
+        # Async-mode fallback: server returned {execution_id, mode: "async"}
+        # without the synchronous fields. Poll until terminal.
+        if data.get("mode") == "async" or (
+            not data.get("output") and not data.get("output_message")
+            and data.get("execution_id")
+        ):
+            exec_id = data.get("execution_id")
+            if exec_id:
+                data = await self._poll_execution(exec_id, deadline_s=wait_timeout)
+
         return ExecutionResult(
-            output=data.get("output", data.get("output_message", "")),
-            input_tokens=data.get("input_tokens", 0),
-            output_tokens=data.get("output_tokens", 0),
-            cost=data.get("cost", 0),
-            duration_ms=data.get("duration_ms", 0),
-            model=data.get("model", ""),
-            tool_calls=data.get("tool_calls", []),
+            output=data.get("output", data.get("output_message", "")) or "",
+            input_tokens=data.get("input_tokens", 0) or 0,
+            output_tokens=data.get("output_tokens", 0) or 0,
+            cost=data.get("cost", 0) or 0,
+            duration_ms=data.get("duration_ms", 0) or 0,
+            model=data.get("model", "") or "",
+            tool_calls=data.get("tool_calls", []) or [],
             confidence_score=data.get("confidence_score"),
         )
+
+    async def _poll_execution(
+        self, execution_id: str, deadline_s: int = 180,
+    ) -> dict[str, Any]:
+        """Poll the executions endpoint until terminal. Returns the data dict.
+
+        Used as a fallback when the execute endpoint returns async-mode and the
+        caller wanted the synchronous output. Terminal statuses: completed,
+        succeeded, failed, error, cancelled. We poll every 2s with a small
+        warm-up so short executions return fast.
+        """
+        import asyncio as _asyncio
+        terminal = {"completed", "succeeded", "failed", "error", "cancelled"}
+        delay = 0.5
+        elapsed = 0.0
+        last: dict[str, Any] = {"execution_id": execution_id}
+        while elapsed < deadline_s:
+            try:
+                r = await self._http.get(f"/api/executions/{execution_id}")
+                if r.status_code == 200:
+                    last = (r.json() or {}).get("data", {}) or last
+                    if (last.get("status") or "").lower() in terminal:
+                        return last
+            except httpx.HTTPError:
+                pass
+            await _asyncio.sleep(delay)
+            elapsed += delay
+            delay = min(2.0, delay * 1.5)
+        return last
 
     async def stream(
         self, agent_slug_or_id: str, message: str,

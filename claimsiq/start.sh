@@ -67,6 +67,18 @@ fi
 if [ -z "$CLAIMSIQ_ABENIX_API_KEY" ]; then
   warn "CLAIMSIQ_ABENIX_API_KEY not set — pipeline dispatch will 401."
   warn "Create a key in Abenix with can_delegate scope and export the env var."
+else
+  _AF_URL="${ABENIX_API_URL:-http://localhost:8000}"
+  _CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+    -H "X-API-Key: $CLAIMSIQ_ABENIX_API_KEY" "${_AF_URL}/api/agents" 2>/dev/null || echo "000")
+  if [ "$_CODE" = "200" ]; then
+    ok "CLAIMSIQ_ABENIX_API_KEY validates against ${_AF_URL} (200)"
+  elif [ "$_CODE" = "401" ] || [ "$_CODE" = "403" ]; then
+    fail "CLAIMSIQ_ABENIX_API_KEY rejected by ${_AF_URL} (${_CODE}) — pipeline dispatch will fail"
+    fail "  Run: bash scripts/seed-standalone-keys.sh claimsiq"
+  else
+    warn "Could not validate CLAIMSIQ_ABENIX_API_KEY (got ${_CODE} from ${_AF_URL})"
+  fi
 fi
 
 # logs dir

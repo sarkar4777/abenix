@@ -35,73 +35,74 @@ model_config:
     - agent_step
     - human_approval
     - http_client
-  pipeline_config:
-    nodes:
-      - id: load_open_cases
-        type: tool
-        tool: database_query
-        input:
-          sql: >-
-            SELECT id, customer_id, tier, intent, sku, jurisdiction,
-                   opened_at, last_agent_reply_at, sla_tier, sla_target_minutes
-            FROM cases
-            WHERE status = 'open'
-              AND opened_at > now() - interval '14 days'
-          limit: 500
 
-      - id: rescore_sla
-        type: tool
-        tool: code_asset
-        input:
-          asset_slug: sla-scorer
-          args:
-            cases: "{{load_open_cases.rows}}"
-            now:   "{{input.now_iso}}"
-        context:
-          breach_threshold_minutes: 0
+pipeline_config:
+  nodes:
+    - id: load_open_cases
+      type: tool
+      tool: database_query
+      input:
+        sql: >-
+          SELECT id, customer_id, tier, intent, sku, jurisdiction,
+                 opened_at, last_agent_reply_at, sla_tier, sla_target_minutes
+          FROM cases
+          WHERE status = 'open'
+            AND opened_at > now() - interval '14 days'
+        limit: 500
 
-      - id: plan_rescue
-        type: agent
-        agent_slug: resolveai-resolution-planner
-        input: >-
-          Breaching cases needing rescue: {{rescore_sla.breaching}}
-          Produce one action plan per case, keyed by case_id.
-        context:
-          amount_limits:
-            auto_usd: 25
-            t1_usd:   250
-            mgr_usd:  5000
-          mode: "rescue"
-        required_if: "{{len(rescore_sla.breaching) > 0}}"
+    - id: rescore_sla
+      type: tool
+      tool: code_asset
+      input:
+        asset_slug: sla-scorer
+        args:
+          cases: "{{load_open_cases.rows}}"
+          now:   "{{input.now_iso}}"
+      context:
+        breach_threshold_minutes: 0
 
-      - id: approval_gate
-        type: tool
-        tool: human_approval
-        input:
-          actions:       "{{plan_rescue.actions}}"
-          minimum_tier:  "t1_lead"
-          reason:        "SLA breach rescue plan"
-        required_if: "{{len(rescore_sla.breaching) > 0}}"
+    - id: plan_rescue
+      type: agent
+      agent_slug: resolveai-resolution-planner
+      input: >-
+        Breaching cases needing rescue: {{rescore_sla.breaching}}
+        Produce one action plan per case, keyed by case_id.
+      context:
+        amount_limits:
+          auto_usd: 25
+          t1_usd:   250
+          mgr_usd:  5000
+        mode: "rescue"
+      required_if: "{{len(rescore_sla.breaching) > 0}}"
 
-      - id: slack_escalate
-        type: tool
-        tool: http_client
-        input:
-          method: POST
-          url:    "{{tenant.slack_webhook_url}}"
-          json:
-            text: >-
-              SLA breach sweep: {{len(rescore_sla.breaching)}} cases
-              approaching/over tier target. Approved rescue plans
-              attached.
-            attachments: "{{plan_rescue.actions}}"
-        required_if: "{{len(rescore_sla.breaching) > 0 and approval_gate.approved}}"
+    - id: approval_gate
+      type: tool
+      tool: human_approval
+      input:
+        actions:       "{{plan_rescue.actions}}"
+        minimum_tier:  "t1_lead"
+        reason:        "SLA breach rescue plan"
+      required_if: "{{len(rescore_sla.breaching) > 0}}"
 
-      - id: final_report
-        type: structured
-        output:
-          swept_count:      "{{len(load_open_cases.rows)}}"
-          breaching_count:  "{{len(rescore_sla.breaching)}}"
-          approved:         "{{approval_gate.approved}}"
-          slack_posted:     "{{slack_escalate.status == 200}}"
-          rescue_actions:   "{{plan_rescue.actions}}"
+    - id: slack_escalate
+      type: tool
+      tool: http_client
+      input:
+        method: POST
+        url:    "{{tenant.slack_webhook_url}}"
+        json:
+          text: >-
+            SLA breach sweep: {{len(rescore_sla.breaching)}} cases
+            approaching/over tier target. Approved rescue plans
+            attached.
+          attachments: "{{plan_rescue.actions}}"
+      required_if: "{{len(rescore_sla.breaching) > 0 and approval_gate.approved}}"
+
+    - id: final_report
+      type: structured
+      output:
+        swept_count:      "{{len(load_open_cases.rows)}}"
+        breaching_count:  "{{len(rescore_sla.breaching)}}"
+        approved:         "{{approval_gate.approved}}"
+        slack_posted:     "{{slack_escalate.status == 200}}"
+        rescue_actions:   "{{plan_rescue.actions}}"

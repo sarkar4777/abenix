@@ -233,6 +233,22 @@ async def _run_one(payload: dict) -> None:
                 elif output is not None:
                     out_text = str(output) if not isinstance(output, str) else output
                     evt["output_preview"] = out_text[:500]
+                    # Provenance: surface the top-level JSON keys this node
+                    # produced so the OracleNet provenance tab can render
+                    # real lineage instead of static layout. Best-effort —
+                    # if output isn't JSON we just skip the field map.
+                    try:
+                        from engine.post_process import _extract_json  # type: ignore
+
+                        parsed = (
+                            output
+                            if isinstance(output, dict)
+                            else _extract_json(out_text)
+                        )
+                        if isinstance(parsed, dict):
+                            evt["produced_fields"] = sorted(list(parsed.keys()))[:50]
+                    except Exception:
+                        pass
                 await _publish(execution_id, evt)
 
             pipeline_config = loaded["pipeline_config"] or {}
@@ -260,6 +276,27 @@ async def _run_one(payload: dict) -> None:
             )
             serialized = serialize_pipeline_result(result)
             final_text = ""
+            # Generic post-process for pipeline final_output: same logic as
+            # the agent path. Drives OracleNet's strict-enum guarantees.
+            _pipeline_warnings: list[str] = []
+            try:
+                _output_schema = (loaded.get("model_cfg") or {}).get("output_schema")
+                if _output_schema and result.final_output is not None:
+                    from engine.post_process import post_process  # type: ignore
+
+                    _normalized, _pipeline_warnings = post_process(
+                        result.final_output, _output_schema
+                    )
+                    if isinstance(_normalized, (dict, list)):
+                        result.final_output = _normalized
+                    if _pipeline_warnings:
+                        logger.info(
+                            "pipeline post_process: %s warnings",
+                            len(_pipeline_warnings),
+                        )
+            except Exception as _e:
+                logger.warning("pipeline post_process skipped: %s", _e)
+
             if result.final_output:
                 # 50 KB cap matches the DB output_message column.
                 final_text = (
@@ -285,16 +322,17 @@ async def _run_one(payload: dict) -> None:
                 )[:2000]
 
             await _mark_done(execution_id, pipeline_status, final_text, err_text)
-            await _publish(
-                execution_id,
-                {
-                    "event": "done" if pipeline_status == "completed" else "error",
-                    "execution_id": execution_id,
-                    "output": final_text,
-                    "summary": serialized,
-                    **({"error": err_text} if err_text else {}),
-                },
-            )
+            _pipe_evt: dict[str, Any] = {
+                "event": "done" if pipeline_status == "completed" else "error",
+                "execution_id": execution_id,
+                "output": final_text,
+                "summary": serialized,
+            }
+            if err_text:
+                _pipe_evt["error"] = err_text
+            if _pipeline_warnings:
+                _pipe_evt["validation_warnings"] = _pipeline_warnings[:20]
+            await _publish(execution_id, _pipe_evt)
         else:
             from engine.agent_executor import (
                 AgentExecutor,
@@ -335,26 +373,59 @@ async def _run_one(payload: dict) -> None:
             # output_tokens, cost, ...). Pass these through so /executions and
             # /analytics show real numbers instead of nulls.
             output = getattr(result, "output", None) or str(result)
+
+            # Generic post-process: if the agent's model_config declares an
+            # output_schema, validate + normalize obvious enum drift before
+            # the result lands in the DB. Warnings ride on the SSE event so
+            # the UI can render them in a "validation" affordance.
+            _validation_warnings: list[str] = []
+            try:
+                _output_schema = (loaded.get("model_cfg") or {}).get("output_schema")
+                if _output_schema:
+                    from engine.post_process import post_process  # type: ignore
+
+                    _normalized, _validation_warnings = post_process(
+                        output, _output_schema
+                    )
+                    if _validation_warnings:
+                        logger.info(
+                            "post_process: %s warnings for %s",
+                            len(_validation_warnings),
+                            agent_name,
+                        )
+                    # If we successfully parsed + normalized, persist the
+                    # cleaned JSON string so the UI doesn't have to do its
+                    # own enum coercion.
+                    if isinstance(_normalized, (dict, list)):
+                        output = json.dumps(_normalized, default=str)
+            except Exception as _e:
+                logger.warning("consumer: post_process skipped: %s", _e)
+            # 50 KB cap matches /apps/api routers/agents.py and the DB
+            # Text column. Bumped from 4_000 — the old cap silently
+            # truncated long synthesizer briefs (OracleNet, executive
+            # briefing) and produced invalid partial JSON in the UI.
+            _AGENT_OUTPUT_CAP = 50_000
+            full_output_str = str(output)[:_AGENT_OUTPUT_CAP]
             await _mark_done(
                 execution_id,
                 "completed",
-                str(output)[:4000],
+                full_output_str,
                 None,
                 input_tokens=getattr(result, "input_tokens", None),
                 output_tokens=getattr(result, "output_tokens", None),
                 cost=getattr(result, "cost", None),
             )
-            await _publish(
-                execution_id,
-                {
-                    "event": "done",
-                    "execution_id": execution_id,
-                    "output": str(output)[:4000],
-                    "input_tokens": getattr(result, "input_tokens", None),
-                    "output_tokens": getattr(result, "output_tokens", None),
-                    "cost": getattr(result, "cost", None),
-                },
-            )
+            _done_evt: dict[str, Any] = {
+                "event": "done",
+                "execution_id": execution_id,
+                "output": full_output_str,
+                "input_tokens": getattr(result, "input_tokens", None),
+                "output_tokens": getattr(result, "output_tokens", None),
+                "cost": getattr(result, "cost", None),
+            }
+            if _validation_warnings:
+                _done_evt["validation_warnings"] = _validation_warnings[:20]
+            await _publish(execution_id, _done_evt)
     except Exception as e:
         logger.exception("consumer: execution %s failed: %s", execution_id, e)
         await _mark_done(execution_id, "failed", None, str(e)[:2000])

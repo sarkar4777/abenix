@@ -17,6 +17,11 @@ from models.agent import Agent, AgentStatus, AgentType
 from models.tenant import Tenant
 from models.user import User
 
+# Strict schema validation. Lives next to this loader so it ships
+# with the seed runner. See agent_seed_schema.py for rationale.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent_seed_schema import validate_agent_yaml  # noqa: E402
+
 import os
 
 DATABASE_URL = os.environ.get(
@@ -200,9 +205,21 @@ async def seed_agents() -> None:
             print("No seed files found.")
             return
 
+        validation_errors: list[str] = []
         for yaml_file in yaml_files:
             with open(yaml_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
+
+            # Strict validation BEFORE we do anything DB-side. This is the
+            # gate that catches the ClaimsIQ-class silent-coerce bug
+            # (pipeline_config nested in model_config, etc.). Collect all
+            # errors first so the operator sees every broken YAML in one
+            # shot rather than play whack-a-mole.
+            try:
+                validate_agent_yaml(yaml_file.name, data)
+            except Exception as e:  # noqa: BLE001
+                validation_errors.append(str(e))
+                continue
 
             slug = data["slug"]
             result = await db.execute(select(Agent).where(Agent.slug == slug))
@@ -236,6 +253,13 @@ async def seed_agents() -> None:
                 model_cfg["tool_config"] = data["tool_config"]
             if data.get("max_tokens"):
                 model_cfg["max_tokens"] = data["max_tokens"]
+            # Strict-output declaration. The agent runtime's post_process
+            # module validates+normalizes against this on every run when
+            # the agent's mode == "agent" or for the pipeline's
+            # final_output. Lifts top-level seed YAML key into the JSONB
+            # model_config blob so the runtime sees it.
+            if data.get("output_schema"):
+                model_cfg["output_schema"] = data["output_schema"]
 
             icon = data.get("icon")
 
@@ -286,6 +310,20 @@ async def seed_agents() -> None:
                     **scaling_kwargs,
                 )
                 db.add(agent)
+
+        # If any YAML failed strict validation, abort BEFORE commit so we
+        # never half-seed a broken catalog. This is the loud-fail
+        # behaviour we want in CI / deploy-azure.sh — the loader exits
+        # non-zero with every offending file listed.
+        if validation_errors:
+            print("\nFATAL: agent seed validation failed:")
+            for err in validation_errors:
+                print(f"  - {err}")
+            await db.rollback()
+            await engine.dispose()
+            raise SystemExit(
+                f"{len(validation_errors)} agent YAML(s) failed schema validation"
+            )
 
         # Retire agents we no longer ship — archive, don't delete, so
         # historical executions keep their FK target.

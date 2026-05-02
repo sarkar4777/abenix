@@ -1,0 +1,169 @@
+# ResolveAI — Policy KB seed
+#
+# Loaded by `seed_kb.py` (sibling). Idempotent: each document is
+# upserted by (collection_slug, doc.id) so a fresh deploy or a
+# re-run will NOT duplicate. Cognify chunks each doc on first
+# write and skips chunks whose hash already exists in the index.
+#
+# Without this seed, every standalone (ResolveAI, OracleNet QA,
+# Live Copilot) that calls knowledge_search(collection=
+# "resolveai-policy") returns 0 hits → 0 citations → 0 actions.
+# That's exactly the symptom Phase A3 surfaced.
+
+project:
+  slug: resolveai
+  name: "ResolveAI"
+  description: "Customer-service AI — policy + persona + SOP corpora."
+
+collections:
+  - slug: resolveai-policy
+    name: "ResolveAI Policy"
+    description: "Authoritative ToS, return policy, refund rules, SLA."
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - resolveai-policy-research
+      - resolveai-resolution-planner
+      - resolveai-live-copilot
+      - resolveai-qa-reviewer
+    agent_permission: READ
+    documents:
+      - id: rai-pol-001
+        title: "Standard Return Policy v3"
+        version: 3
+        metadata: { policy_id: "STD-RETURN", jurisdiction: "GLOBAL", category: "returns" }
+        content: |
+          STANDARD RETURN POLICY
+          Customers may return any unopened item within 30 days of delivery
+          for a full refund to the original payment method. Opened items in
+          resaleable condition may be returned within 14 days for store
+          credit. Final-sale items, gift cards, and digital downloads are
+          non-returnable. Return shipping is free for orders over $50.
+      - id: rai-pol-002
+        title: "EU Distance Selling Refund Window"
+        version: 2
+        metadata: { policy_id: "EU-DSR", jurisdiction: "EU", category: "returns" }
+        content: |
+          EU DISTANCE SELLING — 14-DAY COOLING-OFF
+          Per EU Directive 2011/83/EU, customers in the EU may withdraw
+          from a purchase within 14 calendar days of delivery without
+          giving any reason. Refund must be issued within 14 days of
+          notification. This window extends the standard 30-day return
+          policy where local law mandates a longer period.
+      - id: rai-pol-003
+        title: "Damaged-on-Arrival Replacement Policy"
+        version: 1
+        metadata: { policy_id: "DOA-REPL", jurisdiction: "GLOBAL", category: "replacements" }
+        content: |
+          DAMAGED ON ARRIVAL
+          If an item arrives damaged, the customer is entitled to a free
+          replacement OR full refund (their choice) within 7 days of
+          delivery. Photo evidence is required. Carrier claim is filed
+          by us, never by the customer. Auto-approval threshold is $250;
+          above that, manager approval is required.
+      - id: rai-pol-004
+        title: "Premium Tier SLA"
+        version: 4
+        metadata: { policy_id: "SLA-PREMIUM", jurisdiction: "GLOBAL", category: "sla" }
+        content: |
+          PREMIUM-TIER SLA
+          Premium customers receive: 1-business-day first response, 3-day
+          resolution, free expedited shipping on replacements, and
+          dedicated account-manager escalation. SLA breaches trigger
+          automatic credit equal to 10% of order value, capped at $50,
+          requiring no manager approval.
+      - id: rai-pol-005
+        title: "Refund Approval Tiers"
+        version: 2
+        metadata: { policy_id: "APPR-TIERS", jurisdiction: "GLOBAL", category: "approval" }
+        content: |
+          REFUND APPROVAL TIERS
+          Refunds and credits are auto-approved up to $25. Between $25
+          and $250 they require T1-Lead approval. Between $250 and
+          $5,000 they require Manager approval. Above $5,000 OR when
+          legal risk is flagged, Legal team approval is required. These
+          tiers apply to all monetary remediations.
+      - id: rai-pol-006
+        title: "PII Handling — Third Parties"
+        version: 1
+        metadata: { policy_id: "PII-3P", jurisdiction: "GLOBAL", category: "compliance" }
+        content: |
+          PII HANDLING
+          No personally identifiable information may be sent to third
+          parties without explicit customer consent and a signed DPA.
+          Carriers receive only the shipping address and phone number;
+          marketing platforms receive only an opaque customer_id.
+
+  - slug: resolveai-personas
+    name: "ResolveAI Customer Personas"
+    description: "Persona archetypes used by Customer Context agent."
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - resolveai-customer-context
+      - resolveai-tone
+    agent_permission: READ
+    documents:
+      - id: rai-per-001
+        title: "Persona — Loyal Premium"
+        metadata: { tier: "premium", value: "high" }
+        content: |
+          LOYAL PREMIUM
+          Multi-year, premium-tier, NPS detractor risk if mishandled.
+          Prefers concise, direct answers. Tone: respectful, deferential.
+          Default approach: lead with empathy, offer concrete remediation
+          inside policy, avoid corporate-speak.
+      - id: rai-per-002
+        title: "Persona — Frustrated New Buyer"
+        metadata: { tier: "standard", value: "medium" }
+        content: |
+          FRUSTRATED NEW BUYER
+          First or second purchase, recent issue, high churn risk.
+          Tone: warm, apologetic, action-oriented. Default approach:
+          fast resolution + small good-will gesture (apology + small credit).
+
+  - slug: resolveai-sop
+    name: "ResolveAI Standard Operating Procedures"
+    description: "Internal SOPs for trend mining + QA review."
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - resolveai-trend-miner
+      - resolveai-qa-reviewer
+    agent_permission: READ
+    documents:
+      - id: rai-sop-001
+        title: "SOP — Escalation to Human"
+        content: |
+          When to escalate: legal threats, suspected fraud > $250,
+          repeat dissatisfaction (3+ tickets/30d), regulatory mention,
+          or any case where Policy Research returns no_kb_configured /
+          no_match. Tag: requires_human=true. Route: t1_lead by default.
+      - id: rai-sop-002
+        title: "SOP — Refund Math"
+        content: |
+          Refunds are computed on the post-discount, post-tax order
+          line subtotal. Shipping is refunded only on full returns or
+          DOA. Loyalty points are returned at original earn-rate. FX
+          conversion is locked at order-date rate.
+
+  - slug: resolveai-qa-rubric
+    name: "ResolveAI QA Rubric"
+    description: "QA Reviewer agent's scoring rubric corpus."
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - resolveai-qa-reviewer
+    agent_permission: READ
+    documents:
+      - id: rai-qa-001
+        title: "QA Rubric v1"
+        content: |
+          QA RUBRIC
+          Score each resolution on 5 axes (1-5):
+            1. Policy adherence — every $ amount cited a real policy.
+            2. Tone match — matched the persona's preferred register.
+            3. Resolution speed — under SLA.
+            4. Customer effort — minimal back-and-forth.
+            5. PII hygiene — no leakage to third parties.
+          Pass threshold: average >= 3.5 AND no axis below 3.

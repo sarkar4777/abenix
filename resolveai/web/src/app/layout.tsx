@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { LayoutDashboard, Inbox, Headphones, Settings, AlertTriangle, Star, TrendingUp, HelpCircle } from 'lucide-react';
+import { LayoutDashboard, Inbox, Headphones, Settings, AlertTriangle, Star, TrendingUp, HelpCircle, Sparkles } from 'lucide-react';
 import './globals.css';
+import ToastHost from '@/components/ToastHost';
+
+const SHOW_SAMPLES = process.env.NEXT_PUBLIC_SHOW_SAMPLES === 'true';
 
 export const metadata: Metadata = {
   title: 'ResolveAI',
@@ -33,10 +36,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <NavItem href="/admin" label="Admin"  icon={<Settings className="w-4 h-4" />} />
               <div className="pt-2 mt-2 border-t border-slate-800/60">
                 <NavItem href="/help" label="Walkthrough" icon={<HelpCircle className="w-4 h-4" />} />
+                {SHOW_SAMPLES && (
+                  <Link
+                    href="/cases?demo=1"
+                    data-testid="demo-sample-link"
+                    className="flex items-center gap-2 px-3 py-2 rounded-md text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200 transition-colors text-sm"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Demo: try a sample ticket
+                  </Link>
+                )}
               </div>
             </nav>
           </aside>
           <main className="flex-1 min-w-0">{children}</main>
+          <ToastHost />
         </div>
       </body>
     </html>

@@ -42,8 +42,67 @@ model_config:
     - text_analyzer
     - json_transformer
 
+# Strict output schema for the pipeline's final_output (the synthesizer
+# node's brief). engine/post_process.py validates + normalizes obvious
+# enum drift on the synthesizer's response so the OracleNet UI never
+# sees sentiment="" or sentiment="mixed" again.
+output_schema:
+  type: object
+  properties:
+    executive_summary: { type: string }
+    stakeholder_impacts:
+      type: array
+      items:
+        type: object
+        properties:
+          stakeholder: { type: string }
+          sentiment: { type: string, enum: [positive, negative, neutral] }
+          intensity: { type: number, minimum: 0, maximum: 1 }
+    contrarian_analysis:
+      type: array
+      items:
+        type: object
+        properties:
+          risk: { type: string }
+          severity: { type: string, enum: [low, medium, high, critical] }
+          probability: { type: number, minimum: 0, maximum: 1 }
+    recommendation:
+      type: object
+      properties:
+        action: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+
 pipeline_config:
   nodes:
+    # depth_router resolves the user's chosen depth (quick / standard / deep)
+    # into boolean flags consumed by per-node `condition:` blocks below.
+    #   quick    = decision_parser -> current_state -> synthesizer (3 nodes, ~30s)
+    #   standard = + historian + stakeholder_sim                   (5 nodes, ~90s)
+    #   deep     = + second_order + contrarian                     (7 nodes, 3-5min)
+    # Pattern is the same as iot_pump_pipeline's severity_router/plan_maintenance.
+    - id: depth_router
+      tool_name: code_executor
+      label: "Resolve Analysis Depth"
+      arguments:
+        code: |
+          import json
+          # /api/oraclenet/analyze passes body.depth straight through into context.
+          depth = str(context.get("depth") or "standard").strip().lower()
+          if depth not in ("quick", "standard", "deep"):
+              depth = "standard"
+          result = {
+              "depth": depth,
+              "run_historian": depth in ("standard", "deep"),
+              "run_stakeholder_sim": depth in ("standard", "deep"),
+              "run_second_order": depth == "deep",
+              "run_contrarian": depth == "deep",
+          }
+          print(json.dumps(result))
+      depends_on: []
+      position:
+        x: 100
+        y: 50
+
     - id: decision_parser
       tool_name: llm_call
       label: "Parse Decision"
@@ -68,7 +127,8 @@ pipeline_config:
           Output ONLY valid JSON, no markdown.
         prompt: "Parse this decision: {{context.message}}"
         model: gemini-2.0-flash
-      depends_on: []
+      depends_on:
+        - depth_router
       position:
         x: 400
         y: 50
@@ -76,6 +136,11 @@ pipeline_config:
     - id: historian
       tool_name: agent_step
       label: "Historian Agent"
+      condition:
+        source_node: depth_router
+        field: run_historian
+        operator: eq
+        value: true
       arguments:
         system_prompt: |
           You are a world-class business and geopolitical historian working for OracleNet.
@@ -150,6 +215,11 @@ pipeline_config:
     - id: stakeholder_sim
       tool_name: agent_step
       label: "Stakeholder Simulation"
+      condition:
+        source_node: depth_router
+        field: run_stakeholder_sim
+        operator: eq
+        value: true
       arguments:
         system_prompt: |
           You are a behavioral economist and stakeholder analyst for OracleNet.
@@ -190,6 +260,11 @@ pipeline_config:
     - id: second_order
       tool_name: agent_step
       label: "Second-Order Effects"
+      condition:
+        source_node: depth_router
+        field: run_second_order
+        operator: eq
+        value: true
       arguments:
         system_prompt: |
           You are a systems thinker and complexity analyst for OracleNet.
@@ -237,6 +312,11 @@ pipeline_config:
     - id: contrarian
       tool_name: agent_step
       label: "Contrarian Agent"
+      condition:
+        source_node: depth_router
+        field: run_contrarian
+        operator: eq
+        value: true
       arguments:
         system_prompt: |
           You are a devil's advocate, red team analyst, and risk officer for OracleNet.
@@ -317,12 +397,23 @@ pipeline_config:
             "key_assumptions": [ "what must hold for this to work" ]
           }
 
+          STRICT ENUM RULES (the UI's <SentimentBadge /> and
+          <RiskSeverityBadge /> components reject other values and trigger
+          a React error boundary that crashes the Stakeholders tab):
+          - `stakeholder_impacts[].sentiment` MUST be exactly one of:
+            `positive`, `negative`, `neutral` (lowercase). Never `mixed`,
+            never empty, never any other value. Map ambiguous to `neutral`.
+          - `contrarian_analysis[].severity` MUST be exactly one of:
+            `low`, `medium`, `high`, `critical` (lowercase). Never `extreme`.
+          - `scenarios[].probability` and `recommendation.confidence` MUST
+            be numbers in [0.0, 1.0].
+
           Rules:
           - Resolve conflicts between agents explicitly
           - Be specific and quantitative
           - The recommendation must be ACTIONABLE, not academic hedging
           - Confidence score accounts for: data quality, agent agreement, historical base rates
-          - Output ONLY valid JSON
+          - Output ONLY valid JSON — no markdown fences, no prose preamble.
         prompt: |
           Synthesize the Decision Brief from these agent findings:
 

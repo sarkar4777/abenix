@@ -31,9 +31,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "sdk"))
 
+import httpx  # noqa: E402
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from abenix_sdk import Abenix, ActingSubject  # noqa: E402
 
@@ -132,6 +133,35 @@ async def list_pipelines() -> dict[str, Any]:
     }
 
 
+@app.get("/api/industrial-iot/kb-status")
+async def kb_status() -> dict[str, Any]:
+    """Check whether the tenant has at least one knowledge base ready.
+
+    The PumpTab + ColdChainTab show a yellow "KB Not Available" badge if
+    this returns `available: false`, so users know adjudication will fall
+    back to model defaults instead of citing tenant docs.
+    """
+    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
+    if not api_key:
+        return {"data": {"available": False, "reason": "no_api_key"}}
+    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"{base_url}/api/knowledge-engines",
+                headers={"X-API-Key": api_key},
+            )
+            if r.status_code != 200:
+                return {"data": {"available": False, "reason": f"http_{r.status_code}"}}
+            payload = r.json()
+            engines = payload.get("data") or []
+            ready = [e for e in engines if (e.get("status") in (None, "ready", "active"))]
+            return {"data": {"available": bool(ready), "count": len(ready)}}
+    except Exception as exc:
+        logger.warning("kb-status probe failed: %s", exc)
+        return {"data": {"available": False, "reason": "probe_error"}}
+
+
 @app.post("/api/industrial-iot/pipelines/{pipeline_key}/execute")
 async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
     """Run one of the showcase pipelines synchronously."""
@@ -179,6 +209,99 @@ async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
         "cost": result.cost,
         "duration_ms": result.duration_ms,
     })
+
+
+# ─── Platform-API passthrough ──────────────────────────────────────────
+# Forwards /api/code-assets/* and /api/agents/* to abenix-api with the
+# seeded service-account key so the showcase web doesn't have to expose
+# Abenix credentials in the browser. Read-only or upload-style routes
+# only — execution stays in the explicit pipelines endpoint above.
+_PASSTHROUGH_PREFIXES = ("/api/code-assets", "/api/agents")
+_HOP_BY_HOP_HEADERS = {
+    "host", "content-length", "transfer-encoding", "connection",
+    "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+    "trailers", "upgrade",
+}
+
+
+async def _proxy(request: Request, path: str) -> Response:
+    """Forward `path` to abenix-api with the standalone's API key."""
+    full = f"/{path.lstrip('/')}"
+    if not any(full == p or full.startswith(p + "/") or full.startswith(p + "?")
+               for p in _PASSTHROUGH_PREFIXES):
+        raise HTTPException(status_code=404, detail=f"no proxy route for {full}")
+
+    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="INDUSTRIALIOT_ABENIX_API_KEY is not set on the industrial-iot-api pod.",
+        )
+    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
+
+    # Build forward headers: drop hop-by-hop + the inbound Host, inject
+    # the API key. Forward acting-subject if present.
+    fwd_headers: dict[str, str] = {}
+    for k, v in request.headers.items():
+        if k.lower() in _HOP_BY_HOP_HEADERS:
+            continue
+        # Don't carry the browser's X-API-Key (there is none, but be safe)
+        if k.lower() == "x-api-key":
+            continue
+        fwd_headers[k] = v
+    fwd_headers["X-API-Key"] = api_key
+    subject = _acting_subject(request)
+    if subject:
+        fwd_headers["X-Abenix-Subject"] = subject.to_header()
+
+    body = await request.body()
+    target = f"{base_url}{full}"
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            up = await client.request(
+                request.method, target, content=body or None,
+                headers=fwd_headers,
+            )
+    except httpx.HTTPError as exc:
+        logger.exception("proxy forward failed: %s", target)
+        return JSONResponse(
+            status_code=502,
+            content={"data": None, "error": f"upstream unreachable: {exc}", "meta": None},
+        )
+
+    # Strip hop-by-hop response headers; keep content-type so JSON is parsed.
+    out_headers = {
+        k: v for k, v in up.headers.items()
+        if k.lower() not in _HOP_BY_HOP_HEADERS
+    }
+    return Response(
+        content=up.content, status_code=up.status_code,
+        headers=out_headers,
+        media_type=up.headers.get("content-type"),
+    )
+
+
+@app.api_route("/api/code-assets", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_code_assets_root(request: Request) -> Response:
+    return await _proxy(request, "/api/code-assets")
+
+
+@app.api_route("/api/code-assets/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_code_assets(request: Request, rest: str) -> Response:
+    return await _proxy(request, f"/api/code-assets/{rest}")
+
+
+@app.api_route("/api/agents", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_agents_root(request: Request) -> Response:
+    return await _proxy(request, "/api/agents")
+
+
+@app.api_route("/api/agents/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_agents(request: Request, rest: str) -> Response:
+    return await _proxy(request, f"/api/agents/{rest}")
 
 
 if __name__ == "__main__":

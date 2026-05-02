@@ -39,6 +39,25 @@ if ! curl -sf http://localhost:8000/api/health >/dev/null 2>&1; then
   warn "Abenix API is not running on :8000 — pipeline calls will fail"
 fi
 
+# Resolve key (fall back to the example app key if dedicated one isn't set), then probe.
+: "${INDUSTRIALIOT_ABENIX_API_KEY:=${EXAMPLE_APP_ABENIX_API_KEY:-}}"
+export INDUSTRIALIOT_ABENIX_API_KEY
+if [ -n "$INDUSTRIALIOT_ABENIX_API_KEY" ]; then
+  _AF_URL="${ABENIX_API_URL:-http://localhost:8000}"
+  _CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+    -H "X-API-Key: $INDUSTRIALIOT_ABENIX_API_KEY" "${_AF_URL}/api/agents" 2>/dev/null || echo "000")
+  if [ "$_CODE" = "200" ]; then
+    ok "INDUSTRIALIOT_ABENIX_API_KEY validates against ${_AF_URL} (200)"
+  elif [ "$_CODE" = "401" ] || [ "$_CODE" = "403" ]; then
+    warn "INDUSTRIALIOT_ABENIX_API_KEY rejected by ${_AF_URL} (${_CODE}) — pipeline calls will fail"
+    warn "  Run: bash scripts/seed-standalone-keys.sh industrial-iot"
+  else
+    warn "Could not validate INDUSTRIALIOT_ABENIX_API_KEY (got ${_CODE} from ${_AF_URL})"
+  fi
+else
+  warn "INDUSTRIALIOT_ABENIX_API_KEY not set — pipeline calls will fail"
+fi
+
 # Install deps on first run
 if ! $PYTHON -c "import fastapi" >/dev/null 2>&1; then
   log "Installing Industrial-IoT API deps..."

@@ -16,7 +16,8 @@ import {
   findAssetByName, uploadAndDeploy, waitForSchemaProbe,
 } from '../lib/deploy';
 import { findPipelineBySlug, runPipeline, type PipelineKey } from '../lib/pipelineRunner';
-import { coldChainShipment } from '../lib/synthetic';
+import { coldChainShipment, parseColdChainQueryParams } from '../lib/synthetic';
+import KbBadge from '../components/KbBadge';
 
 interface Adjudication {
   severity?: string;
@@ -106,7 +107,7 @@ export default function ColdChainTab() {
     setLog([]);
     abortRef.current = new AbortController();
 
-    const shipment = coldChainShipment();
+    const shipment = coldChainShipment(parseColdChainQueryParams());
 
     // Animate the raw reading stream up front so the user can watch
     // the excursion spike unfold, BEFORE we show what the pipeline
@@ -157,6 +158,7 @@ export default function ColdChainTab() {
       <div className="space-y-6 min-w-0">
       <DeployRow asset={asset} busy={deploying} onDeploy={deploy} />
       {probeStatus && <div className="text-xs text-slate-400">{probeStatus}</div>}
+      <KbBadge />
       {deployError && (
         <div className="flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
           <AlertTriangle className="w-4 h-4 mt-0.5" />

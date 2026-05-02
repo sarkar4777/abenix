@@ -488,6 +488,173 @@ async def get_agent(
     return success(_serialize_agent(agent))
 
 
+def _self_check_agent(agent: Agent) -> dict[str, Any]:
+    """Run a battery of structural checks on an agent's stored config.
+
+    Returns a structured report of {check_name: {status, detail}}. Born
+    from the ClaimsIQ Phase A4 incident — the goal is to make every
+    silent-coerce bug surface as a deterministic check failure here
+    BEFORE the agent ever takes traffic.
+    """
+    report: dict[str, Any] = {
+        "slug": agent.slug,
+        "agent_type": str(agent.agent_type),
+        "status": str(agent.status),
+        "checks": {},
+        "ok": True,
+    }
+
+    def add(name: str, ok: bool, detail: str = "") -> None:
+        report["checks"][name] = {"ok": ok, "detail": detail}
+        if not ok:
+            report["ok"] = False
+
+    cfg = agent.model_config_ or {}
+
+    # 1. ClaimsIQ-class bug: pipeline_config must NEVER live under
+    #    model_config. seed_agents.py reads it from top-level only.
+    leaked = []
+    for forbidden in ("pipeline_config", "agent_type", "system_prompt", "slug"):
+        if forbidden in cfg and forbidden != "pipeline_config":
+            leaked.append(forbidden)
+    add(
+        "no_top_level_keys_leaked_into_model_config",
+        not leaked,
+        f"leaked: {leaked}" if leaked else "",
+    )
+
+    # 2. Pipeline-mode invariants.
+    mode = cfg.get("mode")
+    is_pipeline = mode == "pipeline"
+    if is_pipeline:
+        pc = cfg.get("pipeline_config") or {}
+        nodes = pc.get("nodes") if isinstance(pc, dict) else None
+        add(
+            "pipeline_has_nodes",
+            bool(nodes),
+            (
+                "mode=pipeline but pipeline_config.nodes is missing or empty "
+                "— check the seed YAML"
+                if not nodes
+                else f"{len(nodes)} nodes"
+            ),
+        )
+        # Each node needs id + (type or tool_name).
+        bad_nodes = []
+        for n in nodes or []:
+            if not isinstance(n, dict):
+                bad_nodes.append(repr(n))
+                continue
+            if not n.get("id"):
+                bad_nodes.append("(no id)")
+                continue
+            if not n.get("type") and not n.get("tool_name"):
+                bad_nodes.append(n.get("id"))
+        add(
+            "pipeline_nodes_well_formed",
+            not bad_nodes,
+            f"malformed: {bad_nodes}" if bad_nodes else "",
+        )
+    else:
+        add(
+            "pipeline_mode_consistent",
+            "pipeline_config" not in cfg or not cfg.get("pipeline_config"),
+            (
+                "agent has pipeline_config but mode!=pipeline — "
+                "pipeline_config will be ignored at runtime"
+                if cfg.get("pipeline_config")
+                else ""
+            ),
+        )
+
+    # 3. Model is set (executor will fall back to a default but a missing
+    #    one usually means the YAML lost its model declaration).
+    add("model_declared", bool(cfg.get("model")), "")
+
+    # 4. Tools listed in the YAML must exist in the runtime registry.
+    tools = cfg.get("tools") or []
+    unknown_tools: list[str] = []
+    if tools:
+        try:
+            sys.path.insert(
+                0,
+                str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"),
+            )
+            from engine.agent_executor import (  # type: ignore
+                _ensure_tool_classes,
+                _TOOL_CLASSES,
+                _CONTEXT_TOOL_FACTORIES,
+            )
+
+            _ensure_tool_classes()
+            known = set(_TOOL_CLASSES.keys()) | set(_CONTEXT_TOOL_FACTORIES.keys())
+            unknown_tools = [t for t in tools if t not in known]
+        except Exception as e:
+            add(
+                "tools_registry_loadable",
+                False,
+                f"could not load tool registry: {e}",
+            )
+        else:
+            add(
+                "tools_registry_loadable",
+                True,
+                f"{len(known)} tools registered",
+            )
+    add(
+        "tools_all_known",
+        not unknown_tools,
+        f"unknown: {unknown_tools}" if unknown_tools else "",
+    )
+
+    return report
+
+
+@router.get("/{agent_id}/self-check")
+async def self_check_agent(
+    agent_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Validate an agent's stored config and report structural issues.
+
+    Accepts either a UUID or a slug so platform engineers can hit
+    `GET /api/agents/claimsiq-adjudicate/self-check` without first
+    looking up the UUID.
+    """
+    # Try UUID, fall back to slug.
+    agent: Agent | None = None
+    try:
+        uid = uuid.UUID(agent_id)
+        result = await db.execute(
+            select(Agent).where(
+                Agent.id == uid,
+                or_(
+                    Agent.tenant_id == user.tenant_id,
+                    Agent.agent_type == AgentType.OOB,
+                ),
+            )
+        )
+        agent = result.scalar_one_or_none()
+    except (ValueError, TypeError):
+        pass
+    if agent is None:
+        result = await db.execute(
+            select(Agent).where(
+                Agent.slug == agent_id,
+                or_(
+                    Agent.tenant_id == user.tenant_id,
+                    Agent.agent_type == AgentType.OOB,
+                ),
+            )
+        )
+        agent = result.scalar_one_or_none()
+    if agent is None:
+        return error("Agent not found", 404)
+
+    return success(_self_check_agent(agent))
+
+
 @router.post("")
 async def create_agent(
     body: CreateAgentRequest,
@@ -1098,6 +1265,24 @@ async def execute_agent(
 ) -> StreamingResponse | JSONResponse:
     from app.core.usage import check_limit, check_user_quota
 
+    # Tri-state wait resolution (belt-and-suspenders for the SDK fix).
+    # If the client did not specify wait, default based on caller type:
+    #   - X-API-Key (SDK) → wait=True  (synchronous; SDK has no live stream)
+    #   - JWT/cookie (browser) → wait=False (async; UI streams progress)
+    # An explicit True/False from the client always wins. This means even
+    # if a future SDK ships with `wait` accidentally dropped from the
+    # request body, the server still returns synchronously to API-key
+    # callers, so standalone apps never see an empty-output regression.
+    if body.wait is None:
+        is_api_key_caller = getattr(user, "_api_key_scopes", None) is not None
+        body.wait = bool(is_api_key_caller)
+        # Also flip stream off for API-key callers when we're defaulting
+        # to wait=True — streaming + wait are incompatible (stream short-
+        # circuits before the wait branch). Browser callers keep stream
+        # default (True) since they want SSE.
+        if is_api_key_caller and body.stream is True:
+            body.stream = False
+
     allowed, limit_msg = await check_limit(db, user.tenant_id, user.id)
     if not allowed:
         return error(limit_msg, 429)
@@ -1325,7 +1510,19 @@ async def execute_agent(
     if is_pipeline:
         pipeline_config = model_cfg.get("pipeline_config")
         if not pipeline_config or not pipeline_config.get("nodes"):
-            return error("Pipeline agent has no pipeline configuration", 400)
+            # Clear, actionable error. The most common cause is the
+            # ClaimsIQ-class silent-coerce bug: pipeline_config nested
+            # under model_config in the seed YAML. The previous text —
+            # "Pipeline agent has no pipeline configuration" — sent us
+            # hunting for two hours during Phase A4.
+            return error(
+                f"Agent '{agent.slug}' is registered as mode=pipeline "
+                "but pipeline_config is missing or empty. Likely cause: "
+                "pipeline_config nested under model_config in the seed "
+                "YAML. Run `python scripts/lint-agent-seeds.py` or "
+                "GET /api/agents/{slug}/self-check for details.",
+                400,
+            )
 
         if body.stream:
             return StreamingResponse(
@@ -1694,6 +1891,28 @@ async def _stream_pipeline_execution(
             execution.duration_ms = pr.total_duration_ms
             execution.completed_at = datetime.now(timezone.utc)
             if pr.final_output:
+                # Apply the same generic post-processor that runs in the
+                # NATS consumer path so the inline path produces the same
+                # normalized output (no sentiment="mixed", severity="extreme",
+                # etc.). See engine/post_process.py for the rationale.
+                _output_schema_inline = (model_cfg or {}).get("output_schema")
+                if _output_schema_inline:
+                    try:
+                        import sys as _sys
+                        from pathlib import Path as _Path
+
+                        _runtime_path = str(
+                            _Path(__file__).resolve().parents[4] / "agent-runtime"
+                        )
+                        if _runtime_path not in _sys.path:
+                            _sys.path.insert(0, _runtime_path)
+                        from engine.post_process import post_process as _pp  # type: ignore
+
+                        _norm, _w = _pp(pr.final_output, _output_schema_inline)
+                        if isinstance(_norm, (dict, list)):
+                            pr.final_output = _norm
+                    except Exception:
+                        pass
                 out = pr.final_output
                 if isinstance(out, dict):
                     out = out.get("response", out.get("content", str(out)))

@@ -1,0 +1,71 @@
+# Industrial IoT — Equipment + maintenance reference KB.
+# Backs the iot-* agents that call knowledge_search for
+# vibration-spec lookups + cold-chain regulatory references.
+
+project:
+  slug: industrial-iot
+  name: "Industrial IoT"
+  description: "Equipment manuals, regulations, maintenance playbooks."
+
+collections:
+  - slug: industrial-iot-knowledge
+    name: "Industrial IoT Knowledge"
+    description: "Pump specs, cold-chain regulations, maintenance SOPs."
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - iot-pump-diagnosis
+      - iot-pump-dsp-analyzer
+      - iot-coldchain-monitor
+      - iot-excursion-adjudicator
+      - iot-maintenance-planner
+      - iot-claims-dispatcher
+    agent_permission: READ
+    documents:
+      - id: iot-knw-001
+        title: "Centrifugal Pump Vibration ISO Spec"
+        metadata: { equipment: "pump", standard: "ISO-10816" }
+        content: |
+          ISO 10816 — VIBRATION SEVERITY
+          Class III centrifugal pumps (15-300 kW) — RMS velocity zones:
+          A (good): <= 2.8 mm/s; B (acceptable): 2.8-7.1 mm/s;
+          C (unsatisfactory): 7.1-18 mm/s; D (unacceptable): >18 mm/s.
+          Sustained operation in zone C requires inspection within 7 days;
+          zone D requires immediate shutdown.
+      - id: iot-knw-002
+        title: "Pump Bearing Defect Frequencies"
+        metadata: { equipment: "pump", topic: "diagnosis" }
+        content: |
+          BEARING DEFECT FREQUENCIES
+          Inner race (BPFI) ≈ 5.4 × shaft RPM / 60 Hz for 9-roller bearings;
+          outer race (BPFO) ≈ 3.6 ×; cage (FTF) ≈ 0.4 ×; ball spin (BSF)
+          ≈ 2.3 ×. Sidebands at line frequency suggest electrical fault
+          rather than mechanical.
+      - id: iot-knw-003
+        title: "FDA Cold Chain — Vaccines"
+        metadata: { equipment: "cold_chain", regulation: "FDA-21CFR" }
+        content: |
+          VACCINE COLD-CHAIN STORAGE — FDA 21 CFR
+          Most refrigerated vaccines: 2°C-8°C, max 30 minutes outside
+          range during routine transfers; any excursion above 8°C for
+          > 30 min, or below 0°C, requires manufacturer consultation
+          before administration. Frozen vaccines: -50°C to -15°C,
+          stricter excursion log.
+      - id: iot-knw-004
+        title: "Pharma Cold-Chain Excursion SOP"
+        metadata: { equipment: "cold_chain", topic: "ops" }
+        content: |
+          EXCURSION RESPONSE SOP
+          On excursion event: (1) quarantine the affected lot; (2) pull
+          last 24h sensor history; (3) classify minor/major/critical
+          using temp × duration × product stability; (4) notify QA
+          within 1 hour for major+; (5) file CAPA if critical.
+      - id: iot-knw-005
+        title: "Predictive Maintenance — Trigger Thresholds"
+        metadata: { equipment: "all", topic: "maintenance" }
+        content: |
+          MAINTENANCE TRIGGERS
+          Pump vibration zone C → schedule within 7 days. Bearing
+          temperature rise > 15°C above baseline → inspect within 48h.
+          Cold-chain compressor duty cycle > 80% sustained 6h → inspect.
+          Always link the work order to the originating sensor event.

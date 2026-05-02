@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Plus, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
-import { useResolveAIFetch, resolveAIPost } from '@/lib/api';
+import { useResolveAIFetch, resolveAIPost, fetchSampleTickets, type SampleTicket } from '@/lib/api';
+import { toastError, toastSuccess } from '@/stores/toastStore';
 
 type Case = {
   id: string;
@@ -26,14 +27,10 @@ const STATUS_COLOR: Record<string, string> = {
   ingested:       'text-slate-300 bg-slate-500/10 border-slate-500/30',
 };
 
-// Synthetic ticket templates kept out of the handler so mis-clicks
-// while a pipeline is running can't corrupt the chosen payload.
-const SAMPLES = [
-  { customer_id: 'c-1001', customer_tier: 'vip',      subject: 'My order #5483 shipped wrong SKU',   body: 'Ordered M, got L. Been a customer 4 years. Need this resolved fast.', order_id: 'ord-5483', sku: 'SKU-BLUE-M' },
-  { customer_id: 'c-1002', customer_tier: 'standard', subject: 'Refund for damaged package',          body: 'Box was crushed, item dented. Photos attached. Want a full refund.',  order_id: 'ord-5484', sku: 'SKU-RED-L' },
-  { customer_id: 'c-1003', customer_tier: 'standard', subject: 'Trial extension request',             body: 'I did not get to evaluate the product, travel interfered.' },
-  { customer_id: 'c-1004', customer_tier: 'gold',     subject: 'Two duplicate charges on my card',    body: 'I see two identical charges on my statement — please refund one.', order_id: 'ord-5501', sku: 'SKU-PRO-ANN' },
-];
+// Server-controlled now — fetched from /api/resolveai/admin/sample-tickets
+// so we can vary fixtures per tenant and keep them out of the prod bundle.
+// `NEXT_PUBLIC_SHOW_SAMPLES=true` is the gate; in prod we hide the button.
+const SHOW_SAMPLES = process.env.NEXT_PUBLIC_SHOW_SAMPLES === 'true';
 
 export default function CasesPage() {
   const { data, error, isLoading, refetch } = useResolveAIFetch<Case[]>('/api/resolveai/cases?limit=200');
@@ -44,14 +41,27 @@ export default function CasesPage() {
   const createSynthetic = async () => {
     setCreating(true);
     setPostErr(null);
-    const pick = SAMPLES[Math.floor(Math.random() * SAMPLES.length)];
+    const samples = await fetchSampleTickets();
+    if (samples.length === 0) {
+      const msg = 'Could not load sample tickets — admin endpoint unreachable.';
+      setPostErr(msg);
+      toastError(msg);
+      setCreating(false);
+      return;
+    }
+    const pick: SampleTicket = samples[Math.floor(Math.random() * samples.length)];
     const { error: err } = await resolveAIPost('/api/resolveai/cases', {
       ...pick,
       channel: 'chat',
       jurisdiction: 'US',
       locale: 'en',
     });
-    if (err) setPostErr(err);
+    if (err) {
+      setPostErr(err);
+      toastError(`Pipeline call failed: ${err}`);
+    } else {
+      toastSuccess('Sample ticket queued — running through Inbound Resolution.');
+    }
     setCreating(false);
     void refetch();
   };
@@ -76,15 +86,17 @@ export default function CasesPage() {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} /> Refresh
           </button>
-          <button
-            onClick={createSynthetic}
-            disabled={creating}
-            data-testid="create-synthetic"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-medium rounded-lg text-sm disabled:opacity-60"
-          >
-            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            {creating ? 'Running pipeline…' : 'Simulate a ticket'}
-          </button>
+          {SHOW_SAMPLES && (
+            <button
+              onClick={createSynthetic}
+              disabled={creating}
+              data-testid="create-synthetic"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-medium rounded-lg text-sm disabled:opacity-60"
+            >
+              {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {creating ? 'Running pipeline…' : 'Simulate a ticket'}
+            </button>
+          )}
         </div>
       </div>
 

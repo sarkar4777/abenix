@@ -1599,17 +1599,26 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
             "error": nr.error,
             "attempt": nr.attempt,
         }
-        # Include output for completed nodes (truncate large outputs)
+        # Include output for completed nodes (truncate large outputs).
+        # Bumped from 10K→128K to keep multi-stage briefs (OracleNet
+        # synthesizer, the example app executive briefing, etc.) intact when the
+        # client renders them. JSON loads can't round-trip a sliced string,
+        # so on truncation we emit the raw string + an "output_truncated"
+        # flag so the UI can show a "view raw" affordance.
+        _NODE_OUTPUT_CAP = 128_000
+        _NODE_FALLBACK_CAP = 32_000
         if nr.status == "completed" and nr.output is not None:
             try:
                 output_str = json.dumps(nr.output, default=str)
-                if len(output_str) > 10_000:
-                    node_results[nid]["output"] = json.loads(output_str[:10_000])
+                if len(output_str) > _NODE_OUTPUT_CAP:
+                    # Don't try to re-parse a truncated slice — that almost
+                    # always raises and falls into the str() branch anyway.
+                    node_results[nid]["output"] = output_str[:_NODE_OUTPUT_CAP]
                     node_results[nid]["output_truncated"] = True
                 else:
                     node_results[nid]["output"] = nr.output
             except (TypeError, json.JSONDecodeError):
-                node_results[nid]["output"] = str(nr.output)[:5000]
+                node_results[nid]["output"] = str(nr.output)[:_NODE_FALLBACK_CAP]
         elif nr.status == "skipped":
             node_results[nid]["output"] = None
 

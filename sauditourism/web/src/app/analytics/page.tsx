@@ -4,15 +4,12 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { TrendingUp, Users, DollarSign, Star, Loader2, RefreshCw } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
+import { fetchWithToast } from '@/stores/toastStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return localStorage.getItem('st_token') || ''; }
 
-async function safeFetch(url: string, opts?: any) {
-  const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(600000) });
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return { data: null, error: { message: text.slice(0, 200) } }; }
-}
+type AnalyticsTab = 'time_series' | 'segmentation' | 'revenue';
 
 const GREENS = ['#00A651', '#16A34A', '#22C55E', '#4ADE80', '#86EFAC', '#059669', '#10B981'];
 
@@ -21,17 +18,20 @@ export default function DeepAnalyticsPage() {
   const [loading, setLoading] = useState(false);
   const [cached, setCached] = useState(false);
   const [error, setError] = useState('');
+  const [tab, setTab] = useState<AnalyticsTab>('time_series');
 
   async function loadDeep(refresh = false) {
     setLoading(true);
     setError('');
-    try {
-      const url = `${API_URL}/api/st/analytics/deep${refresh ? '?refresh=true' : ''}`;
-      const json = await safeFetch(url, { headers: { Authorization: `Bearer ${getToken()}` } });
-      if (json.data) { setCached(!!json.data._cached); setData(json.data); setError(''); }
-      else if (json.error) setError(json.error.message);
-    } catch (e: any) { setError(e.message); }
-    finally { setLoading(false); }
+    const url = `${API_URL}/api/st/analytics/deep${refresh ? '?refresh=true' : ''}`;
+    const json = await fetchWithToast(
+      url,
+      { headers: { Authorization: `Bearer ${getToken()}` } },
+      'Deep Analytics failed',
+    );
+    if (json.data) { setCached(!!json.data._cached); setData(json.data); setError(''); }
+    else if (json.error?.message) setError(json.error.message);
+    setLoading(false);
   }
 
   // Only try loading cached result on mount (10s timeout — cache is instant, agent is slow).
@@ -107,12 +107,36 @@ export default function DeepAnalyticsPage() {
         </div>
       )}
 
+      {/* Tabs — split sections so users don't see one giant scroll */}
+      {data && (
+        <div className="mb-5 flex items-center gap-1 border border-green-800/40 rounded-xl p-1 bg-[#0A2818]/40 w-fit">
+          {[
+            { key: 'time_series' as AnalyticsTab, label: 'Time Series', icon: TrendingUp },
+            { key: 'segmentation' as AnalyticsTab, label: 'Segmentation', icon: Users },
+            { key: 'revenue' as AnalyticsTab, label: 'Revenue Attribution', icon: DollarSign },
+          ].map(t => {
+            const active = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                  active ? 'bg-green-700/40 text-white border border-green-500/40' : 'text-green-300/60 hover:text-white'
+                }`}
+              >
+                <t.icon className="w-3.5 h-3.5" /> {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Monthly Trend */}
-        {monthly.length > 0 && (
-          <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/50 p-5">
+        {/* TIME SERIES tab */}
+        {tab === 'time_series' && monthly.length > 0 && (
+          <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/50 p-5 lg:col-span-2">
             <h3 className="text-sm font-semibold mb-4 text-green-200 flex items-center gap-2"><TrendingUp className="w-4 h-4" /> Monthly Visitor Trend</h3>
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={300}>
               <LineChart data={monthly}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#0D3320" />
                 <XAxis dataKey="month" tick={{ fill: '#4ADE80', fontSize: 10 }} />
@@ -124,8 +148,8 @@ export default function DeepAnalyticsPage() {
           </div>
         )}
 
-        {/* Origin Segmentation */}
-        {originData.length > 0 && (
+        {/* SEGMENTATION tab */}
+        {tab === 'segmentation' && originData.length > 0 && (
           <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/50 p-5">
             <h3 className="text-sm font-semibold mb-4 text-green-200 flex items-center gap-2"><Users className="w-4 h-4" /> Visitor Origin</h3>
             <ResponsiveContainer width="100%" height={250}>
@@ -139,8 +163,7 @@ export default function DeepAnalyticsPage() {
           </div>
         )}
 
-        {/* Purpose Segmentation */}
-        {purposeData.length > 0 && (
+        {tab === 'segmentation' && purposeData.length > 0 && (
           <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/50 p-5">
             <h3 className="text-sm font-semibold mb-4 text-green-200 flex items-center gap-2"><Users className="w-4 h-4" /> Visitor Purpose</h3>
             <ResponsiveContainer width="100%" height={250}>
@@ -154,24 +177,7 @@ export default function DeepAnalyticsPage() {
           </div>
         )}
 
-        {/* Revenue Attribution */}
-        {revAttr.length > 0 && (
-          <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/50 p-5">
-            <h3 className="text-sm font-semibold mb-4 text-green-200 flex items-center gap-2"><DollarSign className="w-4 h-4" /> Revenue by Sector</h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={revAttr}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#0D3320" />
-                <XAxis dataKey="sector" tick={{ fill: '#4ADE80', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#4ADE80', fontSize: 10 }} />
-                <Tooltip contentStyle={{ background: '#0A2818', border: '1px solid #166534', borderRadius: '8px', color: 'white' }} />
-                <Bar dataKey="revenue" fill="#16A34A" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Satisfaction Distribution */}
-        {ratingDist.length > 0 && (
+        {tab === 'segmentation' && ratingDist.length > 0 && (
           <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/50 p-5 lg:col-span-2">
             <h3 className="text-sm font-semibold mb-4 text-green-200 flex items-center gap-2"><Star className="w-4 h-4" /> Satisfaction Ratings</h3>
             <div className="flex items-center gap-4 mb-4">
@@ -193,6 +199,33 @@ export default function DeepAnalyticsPage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* REVENUE tab */}
+        {tab === 'revenue' && revAttr.length > 0 && (
+          <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/50 p-5 lg:col-span-2">
+            <h3 className="text-sm font-semibold mb-4 text-green-200 flex items-center gap-2"><DollarSign className="w-4 h-4" /> Revenue by Sector</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={revAttr}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#0D3320" />
+                <XAxis dataKey="sector" tick={{ fill: '#4ADE80', fontSize: 10 }} />
+                <YAxis tick={{ fill: '#4ADE80', fontSize: 10 }} />
+                <Tooltip contentStyle={{ background: '#0A2818', border: '1px solid #166534', borderRadius: '8px', color: 'white' }} />
+                <Bar dataKey="revenue" fill="#16A34A" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Empty state per tab when data exists but section is empty */}
+        {data && (
+          (tab === 'time_series' && monthly.length === 0) ||
+          (tab === 'segmentation' && originData.length === 0 && purposeData.length === 0 && ratingDist.length === 0) ||
+          (tab === 'revenue' && revAttr.length === 0)
+        ) && (
+          <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/30 p-10 text-center lg:col-span-2">
+            <p className="text-green-300/40 text-sm">No data for this view yet — re-run the agent or upload more datasets.</p>
           </div>
         )}
       </div>

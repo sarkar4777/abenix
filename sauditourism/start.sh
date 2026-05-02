@@ -61,6 +61,18 @@ fi
 if [ -z "$SAUDITOURISM_ABENIX_API_KEY" ]; then
   warn "SAUDITOURISM_ABENIX_API_KEY not set — all agent features will fail"
   warn "Create a key in Abenix with can_delegate scope and set the env var"
+else
+  _AF_URL="${ABENIX_API_URL:-http://localhost:8000}"
+  _CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+    -H "X-API-Key: $SAUDITOURISM_ABENIX_API_KEY" "${_AF_URL}/api/agents" 2>/dev/null || echo "000")
+  if [ "$_CODE" = "200" ]; then
+    ok "SAUDITOURISM_ABENIX_API_KEY validates against ${_AF_URL} (200)"
+  elif [ "$_CODE" = "401" ] || [ "$_CODE" = "403" ]; then
+    fail "SAUDITOURISM_ABENIX_API_KEY rejected by ${_AF_URL} (${_CODE}) — agent calls will fail"
+    fail "  Run: bash scripts/seed-standalone-keys.sh sauditourism"
+  else
+    warn "Could not validate SAUDITOURISM_ABENIX_API_KEY (got ${_CODE} from ${_AF_URL})"
+  fi
 fi
 
 if [ -z "$PGSSLMODE" ]; then

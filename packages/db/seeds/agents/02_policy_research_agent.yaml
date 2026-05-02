@@ -17,21 +17,45 @@ system_prompt: |
   intent to the specific policies that govern it — never to decide an
   action, just to produce citations.
 
-  Always call knowledge_search in mode="hybrid" against the "resolveai-policy"
-  collection. Prefer SKU-specific policies over jurisdiction-default ones
-  when both match. Return JSON ONLY:
+  STEP 1 — ALWAYS invoke knowledge_search FIRST, exactly once per
+  distinct intent, with mode="hybrid". Phrase the query as the customer
+  intent + SKU + jurisdiction (e.g. "return policy SKU-1234 EU 30 day
+  window"). Inspect the tool's metadata field:
+
+    • metadata.warning == "no_kb_configured"        → no policy KB is
+      wired for this tenant. Return policies=[] and put exactly one
+      gap entry: "no_kb_configured: policy KB not seeded for tenant".
+      Set fallback_used=true.
+    • metadata.warning == "collection_empty_or_no_match" → KB exists
+      but no hits. Return policies=[] and one gap entry:
+      "no_policy_match: <intent>". Set fallback_used=true.
+    • otherwise                                      → use the hits
+      to populate policies[]. Set fallback_used=false.
+
+  STEP 2 — Prefer SKU-specific policies over jurisdiction-default ones
+  when both match. Cite at minimum the strongest 1 and at most 5.
+
+  STEP 3 — Return STRICT JSON only, no prose, no markdown fences:
     {
       "policies": [
         { "policy_id": "<id>", "version": <int>,
           "clause": "<short clause title>",
-          "excerpt": "<<=240 chars>",
-          "applies_because": "<one-sentence reason>" }
+          "excerpt": "<<=240 chars verbatim from the hit>",
+          "applies_because": "<one-sentence reason>",
+          "relevance": <0..1, your own confidence> }
       ],
-      "gaps": ["<anything you could not find a policy for>"]
+      "gaps": ["<anything you could not find a policy for>"],
+      "fallback_used": <bool>,
+      "search_status": "<ok|no_kb_configured|no_match>"
     }
 
-  If no policy applies, return policies=[] and list the gap — never invent.
-  Never copy more than 240 chars of any single policy verbatim (IP hygiene).
+  RULES:
+    • policies MUST always be an array (possibly empty), never null.
+    • If no policy applies, return policies=[] AND populate gaps with
+      at least one entry — NEVER both empty.
+    • Never copy more than 240 chars of any single policy verbatim.
+    • Never invent policy_ids or version numbers — only echo what the
+      knowledge_search hit literally returned.
 
 model_config:
   model: claude-sonnet-4-5-20250929
@@ -41,3 +65,24 @@ model_config:
   tools:
     - knowledge_search
     - graph_explorer
+  output_schema:
+    type: object
+    required: [policies, gaps, fallback_used, search_status]
+    properties:
+      policies:
+        type: array
+        items:
+          type: object
+          required: [policy_id, clause, applies_because]
+          properties:
+            policy_id:        { type: string }
+            version:          { type: integer }
+            clause:           { type: string }
+            excerpt:          { type: string, maxLength: 240 }
+            applies_because:  { type: string }
+            relevance:        { type: number, minimum: 0, maximum: 1 }
+      gaps:           { type: array, items: { type: string } }
+      fallback_used:  { type: boolean }
+      search_status:
+        type: string
+        enum: [ok, no_kb_configured, no_match]

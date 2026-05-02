@@ -16,7 +16,8 @@ import {
   findAssetByName, uploadAndDeploy, waitForSchemaProbe,
 } from '../lib/deploy';
 import { findPipelineBySlug, runPipeline, type PipelineKey } from '../lib/pipelineRunner';
-import { vibrationWindow, VibrationWindow } from '../lib/synthetic';
+import { vibrationWindow, VibrationWindow, parsePumpQueryParams } from '../lib/synthetic';
+import KbBadge from '../components/KbBadge';
 
 interface WindowResult {
   index: number;
@@ -122,10 +123,11 @@ export default function PumpTab() {
     setStreaming(true); setResults([]); setCurrentLog([]); setExpandedWindow(null);
     abortRef.current = new AbortController();
 
+    const overrides = parsePumpQueryParams();
     const total = 10; // 10 windows across ~5-10 min (LLM round-trip per window)
     for (let i = 1; i <= total; i++) {
       if (abortRef.current.signal.aborted) break;
-      const win = vibrationWindow(i, total);
+      const win = vibrationWindow(i, total, overrides);
       setCurrentLog((p) => [...p.slice(-12), `Window ${i}/${total} (${win.scenario})  running…`]);
 
       const message = {
@@ -210,6 +212,7 @@ export default function PumpTab() {
       {probeStatus && (
         <div className="text-xs text-slate-400">{probeStatus}</div>
       )}
+      <KbBadge />
       {deployError && (
         <div className="flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
           <AlertTriangle className="w-4 h-4 mt-0.5" />
@@ -515,7 +518,7 @@ export default function PumpTab() {
               <ul className="list-disc list-outside pl-4 space-y-1">
                 <li>Bring-your-own code — no container push, no registry hassle.</li>
                 <li>Same request path runs on minikube locally and AKS in prod.</li>
-                <li>Every agent + tool call is recorded under <a href="/executions" className="text-cyan-300 underline">/executions</a> for audit.</li>
+                <li>Every agent + tool call is recorded under <a href={`${(process.env.NEXT_PUBLIC_ABENIX_WEB_URL || 'http://localhost:3000').replace(/\/$/, '')}/executions`} target="_blank" rel="noopener noreferrer" className="text-cyan-300 underline">/executions</a> for audit.</li>
                 <li>Budgets, rate-limits, moderation gates apply to this flow like every other.</li>
               </ul>
             ),

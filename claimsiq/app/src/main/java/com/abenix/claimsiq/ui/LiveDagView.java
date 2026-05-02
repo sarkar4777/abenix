@@ -73,8 +73,13 @@ public class LiveDagView extends VerticalLayout {
         super.onAttach(e);
         attachedUi = e.getUI();
         attachedUi.setPollInterval(2000);
+        // Always paint the 6-node skeleton up front so the user sees the
+        // pipeline shape (FNOL Intake → Policy Matcher → Damage Assessor →
+        // Fraud Screener → Valuator → Claim Decider) before the first
+        // SSE snapshot arrives. Real snapshots overwrite the skeleton
+        // as soon as `dispatch()` fires.
+        renderSkeleton();
         if (executionId == null || executionId.isBlank()) {
-            renderQueued();
             return;
         }
         openStream();
@@ -125,13 +130,43 @@ public class LiveDagView extends VerticalLayout {
         header.add(h, s);
     }
 
-    private void renderQueued() {
+    /**
+     * Paint the full 6-node ClaimsIQ pipeline shape with every node in
+     * {@code pending} state — runs immediately on attach so users see
+     * the pipeline structure before the first SSE snapshot lands.
+     * Real snapshots replace this skeleton on the next {@link #render}.
+     */
+    private void renderSkeleton() {
         header.removeAll();
-        H2 h = new H2("Pipeline is queued");
-        h.getStyle().set("font-size", "15px").set("color", Palette.TEXT_STRONG).set("margin", "0");
-        Span s = new Span("The claim row was saved; the pipeline fires in the background. Snapshots appear below as nodes start executing.");
-        s.getStyle().set("color", Palette.TEXT_MUTED).set("font-size", "12.5px");
-        header.add(h, s);
+        H2 h = new H2("ClaimsIQ — Adjudicate Claim");
+        h.getStyle().set("font-size", "16px").set("color", Palette.TEXT_STRONG).set("margin", "0")
+            .set("letter-spacing", "-0.02em");
+        HorizontalLayout meta = new HorizontalLayout();
+        meta.setSpacing(true);
+        meta.getStyle().set("margin-top", "0.5rem").set("flex-wrap", "wrap");
+        meta.add(chip("status", "queued", Palette.AMBER));
+        meta.add(chip("progress", "0 / 6", Palette.INDIGO));
+        header.add(h, meta);
+
+        nodeStack.removeAll();
+        // (id, label, agent_slug) tuples — labels are the user-facing
+        // names from the FNOL form / detail view, slugs match the
+        // platform seeds under packages/db/seeds/agents/cq_*.yaml.
+        String[][] skeleton = {
+            {"fnol",          "FNOL Intake",      "claimsiq-fnol-intake"},
+            {"policy_match",  "Policy Matcher",   "claimsiq-policy-matcher"},
+            {"damage_assess", "Damage Assessor",  "claimsiq-damage-assessor"},
+            {"fraud_screen",  "Fraud Screener",   "claimsiq-fraud-screener"},
+            {"valuate",       "Valuator",         "claimsiq-valuator"},
+            {"decide",        "Claim Decider",    "claimsiq-claim-decider"},
+        };
+        for (String[] row : skeleton) {
+            DagSnapshot.Node n = new DagSnapshot.Node(
+                row[0], row[1], null, row[2], "pending",
+                null, null, null, null, null, null, null, null, null, null
+            );
+            nodeStack.add(renderNode(n));
+        }
     }
 
     private void render(DagSnapshot snap) {

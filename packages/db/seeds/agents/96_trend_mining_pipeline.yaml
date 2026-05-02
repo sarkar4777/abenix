@@ -30,57 +30,58 @@ model_config:
     - agent_step
     - database_writer
     - http_client
-  pipeline_config:
-    nodes:
-      - id: mine_trends
-        type: agent
-        agent_slug: resolveai-trend-miner
-        input: >-
-          Window: last 72h.
-          Tenant: {{input.tenant_id}}
-        context:
-          tenant_id:   "{{input.tenant_id}}"
-          window_hours: 72
 
-      - id: open_voc_cases
-        type: tool
-        tool: database_writer
-        input:
-          table: voc_insights
-          rows: >-
-            {{[
-              { "tenant_id":      input.tenant_id,
-                "cluster_id":     c.id,
-                "signal":         c.signal,
-                "case_count":     c.case_count,
-                "example_case_ids": c.example_case_ids,
-                "anomaly_score": c.anomaly_score,
-                "suggested_action": c.suggested_action,
-                "status":         "open",
-                "source":         "trend_miner" }
-              for c in mine_trends.clusters if c.anomaly_score >= 0.5
-            ]}}
-        required_if: "{{len(mine_trends.clusters) > 0}}"
+pipeline_config:
+  nodes:
+    - id: mine_trends
+      type: agent
+      agent_slug: resolveai-trend-miner
+      input: >-
+        Window: last 72h.
+        Tenant: {{input.tenant_id}}
+      context:
+        tenant_id:   "{{input.tenant_id}}"
+        window_hours: 72
 
-      - id: slack_alert
-        type: tool
-        tool: http_client
-        input:
-          method: POST
-          url:    "{{tenant.slack_webhook_url}}"
-          json:
-            text: >-
-              ResolveAI Trend Miner: {{len(mine_trends.alerts)}}
-              anomaly alert(s) in the last 72h.
-            attachments: "{{mine_trends.alerts}}"
-        required_if: "{{len(mine_trends.alerts) > 0}}"
+    - id: open_voc_cases
+      type: tool
+      tool: database_writer
+      input:
+        table: voc_insights
+        rows: >-
+          {{[
+            { "tenant_id":      input.tenant_id,
+              "cluster_id":     c.id,
+              "signal":         c.signal,
+              "case_count":     c.case_count,
+              "example_case_ids": c.example_case_ids,
+              "anomaly_score": c.anomaly_score,
+              "suggested_action": c.suggested_action,
+              "status":         "open",
+              "source":         "trend_miner" }
+            for c in mine_trends.clusters if c.anomaly_score >= 0.5
+          ]}}
+      required_if: "{{len(mine_trends.clusters) > 0}}"
 
-      - id: final_report
-        type: structured
-        output:
-          tenant_id:          "{{input.tenant_id}}"
-          cluster_count:      "{{len(mine_trends.clusters)}}"
-          alert_count:        "{{len(mine_trends.alerts)}}"
-          voc_cases_opened:   "{{open_voc_cases.rows_written}}"
-          slack_posted:       "{{slack_alert.status == 200}}"
-          clusters:           "{{mine_trends.clusters}}"
+    - id: slack_alert
+      type: tool
+      tool: http_client
+      input:
+        method: POST
+        url:    "{{tenant.slack_webhook_url}}"
+        json:
+          text: >-
+            ResolveAI Trend Miner: {{len(mine_trends.alerts)}}
+            anomaly alert(s) in the last 72h.
+          attachments: "{{mine_trends.alerts}}"
+      required_if: "{{len(mine_trends.alerts) > 0}}"
+
+    - id: final_report
+      type: structured
+      output:
+        tenant_id:          "{{input.tenant_id}}"
+        cluster_count:      "{{len(mine_trends.clusters)}}"
+        alert_count:        "{{len(mine_trends.alerts)}}"
+        voc_cases_opened:   "{{open_voc_cases.rows_written}}"
+        slack_posted:       "{{slack_alert.status == 200}}"
+        clusters:           "{{mine_trends.clusters}}"

@@ -46,6 +46,21 @@ if [ -z "$RESOLVEAI_ABENIX_API_KEY" ]; then
   [ -z "$RESOLVEAI_ABENIX_API_KEY" ] && warn "RESOLVEAI_ABENIX_API_KEY not set — pipeline calls will 503"
 fi
 
+# Probe — validate the key against Abenix /api/agents so a stale 401 surfaces in pod logs.
+if [ -n "$RESOLVEAI_ABENIX_API_KEY" ]; then
+  _AF_URL="${ABENIX_API_URL:-http://localhost:8000}"
+  _CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+    -H "X-API-Key: $RESOLVEAI_ABENIX_API_KEY" "${_AF_URL}/api/agents" 2>/dev/null || echo "000")
+  if [ "$_CODE" = "200" ]; then
+    ok "RESOLVEAI_ABENIX_API_KEY validates against ${_AF_URL} (200)"
+  elif [ "$_CODE" = "401" ] || [ "$_CODE" = "403" ]; then
+    warn "RESOLVEAI_ABENIX_API_KEY rejected by ${_AF_URL} (${_CODE}) — pipeline calls will fail"
+    warn "  Run: bash scripts/seed-standalone-keys.sh resolveai"
+  else
+    warn "Could not validate RESOLVEAI_ABENIX_API_KEY (got ${_CODE} from ${_AF_URL})"
+  fi
+fi
+
 # Install API deps if missing
 if ! $PYTHON -c "import fastapi" >/dev/null 2>&1; then
   log "Installing ResolveAI API deps..."

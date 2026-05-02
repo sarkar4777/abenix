@@ -7,7 +7,17 @@ class ExecuteRequest(BaseModel):
     message: str
     stream: bool = True
     context: dict[str, Any] | None = None  # Input variables for pipelines and agents
-    wait: bool = False
+    # Tri-state: None means "let the server pick based on caller type":
+    #   - SDK / X-API-Key callers default to wait=True (synchronous), because
+    #     they have no UI to subscribe to a live stream and are almost always
+    #     blocking on the agent's output (the SDK contract that every
+    #     standalone app — the example app, ResolveAI, SauditTourism, IndustrialIoT,
+    #     ClaimsIQ — depends on).
+    #   - Browser / cookie / JWT callers default to wait=False (async), because
+    #     they have /api/executions/{id}/watch + /api/executions/live for live
+    #     monitoring and prefer the immediate execution_id handoff.
+    # An explicit True/False from the client always wins.
+    wait: bool | None = None
     wait_timeout_seconds: int = Field(default=180, ge=5, le=1800)
 
 

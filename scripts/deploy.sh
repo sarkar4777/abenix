@@ -506,6 +506,11 @@ seed_agents() {
   # Sample ML models (iris/housing/churn) for the OOB ml_prediction_pipeline.
   kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
     bash -c 'python /app/packages/db/seeds/seed_ml_models.py' 2>&1 | tail -5 || true
+  # KB seed: policy/persona/SOP for ResolveAI, policies for ClaimsIQ,
+  # equipment refs for Industrial IoT. MUST run AFTER seed_agents because
+  # it grants collections to agents by slug.
+  kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
+    bash -c 'python /app/packages/db/seeds/seed_kb.py' 2>&1 | tail -5 || true
   ok "Seeding complete"
 }
 

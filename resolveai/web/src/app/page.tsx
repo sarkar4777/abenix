@@ -19,6 +19,7 @@ type Metrics = {
 };
 
 const WELCOME_KEY = 'resolveai.welcome.v1';
+const SHOW_SAMPLES = process.env.NEXT_PUBLIC_SHOW_SAMPLES === 'true';
 
 export default function Dashboard() {
   const { data: m, error, refetch } = useResolveAIFetch<Metrics>('/api/resolveai/metrics');
@@ -86,6 +87,15 @@ export default function Dashboard() {
           >
             <HelpCircle className="w-3.5 h-3.5" /> Walkthrough
           </Link>
+          {SHOW_SAMPLES && (
+            <Link
+              href="/cases?demo=1"
+              data-testid="dashboard-demo-link"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> Demo: try a sample ticket
+            </Link>
+          )}
           <Link
             href="/cases"
             data-testid="dashboard-open-cases"

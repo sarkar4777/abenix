@@ -2,6 +2,7 @@ package com.abenix.claimsiq.ui;
 
 import com.abenix.claimsiq.domain.Claim;
 import com.abenix.claimsiq.service.ClaimsService;
+import com.abenix.claimsiq.service.PhotoUrlsCodec;
 import com.abenix.claimsiq.service.SamplePhotos;
 import com.vaadin.flow.component.Html;
 import com.vaadin.flow.component.UI;
@@ -144,10 +145,21 @@ public class FnolView extends VerticalLayout {
         submit.getStyle().set("background", Palette.INDIGO).set("color", "white")
             .set("box-shadow", "0 4px 14px " + Palette.INDIGO + "40");
         submit.addClickListener(e -> {
-            String photosCsv = String.join(",", photoDataUris);
+            // Encode as JSON instead of CSV — data URIs contain commas
+            // inside the base64 payload + MIME-parameter section, so
+            // CSV-joining shattered the list on read. JSON is unambiguous.
+            String photosJson = PhotoUrlsCodec.encode(photoDataUris);
+            if (photosJson.length() > PhotoUrlsCodec.MAX_TOTAL_BYTES) {
+                submit.setEnabled(true);
+                Notification.show(
+                    "Photo payload is too large (" + (photosJson.length() / (1024 * 1024))
+                        + " MB). Attach a maximum of 6 images at ~1 MB each.",
+                    5000, Notification.Position.MIDDLE);
+                return;
+            }
             Claim c = service.ingest(new ClaimsService.FnolRequest(
                 claimant.getValue(), policy.getValue(),
-                channel.getValue(), desc.getValue(), photosCsv));
+                channel.getValue(), desc.getValue(), photosJson));
             Notification.show("Claim " + c.getId().toString().substring(0, 8) + " filed — pipeline is running.",
                 3000, Notification.Position.BOTTOM_END);
             UI.getCurrent().navigate("claims/" + c.getId());

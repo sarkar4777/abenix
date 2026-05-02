@@ -281,6 +281,22 @@ if [ "${1:-}" = "--status" ]; then
   exit 0
 fi
 
+# ── Pre-flight: SDK drift gate ────────────────────────────────
+# Bail early if any of the 5 vendored Abenix SDK copies has drifted
+# from the canonical packages/sdk/python source. A drifted SDK in dev
+# silently breaks every standalone app's agent.execute() call (the
+# wait=True default that polls async-mode executions lives in the SDK).
+# Set SKIP_SDK_SYNC_CHECK=1 to bypass.
+if [ "${SKIP_SDK_SYNC_CHECK:-0}" != "1" ] && [ -f "$ROOT_DIR/scripts/sync-sdks.sh" ]; then
+  if ! bash "$ROOT_DIR/scripts/sync-sdks.sh" --check >/dev/null 2>&1; then
+    err "Abenix SDK copies are out of sync with canonical."
+    err "Run: bash scripts/sync-sdks.sh   (or SKIP_SDK_SYNC_CHECK=1 to bypass)"
+    bash "$ROOT_DIR/scripts/sync-sdks.sh" --check || true
+    exit 1
+  fi
+  ok "SDK copies in sync"
+fi
+
 # STARTUP
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
@@ -580,6 +596,86 @@ if [ "$READY" = true ]; then
     ok "MCP registry synced"
   else
     warn "Could not sync MCP registry (auth failed)"
+  fi
+
+  # ── Mint / validate standalone ABENIX_API_KEYs before launching apps ─
+  # Run a small helper that hits the local platform API and ensures each
+  # standalone has an active can_delegate-scoped key. Same logic as the
+  # in-cluster scripts/seed-standalone-keys.sh, just talking to localhost.
+  log "Reconciling standalone ABENIX_API_KEYs (idempotent)..."
+  STANDALONE_KEYS_JSON=$(DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://abenix:abenix@localhost:5432/abenix}" \
+    PYTHONPATH="$ROOT_DIR/packages/db" \
+    $PYTHON -c "
+import asyncio, hashlib, json, os, secrets, sys
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from models.api_key import ApiKey
+from models.user import User
+
+WANT = {
+    'EXAMPLE_APP_ABENIX_API_KEY':   'standalone-example_app',
+    'SAUDITOURISM_ABENIX_API_KEY': 'standalone-sauditourism',
+    'INDUSTRIALIOT_ABENIX_API_KEY':'standalone-industrial-iot',
+    'RESOLVEAI_ABENIX_API_KEY':    'standalone-resolveai',
+    'CLAIMSIQ_ABENIX_API_KEY':     'standalone-claimsiq',
+}
+
+async def run():
+    eng = create_async_engine(os.environ['DATABASE_URL'], echo=False)
+    sf = async_sessionmaker(eng, expire_on_commit=False)
+    out = {}
+    async with sf() as db:
+        u = (await db.execute(
+            select(User).where(User.email == 'admin@abenix.dev')
+        )).scalar_one_or_none()
+        if u is None:
+            print(json.dumps({}))
+            return
+        for env_var, name in WANT.items():
+            current = os.environ.get(env_var, '').strip()
+            valid = False
+            if current.startswith('af_'):
+                h = hashlib.sha256(current.encode()).hexdigest()
+                row = (await db.execute(
+                    select(ApiKey).where(ApiKey.key_hash == h, ApiKey.is_active.is_(True))
+                )).scalar_one_or_none()
+                if row is not None:
+                    valid = True
+                    out[env_var] = current
+            if not valid:
+                old = (await db.execute(
+                    select(ApiKey).where(ApiKey.name == name, ApiKey.is_active.is_(True))
+                )).scalars().all()
+                for k in old:
+                    k.is_active = False
+                raw = 'af_' + secrets.token_urlsafe(40)
+                ak = ApiKey(
+                    user_id=u.id, tenant_id=u.tenant_id, name=name,
+                    key_prefix=raw[:8] + '****' + raw[-4:],
+                    key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+                    scopes={'allowed_actions': ['can_delegate', 'execute', 'list', 'read']},
+                    is_active=True,
+                )
+                db.add(ak)
+                await db.commit()
+                out[env_var] = raw
+    print(json.dumps(out))
+    await eng.dispose()
+
+asyncio.run(run())
+" 2>/dev/null || echo "{}")
+
+  # Export each minted/validated key so the start.sh files inherit it.
+  if [ -n "$STANDALONE_KEYS_JSON" ] && [ "$STANDALONE_KEYS_JSON" != "{}" ]; then
+    while IFS='=' read -r k v; do
+      [ -n "$k" ] && export "$k=$v"
+    done < <(echo "$STANDALONE_KEYS_JSON" | $PYTHON -c "
+import sys,json
+for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
+" 2>/dev/null)
+    ok "Standalone keys reconciled: $(echo "$STANDALONE_KEYS_JSON" | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); print(len(d), "key(s) active")' 2>/dev/null)"
+  else
+    warn "Could not reconcile standalone keys — chat in the example app/Saudi Tourism/etc. may 401"
   fi
 
   # ── Step 8: Start the example app standalone application ──────────
