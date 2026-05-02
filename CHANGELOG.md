@@ -1,15 +1,5 @@
 # Changelog
 
-## v1.0.6 — 2026-05-02
-
-### Added
-
-### Changed
-- 28 new unit tests pinning every tool fix above (db_url helpers, config_check helpers, materialise_path helper, atlas_query coercion, json_transformer identity, financial_calculator FV/PV/compound). Total suite now 160 tests, all passing in <8s without any live services. Added
-- Local-mode (dev-local.sh) parity: exports EXPORT_DIR/UPLOAD_DIR/ML_MODELS_DIR/CODE_ASSET_STORE/CODE_ASSET_BUILD_CACHE before launching, mkdir -p on startup. Neo4j default password bumped to 8+ chars (matches helm) so fresh installs don't crash-loop. Helm agent-runtime-pools template now mounts /data PVC, sets fsGroup=1001, runs init container as root to chown dirs. Changed
-- Comprehensive tools+pipelines deep-UAT fix wave: B-INFRA-1 (/data writable in agent-runtime pool pods + EXPORT_DIR fallback that rescues both broken k8s pods AND fresh local installs); B-TOOL-1 (web_search dedup); B-TOOL-2 (atlas_query accepts query/patterns/string-list); B-TOOL-3 (json_transformer identity/noop/empty pass-through + enum); B-TOOL-4 (memory_store/recall/forget use async engine + DATABASE_URL env-fallback); B-TOOL-5 (financial_calculator imperative description + future_value/present_value/compound_interest ops); B-TOOL-6 (news_feed surfaces backend errors instead of silent apology); B-NEW-1 (database_writer SSL param fix); B-NEW-2 (file-input tools accept inline text via materialise_path helper); B-META-1 (input_schema for 5 missing tools). All fixes verified live on Azure AKS. Fixed
-
-### Fixed
 
 ## v1.0.5 — 2026-05-01
 
