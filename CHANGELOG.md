@@ -1,35 +1,5 @@
 # Changelog
 
-## v1.0.6 — 2026-05-02
-
-### Fixed
-- **Schema-drift catchup**: several columns lived only in the SQLAlchemy models (executions.node_results / execution_trace / failure_code / parent_execution_id / retry_count / moderation_blocked, agent_shares.shared_with_user_id / shared_with_email) without ever being captured in an alembic migration — every fresh `alembic upgrade head` produced a database missing those columns and every API call that touched them returned 500. Added `packages/db/alembic/versions/x4y5z6a7b8c9_schema_drift_catchup.py`, idempotent (information_schema-guarded) ADD COLUMN migration that picks up automatically on every k8s deploy + dev-local boot.
-- **Pipeline failures** now return 200 with `data.status="failed"` + `data.execution_id` (was 500 + no id). Both queue and inline paths converged on the same envelope so callers can drill into the persisted execution row.
-- **Self-signup tenants** get a default moderation policy auto-seeded on tenant creation (BLOCK at 0.5 threshold, omni-moderation-latest, pre_llm + post_llm hooks). Previously the gate was a no-op for new tenants because no policy existed.
-- **`code_executor`**: `[Errno 13] Permission denied: '/data'` — `_resolve_export_dir()` now probes EXPORT_DIR → `<cwd>/.data/exports` → `<tempdir>/abenix_exports` with a write-probe at each step. Single change rescues both broken k8s pods AND fresh local installs.
-- **`atlas_query`**: accepts `query: 'X'`, `patterns: ['X']`, OR `patterns: [{label_like: 'X'}]` — was rejecting all but the third shape with "No patterns supplied".
-- **`json_transformer`**: accepts `'identity'`/`'noop'`/empty as no-op pass-through and lists supported operations in error messages.
-- **`memory_store` / `memory_recall` / `memory_forget`**: were failing with "Could not parse SQLAlchemy URL" because the sync engine couldn't parse `+asyncpg://`. New `_db_url.resolve_async_db_url()` helper coerces the URL + falls back to env DATABASE_URL.
-- **`database_writer`**: same SSL-param fix via the shared db_url helper.
-- **`news_feed` / `academic_search`**: backend failures now surface as `is_error=True` so dashboards record them instead of the LLM apologising politely.
-- **`web_search`** registered twice in `/api/tools` — duplicate dropped.
-- **5 tools missing `input_schema`** in catalogue (calculator, current_time, web_search, file_reader, csv_analyzer) — populated with imperative descriptions.
-- **File-input tools** (file_reader, document_parser, spreadsheet_analyzer, presentation_analyzer) now accept inline `text` content via the new `_inline_file.materialise_path()` helper — end users can paste content in chat instead of being told "I need a file".
-- **Moderation rule order**: `MODERATION_BLOCKED` now beats `TOOL_ERROR` in `app.core.failure_codes` so moderation exceptions raised from inside a tool context group correctly on `/alerts`.
-
-### Changed
-- **Local-mode parity**: `dev-local.sh` exports `EXPORT_DIR/UPLOAD_DIR/ML_MODELS_DIR/CODE_ASSET_STORE/CODE_ASSET_BUILD_CACHE` to `$ROOT_DIR/.data/*` and mkdir-p's them on startup.
-- **Robust schema verification on startup**: dev-local Step 4/7 + deploy-azure `run_migrations` both run `alembic upgrade head` then verify 6 sentinel columns via information_schema; fail loud on drift instead of silently rolling forward.
-- **`scripts/verify-schema.sh`** new standalone tool: default = verify only (safe to run in prod), `--reset` = drop + recreate (developer convenience), `--pod=NAME` = check a k8s pod's DB.
-- **Helm `agent-runtime-pools`**: mounts `sharedData` PVC, sets `securityContext.fsGroup=1001`, init container runs as root to chown `/data/{exports,uploads,ml-models,code-assets,code-asset-cache}`. Sets `LIVEKIT_URL` + `EXPORT_DIR` + sibling env-vars explicitly.
-- **`docker-compose.yml`**: neo4j default password bumped to 8+ chars (matches helm) so fresh installs don't crash-loop with `InvalidPasswordException`.
-- **`financial_calculator`**: rewritten description (imperative, lists FV/PV/compound_interest/NPV/IRR with param shapes); added 3 new ops (future_value, present_value, compound_interest).
-
-### Added
-- **132 → 188 unit tests**: new `tests/unit/test_tool_fixes.py` (28 tests) pins every tool fix above (db_url helpers, config_check helpers, materialise_path, atlas_query coercion, json_transformer identity, financial_calculator FV/PV/compound). Total suite passes in <8s without any live services.
-- **Token-refresh** in the deep UAT runner so long sweeps (~80 tools) don't cascade past the 15-min JWT lifetime.
-- **`engine/tools/_db_url.py`** + **`_config_check.py`** + **`_inline_file.py`** shared helpers — pull every "external API config", "DB URL coercion", and "inline-vs-file" boilerplate out of individual tools.
-
 
 ## v1.0.5 — 2026-05-01
 
