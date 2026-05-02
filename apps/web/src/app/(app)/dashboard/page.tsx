@@ -213,6 +213,86 @@ export default function DashboardPage() {
         </div>
       </motion.div>
 
+      {/*
+        Zero-state hero — shown when a fresh tenant lands here for the
+        first time (no agents, no executions). Three concrete actions
+        that move them forward in <30 seconds. Hidden once the tenant
+        has any activity so power users don't see redundant CTAs.
+      */}
+      {stats && stats.total_agents === 0 && stats.today_executions === 0 && (
+        <motion.div variants={item}>
+          <div className="bg-gradient-to-br from-cyan-500/10 via-purple-500/5 to-transparent border border-cyan-500/20 rounded-xl p-6">
+            <h2 className="text-lg font-semibold text-white mb-1">Welcome to Abenix 👋</h2>
+            <p className="text-sm text-slate-300 mb-5">
+              Three ways to get going in the next 5 minutes:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <a
+                href="/chat"
+                className="group bg-slate-900/60 border border-slate-700/60 rounded-lg p-4 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-cyan-500/15 flex items-center justify-center">
+                    <Bot className="w-4 h-4 text-cyan-400" />
+                  </div>
+                  <h3 className="text-white font-medium">Talk to a sample agent</h3>
+                </div>
+                <p className="text-xs text-slate-400">
+                  We pre-seeded a few agents (code-assistant, web-researcher, doc-summariser).
+                  Open <code className="text-cyan-300">/chat</code>, pick one, send a prompt.
+                </p>
+                <span className="inline-flex items-center gap-1 mt-3 text-xs text-cyan-400 group-hover:gap-2 transition-all">
+                  Try it <ArrowRight className="w-3 h-3" />
+                </span>
+              </a>
+              <a
+                href="/agents/new"
+                className="group bg-slate-900/60 border border-slate-700/60 rounded-lg p-4 hover:border-purple-500/40 hover:bg-slate-900 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-purple-500/15 flex items-center justify-center">
+                    <Plus className="w-4 h-4 text-purple-400" />
+                  </div>
+                  <h3 className="text-white font-medium">Build your first agent</h3>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Pick a system prompt + a few tools (calculator, web_search, file_reader).
+                  No code needed.
+                </p>
+                <span className="inline-flex items-center gap-1 mt-3 text-xs text-purple-400 group-hover:gap-2 transition-all">
+                  Open builder <ArrowRight className="w-3 h-3" />
+                </span>
+              </a>
+              <a
+                href="/knowledge"
+                className="group bg-slate-900/60 border border-slate-700/60 rounded-lg p-4 hover:border-amber-500/40 hover:bg-slate-900 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">
+                    <Upload className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <h3 className="text-white font-medium">Upload a knowledge base</h3>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Drop in PDFs, DOCX, CSV, or Markdown. Agents can search them with
+                  the <code className="text-amber-300">knowledge_search</code> tool.
+                </p>
+                <span className="inline-flex items-center gap-1 mt-3 text-xs text-amber-400 group-hover:gap-2 transition-all">
+                  Upload <ArrowRight className="w-3 h-3" />
+                </span>
+              </a>
+            </div>
+            <p className="text-xs text-slate-500 mt-4">
+              Need a deeper walkthrough?{' '}
+              <a href="/help" className="text-cyan-400 hover:underline">
+                Open the help center
+              </a>{' '}
+              — every feature has a short tour.
+            </p>
+          </div>
+        </motion.div>
+      )}
+
       <motion.div variants={item} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpiCards.map((kpi) => (
           <div

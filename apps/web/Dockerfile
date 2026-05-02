@@ -14,6 +14,18 @@ COPY apps/web/ ./apps/web/
 COPY packages/shared/ ./packages/shared/
 COPY turbo.json ./
 ENV NEXT_TELEMETRY_DISABLED=1
+# Patch Next.js's lockfile-checker to no-op. The original throws
+# `Cannot read properties of undefined (reading 'os')` on alpine
+# because some optional-deps entries are missing platform-specific
+# metadata. The patcher's only job is to suggest re-running npm
+# install — it doesn't affect the actual build output. Replacing
+# the function body with a return is the cleanest fix; the env-var
+# bypass alone has been unreliable across Next 14.x.
+# Also strip `packageManager` from root package.json so Corepack
+# doesn't accidentally invoke Yarn (which is on the alpine base
+# image but doesn't speak the npm@ format).
+RUN sed -i 's/"packageManager":[^,]*,*//' /app/package.json && \
+    node -e "const f='/app/node_modules/next/dist/lib/patch-incorrect-lockfile.js';const s=require('fs').readFileSync(f,'utf8');require('fs').writeFileSync(f,s.replace('async function patchIncorrectLockfile(dir) {','async function patchIncorrectLockfile(dir) { return;'))"
 RUN npm run build --workspace=@abenix/web
 
 FROM node:20-alpine

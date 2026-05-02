@@ -176,6 +176,7 @@ app.include_router(a2a.router)
 from app.routers import (
     memories,
     tools,
+    integrations,
     ai_builder,
     tool_library,
     oraclenet,
@@ -188,6 +189,7 @@ from app.routers import (
 
 app.include_router(memories.router)
 app.include_router(tools.router)
+app.include_router(integrations.router)
 app.include_router(ai_builder.router)
 app.include_router(tool_library.router)
 app.include_router(oraclenet.router)

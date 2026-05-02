@@ -856,6 +856,13 @@ export default function AtlasPage() {
                 onChange={e => e.target.files && submitFile(e.target.files[0])} />
             </div>
           )}
+          <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
+            Agents can <span className="text-violet-300">search</span> (atlas_search_grounded),
+            {' '}<span className="text-violet-300">describe</span> (atlas_describe),
+            {' '}<span className="text-violet-300">traverse</span> (atlas_traverse), and
+            {' '}<span className="text-violet-300">query</span> (atlas_query) this graph as a tool — pin specific atlases via{' '}
+            <code className="font-mono text-slate-400">model_config.atlas_graphs</code>.
+          </p>
         </header>
 
         {!activeId && (
