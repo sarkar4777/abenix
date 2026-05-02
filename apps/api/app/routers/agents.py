@@ -1895,7 +1895,24 @@ async def _stream_pipeline_execution(
                 # NATS consumer path so the inline path produces the same
                 # normalized output (no sentiment="mixed", severity="extreme",
                 # etc.). See engine/post_process.py for the rationale.
-                _output_schema_inline = (model_cfg or {}).get("output_schema")
+                # Pipeline-level output_schema takes precedence; if absent we
+                # fall back to the agent's model_config.output_schema fetched
+                # in the same DB query.
+                _output_schema_inline = (pipeline_config or {}).get("output_schema")
+                if not _output_schema_inline:
+                    _agent_row = (
+                        (
+                            await db.execute(
+                                select(Agent).where(Agent.id == uuid.UUID(agent_id))
+                            )
+                        ).scalar_one_or_none()
+                        if agent_id
+                        else None
+                    )
+                    if _agent_row is not None:
+                        _output_schema_inline = (_agent_row.model_config_ or {}).get(
+                            "output_schema"
+                        )
                 if _output_schema_inline:
                     try:
                         import sys as _sys

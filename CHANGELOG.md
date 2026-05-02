@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.8 — 2026-05-03
+
+### Fixed
+- CI: ruff F821 in `apps/api/app/routers/agents.py` (undefined `model_cfg`) and `packages/db/seeds/seed_kb.py` (dangling `if written` after the `_upsert_documents` no-op refactor). Black auto-format applied to 6 files.
+- README: 5 use-case screenshot paths moved from `logs/uat/apps/*-screens/` (gitignored, so they appeared broken on the public mirror) to `docs/screenshots/usecases/`. Same Azure-cluster captures, in a tracked path that survives `publish-public.sh`.
+
+### Changed
+- README: removed stale `examples/` link and the `logs/uat/apps/PHASE-A*.md` link. Added direct links to the Python SDK README and `NEXT_PLANS.md`.
+- `scripts/publish-public.sh`: new `BUMP=none` mode for follow-on docs/CI fixes that mirror to the public repo without rolling the version forward or moving the existing tag.
+
 ## v1.0.8 — 2026-05-02
 
 ### Added

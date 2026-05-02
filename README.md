@@ -195,7 +195,7 @@ open http://localhost:3000/oraclenet         # already inside Abenix web
 ```
 
 <p align="center">
-  <img src="logs/uat/apps/oraclenet-screens/run1_brief_default.png" alt="OracleNet brief" width="100%" />
+  <img src="docs/screenshots/usecases/oraclenet-brief.png" alt="OracleNet brief" width="100%" />
   <br/><em>OracleNet Decision Brief — confidence + recommendation card, 6 tabs</em>
 </p>
 
@@ -226,7 +226,7 @@ open http://localhost:3002
 ```
 
 <p align="center">
-  <img src="logs/uat/apps/sauditourism-screens/flow_dashboard_kpis.png" alt="Saudi Tourism dashboard" width="100%" />
+  <img src="docs/screenshots/usecases/sauditourism-dashboard.png" alt="Saudi Tourism dashboard" width="100%" />
   <br/><em>Saudi Tourism dashboard — KPIs computed live from baked test data</em>
 </p>
 
@@ -268,7 +268,7 @@ open http://localhost:3005/fnol
 ```
 
 <p align="center">
-  <img src="logs/uat/apps/claimsiq-screens/09-claim-7555a256-final.png" alt="ClaimsIQ final adjudication" width="100%" />
+  <img src="docs/screenshots/usecases/claimsiq-final.png" alt="ClaimsIQ final adjudication" width="100%" />
   <br/><em>Final adjudication — decision, amount, cited clauses, live DAG</em>
 </p>
 
@@ -315,7 +315,7 @@ open http://localhost:3003
 ```
 
 <p align="center">
-  <img src="logs/uat/apps/industrial-iot-screens/pump-02-post-deploy-both.png" alt="Industrial-IoT pump tab" width="100%" />
+  <img src="docs/screenshots/usecases/industrial-iot-pump.png" alt="Industrial-IoT pump tab" width="100%" />
   <br/><em>Industrial-IoT — pump tab after both code assets deployed</em>
 </p>
 
@@ -352,7 +352,7 @@ open http://localhost:3004
 ```
 
 <p align="center">
-  <img src="logs/uat/apps/resolveai-screens/case_after_takeover_e3adf1f9.png" alt="ResolveAI case detail" width="100%" />
+  <img src="docs/screenshots/usecases/resolveai-case.png" alt="ResolveAI case detail" width="100%" />
   <br/><em>ResolveAI — case detail with inbound-resolution DAG and cited policy</em>
 </p>
 
@@ -561,8 +561,8 @@ Tested on AKS, EKS, GKE, and bare metal.
 - **In-app help** — every running instance has `/help` with the full user guide
 - **API reference** — every running instance has `/docs` (FastAPI Swagger)
 - **Atlas API** — see [apps/api/app/routers/atlas.py](apps/api/app/routers/atlas.py)
-- **SDK examples** — see [examples/](examples/)
-- **Phase A landing notes** — [`logs/uat/apps/PHASE-A*.md`](logs/uat/apps/)
+- **Python SDK** — see [packages/sdk/python/README.md](packages/sdk/python/README.md)
+- **Roadmap** — see [NEXT_PLANS.md](NEXT_PLANS.md)
 
 ---
 

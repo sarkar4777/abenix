@@ -202,10 +202,6 @@ async def _upsert_documents(
     )
     return 0
 
-    if written:
-        collection.doc_count = (collection.doc_count or 0) + written
-    return written
-
 
 async def seed_kb() -> None:
     if not SEEDS_DIR.exists():
