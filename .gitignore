@@ -15,6 +15,24 @@ dist/
 build/
 *.egg-info/
 
+# Local dev data dirs (created by dev-local.sh)
+.data/
+
+# Transient UAT artefacts — only the canonical report
+# (BUGS_TOOLS_DEEP.md) is tracked. One-off bug reports + per-run
+# screenshots + per-build logs live in working tree but never go to
+# git or to the public publish.
+BUGS_FOUND.md
+BUGS_DEEP.md
+BUGS_DEEPER.md
+BUGS_TOOLS.md
+BUGS_TOOLS_FULL.md
+NEXT_STEPS.md
+UAT_REPORT.md
+RELEASE_NOTES_PENDING_*.md
+logs/uat/
+logs/build-*.log
+
 # Turbo
 .turbo/
 

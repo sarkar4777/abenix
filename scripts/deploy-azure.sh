@@ -534,7 +534,7 @@ ensure_jwt_keys() {
 }
 
 run_migrations() {
-  step "Ensuring abenix database + tables"
+  step "Ensuring abenix database + tables + schema is current"
   local pg
   pg=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=postgresql" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
   if [ -n "${pg}" ]; then
@@ -542,6 +542,55 @@ run_migrations() {
       'PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = '"'"'abenix'"'"'" | grep -q 1 || PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -c "CREATE DATABASE abenix"' 2>/dev/null
     ok "Database ready"
   fi
+
+  # Wait for an API pod that we can run alembic against. The pod
+  # ships /app/packages/db with the Alembic config + migrations.
+  local api_pod="" tries=0
+  while [ -z "${api_pod}" ] && [ "$tries" -lt 30 ]; do
+    api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+      --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    [ -n "${api_pod}" ] && break
+    sleep 3
+    tries=$((tries + 1))
+  done
+
+  if [ -n "${api_pod}" ]; then
+    log "Running alembic upgrade head via ${api_pod}..."
+    kubectl exec -n "${NAMESPACE}" "${api_pod}" -- bash -c \
+      'cd /app/packages/db && python -m alembic upgrade head' 2>&1 | tail -10 || true
+
+    # Schema-drift sentinel: a small set of canonical columns that
+    # MUST exist after alembic upgrade head. If any is missing the
+    # catchup migration didn't fully apply — fail loud so prod
+    # rollouts don't proceed against a half-migrated database.
+    log "Verifying schema sentinels in live database..."
+    local missing=""
+    for col in \
+      "executions:node_results" \
+      "executions:execution_trace" \
+      "executions:failure_code" \
+      "agent_shares:shared_with_user_id" \
+      "moderation_policies:default_action"; do
+      local table="${col%:*}"
+      local column="${col#*:}"
+      local exists
+      exists=$(kubectl exec -n "${NAMESPACE}" "${pg}" -- bash -c \
+        "PGPASSWORD=\$POSTGRES_PASSWORD psql -U postgres -d abenix -tAc \"SELECT 1 FROM information_schema.columns WHERE table_name='${table}' AND column_name='${column}'\"" \
+        2>/dev/null | tr -d '[:space:]')
+      [ "${exists}" = "1" ] || missing="${missing} ${table}.${column}"
+    done
+
+    if [ -n "${missing}" ]; then
+      err "Schema drift after alembic — missing columns:${missing}"
+      err "Inspect packages/db/alembic/versions/x4y5z6a7b8c9_schema_drift_catchup.py"
+      err "Production rollout aborted — DB is not at the expected schema."
+      exit 6
+    fi
+    ok "Schema verified — all sentinel columns present"
+  else
+    warn "No ready API pod — skipping alembic + schema verification"
+  fi
+
   kubectl -n "${NAMESPACE}" rollout restart deployment -l "app.kubernetes.io/name=api" 2>&1 | tail -1 || true
   kubectl -n "${NAMESPACE}" rollout status deployment -l "app.kubernetes.io/name=api" --timeout=180s 2>&1 | tail -1 || true
   # Same trick for web — when IMAGE_TAG matches what's already deployed

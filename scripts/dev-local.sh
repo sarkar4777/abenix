@@ -371,26 +371,58 @@ else
   ok "Python packages installed"
 fi
 
-# ── Step 5: Run migrations ────────────────────────────────────
-log "Step 4/7 — Database migrations..."
+# ── Step 5: Run migrations + verify schema is current ──────────
+# Robust startup: `alembic upgrade head` is the source of truth in BOTH
+# local and k8s prod. The catchup migration `x4y5z6a7b8c9` adds any
+# columns that drifted between the ORM and the database — it's
+# idempotent (information_schema-guarded) so re-running it is always
+# safe in production.
+#
+# Verification step: AFTER alembic, check a small set of canonical
+# columns. If any are STILL missing the catchup migration is
+# incomplete and we exit non-zero so the developer notices and fixes
+# the migration rather than papering over the gap with a destructive
+# drop.
+log "Step 4/7 — Database migrations + schema verification..."
 cd "$ROOT_DIR/packages/db"
 
 # Clean Python cache to avoid stale bytecode
 find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
+# Run alembic to head — applies the catchup migration if needed.
 MIGRATION_OUT=$(PYTHONPATH="." $PYTHON -m alembic upgrade head 2>&1) || true
 echo "$MIGRATION_OUT" | grep "Running upgrade" | sed 's/^/      /' || true
-if echo "$MIGRATION_OUT" | grep -qi "error\|traceback"; then
-  # Check if it's just "already at head"
-  if echo "$MIGRATION_OUT" | grep -qi "already"; then
-    ok "Migrations already up to date"
-  else
-    warn "Migration had issues — check output above"
-    echo "$MIGRATION_OUT" | tail -5 | sed 's/^/      /'
-  fi
-else
-  ok "Migrations complete"
+
+# Sentinel column list — small, load-bearing, updated whenever a
+# schema-changing migration lands. If ALL of these are present,
+# the schema is considered current.
+_CANONICAL_COLUMNS=(
+  "executions.node_results"
+  "executions.execution_trace"
+  "executions.failure_code"
+  "agent_shares.shared_with_user_id"
+  "moderation_policies.default_action"
+  "agent_memories.importance"
+)
+
+_missing=""
+for entry in "${_CANONICAL_COLUMNS[@]}"; do
+  table="${entry%.*}"
+  column="${entry#*.}"
+  exists=$(docker exec abenix-postgres psql -U abenix -d abenix -tAc \
+    "SELECT 1 FROM information_schema.columns WHERE table_name='$table' AND column_name='$column'" 2>/dev/null || echo "")
+  [ -z "$exists" ] && _missing="$_missing $entry"
+done
+
+if [ -n "$_missing" ]; then
+  err "Schema drift after alembic upgrade head — missing:$_missing"
+  err "The catchup migration didn't fully apply. Inspect:"
+  err "  packages/db/alembic/versions/x4y5z6a7b8c9_schema_drift_catchup.py"
+  err "If this is a fresh install you can recover with:"
+  err "  bash scripts/verify-schema.sh --reset"
+  exit 5
 fi
+ok "Migrations complete; schema verified current ($((${#_CANONICAL_COLUMNS[@]})) sentinel columns present)"
 cd "$ROOT_DIR"
 
 # ── Step 6: Seed agents ──────────────────────────────────────
