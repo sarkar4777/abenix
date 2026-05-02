@@ -318,9 +318,13 @@ export default function TopBar() {
       <div className="flex items-center gap-2 text-sm">
         <button
           onClick={() => setMobileOpen(true)}
+          aria-label="Open navigation menu"
+          title="Menu"
+          data-testid="mobile-menu-trigger"
           className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors md:hidden"
         >
           <Menu className="w-5 h-5" />
+          <span className="sr-only">Menu</span>
         </button>
         {/* Back button — only shows on pages other than /dashboard.
             Uses a route-aware parent map (via resolveBackTarget) to avoid
@@ -476,6 +480,10 @@ export default function TopBar() {
         <div className="relative">
           <button
             onClick={() => setShowDropdown(!showDropdown)}
+            aria-label={`User menu for ${user?.full_name || 'your account'}`}
+            aria-haspopup="menu"
+            aria-expanded={showDropdown}
+            title="User menu — open to log out, view profile, and switch settings"
             className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white"
           >
             {user?.full_name?.charAt(0) || 'U'}
@@ -528,10 +536,11 @@ export default function TopBar() {
                         setShowDropdown(false);
                         logout();
                       }}
+                      aria-label="Log out of your account"
                       className="flex items-center gap-3 px-4 py-2 text-sm text-red-400 hover:bg-slate-700/50 transition-colors w-full"
                     >
                       <LogOut className="w-4 h-4" />
-                      Logout
+                      Log out
                     </button>
                   </div>
                 </motion.div>

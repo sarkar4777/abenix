@@ -47,7 +47,12 @@ function useTypingAnimation(text: string, speed = 80) {
 }
 
 export default function AuthCard() {
-  const [tab, setTab] = useState<Tab>('register');
+  // Default to login because the vast majority of repeat visitors are
+  // returning users. New users notice the Register tab next to Sign In;
+  // returning users staring at a Register form just type into it and end
+  // up with a duplicate-email error. Sign-in-by-default also makes the
+  // forgot-password / "I have an account" flow naturally available.
+  const [tab, setTab] = useState<Tab>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -181,7 +186,7 @@ export default function AuthCard() {
                   : 'text-slate-500 hover:text-slate-300'
               }`}
             >
-              {t === 'login' ? 'Sign In' : 'Register'}
+              {t === 'login' ? 'Sign in' : 'Create account'}
             </button>
           ))}
         </div>
@@ -272,6 +277,22 @@ export default function AuthCard() {
                 Min 8 characters
               </p>
             )}
+            {/*
+              Self-serve password reset isn't wired yet — link to a
+              mailto so users have a clear next step instead of a
+              dead end. The href will switch to an /auth/forgot
+              flow once that ships. Always rendered (both tabs) so a
+              user who got here via the wrong tab can still find help.
+            */}
+            <div className="mt-2 text-right">
+              <a
+                href="mailto:support@abenix.dev?subject=Password%20reset"
+                className="text-xs text-cyan-400/80 hover:text-cyan-300 transition"
+                aria-label="Forgot password? Email support"
+              >
+                Forgot password?
+              </a>
+            </div>
           </div>
 
           {error && (
@@ -293,13 +314,14 @@ export default function AuthCard() {
             type="submit"
             disabled={loading}
             aria-label={loading ? 'Submitting...' : tab === 'login' ? 'Sign in to your account' : 'Create a new account'}
+            data-testid="auth-submit"
             className="w-full bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-semibold py-3 rounded-lg shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
           >
             {loading ? (
               <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true" />
             ) : tab === 'login' ? (
               <>
-                Initialize Session
+                Sign in to your account
                 <ArrowRight className="w-4 h-4" aria-hidden="true" />
               </>
             ) : (

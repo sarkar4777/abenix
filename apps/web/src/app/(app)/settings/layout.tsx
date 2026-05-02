@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  Activity,
   Bell,
   Box,
   Coins,
@@ -10,6 +11,7 @@ import {
   Eye,
   Key,
   Lock,
+  Plug,
   Shield,
   User,
   Users,
@@ -23,7 +25,9 @@ const NAV_ITEMS = [
   { label: 'API Keys', icon: Key, href: '/settings/api-keys' },
   ...(MONETIZATION_ENABLED ? [{ label: 'Billing', icon: CreditCard, href: '/settings/billing' }] : []),
   { label: 'Team', icon: Users, href: '/settings/team' },
+  { label: 'Integrations', icon: Plug, href: '/settings/integrations' },
   { label: 'Notifications', icon: Bell, href: '/settings/notifications' },
+  { label: 'Observability', icon: Activity, href: '/settings/observability' },
   { label: 'Security', icon: Lock, href: '/settings/security' },
   { label: 'Data & DLP', icon: Shield, href: '/settings/data' },
   { label: 'Privacy & GDPR', icon: Eye, href: '/settings/privacy' },
@@ -55,6 +59,7 @@ export default function SettingsLayout({
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={false}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm ${
                     active
                       ? 'bg-cyan-500/10 text-cyan-400'

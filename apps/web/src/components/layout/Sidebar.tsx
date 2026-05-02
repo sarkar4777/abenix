@@ -83,9 +83,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     id: 'build',
     label: 'BUILD',
-    defaultOpen: false,
+    defaultOpen: true,
     items: [
       { label: 'Agent Builder',     icon: Wand2,    href: '/builder',           feature: 'use_builder' },
+      { label: 'Tools Catalogue',   icon: Wrench,   href: '/tools',             feature: 'use_builder' },
       { label: 'Code Runner',       icon: Code2,    href: '/code-runner',       feature: 'use_code_runner' },
       { label: 'ML Models',         icon: Brain,    href: '/ml-models',         feature: 'use_ml_models' },
       { label: 'Knowledge Bases',   icon: Database, href: '/knowledge',         feature: 'use_kb' },
@@ -98,7 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     id: 'run',
     label: 'RUN & TEST',
-    defaultOpen: false,
+    defaultOpen: true,
     items: [
       { label: 'SDK Playground',  icon: Code2, href: '/sdk-playground',  feature: 'use_sdk_playground' },
       { label: 'Load Playground', icon: Gauge, href: '/load-playground', feature: 'use_load_playground' },
@@ -108,7 +109,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     id: 'monitor',
     label: 'MONITOR',
-    defaultOpen: false,
+    defaultOpen: true,
     items: [
       { label: 'Executions',  icon: Activity,  href: '/executions',      feature: 'view_executions' },
       { label: 'Live Debug',  icon: Radio,     href: '/executions/live', feature: 'view_executions' },
@@ -145,10 +146,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     id: 'workspace',
     label: 'WORKSPACE',
-    defaultOpen: false,
+    defaultOpen: true,
     items: [
       { label: 'MCP Servers',    icon: Plug, href: '/mcp',                feature: 'manage_mcp' },
       { label: 'API Keys',       icon: Key,  href: '/settings/api-keys',  feature: 'manage_api_keys' },
+      { label: 'Integrations',   icon: Plug, href: '/settings/integrations' },
       { label: 'Settings',       icon: Settings,   href: '/settings' },
       { label: 'Help',           icon: HelpCircle, href: '/help' },
       { label: 'Docs',           icon: BookOpen, href: '/docs', external: true, badge: 'new' },
@@ -255,8 +257,21 @@ function SidebarNav({
                 {group.label}
               </p>
             )}
-            {(open || collapsed || isPinned) && (
-              <div className="space-y-0.5 mb-2">
+            {/*
+              Always render the links into the DOM. When the group is
+              collapsed we hide them via CSS rather than removing them,
+              so keyboard nav, screen readers, browser-tab search,
+              and automation can still find every route. The pinned
+              group is rendered identically; collapsed sidebar mode
+              shows just the icons (px-0 / justify-center).
+            */}
+            <div
+              className={`space-y-0.5 mb-2 overflow-hidden transition-[max-height] duration-200 ${
+                open || collapsed || isPinned ? 'max-h-[1500px]' : 'max-h-0'
+              }`}
+              aria-hidden={!(open || collapsed || isPinned)}
+            >
+              <div>
                 {group.items.map(item => {
                   const active =
                     pathname === item.href ||
@@ -302,6 +317,7 @@ function SidebarNav({
                     <Link
                       key={item.href}
                       href={item.href}
+                      prefetch={false}
                       title={collapsed ? item.label : undefined}
                       onClick={onLinkClick}
                       className={linkCls}
@@ -311,7 +327,7 @@ function SidebarNav({
                   );
                 })}
               </div>
-            )}
+            </div>
           </div>
         );
       })}
@@ -334,9 +350,11 @@ function SidebarFooter({
         <button
           onClick={logout}
           title="Logout"
+          aria-label="Log out"
           className="w-full flex items-center justify-center py-2.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors"
         >
           <LogOut className="w-[18px] h-[18px]" />
+          <span className="sr-only">Log out</span>
         </button>
       ) : (
         <div className="flex items-center gap-3">
@@ -354,9 +372,11 @@ function SidebarFooter({
           <button
             onClick={logout}
             title="Logout"
+            aria-label="Log out"
             className="text-slate-400 hover:text-white transition-colors shrink-0"
           >
             <LogOut className="w-4 h-4" />
+            <span className="sr-only">Log out</span>
           </button>
         </div>
       )}
