@@ -30,7 +30,8 @@ system_prompt: |
 
   Output per stakeholder:
   - Stakeholder group
-  - Sentiment: positive/negative/neutral/mixed
+  - Sentiment: MUST be exactly one of `positive`, `negative`, or `neutral`
+    (lowercase, no other values). Use `neutral` for ambiguous/mixed reactions.
   - Intensity: 0.0-1.0
   - Likely Actions: concrete actions
   - Timeline: immediate/weeks/months/quarters

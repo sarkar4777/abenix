@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,9 +59,12 @@ async def analyze_decision(
 
     tool_names = model_cfg.get("tools", [])
 
-    # Build context with the decision prompt
+    # Build context with the decision prompt.
+    # `depth` is consumed by the depth_router node in oraclenet_pipeline.yaml
+    # to decide which optional agents to run (quick=3, standard=5, deep=7).
     context = {
         "message": body.decision_prompt,
+        "depth": body.depth or "standard",
         **(body.context or {}),
     }
 
@@ -190,6 +193,170 @@ async def get_session(
             ),
         }
     )
+
+
+def _brief_to_markdown(brief: dict[str, Any]) -> str:
+    """Render a Decision Brief dict as readable markdown."""
+    lines: list[str] = ["# OracleNet Decision Brief", ""]
+    if brief.get("summary") or brief.get("executive_summary"):
+        lines += [
+            "## Executive Summary",
+            str(brief.get("summary") or brief.get("executive_summary") or ""),
+            "",
+        ]
+    if brief.get("confidence") is not None:
+        lines += [f"**Confidence:** {brief.get('confidence')}%", ""]
+    if brief.get("recommendation"):
+        rec = brief["recommendation"]
+        rec_text = (
+            rec if isinstance(rec, str) else (rec.get("action") or json.dumps(rec))
+        )
+        lines += ["## Recommendation", str(rec_text), ""]
+    for s in brief.get("scenarios", []) or []:
+        title = s.get("title") or s.get("name") or "Scenario"
+        prob = s.get("probability") or 0
+        lines += [
+            f"### Scenario: {title} ({prob}%)",
+            str(s.get("description") or ""),
+            "",
+        ]
+    if brief.get("stakeholders"):
+        lines += ["## Stakeholders"]
+        for s in brief["stakeholders"]:
+            lines += [
+                f"- **{s.get('name', 'Stakeholder')}** [{s.get('sentiment', 'neutral')}]: {s.get('details') or s.get('impact') or ''}"
+            ]
+        lines += [""]
+    if brief.get("risks"):
+        lines += ["## Risks"]
+        for r in brief["risks"]:
+            lines += [
+                f"- **{r.get('title', 'Risk')}** [{r.get('severity', 'medium')}] {r.get('probability', 0)}%: {r.get('description') or ''}"
+            ]
+        lines += [""]
+    if brief.get("conditions"):
+        lines += ["## Conditions"] + [f"- {c}" for c in brief["conditions"]] + [""]
+    if brief.get("monitoringTriggers") or brief.get("monitoring_triggers"):
+        triggers = (
+            brief.get("monitoringTriggers") or brief.get("monitoring_triggers") or []
+        )
+        lines += ["## Monitoring Triggers"] + [f"- {t}" for t in triggers] + [""]
+    return "\n".join(lines)
+
+
+@router.post("/export")
+async def export_brief_inline(
+    format: str = Query(
+        default="pdf", description="Output format: pdf | docx | markdown"
+    ),
+    payload: dict[str, Any] = Body(...),
+    user: User = Depends(get_current_user),
+) -> Any:
+    """Export a Decision Brief supplied inline as PDF or DOCX.
+
+    Body shape: {"brief": {... BriefData ...}}.
+    """
+    fmt = (format or "").lower()
+    if fmt not in ("pdf", "docx", "markdown", "md"):
+        return error("format must be pdf, docx, or markdown", 400)
+
+    brief = payload.get("brief") or payload
+    if not isinstance(brief, dict):
+        return error("Body must include {brief: {...}}", 400)
+
+    md_text = _brief_to_markdown(brief)
+
+    if fmt in ("markdown", "md"):
+        return StreamingResponse(
+            iter([md_text.encode()]),
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": 'attachment; filename="oraclenet-brief.md"'
+            },
+        )
+
+    if fmt == "pdf":
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+            import io
+
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+            for raw_para in md_text.split("\n\n"):
+                para = raw_para.strip()
+                if not para:
+                    continue
+                if para.startswith("# "):
+                    story.append(Paragraph(para.lstrip("# ").strip(), styles["Title"]))
+                elif para.startswith("## "):
+                    story.append(
+                        Paragraph(para.lstrip("# ").strip(), styles["Heading2"])
+                    )
+                elif para.startswith("### "):
+                    story.append(
+                        Paragraph(para.lstrip("# ").strip(), styles["Heading3"])
+                    )
+                else:
+                    # Escape <, > so reportlab doesn't try to parse them as markup
+                    safe = (
+                        para.replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                    )
+                    story.append(Paragraph(safe, styles["Normal"]))
+                story.append(Spacer(1, 6))
+            doc.build(story)
+            buffer.seek(0)
+            return StreamingResponse(
+                iter([buffer.read()]),
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": 'attachment; filename="oraclenet-brief.pdf"'
+                },
+            )
+        except ImportError:
+            return error("reportlab not installed for PDF generation", 500)
+        except Exception as e:
+            return error(f"PDF generation failed: {e}", 500)
+
+    if fmt == "docx":
+        try:
+            from docx import Document
+            import io
+
+            doc = Document()
+            for raw_para in md_text.split("\n\n"):
+                para = raw_para.strip()
+                if not para:
+                    continue
+                if para.startswith("# "):
+                    doc.add_heading(para.lstrip("# ").strip(), 0)
+                elif para.startswith("## "):
+                    doc.add_heading(para.lstrip("# ").strip(), level=1)
+                elif para.startswith("### "):
+                    doc.add_heading(para.lstrip("# ").strip(), level=2)
+                else:
+                    doc.add_paragraph(para)
+            buffer = io.BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            return StreamingResponse(
+                iter([buffer.read()]),
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={
+                    "Content-Disposition": 'attachment; filename="oraclenet-brief.docx"'
+                },
+            )
+        except ImportError:
+            return error("python-docx not installed for DOCX generation", 500)
+        except Exception as e:
+            return error(f"DOCX generation failed: {e}", 500)
+
+    return error("Unsupported format", 400)
 
 
 @router.get("/sessions/{execution_id}/export/{fmt}")

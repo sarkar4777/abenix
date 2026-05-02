@@ -40,8 +40,24 @@ system_prompt: |
 
   Rules:
     • Every action with a $ amount must cite at least one policy.
-    • If Policy Research returned zero policies on a refund intent,
-      set action.type="escalate_human" with reason "no_policy_match".
+    • actions MUST always be an array of length >= 1, never empty.
+      If you genuinely cannot find an action, emit exactly:
+        [{
+          "type": "no_action",
+          "amount_usd": null,
+          "rationale": "<why no action applies — e.g. 'request out of policy window'>",
+          "cites": [],
+          "requires_approval": false,
+          "approval_tier": "none"
+        }]
+      This makes case detail UI show actions=1 (not 0) so the
+      operator can tell the agent ran rather than failing silently.
+    • If Policy Research returned policies=[] AND search_status="no_kb_configured",
+      emit exactly one action of type="escalate_human", approval_tier="t1_lead",
+      rationale="policy_kb_not_configured — escalating to human until KB seeded".
+    • If Policy Research returned policies=[] AND search_status="no_match"
+      on a refund intent, set action.type="escalate_human" with reason
+      "no_policy_match".
     • Never bypass moderation, never propose sending PII to third parties.
 
 model_config:
@@ -53,3 +69,34 @@ model_config:
     - code_asset    # for refund math, loyalty-point conversions, FX
     - agent_step
     - llm_route
+  output_schema:
+    type: object
+    required: [summary, actions, deflection_score]
+    properties:
+      summary: { type: string }
+      actions:
+        type: array
+        minItems: 1                  # never silently empty
+        items:
+          type: object
+          required: [type, rationale, requires_approval, approval_tier]
+          properties:
+            type:
+              type: string
+              enum:
+                - refund
+                - partial_refund
+                - replacement
+                - credit
+                - apology
+                - policy_explain
+                - escalate_human
+                - no_action
+            amount_usd: { type: [number, "null"] }
+            rationale:  { type: string }
+            cites:      { type: array, items: { type: string } }
+            requires_approval: { type: boolean }
+            approval_tier:
+              type: string
+              enum: [none, t1_lead, manager, legal]
+      deflection_score: { type: number, minimum: 0, maximum: 1 }

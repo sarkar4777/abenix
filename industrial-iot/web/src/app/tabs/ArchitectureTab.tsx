@@ -2,6 +2,12 @@
 
 import { Box, Cpu, Database, GitBranch, HardDrive, Server } from 'lucide-react';
 
+// Abenix's main UI lives on a different origin in cluster (e.g.
+// http://20.72.73.141.nip.io). Falling back to localhost:3000 keeps dev
+// links working. Build with NEXT_PUBLIC_ABENIX_WEB_URL set.
+const ABENIX_WEB =
+  (process.env.NEXT_PUBLIC_ABENIX_WEB_URL || 'http://localhost:3000').replace(/\/$/, '');
+
 export default function ArchitectureTab() {
   return (
     <div className="space-y-6">
@@ -91,7 +97,7 @@ export default function ArchitectureTab() {
               Pipeline writes rows to <code>af_pump_readings</code> +
               <code>af_work_orders</code> or <code>af_coldchain_events</code>
               via the <code>database_writer</code> tool. All executions are
-              visible under <a href="/executions" className="text-cyan-300 underline">/executions</a>.
+              visible under <a href={`${ABENIX_WEB}/executions`} target="_blank" rel="noopener noreferrer" className="text-cyan-300 underline">/executions</a>.
             </>
           }
         />
@@ -106,7 +112,7 @@ export default function ArchitectureTab() {
             ISO 10816 zone mapping. The Python RUL estimator does exponential
             degradation fitting with a linear fallback. Both compile and run
             inside sandboxed k8s Jobs the user can inspect under
-            <a href="/code-runner" className="text-cyan-300 underline ml-1">Code Runner</a>.
+            <a href={`${ABENIX_WEB}/code-runner`} target="_blank" rel="noopener noreferrer" className="text-cyan-300 underline ml-1">Code Runner</a>.
           </li>
           <li>
             <b className="text-white">Two fundamentally different industrial problems, one platform.</b>

@@ -4,17 +4,15 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { BarChart3, Users, DollarSign, Hotel, Star, Loader2, AlertCircle, Database, RefreshCw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from 'recharts';
+import { fetchWithToast, toastError, toastSuccess } from '@/stores/toastStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return localStorage.getItem('st_token') || ''; }
 
 const GREENS = ['#00A651', '#16A34A', '#22C55E', '#4ADE80', '#86EFAC', '#059669', '#10B981', '#34D399'];
 
-async function safeFetch(url: string, opts?: any) {
-  const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(600000) });
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return { data: null, error: { message: text.slice(0, 200) } }; }
-}
+const ANALYTICS_CACHE_KEY = 'st_dashboard_cache_v1';
+const ANALYTICS_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
@@ -28,40 +26,67 @@ export default function DashboardPage() {
 
   // Load instant data (no agent needed)
   async function loadBasicData() {
-    try {
-      const [statsRes, dsRes] = await Promise.all([
-        safeFetch(`${API_URL}/api/st/datasets/stats`, { headers }),
-        safeFetch(`${API_URL}/api/st/datasets`, { headers }),
-      ]);
-      if (statsRes.data) setStats(statsRes.data);
-      if (dsRes.data) setDatasets(dsRes.data);
-    } catch { }
+    const [statsRes, dsRes] = await Promise.all([
+      fetchWithToast(`${API_URL}/api/st/datasets/stats`, { headers }, 'Failed to load dataset stats'),
+      fetchWithToast(`${API_URL}/api/st/datasets`, { headers }, 'Failed to load datasets'),
+    ]);
+    if (statsRes.data) setStats(statsRes.data);
+    if (dsRes.data) setDatasets(dsRes.data);
   }
 
   // Load full analytics via Abenix (takes 30-90s)
-  async function loadAnalytics() {
-    setLoading(true);
+  async function loadAnalytics(opts: { background?: boolean } = {}) {
+    if (!opts.background) setLoading(true);
     setError('');
-    try {
-      const json = await safeFetch(`${API_URL}/api/st/analytics/dashboard`, { headers });
-      if (json.data) setData(json.data);
-      else if (json.error) setError(json.error.message || 'Agent returned an error');
-    } catch (e: any) {
-      setError(e.message || 'Failed to load analytics');
-    } finally {
-      setLoading(false);
+    const json = await fetchWithToast(
+      `${API_URL}/api/st/analytics/dashboard`,
+      { headers },
+      'AI Analytics failed',
+    );
+    if (json.data) {
+      setData(json.data);
+      try {
+        localStorage.setItem(ANALYTICS_CACHE_KEY, JSON.stringify({ at: Date.now(), data: json.data }));
+      } catch { }
+    } else if (json.error?.message) {
+      setError(json.error.message);
     }
+    if (!opts.background) setLoading(false);
   }
 
   async function seedData() {
     setSeeding(true);
-    try {
-      await safeFetch(`${API_URL}/api/st/datasets/seed`, { method: 'POST', headers });
-      await loadBasicData();
-    } catch { } finally { setSeeding(false); }
+    const json = await fetchWithToast(
+      `${API_URL}/api/st/datasets/seed`,
+      { method: 'POST', headers },
+      'Seed test data failed',
+    );
+    if (json.data) {
+      const seeded = (json.data.seeded || []).filter((s: any) => s.status === 'seeded').length;
+      toastSuccess(`Seeded ${seeded} dataset(s)`, seeded === 0 ? 'All test datasets already loaded' : undefined);
+    }
+    await loadBasicData();
+    setSeeding(false);
   }
 
-  useEffect(() => { loadBasicData(); }, []);
+  // Auto-load: instant data first, then hydrate from cache, then refresh stale.
+  useEffect(() => {
+    loadBasicData();
+    try {
+      const raw = localStorage.getItem(ANALYTICS_CACHE_KEY);
+      if (raw) {
+        const { at, data: cached } = JSON.parse(raw);
+        if (cached) setData(cached);
+        if (Date.now() - (at || 0) > ANALYTICS_TTL_MS) {
+          // Stale — kick off a background refresh (no spinner over the cards)
+          loadAnalytics({ background: true });
+        }
+      } else {
+        // No cache yet — trigger a one-shot background fetch so KPIs appear without a click
+        loadAnalytics({ background: true });
+      }
+    } catch { }
+  }, []);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -76,7 +101,7 @@ export default function DashboardPage() {
             {seeding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
             {seeding ? 'Seeding...' : 'Seed Test Data'}
           </button>
-          <button onClick={loadAnalytics} disabled={loading}
+          <button onClick={() => loadAnalytics()} disabled={loading}
             className="px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-green-700 text-white text-xs font-semibold hover:shadow-lg hover:shadow-green-600/25 transition-all flex items-center gap-2 disabled:opacity-50">
             {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             {loading ? 'Analyzing via Abenix...' : 'Run AI Analytics'}

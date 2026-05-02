@@ -228,13 +228,40 @@ async def delete_dataset(
     return success({"deleted": True})
 
 
+def _find_test_data_dir() -> Path:
+    """Locate the bundled test-data directory.
+
+    Priority:
+      1. /app/test-data           (baked into the prod image via Dockerfile)
+      2. <repo>/sauditourism/test-data (dev-local; api/ -> ../test-data)
+    """
+    baked = Path("/app/test-data")
+    if baked.is_dir():
+        return baked
+    # api/app/routers/datasets.py -> parents[3] is the api/ dir's parent (sauditourism/)
+    dev_local = Path(__file__).resolve().parents[3] / "test-data"
+    return dev_local
+
+
 @router.post("/seed")
 async def seed_test_data(
     user: STUser = Depends(get_st_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Seed all test-data CSVs/TXTs — extraction done via Abenix."""
-    test_dir = Path(__file__).resolve().parent.parent.parent.parent / "test-data"
+    """Seed all test-data CSVs/TXTs — extraction done via Abenix.
+
+    Idempotent: if a dataset with the same filename already exists for the user,
+    it is left alone. Missing datasets are ingested. Safe to retry on partial
+    failure.
+    """
+    test_dir = _find_test_data_dir()
+    if not test_dir.is_dir():
+        logger.error("seed: test-data dir not found at %s", test_dir)
+        return error(
+            f"test-data directory not found at {test_dir}. "
+            "Rebuild the API image with the test-data/ COPY layer.",
+            500,
+        )
     seeded = []
 
     for f in sorted(test_dir.glob("*.*")):

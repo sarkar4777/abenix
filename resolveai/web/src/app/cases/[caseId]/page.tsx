@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, CheckCircle2, Loader2, UserRound, RefreshCw } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, UserRound, RefreshCw, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { useResolveAIFetch, resolveAIPost } from '@/lib/api';
 
 type Citation = {
@@ -137,16 +137,10 @@ export default function CaseDetail({ params }: { params: { caseId: string } }) {
           </p>
           {citations.length > 0 && (
             <div className="mt-3 pt-3 border-t border-slate-700/50">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Cited policies</p>
-              <ul className="space-y-1 text-xs text-slate-400">
-                {citations.map((cit, i) => (
-                  <li key={i} className="font-mono">
-                    {typeof cit === 'string'
-                      ? cit
-                      : `${cit.policy_id ?? 'UNKNOWN'}@v${cit.version ?? '?'}${cit.clause ? ` · ${cit.clause}` : ''}`}
-                  </li>
-                ))}
-              </ul>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+                <BookOpen className="w-3 h-3 text-cyan-400" /> Cited policies ({citations.length})
+              </p>
+              <CitationStack citations={citations} />
             </div>
           )}
         </div>
@@ -205,5 +199,58 @@ function Pill({ label, value }: { label: string; value: string | number }) {
       <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
       <p className="text-lg font-semibold text-white mt-1">{value}</p>
     </div>
+  );
+}
+
+function CitationStack({ citations }: { citations: Array<Citation | string> }) {
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  return (
+    <ul className="space-y-1.5 text-xs" data-testid="citation-stack">
+      {citations.map((cit, i) => {
+        const isOpen = openIdx === i;
+        // Normalise — backend has historically returned both raw strings
+        // and structured Citation objects, so render either path safely.
+        const obj: Citation = typeof cit === 'string'
+          ? { policy_id: cit }
+          : (cit as Citation);
+        const policyId = obj.policy_id ?? 'UNKNOWN';
+        const version = obj.version ?? null;
+        const clause = obj.clause;
+        const excerpt = obj.excerpt || obj.applies_because || '';
+        const chip = `${policyId}${version != null ? `@v${version}` : ''}${clause ? ` · ${clause}` : ''}`;
+        return (
+          <li
+            key={i}
+            className="rounded-lg border border-slate-700/50 bg-slate-900/30"
+            data-testid="citation-item"
+          >
+            <button
+              onClick={() => setOpenIdx(isOpen ? null : i)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-slate-800/40 rounded-lg"
+            >
+              {isOpen
+                ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                : <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
+              <span className="font-mono text-cyan-300 truncate">{chip}</span>
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-2 pt-1 text-slate-300 border-t border-slate-700/50">
+                {excerpt ? (
+                  <p className="whitespace-pre-wrap leading-relaxed">{excerpt}</p>
+                ) : (
+                  <p className="text-slate-500 italic">No excerpt returned by Policy Research.</p>
+                )}
+                {obj.applies_because && obj.excerpt && obj.applies_because !== obj.excerpt && (
+                  <p className="mt-2 text-[10px] uppercase tracking-wider text-slate-500">Why it applies</p>
+                )}
+                {obj.applies_because && obj.excerpt && obj.applies_because !== obj.excerpt && (
+                  <p className="text-slate-400 mt-1 leading-relaxed">{obj.applies_because}</p>
+                )}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

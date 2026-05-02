@@ -6,6 +6,7 @@ import {
   BarChart3, Upload, MapPin, TrendingUp, Gauge, MessageSquare,
   FileText, LogOut, HelpCircle, Palmtree,
 } from 'lucide-react';
+import LanguageToggle from '@/components/LanguageToggle';
 
 function getToken() { if (typeof window === 'undefined') return null; return localStorage.getItem('st_token'); }
 function getUser() { if (typeof window === 'undefined') return null; try { return JSON.parse(localStorage.getItem('st_user') || 'null'); } catch { return null; } }
@@ -82,7 +83,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           })}
         </nav>
         <div className="border-t border-green-900/50 pt-4">
-          <p className="text-xs text-green-300/50 mb-1">{user?.full_name}</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-green-300/50">{user?.full_name}</p>
+            <LanguageToggle />
+          </div>
           <p className="text-[10px] text-green-400/30 mb-3">{user?.email}</p>
           <button onClick={logout} className="flex items-center gap-2 text-xs text-green-300/40 hover:text-red-400 transition-colors">
             <LogOut className="w-3.5 h-3.5" /> Sign Out

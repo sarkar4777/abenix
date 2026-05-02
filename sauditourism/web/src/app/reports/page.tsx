@@ -2,16 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Play, Loader2, Clock, ChevronRight } from 'lucide-react';
+import { FileText, Play, Loader2, Clock, ChevronRight, Download, FileType2 } from 'lucide-react';
+import { fetchWithToast, toastError, toastSuccess } from '@/stores/toastStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return localStorage.getItem('st_token') || ''; }
-
-async function safeFetch(url: string, opts?: any) {
-  const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(600000) });
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return { data: null, error: { message: text.slice(0, 200) } }; }
-}
 
 export default function ReportsPage() {
   const [types, setTypes] = useState<any>({});
@@ -21,40 +16,74 @@ export default function ReportsPage() {
 
   useEffect(() => {
     (async () => {
-      try {
-        const [typesJson, reportsJson] = await Promise.all([
-          safeFetch(`${API_URL}/api/st/reports/types`, { headers: { Authorization: `Bearer ${getToken()}` } }),
-          safeFetch(`${API_URL}/api/st/reports`, { headers: { Authorization: `Bearer ${getToken()}` } }),
-        ]);
-        if (typesJson.data) setTypes(typesJson.data);
-        if (reportsJson.data) setReports(reportsJson.data);
-      } catch { }
+      const headers = { Authorization: `Bearer ${getToken()}` };
+      const [typesJson, reportsJson] = await Promise.all([
+        fetchWithToast(`${API_URL}/api/st/reports/types`, { headers }, 'Failed to load report types'),
+        fetchWithToast(`${API_URL}/api/st/reports`, { headers }, 'Failed to load reports'),
+      ]);
+      if (typesJson.data) setTypes(typesJson.data);
+      if (reportsJson.data) setReports(reportsJson.data);
     })();
   }, []);
 
   async function generateReport(type: string) {
     setGenerating(type);
     setViewReport(null);
-    try {
-      const json = await safeFetch(`${API_URL}/api/st/reports/generate`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type }),
-      });
-      if (json.data) {
-        setViewReport(json.data);
-        // Refresh list
-        const reportsJson = await safeFetch(`${API_URL}/api/st/reports`, { headers: { Authorization: `Bearer ${getToken()}` } });
-        if (reportsJson.data) setReports(reportsJson.data);
-      }
-    } catch { } finally { setGenerating(''); }
+    const headers = { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' };
+    const json = await fetchWithToast(
+      `${API_URL}/api/st/reports/generate`,
+      { method: 'POST', headers, body: JSON.stringify({ type }) },
+      'Report generation failed',
+    );
+    if (json.data) {
+      setViewReport(json.data);
+      toastSuccess(`Report ready: ${json.data.title}`);
+      const reportsJson = await fetchWithToast(
+        `${API_URL}/api/st/reports`,
+        { headers: { Authorization: `Bearer ${getToken()}` } },
+        'Failed to refresh reports list',
+      );
+      if (reportsJson.data) setReports(reportsJson.data);
+    }
+    setGenerating('');
   }
 
   async function loadReport(id: string) {
+    const json = await fetchWithToast(
+      `${API_URL}/api/st/reports/${id}`,
+      { headers: { Authorization: `Bearer ${getToken()}` } },
+      'Failed to load report',
+    );
+    if (json.data) setViewReport(json.data);
+  }
+
+  async function exportReport(id: string, format: 'pdf' | 'docx') {
     try {
-      const json = await safeFetch(`${API_URL}/api/st/reports/${id}`, { headers: { Authorization: `Bearer ${getToken()}` } });
-      if (json.data) setViewReport(json.data);
-    } catch { }
+      const res = await fetch(`${API_URL}/api/st/reports/${id}/export?format=${format}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        toastError(`Export ${format.toUpperCase()} failed`, text.slice(0, 160) || `HTTP ${res.status}`);
+        return;
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      const m = /filename="?([^";]+)"?/.exec(cd);
+      const filename = m?.[1] || `report.${format}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toastSuccess(`Downloaded ${filename}`);
+    } catch (e: any) {
+      toastError(`Export ${format.toUpperCase()} failed`, e?.message || String(e));
+    }
   }
 
   return (
@@ -125,22 +154,46 @@ export default function ReportsPage() {
                 <h2 className="text-lg font-bold text-white">{viewReport.title}</h2>
                 <span className="text-[10px] text-green-400/20 ml-auto">{viewReport.created_at ? new Date(viewReport.created_at).toLocaleDateString() : ''}</span>
               </div>
-              <div className="prose prose-invert prose-green max-w-none text-sm leading-relaxed"
+              <div className="flex items-center gap-2 mb-4">
+                <button
+                  onClick={() => navigator.clipboard?.writeText(viewReport.content || '')}
+                  className="text-[11px] px-2.5 py-1.5 rounded-md border border-green-800/40 bg-green-900/30 text-green-200/70 hover:text-white transition-colors flex items-center gap-1.5"
+                >
+                  <FileText className="w-3 h-3" /> Copy
+                </button>
+                <button
+                  onClick={() => exportReport(viewReport.id, 'pdf')}
+                  className="text-[11px] px-2.5 py-1.5 rounded-md border border-green-700/50 bg-green-800/40 text-green-100 hover:bg-green-700/60 transition-colors flex items-center gap-1.5"
+                >
+                  <Download className="w-3 h-3" /> Download PDF
+                </button>
+                <button
+                  onClick={() => exportReport(viewReport.id, 'docx')}
+                  className="text-[11px] px-2.5 py-1.5 rounded-md border border-green-700/50 bg-green-800/40 text-green-100 hover:bg-green-700/60 transition-colors flex items-center gap-1.5"
+                >
+                  <FileType2 className="w-3 h-3" /> Download DOCX
+                </button>
+              </div>
+              <div
+                className="prose prose-invert prose-green max-w-none text-sm leading-relaxed
+                  prose-headings:text-green-200 prose-h1:text-xl prose-h2:text-lg prose-h3:text-base
+                  prose-strong:text-white
+                  prose-table:text-xs [&_table]:border [&_table]:border-green-800/40 [&_table]:rounded-lg [&_table]:overflow-hidden
+                  prose-th:px-3 prose-th:py-1.5 prose-th:bg-green-900/40 prose-th:text-green-200
+                  prose-td:px-3 prose-td:py-1.5 prose-td:border-green-800/30
+                  prose-li:text-green-100/80 prose-p:text-green-100/80
+                  prose-hr:border-green-800/30
+                "
                 dangerouslySetInnerHTML={{
-                  __html: (viewReport.content || '')
-                    .replace(/^# (.*$)/gm, '<h1 class="text-xl font-bold text-white mt-6 mb-3">$1</h1>')
-                    .replace(/^## (.*$)/gm, '<h2 class="text-lg font-semibold text-green-200 mt-5 mb-2">$1</h2>')
-                    .replace(/^### (.*$)/gm, '<h3 class="text-sm font-semibold text-green-300 mt-4 mb-1">$1</h3>')
-                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
-                    .replace(/^- (.*$)/gm, '<li class="ml-4 text-green-200/60">$1</li>')
-                    .replace(/^\d+\. (.*$)/gm, '<li class="ml-4 text-green-200/60">$1</li>')
-                    .replace(/\|(.+)\|/gm, (match: string) => {
-                      const cells = match.split('|').filter(Boolean).map(c => c.trim());
-                      return `<tr>${cells.map(c => `<td class="px-3 py-1 border border-green-800/30 text-xs">${c}</td>`).join('')}</tr>`;
-                    })
-                    .replace(/---/g, '<hr class="border-green-800/30 my-4" />')
-                    .replace(/\n/g, '<br/>')
-                }} />
+                  // Prefer server-rendered HTML; fall back to plain-text wrapped in <pre>.
+                  __html:
+                    viewReport.content_html ||
+                    `<pre style="white-space:pre-wrap">${(viewReport.content || '')
+                      .replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')}</pre>`,
+                }}
+              />
               {viewReport.agent_cost !== undefined && (
                 <div className="mt-4 pt-3 border-t border-green-800/30">
                   <p className="text-[10px] text-green-400/20">Generated by st-report-generator &middot; Cost: ${viewReport.agent_cost?.toFixed(4)}</p>

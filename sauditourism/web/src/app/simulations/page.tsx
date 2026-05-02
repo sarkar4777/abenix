@@ -3,15 +3,10 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Gauge, Play, Loader2, ChevronDown, CheckCircle2, Clock } from 'lucide-react';
+import { fetchWithToast, toastSuccess } from '@/stores/toastStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return localStorage.getItem('st_token') || ''; }
-
-async function safeFetch(url: string, opts?: any) {
-  const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(600000) });
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return { data: null, error: { message: text.slice(0, 200) } }; }
-}
 
 export default function SimulationsPage() {
   const [presets, setPresets] = useState<any>({});
@@ -23,14 +18,13 @@ export default function SimulationsPage() {
 
   useEffect(() => {
     (async () => {
-      try {
-        const [presetsJson, histJson] = await Promise.all([
-          safeFetch(`${API_URL}/api/st/simulations/presets`, { headers: { Authorization: `Bearer ${getToken()}` } }),
-          safeFetch(`${API_URL}/api/st/simulations`, { headers: { Authorization: `Bearer ${getToken()}` } }),
-        ]);
-        if (presetsJson.data) setPresets(presetsJson.data);
-        if (histJson.data) setHistory(histJson.data);
-      } catch { }
+      const headers = { Authorization: `Bearer ${getToken()}` };
+      const [presetsJson, histJson] = await Promise.all([
+        fetchWithToast(`${API_URL}/api/st/simulations/presets`, { headers }, 'Failed to load simulation presets'),
+        fetchWithToast(`${API_URL}/api/st/simulations`, { headers }, 'Failed to load simulation history'),
+      ]);
+      if (presetsJson.data) setPresets(presetsJson.data);
+      if (histJson.data) setHistory(histJson.data);
     })();
   }, []);
 
@@ -48,17 +42,23 @@ export default function SimulationsPage() {
   async function runSimulation() {
     setRunning(true);
     setResult(null);
-    try {
-      const json = await safeFetch(`${API_URL}/api/st/simulations/run`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: selected, parameters: params }),
-      });
-      if (json.data) setResult(json.data);
-      // Refresh history
-      const histJson = await safeFetch(`${API_URL}/api/st/simulations`, { headers: { Authorization: `Bearer ${getToken()}` } });
-      if (histJson.data) setHistory(histJson.data);
-    } catch { } finally { setRunning(false); }
+    const headers = { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' };
+    const json = await fetchWithToast(
+      `${API_URL}/api/st/simulations/run`,
+      { method: 'POST', headers, body: JSON.stringify({ type: selected, parameters: params }) },
+      'Simulation failed',
+    );
+    if (json.data) {
+      setResult(json.data);
+      toastSuccess('Simulation complete');
+    }
+    const histJson = await fetchWithToast(
+      `${API_URL}/api/st/simulations`,
+      { headers: { Authorization: `Bearer ${getToken()}` } },
+      'Failed to refresh simulation history',
+    );
+    if (histJson.data) setHistory(histJson.data);
+    setRunning(false);
   }
 
   const preset = presets[selected] || {};

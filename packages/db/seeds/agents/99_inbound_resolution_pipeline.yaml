@@ -32,71 +32,78 @@ model_config:
     - knowledge_search
     - human_approval
     - moderation_vet
-  pipeline_config:
-    nodes:
-      - id: triage
-        type: agent
-        agent_slug: resolveai-triage
-        input: "{{input.message}}"
-        context:
-          customer_id:    "{{input.customer_id}}"
-          customer_tier:  "{{input.customer_tier}}"
-          jurisdiction:   "{{input.jurisdiction}}"
 
-      - id: policy_research
-        type: agent
-        agent_slug: resolveai-policy-research
-        input: >-
-          Intent: {{triage.intent}} / {{triage.ticket_category}}
-          SKU: {{input.sku}}
-          Jurisdiction: {{input.jurisdiction}}
-        context:
-          sku:          "{{input.sku}}"
-          jurisdiction: "{{input.jurisdiction}}"
-          intent:       "{{triage.intent}}"
+pipeline_config:
+  nodes:
+    - id: triage
+      label: "Triage"
+      type: agent
+      agent_slug: resolveai-triage
+      input: "{{input.message}}"
+      context:
+        customer_id:    "{{input.customer_id}}"
+        customer_tier:  "{{input.customer_tier}}"
+        jurisdiction:   "{{input.jurisdiction}}"
 
-      - id: plan
-        type: agent
-        agent_slug: resolveai-resolution-planner
-        input: >-
-          Triage: {{triage}}
-          Policies: {{policy_research.policies}}
-          Gaps:     {{policy_research.gaps}}
-        context:
-          customer_tier: "{{input.customer_tier}}"
-          amount_limits:
-            auto_usd: 25
-            t1_usd:   250
-            mgr_usd:  5000
+    - id: policy_research
+      label: "Policy Research"
+      type: agent
+      agent_slug: resolveai-policy-research
+      input: >-
+        Intent: {{triage.intent}} / {{triage.ticket_category}}
+        SKU: {{input.sku}}
+        Jurisdiction: {{input.jurisdiction}}
+      context:
+        sku:          "{{input.sku}}"
+        jurisdiction: "{{input.jurisdiction}}"
+        intent:       "{{triage.intent}}"
 
-      - id: approval_gate
-        type: tool
-        tool: human_approval
-        on_error: continue
-        input:
-          action: "{{plan.summary}}"
-          minimum_tier: "t1_lead"
-        # Simple truthy check — fires on the FIRST action's
-        # requires_approval. For pipelines with heterogeneous approval
-        # needs, split into multiple approval_gate nodes. The engine's
-        # truthy-resolver handles the common cases (false / null /
-        # "[not available]" / empty list) without a full expression
-        # parser.
-        required_if: "{{plan.actions.0.requires_approval}}"
+    - id: plan
+      label: "Resolution Plan"
+      type: agent
+      agent_slug: resolveai-resolution-planner
+      input: >-
+        Triage: {{triage}}
+        Policies: {{policy_research.policies}}
+        Gaps:     {{policy_research.gaps}}
+      context:
+        customer_tier: "{{input.customer_tier}}"
+        amount_limits:
+          auto_usd: 25
+          t1_usd:   250
+          mgr_usd:  5000
 
-      - id: final_reply
-        type: tool
-        tool: moderation_vet
-        input:
-          content: "{{plan.summary}}"
-          gate:    "post_llm"
-          policy_id: "resolveai-default"
+    - id: approval_gate
+      label: "Approval Gate"
+      type: tool
+      tool: human_approval
+      on_error: continue
+      input:
+        action: "{{plan.summary}}"
+        minimum_tier: "t1_lead"
+      # Simple truthy check — fires on the FIRST action's
+      # requires_approval. For pipelines with heterogeneous approval
+      # needs, split into multiple approval_gate nodes. The engine's
+      # truthy-resolver handles the common cases (false / null /
+      # "[not available]" / empty list) without a full expression
+      # parser.
+      required_if: "{{plan.actions.0.requires_approval}}"
 
-      - id: final_report
-        type: structured
-        output:
-          reply:            "{{plan.summary}}"
-          action_plan:      "{{plan.actions}}"
-          deflection_score: "{{plan.deflection_score}}"
-          citations:        "{{policy_research.policies}}"
-          triage:           "{{triage}}"
+    - id: final_reply
+      label: "Final Reply (Moderated)"
+      type: tool
+      tool: moderation_vet
+      input:
+        content: "{{plan.summary}}"
+        gate:    "post_llm"
+        policy_id: "resolveai-default"
+
+    - id: final_report
+      label: "Final Report"
+      type: structured
+      output:
+        reply:            "{{plan.summary}}"
+        action_plan:      "{{plan.actions}}"
+        deflection_score: "{{plan.deflection_score}}"
+        citations:        "{{policy_research.policies}}"
+        triage:           "{{triage}}"

@@ -225,11 +225,18 @@ public class WatchController {
             });
         }
         // If we got nothing yet but the pipeline is running, scaffold
-        // 8 placeholder nodes so the user sees the structure.
+        // the 6 user-visible agent nodes so the user sees the structure.
         if (nodes.isEmpty()) {
-            for (String n : java.util.List.of("fnol", "policy_match", "damage_assess",
-                    "fraud_screen", "valuate", "decide", "moderation_gate", "final_report")) {
-                nodes.add(new DagSnapshot.Node(n, n, null, null, "pending",
+            String[][] skeleton = {
+                {"fnol",          "FNOL Intake",     "claimsiq-fnol-intake"},
+                {"policy_match",  "Policy Matcher",  "claimsiq-policy-matcher"},
+                {"damage_assess", "Damage Assessor", "claimsiq-damage-assessor"},
+                {"fraud_screen",  "Fraud Screener",  "claimsiq-fraud-screener"},
+                {"valuate",       "Valuator",        "claimsiq-valuator"},
+                {"decide",        "Claim Decider",   "claimsiq-claim-decider"},
+            };
+            for (String[] row : skeleton) {
+                nodes.add(new DagSnapshot.Node(row[0], row[1], null, row[2], "pending",
                     null, null, null, null, null, null, null, null, null, null));
             }
         }
@@ -268,10 +275,21 @@ public class WatchController {
     }
 
     private DagSnapshot synthesiseQueued(Claim c) {
+        // 6 user-visible agent nodes — same shape + labels as the
+        // client-side LiveDagView skeleton so the first SSE snapshot
+        // doesn't reflow the DAG.
+        String[][] skeleton = {
+            {"fnol",          "FNOL Intake",     "claimsiq-fnol-intake"},
+            {"policy_match",  "Policy Matcher",  "claimsiq-policy-matcher"},
+            {"damage_assess", "Damage Assessor", "claimsiq-damage-assessor"},
+            {"fraud_screen",  "Fraud Screener",  "claimsiq-fraud-screener"},
+            {"valuate",       "Valuator",        "claimsiq-valuator"},
+            {"decide",        "Claim Decider",   "claimsiq-claim-decider"},
+        };
         java.util.List<DagSnapshot.Node> placeholderNodes = new java.util.ArrayList<>();
-        for (String n : java.util.List.of("fnol", "policy_match", "damage_assess",
-                "fraud_screen", "valuate", "decide", "moderation_gate", "final_report")) {
-            placeholderNodes.add(new DagSnapshot.Node(n, n, null, null, "pending",
+        for (String[] row : skeleton) {
+            placeholderNodes.add(new DagSnapshot.Node(
+                row[0], row[1], null, row[2], "pending",
                 null, null, null, null, null, null, null, null, null, null));
         }
         Instant started = (c == null || c.getCreatedAt() == null) ? Instant.now() : c.getCreatedAt();

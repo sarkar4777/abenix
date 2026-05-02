@@ -2,6 +2,7 @@ package com.abenix.claimsiq.ui;
 
 import com.abenix.claimsiq.domain.Claim;
 import com.abenix.claimsiq.service.ClaimsService;
+import com.abenix.claimsiq.service.PhotoUrlsCodec;
 import com.vaadin.flow.component.Html;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
@@ -307,7 +308,7 @@ public class ClaimDetailView extends VerticalLayout implements BeforeEnterObserv
         return d;
     }
 
-    private Div photoStrip(String csv) {
+    private Div photoStrip(String stored) {
         Div wrap = new Div();
         wrap.getStyle()
             .set("background", Palette.SURFACE)
@@ -322,10 +323,22 @@ public class ClaimDetailView extends VerticalLayout implements BeforeEnterObserv
         Div strip = new Div();
         strip.getStyle().set("display", "flex").set("gap", "0.5rem")
             .set("flex-wrap", "wrap").set("margin-top", "0.5rem");
+
+        // Use the codec — handles both the new JSON-array format and
+        // the legacy CSV format (where commas inside base64-encoded
+        // data URIs would otherwise shatter the list and produce
+        // broken <img src="iVBOR..."> requests).
+        java.util.List<String> uris = PhotoUrlsCodec.decode(stored);
         int n = 0;
-        for (String uri : csv.split(",")) {
-            String u = uri.trim();
+        for (String uri : uris) {
+            String u = uri == null ? "" : uri.trim();
             if (u.isEmpty()) continue;
+            // Defensive: a malformed legacy fragment that doesn't start
+            // with "data:" or "http" is the exact bug we're fixing —
+            // skip it instead of letting the browser do a relative GET.
+            if (!u.startsWith("data:") && !u.startsWith("http://") && !u.startsWith("https://")) continue;
+            // Vaadin Image takes the src directly and renders inside
+            // the shadow DOM correctly (no manual <img> HTML needed).
             Image img = new Image(u, "damage photo " + (++n));
             img.getStyle().set("width", "180px").set("height", "120px")
                 .set("object-fit", "cover").set("border-radius", "8px")

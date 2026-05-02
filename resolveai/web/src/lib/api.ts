@@ -102,6 +102,33 @@ export function useResolveAIFetch<T, M = Record<string, unknown>>(
 }
 
 /**
+ * Fixture shape for the synthetic ticket templates used by the demo
+ * "Simulate a ticket" button. Matches the dict returned by
+ * `GET /api/resolveai/admin/sample-tickets`.
+ */
+export interface SampleTicket {
+  customer_id: string;
+  customer_tier: string;
+  subject: string;
+  body: string;
+  order_id?: string;
+  sku?: string;
+}
+
+/**
+ * One-shot fetch of demo sample tickets — replaces the hardcoded
+ * SAMPLES that used to live in the client bundle. Returns [] on any
+ * error; callers should toast the failure separately.
+ */
+export async function fetchSampleTickets(): Promise<SampleTicket[]> {
+  const res = await fetchOnce<SampleTicket[], Record<string, unknown>>(
+    '/api/resolveai/admin/sample-tickets',
+  );
+  if (res.error || !Array.isArray(res.data)) return [];
+  return res.data;
+}
+
+/**
  * Fire-and-forget POST helper with the same envelope handling and a
  * one-retry on transient failure. Returns `{data, error}` so callers
  * can surface the error inline without throwing.

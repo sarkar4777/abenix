@@ -5,15 +5,10 @@ import { motion } from 'framer-motion';
 import { MessageSquare, Send, Loader2, Trash2, Palmtree } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { fetchWithToast } from '@/stores/toastStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return localStorage.getItem('st_token') || ''; }
-
-async function safeFetch(url: string, opts?: any) {
-  const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(600000) });
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return { data: null, error: { message: text.slice(0, 200) } }; }
-}
 
 const SUGGESTIONS = [
   'Which region had the highest visitor count in 2024?',
@@ -32,11 +27,12 @@ export default function ChatPage() {
 
   useEffect(() => {
     (async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/st/chat/history`, { headers: { Authorization: `Bearer ${getToken()}` } });
-        const json = await res.json();
-        if (json.data) setMessages(json.data);
-      } catch { }
+      const json = await fetchWithToast(
+        `${API_URL}/api/st/chat/history`,
+        { headers: { Authorization: `Bearer ${getToken()}` } },
+        'Failed to load chat history',
+      );
+      if (json.data) setMessages(json.data);
     })();
   }, []);
 
@@ -48,16 +44,19 @@ export default function ChatPage() {
     setInput('');
     setMessages(prev => [...prev, { id: Date.now(), role: 'user', content: msg }]);
     setSending(true);
-    try {
-      const json = await safeFetch(`${API_URL}/api/st/chat/message`, {
+    const json = await fetchWithToast(
+      `${API_URL}/api/st/chat/message`,
+      {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg }),
-      });
-      if (json.data) {
-        setMessages(prev => [...prev, { id: Date.now() + 1, role: 'assistant', content: json.data.message }]);
-      }
-    } catch { } finally { setSending(false); }
+      },
+      'Chat request failed',
+    );
+    if (json.data) {
+      setMessages(prev => [...prev, { id: Date.now() + 1, role: 'assistant', content: json.data.message }]);
+    }
+    setSending(false);
   }
 
   async function clearHistory() {

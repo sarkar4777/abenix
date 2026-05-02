@@ -1,0 +1,74 @@
+# ClaimsIQ — Insurance policy KB seed.
+# Backs the cq-policy-matcher agent + the adjudicate pipeline.
+
+project:
+  slug: claimsiq
+  name: "ClaimsIQ"
+  description: "Insurance claim adjudication AI — policies + coverages."
+
+collections:
+  - slug: claimsiq-policies
+    name: "ClaimsIQ Policies"
+    description: "Auto, home, and commercial-property insurance policies."
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - claimsiq-policy-matcher
+      - claimsiq-claim-decider
+      - claimsiq-fraud-screener
+    agent_permission: READ
+    documents:
+      - id: ciq-pol-auto-001
+        title: "Standard Auto Comprehensive"
+        version: 5
+        metadata: { line_of_business: "auto", form: "STD-AUTO" }
+        content: |
+          STANDARD AUTO COMPREHENSIVE — Section IV
+          Coverage applies to direct physical loss to the insured vehicle
+          from causes other than collision: fire, theft, vandalism, hail,
+          flood, falling objects. Policy limit equals declared ACV.
+          Deductible: $500 standard, $250 with discount rider. Glass
+          breakage waived under separate full-glass endorsement.
+      - id: ciq-pol-auto-002
+        title: "Auto Collision"
+        version: 3
+        metadata: { line_of_business: "auto", form: "COLL-AUTO" }
+        content: |
+          AUTO COLLISION COVERAGE
+          Pays for damage to the insured vehicle from collision with
+          another object or upset, regardless of fault. Subject to the
+          collision deductible ($500 default). Diminished value is NOT
+          covered. Rental reimbursement up to $35/day, 30-day max,
+          requires endorsement REI-30.
+      - id: ciq-pol-home-001
+        title: "Homeowner HO-3 Standard"
+        version: 7
+        metadata: { line_of_business: "home", form: "HO-3" }
+        content: |
+          HOMEOWNER HO-3
+          Open-perils coverage on the dwelling and named-perils on
+          contents. Excludes flood (separate NFIP), earthquake, and
+          intentional damage. Coverage A (dwelling) = stated limit;
+          Coverage C (contents) = 50% of A unless endorsed otherwise.
+          Deductible $1,000 standard.
+      - id: ciq-pol-home-002
+        title: "Water-Damage Sub-Limit"
+        version: 2
+        metadata: { line_of_business: "home", form: "WTR-SUB" }
+        content: |
+          WATER DAMAGE SUB-LIMIT
+          Sudden and accidental discharge from plumbing, heating, or AC
+          covered up to $25,000 sub-limit unless higher endorsement.
+          Continuous or repeated seepage over 14+ days is excluded.
+          Mold remediation capped at $5,000 unless endorsed.
+      - id: ciq-pol-fraud-001
+        title: "Fraud Indicators Reference"
+        version: 1
+        metadata: { line_of_business: "all", form: "FRAUD-REF" }
+        content: |
+          FRAUD INDICATORS
+          Heightened-risk signals: claim within 30 days of policy
+          inception, multiple prior claims same peril, photos showing
+          pre-existing damage, inconsistencies between FNOL narrative
+          and damage assessment, named involved party on watch list.
+          Two or more triggers tier=high; one trigger tier=medium.

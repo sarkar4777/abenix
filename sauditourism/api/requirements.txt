@@ -10,3 +10,10 @@ bcrypt>=4.1.0
 httpx>=0.25.0
 anthropic>=0.39.0
 PyPDF2>=3.0.0
+# Real markdown rendering for /api/st/reports — the previous regex-based
+# implementation in the web layer collapsed tables and lists.
+markdown-it-py>=3.0.0
+mdit-py-plugins>=0.4.0
+# PDF + DOCX export for /api/st/reports/{id}/export
+weasyprint>=61.0
+python-docx>=1.1.0

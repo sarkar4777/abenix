@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { Check, X, Loader2, Settings as SettingsIcon, Shield, Save } from 'lucide-react';
 import { useResolveAIFetch, resolveAIPost } from '@/lib/api';
+import { toastError, toastSuccess } from '@/stores/toastStore';
 
 type Settings = {
   approval_tiers?: {
@@ -71,9 +72,14 @@ export default function Admin() {
     setMsg(null);
     const { error } = await resolveAIPost('/api/resolveai/admin/settings', effective);
     setSaving(false);
-    if (error) setMsg(`Couldn't save: ${error}`);
-    else {
-      setMsg('Saved. Approval ceilings apply to the next pipeline run.');
+    if (error) {
+      const detail = `Couldn't save: ${error}`;
+      setMsg(detail);
+      toastError(detail);
+    } else {
+      const okMsg = 'Settings saved — approval ceilings apply to the next pipeline run.';
+      setMsg(okMsg);
+      toastSuccess('Settings saved');
       void settingsReq.refetch();
     }
   }
@@ -88,9 +94,14 @@ export default function Admin() {
       { action_id: actionId },
     );
     setActing(null);
-    if (error) setMsg(`Action failed: ${error}`);
-    else {
-      setMsg(`${approve ? 'Approved' : 'Rejected'} action ${actionId.slice(0, 8)}.`);
+    if (error) {
+      const detail = `Action failed: ${error}`;
+      setMsg(detail);
+      toastError(detail);
+    } else {
+      const okMsg = `${approve ? 'Approved' : 'Rejected'} action ${actionId.slice(0, 8)}.`;
+      setMsg(okMsg);
+      toastSuccess(okMsg);
       void pendingReq.refetch();
     }
   }

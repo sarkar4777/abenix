@@ -86,7 +86,10 @@ Commands:
   deploy            Helm-install Abenix + standalone apps (the example app, Saudi Tourism).
                     Incremental — safe to re-run. --only=... supported.
   redeploy          Alias: build (per --only) + rollout restart (per --only).
-  seed              Re-run agent / portfolio / ML model seed scripts.
+  seed              Re-run agent / portfolio / ML model seed scripts, then
+                    reconcile every standalone's ABENIX_API_KEY so chat works.
+  seed-keys         Reconcile only the standalone ABENIX_API_KEYs (idempotent).
+                    Mints any missing keys + patches secrets + restarts pods.
   test              Run all Playwright E2E suites against the AKS endpoints.
                     E2E_PROJECT=abenix|example_app|sauditourism to scope.
                     E2E_ONLY=test1.spec.ts,test2.spec.ts to run specific files.
@@ -135,6 +138,22 @@ check_prereqs() {
   local sub
   sub=$(az account show --query 'name' -o tsv 2>/dev/null)
   ok "Azure subscription: ${sub}"
+
+  # ── Phase 0 pre-flight: SDK drift gate ──────────────────────────────
+  # The Abenix Python SDK is vendored into 5 standalone-app images. If a
+  # destination has drifted from the canonical packages/sdk/python copy,
+  # those images would ship with stale code (e.g. missing the wait=True
+  # default that synchronises async-mode execute calls). Fail before we
+  # waste 20 minutes on Docker builds. Skip with SKIP_SDK_SYNC_CHECK=1.
+  if [ "${SKIP_SDK_SYNC_CHECK:-0}" != "1" ]; then
+    step "Phase 0 — SDK drift pre-flight"
+    if ! bash "${ROOT_DIR}/scripts/sync-sdks.sh" --check; then
+      err "SDK copies out of sync. Run: bash scripts/sync-sdks.sh"
+      err "Or set SKIP_SDK_SYNC_CHECK=1 to bypass (NOT recommended)."
+      exit 5
+    fi
+    ok "All SDK copies in sync"
+  fi
 }
 
 # Helper: --only parser
@@ -356,7 +375,9 @@ declare -A BUILD_CONTEXTS=(
   [cognify-worker]="${ROOT_DIR}"
   [example_app-api]="${ROOT_DIR}/example_app/api"
   [example_app-web]="${ROOT_DIR}/example_app/web"
-  [sauditourism-api]="${ROOT_DIR}/sauditourism/api"
+  # sauditourism-api: build context must include test-data/ for the seed endpoint,
+  # so we use the sauditourism/ directory rather than sauditourism/api/.
+  [sauditourism-api]="${ROOT_DIR}/sauditourism"
   [sauditourism-web]="${ROOT_DIR}/sauditourism/web"
   [industrial-iot-api]="${ROOT_DIR}/industrial-iot/api"
   [industrial-iot-web]="${ROOT_DIR}/industrial-iot/web"
@@ -605,6 +626,19 @@ run_migrations() {
 
 seed_agents() {
   step "Seeding agents + portfolio schemas + sample ML models"
+
+  # Pre-flight: lint every agent YAML against the strict schema BEFORE
+  # we ship anything to the cluster. Catches the ClaimsIQ-class silent-
+  # coerce bug (pipeline_config nested under model_config) at deploy
+  # time, not 2-5s into a production execution.
+  if [ -f "${ROOT_DIR}/scripts/lint-agent-seeds.py" ]; then
+    log "Linting agent YAMLs against strict schema..."
+    if ! python "${ROOT_DIR}/scripts/lint-agent-seeds.py"; then
+      err "Agent seed lint failed — refusing to seed a broken catalog"
+      return 1
+    fi
+  fi
+
   local api_pod=""
   for i in $(seq 1 30); do
     api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
@@ -618,9 +652,24 @@ seed_agents() {
   done
   if [ -z "${api_pod}" ]; then warn "No ready API pod — skipping seed"; return; fi
   log "Seeding via ${api_pod}..."
-  for script in seed_agents.py seed_users.py seed_portfolio_schemas.py seed_ml_models.py; do
-    kubectl exec -n "${NAMESPACE}" "${api_pod}" -- bash -c "python /app/packages/db/seeds/${script}" 2>&1 | tail -3 || true
+  # seed_kb runs AFTER seed_agents because it grants collections to agents by slug.
+  local seed_failed=0
+  for script in seed_agents.py seed_users.py seed_portfolio_schemas.py seed_ml_models.py seed_kb.py; do
+    # Capture exit code via a temp file because we still want to show
+    # the last 10 lines of output. The seed_agents.py loader now exits
+    # non-zero on schema validation failure (the ClaimsIQ fix); this
+    # block surfaces that to the deploy script.
+    local _rc=0
+    kubectl exec -n "${NAMESPACE}" "${api_pod}" -- bash -c "python /app/packages/db/seeds/${script}" 2>&1 | tail -10 || _rc=$?
+    if [ "${_rc}" != "0" ]; then
+      err "Seed ${script} exited ${_rc}"
+      seed_failed=1
+    fi
   done
+  if [ "${seed_failed}" = "1" ]; then
+    err "One or more seed scripts failed — agent catalog may be broken"
+    return 1
+  fi
   ok "Seeding complete"
 }
 
@@ -1032,6 +1081,18 @@ spec:
 EOF
 
   echo "${host}" > "${ROOT_DIR}/.azure-endpoint"
+
+  # Stamp NEXT_PUBLIC_ABENIX_WEB_URL on standalone web deployments so
+  # cross-app links ("/executions", "/code-runner") point at the abenix
+  # web ingress rather than 404'ing on the standalone origin.
+  local abenix_web_url="http://${host}"
+  for dep in industrial-iot-web example_app-web sauditourism-web resolveai-web claimsiq; do
+    if kubectl -n "${NAMESPACE}" get deploy "${dep}" >/dev/null 2>&1; then
+      kubectl -n "${NAMESPACE}" set env deploy/"${dep}" \
+        NEXT_PUBLIC_ABENIX_WEB_URL="${abenix_web_url}" 2>&1 | tail -1 || true
+    fi
+  done
+
   ok "Ingress ready: http://${host}  (ciq.${host}, tourism.${host}, iot.${host}, care.${host}, claims.${host})"
 }
 
@@ -1061,10 +1122,33 @@ deploy_all() {
   deploy_industrial_iot || warn "Industrial-IoT deploy failed (non-fatal)"
   deploy_resolveai || warn "ResolveAI deploy failed (non-fatal)"
   deploy_claimsiq || warn "ClaimsIQ deploy failed (non-fatal)"
+  # Phase 4 — idempotent ABENIX_API_KEY reconciliation. Every standalone
+  # secret is validated against the platform api_keys table; orphaned keys
+  # (DB was reseeded but secret kept its stale hash) are rotated and the
+  # affected deployments are restarted. This is what makes a fresh
+  # `deploy-azure.sh deploy` produce a working chat path with zero manual
+  # post-install steps.
+  seed_standalone_keys || warn "Standalone key seed failed (chat will 401 in some apps)"
   install_observability || warn "Observability install failed (non-fatal)"
   setup_ingress || warn "Ingress setup failed — you can still port-forward"
 
   ok "Deployment complete"
+}
+
+# Wrapper around scripts/seed-standalone-keys.sh — runs the per-app loop
+# that mints / rotates / patches each standalone secret idempotently.
+seed_standalone_keys() {
+  if [ -n "${ONLY_CSV}" ]; then
+    # When --only is set, only run the reseed if the user is touching
+    # standalone-related groups.
+    case "${ONLY_CSV}" in
+      *example_app*|*sauditourism*|*industrial-iot*|*resolveai*|*claimsiq*) ;;
+      *) return 0 ;;
+    esac
+  fi
+  step "Phase 4 — Reconcile standalone ABENIX_API_KEYs"
+  NAMESPACE="${NAMESPACE}" bash "${ROOT_DIR}/scripts/seed-standalone-keys.sh" 2>&1 \
+    | sed 's/^/      /' || return 1
 }
 
 # PHASE 4: Status + health check
@@ -1255,6 +1339,15 @@ case "${CMD}" in
     check_prereqs
     az aks get-credentials -n "${AKS_NAME}" -g "${AZ_RESOURCE_GROUP}" --overwrite-existing &>/dev/null || true
     seed_agents
+    # Always reconcile standalone keys after a manual reseed — agents/users
+    # may have been recreated under fresh tenant IDs which would invalidate
+    # the existing ABENIX_API_KEYs in standalone-secrets.
+    NAMESPACE="${NAMESPACE}" bash "${ROOT_DIR}/scripts/seed-standalone-keys.sh" || true
+    ;;
+  seed-keys)
+    check_prereqs
+    az aks get-credentials -n "${AKS_NAME}" -g "${AZ_RESOURCE_GROUP}" --overwrite-existing &>/dev/null || true
+    NAMESPACE="${NAMESPACE}" bash "${ROOT_DIR}/scripts/seed-standalone-keys.sh"
     ;;
   test)
     check_prereqs

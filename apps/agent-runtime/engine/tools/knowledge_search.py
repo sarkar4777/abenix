@@ -150,6 +150,29 @@ class KnowledgeSearchTool(BaseTool):
         # tenant on every call. See `_filter_to_tenant` for rationale.
         validated_ids = await self._filter_to_tenant(self.kb_ids)
 
+        # Structured warning when no collection is wired at all — agents
+        # can branch on metadata.warning instead of guessing why hits=0.
+        # Without this, every fresh deploy with un-seeded KBs returned a
+        # silent empty response, and downstream agents (resolveai-policy-
+        # research, resolveai-resolution-planner, claimsiq-policy-matcher)
+        # produced zero citations / zero actions with no actionable signal.
+        if not validated_ids:
+            return ToolResult(
+                content=(
+                    "No knowledge base is configured for this agent. "
+                    "Returning structured no-KB-configured signal so the "
+                    "caller can fall back gracefully. "
+                    "(query was: " + query[:120] + ")"
+                ),
+                metadata={
+                    "warning": "no_kb_configured",
+                    "status": "no_kb_configured",
+                    "mode": mode_str,
+                    "results": 0,
+                    "hits": [],
+                },
+            )
+
         try:
             response = await hybrid_search(
                 query=query,
@@ -161,8 +184,21 @@ class KnowledgeSearchTool(BaseTool):
 
             if not response.results:
                 return ToolResult(
-                    content="No relevant results found in the knowledge base.",
-                    metadata={"mode": response.mode_used, "results": 0},
+                    content=(
+                        "No relevant results found in the knowledge base "
+                        "for the given query. Collection(s) are wired and "
+                        "reachable but produced 0 hits at the requested "
+                        "top_k. The caller should treat this as 'searched, "
+                        "found nothing' (NOT as 'KB not configured')."
+                    ),
+                    metadata={
+                        "warning": "collection_empty_or_no_match",
+                        "status": "no_match",
+                        "mode": response.mode_used,
+                        "results": 0,
+                        "hits": [],
+                        "kb_ids_searched": [str(x) for x in validated_ids],
+                    },
                 )
 
             # Format results for the LLM
