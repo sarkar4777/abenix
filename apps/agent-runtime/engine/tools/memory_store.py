@@ -69,7 +69,28 @@ class MemoryStoreTool(BaseTool):
             from sqlalchemy import select
             from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-            engine = create_async_engine(self._db_url, echo=False)
+            from engine.tools._db_url import resolve_async_db_url
+
+            db_url = resolve_async_db_url(self._db_url)
+            if not db_url:
+                return ToolResult(
+                    content=(
+                        "memory_store: DATABASE_URL is not configured. "
+                        "Set DATABASE_URL in the environment so memory tools "
+                        "can persist across executions."
+                    ),
+                    is_error=True,
+                )
+            if not self._agent_id or not self._tenant_id:
+                return ToolResult(
+                    content=(
+                        "memory_store needs agent_id and tenant_id to "
+                        "scope the memory. They were not supplied to the "
+                        "tool — check the executor's tool-registry build."
+                    ),
+                    is_error=True,
+                )
+            engine = create_async_engine(db_url, echo=False)
 
             import sys
             from pathlib import Path

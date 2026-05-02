@@ -17,32 +17,108 @@ TOOL_CATALOG = [
     {
         "id": "calculator",
         "name": "Calculator",
-        "description": "Evaluate mathematical expressions and formulas",
+        "description": "Evaluate mathematical expressions and formulas. Always invoke this tool for any arithmetic, never compute mentally.",
         "category": "core",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "The arithmetic expression to evaluate, e.g. '17*23 + 9' or 'sqrt(144)'.",
+                }
+            },
+            "required": ["expression"],
+        },
     },
     {
         "id": "current_time",
         "name": "Current Time",
-        "description": "Get current date and time in any timezone",
+        "description": "Get current date and time in UTC or any IANA timezone. Always invoke when the user asks about time, date, or scheduling.",
         "category": "core",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone name (e.g. 'UTC', 'Europe/London', 'America/New_York'). Defaults to 'UTC'.",
+                    "default": "UTC",
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Output format: 'iso' (2026-05-02T14:30:00Z), 'human' (May 2, 2026 14:30 UTC), or 'unix'.",
+                    "default": "iso",
+                },
+            },
+            "required": [],
+        },
     },
     {
         "id": "web_search",
         "name": "Web Search",
-        "description": "Search the internet for real-time information using DuckDuckGo",
+        "description": "Search the internet for real-time information using DuckDuckGo. Use when the user asks about recent events, current data, or anything not in the model's training cutoff.",
         "category": "core",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (1–10).",
+                    "default": 5,
+                },
+            },
+            "required": ["query"],
+        },
     },
     {
         "id": "file_reader",
         "name": "File Reader",
-        "description": "Read and extract text from PDF, DOCX, TXT, and CSV files",
+        "description": "Read and extract text from a PDF, DOCX, TXT, or CSV file. Pass either an inline `text` payload (which is auto-saved to a temp file) OR a `path` to an existing file.",
         "category": "data",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Filesystem path to the file. If omitted, `text` must be supplied.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Inline text content. The tool will create a temp file and read from it. Useful when the LLM is given a document inline rather than as an attachment.",
+                },
+                "format": {
+                    "type": "string",
+                    "description": "File format hint: 'pdf', 'docx', 'txt', 'csv'. Auto-detected from extension if not given.",
+                    "enum": ["pdf", "docx", "txt", "csv"],
+                },
+            },
+            "required": [],
+        },
     },
     {
         "id": "csv_analyzer",
         "name": "CSV Analyzer",
-        "description": "Parse and analyze CSV data — column stats, row counts, data types",
+        "description": "Parse and analyze CSV data — column stats, row counts, data types, missing-value summary. Pass inline CSV content via `text` or a `path` to an existing file.",
         "category": "data",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to a CSV file."},
+                "text": {
+                    "type": "string",
+                    "description": "Inline CSV content (lines separated by \\n). Auto-saved to a temp file before analysis.",
+                },
+                "delimiter": {
+                    "type": "string",
+                    "description": "Field delimiter, default ','.",
+                    "default": ",",
+                },
+            },
+            "required": [],
+        },
     },
     {
         "id": "spreadsheet_analyzer",
@@ -425,12 +501,6 @@ TOOL_CATALOG = [
         "id": "tavily_search",
         "name": "Tavily Search",
         "description": "Real-time web search tuned for research agents — recency bias, source ranking, structured snippets",
-        "category": "core",
-    },
-    {
-        "id": "web_search",
-        "name": "Web Search (alt)",
-        "description": "Generic web search fallback when Tavily is rate-limited",
         "category": "core",
     },
     {

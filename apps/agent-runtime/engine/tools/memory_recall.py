@@ -59,13 +59,31 @@ class MemoryRecallTool(BaseTool):
         memory_type = arguments.get("memory_type")
         limit = min(arguments.get("limit", 10), 50)
 
+        from engine.tools._db_url import resolve_async_db_url
+
+        db_url = resolve_async_db_url(self._db_url)
+        if not db_url:
+            return ToolResult(
+                content=(
+                    "memory_recall: DATABASE_URL is not configured. "
+                    "Set DATABASE_URL in the environment so memory tools "
+                    "can read persisted state."
+                ),
+                is_error=True,
+            )
+        if not self._agent_id or not self._tenant_id:
+            return ToolResult(
+                content="memory_recall needs agent_id and tenant_id (not supplied to the tool).",
+                is_error=True,
+            )
+
         # Try MemPalace enhanced recall
         try:
             import uuid as uuid_mod
 
             from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-            palace_engine = create_async_engine(self._db_url, echo=False)
+            palace_engine = create_async_engine(db_url, echo=False)
             async with AsyncSession(palace_engine, expire_on_commit=False) as palace_db:
                 from engine.memory.palace import MemoryPalace
 
@@ -106,7 +124,7 @@ class MemoryRecallTool(BaseTool):
             from sqlalchemy import select, or_
             from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-            engine = create_async_engine(self._db_url, echo=False)
+            engine = create_async_engine(db_url, echo=False)
 
             import sys
             from pathlib import Path

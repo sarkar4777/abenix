@@ -12,11 +12,12 @@ from engine.tools.base import BaseTool, ToolResult
 class JsonTransformerTool(BaseTool):
     name = "json_transformer"
     description = (
-        "Transform, query, and manipulate structured JSON data. Operations include: "
-        "query (extract nested values by path), filter (select items matching conditions), "
-        "flatten (convert nested structures to flat key-value), aggregate (sum, count, avg "
-        "over arrays), reshape (pivot, group, transpose), merge (combine multiple objects), "
-        "and diff (compare two JSON structures)."
+        "Transform, query, and manipulate structured JSON data. Always specify "
+        "`operation` — one of: query (extract by path), filter (predicate), "
+        "flatten (nest→flat), aggregate (sum/avg/count over arrays), reshape "
+        "(pivot/group/transpose), merge (combine objects), diff (compare two "
+        "structures), schema (infer JSON schema), or identity (pass-through "
+        "for round-tripping). Defaults to identity if omitted."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -35,8 +36,10 @@ class JsonTransformerTool(BaseTool):
                     "merge",
                     "diff",
                     "schema",
+                    "identity",
                 ],
-                "description": "Transformation operation",
+                "description": "Transformation operation. Use 'identity' (or omit) for pass-through.",
+                "default": "identity",
             },
             "path": {
                 "type": "string",
@@ -64,12 +67,17 @@ class JsonTransformerTool(BaseTool):
                 "default": "sum",
             },
         },
-        "required": ["data", "operation"],
+        "required": ["data"],
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         data = arguments.get("data")
-        operation = arguments.get("operation", "")
+        # Treat empty string and 'noop' as the canonical no-op too — the
+        # LLM (and pipeline authors) reach for these naturally when they
+        # just want to pass data through to the next node.
+        operation = (arguments.get("operation") or "identity").strip().lower()
+        if operation in ("", "noop", "passthrough", "pass-through"):
+            operation = "identity"
 
         if isinstance(data, str):
             try:
@@ -89,11 +97,19 @@ class JsonTransformerTool(BaseTool):
             "merge": self._merge,
             "diff": self._diff,
             "schema": self._schema,
+            "identity": lambda d, _a: d,
         }
 
         fn = ops.get(operation)
         if not fn:
-            return ToolResult(content=f"Unknown operation: {operation}", is_error=True)
+            valid = sorted(ops.keys())
+            return ToolResult(
+                content=(
+                    f"Unknown operation: '{operation}'. "
+                    f"Valid operations: {', '.join(valid)}."
+                ),
+                is_error=True,
+            )
 
         try:
             result = fn(data, arguments)

@@ -285,7 +285,19 @@ class NewsFeedTool(BaseTool):
                     )
 
             if not articles:
-                return ToolResult(content=f"No news found for: {query}")
+                # Empty result from the fallback provider after all
+                # paid providers also missed = real backend issue, not
+                # a successful "no matches". Surface as is_error so the
+                # /executions row records a failure_code.
+                return ToolResult(
+                    content=(
+                        f"news_feed could not retrieve any articles for '{query}'. "
+                        "All configured news providers returned empty or failed. "
+                        "Check NEWS_API_KEY / MEDIASTACK_API_KEY in env, or the "
+                        "provider quota."
+                    ),
+                    is_error=True,
+                )
 
             lines = ["[Provider: DuckDuckGo News (fallback)]", ""]
             for i, a in enumerate(articles, 1):

@@ -59,18 +59,24 @@ class DocumentParserTool(BaseTool):
                 ),
             },
         },
-        "required": ["file_path"],
+        "required": [],
     }
 
     # execute
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        file_path = arguments.get("file_path", "")
+        from engine.tools._inline_file import materialise_path
+
         max_chars: int = int(arguments.get("max_chars", 100_000))
         page_range: str | None = arguments.get("page_range")
 
-        if not file_path:
-            return ToolResult(content="Error: file_path is required", is_error=True)
+        norm = dict(arguments)
+        if arguments.get("file_path") and not norm.get("path"):
+            norm["path"] = arguments["file_path"]
+        resolved, err = materialise_path(norm, default_ext="txt")
+        if err:
+            return ToolResult(content=err, is_error=True)
+        file_path = resolved
 
         path = Path(file_path)
         if not path.exists():

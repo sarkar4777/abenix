@@ -62,16 +62,26 @@ class DatabaseWriterTool(BaseTool):
                 is_error=True,
             )
 
-        if not conn_str:
-            import os
+        # Build a connection string asyncpg can actually consume:
+        # asyncpg.connect() does NOT accept the SQLAlchemy `+asyncpg`
+        # driver suffix, AND it does NOT accept `?ssl=disable` as a URL
+        # param (it wants `ssl=False` as a kwarg). Strip both before
+        # calling. This single normalisation works for k8s prod
+        # (DATABASE_URL=postgresql+asyncpg://…?ssl=disable) and for
+        # dev-local.sh (same URL shape via .env).
+        from engine.tools._db_url import resolve_async_db_url
 
-            conn_str = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
-            if not conn_str:
-                return ToolResult(
-                    content="Error: No database connection available", is_error=True
-                )
-        else:
-            conn_str = conn_str.replace("+asyncpg", "")
+        canonical = resolve_async_db_url(conn_str or "")
+        if not canonical:
+            return ToolResult(
+                content=(
+                    "database_writer: DATABASE_URL is not configured. "
+                    "Set DATABASE_URL in the environment so the tool can connect."
+                ),
+                is_error=True,
+            )
+        # asyncpg.connect() wants the bare libpq DSN — drop the driver suffix.
+        conn_str = canonical.replace("postgresql+asyncpg://", "postgresql://", 1)
 
         try:
             import asyncpg
