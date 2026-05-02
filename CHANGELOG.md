@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.6 — 2026-05-02
+
+### Added
+
+### Changed
+- CI: added asyncpg to the test job's pip install — atlas_tools.py imports it at module level and ModuleNotFoundError was killing the entire test collection. Fixed
+
+### Fixed
+
 
 ## v1.0.5 — 2026-05-01
 
