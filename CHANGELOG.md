@@ -3,6 +3,14 @@
 ## v1.0.8 — 2026-05-03
 
 ### Fixed
+- README: replaced the ClaimsIQ screenshot, which was captured mid-pipeline-failure with the broken `<img>` placeholders that the photo-codec fix specifically resolves. The new capture is from the post-fix Azure cluster — photos render, decision pills populated (severity, fraud tier, cost), draft letter present, adjuster notes with policy clauses.
+
+### Added
+- `scripts/capture-claimsiq-clean.ts` — deterministic regeneration of the ClaimsIQ README screenshot. Fires the dashboard "Try it now" CTA, polls for a terminal non-failed state, retries once if the pipeline trips, full-page capture at 1440x1800.
+
+## v1.0.8 — 2026-05-03
+
+### Fixed
 - CI: ruff F821 in `apps/api/app/routers/agents.py` (undefined `model_cfg`) and `packages/db/seeds/seed_kb.py` (dangling `if written` after the `_upsert_documents` no-op refactor). Black auto-format applied to 6 files.
 - README: 5 use-case screenshot paths moved from `logs/uat/apps/*-screens/` (gitignored, so they appeared broken on the public mirror) to `docs/screenshots/usecases/`. Same Azure-cluster captures, in a tracked path that survives `publish-public.sh`.
 
