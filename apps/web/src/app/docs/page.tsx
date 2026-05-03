@@ -2470,7 +2470,7 @@ curl -X POST http://localhost:8000/api/agent-sharing \\
   }'`} />
 
                   <H3>Sidebar Permission Groups</H3>
-                  <P>The UI sidebar shows 6 navigation groups, each gated by the user&apos;s permissions from <code className="text-cyan-300">/api/me/permissions</code>. Admins see all groups; members see a subset; viewers see only shared resources.</P>
+                  <P>The UI sidebar shows 6 navigation groups, each gated by the user&apos;s permissions from <code className="text-cyan-300">/api/me/permissions</code>. Admins see all groups, members see a subset, viewers see only shared resources.</P>
                 </DocSection>
               )}
 
@@ -2718,7 +2718,7 @@ curl -X DELETE http://localhost:8000/api/triggers/{trigger_id} \\
               {/* ── Auth API ── */}
               {sectionVisible('api-auth') && (
                 <DocSection id="api-auth" icon={Key} title="Auth API" isOpen={openSections.has('api-auth')} onToggle={() => toggleSection('api-auth')}>
-                  <P>RS256 JWT tokens with asymmetric key signing. Access tokens expire in 15 minutes; refresh tokens last 7 days.</P>
+                  <P>RS256 JWT tokens with asymmetric key signing. Access tokens expire in 15 minutes, refresh tokens last 7 days.</P>
                   <div className="space-y-0.5">
                     <EndpointRow method="POST" path="/api/auth/register" desc="Register new user + tenant" />
                     <EndpointRow method="POST" path="/api/auth/login" desc="Login, returns JWT pair (access + refresh)" />
@@ -3621,7 +3621,7 @@ api:
               {/* ── Shared Storage ── */}
               {sectionVisible('shared-storage') && (
                 <DocSection id="shared-storage" icon={HardDrive} title="Shared Storage" isOpen={openSections.has('shared-storage')} onToggle={() => toggleSection('shared-storage')}>
-                  <P>Knowledge bases, ML models, and Code Runner assets all share a <code className="text-cyan-300">/data</code> directory. In Docker Compose this is a bind mount; in Kubernetes it is a PersistentVolumeClaim (or hostPath for minikube).</P>
+                  <P>Knowledge bases, ML models, and Code Runner assets all share a <code className="text-cyan-300">/data</code> directory. In Docker Compose this is a bind mount, in Kubernetes it is a PersistentVolumeClaim (or hostPath for minikube).</P>
 
                   <H3>/data Directory Layout</H3>
                   <CodeBlock language="text" code={`/data/

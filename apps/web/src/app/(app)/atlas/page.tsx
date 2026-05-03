@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactFlow, {
-  Background, BackgroundVariant, Controls, MiniMap,
+  Background, BackgroundVariant, Controls,
   applyNodeChanges, applyEdgeChanges, addEdge,
   type Connection, type Edge, type Node as RFNode,
   type NodeChange, type EdgeChange, type ReactFlowInstance,
@@ -250,6 +250,7 @@ export default function AtlasPage() {
   const [showKbPicker, setShowKbPicker] = useState(false);
   const [layoutBusy, setLayoutBusy] = useState<string | null>(null);
   const [showQuery, setShowQuery] = useState(false);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   const [queryPatterns, setQueryPatterns] = useState<QueryPattern[]>([{ label_like: '', kind: '' }]);
   const [queryRunning, setQueryRunning] = useState(false);
   const [queryResults, setQueryResults] = useState<QueryMatch[] | null>(null);
@@ -905,20 +906,8 @@ export default function AtlasPage() {
                 proOptions={{ hideAttribution: true }}
               >
                 <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1e293b" />
-                {/* Hide MiniMap + Controls when the canvas is empty —
-                    they collide with the onboarding panel and aren't
-                    useful with no nodes to navigate. */}
                 {nodesData.length > 0 && (
-                  <>
-                    <Controls className="!bg-slate-900/80 !border-slate-700" />
-                    <MiniMap
-                      className="!bg-slate-900/80 !border-slate-700"
-                      nodeColor={(n) => {
-                        const k = (n.data as any)?.row?.kind as NodeKind | undefined;
-                        return k === 'instance' ? '#10B981' : k === 'document' ? '#F59E0B' : k === 'property' ? '#06B6D4' : '#A855F7';
-                      }}
-                    />
-                  </>
+                  <Controls className="!bg-slate-900/80 !border-slate-700" />
                 )}
               </ReactFlow>
 
@@ -1012,37 +1001,73 @@ export default function AtlasPage() {
                 )}
               </AnimatePresence>
 
-              {/* Suggestions ghost-cursor card (top-right) */}
+              {/* collapsible — was always-on top-right and covered nodes */}
               {suggestions.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
-                  className="absolute top-4 right-4 w-72 rounded-xl border border-violet-500/30 bg-slate-900/90 backdrop-blur-md shadow-xl"
-                >
-                  <div className="px-3 py-2 border-b border-slate-800/60 flex items-center gap-2">
-                    <div className="w-6 h-6 rounded bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center">
-                      <Lightbulb className="w-3.5 h-3.5 text-white" />
+                <div className="absolute top-4 left-4 z-10 flex flex-col items-start gap-2">
+                  <button
+                    onClick={() => setAgentPanelOpen((v) => !v)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-full border shadow-lg backdrop-blur-md transition-colors ${
+                      agentPanelOpen
+                        ? 'bg-violet-500/20 border-violet-500/50 text-violet-100'
+                        : 'bg-slate-900/90 border-violet-500/30 text-slate-200 hover:border-violet-500/60'
+                    }`}
+                    aria-expanded={agentPanelOpen}
+                    aria-label={`Atlas Agent — ${suggestions.length} note${suggestions.length === 1 ? '' : 's'}`}
+                    title={agentPanelOpen ? 'Collapse Atlas Agent' : `Atlas Agent · ${suggestions.length} note${suggestions.length === 1 ? '' : 's'}`}
+                  >
+                    <div className="w-5 h-5 rounded bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center shrink-0">
+                      <Lightbulb className="w-3 h-3 text-white" />
                     </div>
-                    <p className="text-xs font-semibold text-white flex-1">Atlas Agent</p>
-                    <span className="text-[10px] text-slate-500">{suggestions.length} note{suggestions.length === 1 ? '' : 's'}</span>
-                  </div>
-                  <div className="max-h-72 overflow-y-auto p-2 space-y-1.5">
-                    {suggestions.slice(0, 8).map((s, i) => (
-                      <div key={i} className={`rounded-lg p-2 border ${
-                        s.severity === 'warning' ? 'bg-amber-500/5 border-amber-500/30' :
-                        s.severity === 'error'   ? 'bg-rose-500/5 border-rose-500/30' :
-                                                    'bg-slate-800/40 border-slate-700/40'
-                      }`}>
-                        <div className="flex items-start gap-1.5">
-                          {s.severity === 'warning' ? <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 shrink-0" />
-                            : s.severity === 'error' ? <AlertTriangle className="w-3 h-3 text-rose-400 mt-0.5 shrink-0" />
-                            : <Info className="w-3 h-3 text-violet-400 mt-0.5 shrink-0" />}
-                          <p className="text-[11px] text-slate-200 leading-snug font-medium">{s.title}</p>
+                    <span className="text-xs font-semibold">Atlas Agent</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/30 text-violet-100 font-semibold">
+                      {suggestions.length}
+                    </span>
+                  </button>
+                  <AnimatePresence>
+                    {agentPanelOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                        transition={{ duration: 0.15 }}
+                        className="w-80 rounded-xl border border-violet-500/30 bg-slate-900/95 backdrop-blur-md shadow-2xl overflow-hidden"
+                      >
+                        <div className="px-3 py-2 border-b border-slate-800/60 flex items-center gap-2">
+                          <div className="w-6 h-6 rounded bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center">
+                            <Lightbulb className="w-3.5 h-3.5 text-white" />
+                          </div>
+                          <p className="text-xs font-semibold text-white flex-1">Atlas Agent</p>
+                          <span className="text-[10px] text-slate-500">{suggestions.length} note{suggestions.length === 1 ? '' : 's'}</span>
+                          <button
+                            onClick={() => setAgentPanelOpen(false)}
+                            className="ml-1 p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+                            aria-label="Collapse Atlas Agent panel"
+                            title="Collapse"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <p className="text-[10px] text-slate-500 mt-1 ml-4 leading-snug">{s.detail}</p>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
+                        <div className="max-h-72 overflow-y-auto p-2 space-y-1.5">
+                          {suggestions.slice(0, 8).map((s, i) => (
+                            <div key={i} className={`rounded-lg p-2 border ${
+                              s.severity === 'warning' ? 'bg-amber-500/5 border-amber-500/30' :
+                              s.severity === 'error'   ? 'bg-rose-500/5 border-rose-500/30' :
+                                                          'bg-slate-800/40 border-slate-700/40'
+                            }`}>
+                              <div className="flex items-start gap-1.5">
+                                {s.severity === 'warning' ? <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 shrink-0" />
+                                  : s.severity === 'error' ? <AlertTriangle className="w-3 h-3 text-rose-400 mt-0.5 shrink-0" />
+                                  : <Info className="w-3 h-3 text-violet-400 mt-0.5 shrink-0" />}
+                                <p className="text-[11px] text-slate-200 leading-snug font-medium">{s.title}</p>
+                              </div>
+                              <p className="text-[10px] text-slate-500 mt-1 ml-4 leading-snug">{s.detail}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               )}
 
               {/* Snapshots panel (slides in) */}

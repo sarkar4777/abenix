@@ -36,7 +36,7 @@ Most AI agent platforms give your agents amnesia — they retrieve documents, fo
   <br/><em>The Abenix Dashboard — agents, executions, cost, and observability in one place</em>
 </p>
 
-> **Mostly Enterprise-ready.** Multi-tenant by design with hard SQL-level isolation. RBAC + per-resource sharing + actAs delegation for SaaS multiplexing. SHA-256-hashed API keys with per-key scopes + revocation. Pre-/post-LLM moderation with DLP redaction. Per-tenant + per-user budget caps. GDPR-friendly retention with hard purge. SOC 2 telemetry stack pre-wired (Prometheus + Grafana + structured failure codes + Slack/email fan-out). Helm chart deploys to AKS + minikube today; the same chart runs on EKS / GKE with a values override.
+> **Mostly Enterprise-ready.** Multi-tenant by design with hard SQL-level isolation. RBAC + per-resource sharing + actAs delegation for SaaS multiplexing. SHA-256-hashed API keys with per-key scopes + revocation. Pre-/post-LLM moderation with DLP redaction. Per-tenant + per-user budget caps. GDPR-friendly retention with hard purge. SOC 2 telemetry stack pre-wired (Prometheus + Grafana + structured failure codes + Slack/email fan-out). Helm chart deploys to AKS + minikube today, the same chart runs on EKS / GKE with a values override.
 
 ---
 
@@ -117,7 +117,7 @@ n8n / Zapier / LangChain are excellent for *"when a Salesforce row changes, drop
 **Abenix earns its place when the problem is agent-shaped** — long-running reasoning, shared knowledge, real tenant isolation, audit-grade traceability, and a runtime you actually run inside your own cluster.
 
 1. **The unit of deployment is an agent, not a workflow.** Every agent has its own pod pool, KEDA scaler, queue, budget cap, and telemetry channel. See [`infra/helm/abenix/templates/agent-runtime-pools.yaml`](infra/helm/abenix/templates/agent-runtime-pools.yaml) and the admin UI under `/admin/scaling`.
-2. **Knowledge is graph + KB merged.** [Atlas](apps/web/src/app/(app)/atlas/page.tsx) is one ontology canvas; agents have four typed tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_search_grounded`) and answer multi-hop questions by graph traversal — not vector lottery. Postgres + Neo4j, no extra vector DB to operate.
+2. **Knowledge is graph + KB merged.** [Atlas](apps/web/src/app/(app)/atlas/page.tsx) is one ontology canvas, agents have four typed tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_search_grounded`) and answer multi-hop questions by graph traversal — not vector lottery. Postgres + Neo4j, no extra vector DB to operate.
 3. **Multi-tenancy is real.** `tenant_id` on every row, [`ResourceShare`](packages/db/models/resource_share.py) for cross-tenant grants, [`actAs` delegation](packages/db/models/subject_policy.py) for SaaS multiplexing. The five showcase apps below all ride this exact path.
 4. **Failures are first-class.** Structured failure-diff on every node crash → [Pipeline Surgeon](apps/api/app/routers/pipeline_healing.py) proposes a JSON-Patch (RFC 6902) you can review and apply from `/agents/{id}/healing`. Stable `failure_code` badges on `/executions`. A typed [workflow shell REPL](apps/web/src/app/(app)/agents/[id]/shell/page.tsx) — *"kubectl for pipelines"* — drives the same machinery.
 5. **One Helm chart with observability inside.** [`infra/helm/abenix`](infra/helm/abenix/) deploys api + web + workers + per-agent-pool runtimes + Postgres + Redis + Neo4j + NATS + KEDA + Prometheus + Grafana + ingress. Every pod exposes `/metrics`. The [`/alerts`](apps/web/src/app/(app)/alerts/page.tsx) page groups by `failure_code`. Slack + email fan-out via env var.
@@ -280,8 +280,8 @@ open http://localhost:3005/fnol
 
 **What it is.** A standalone showcase for two adjacent industrial domains. Web on `:3003`, API on `:8003`. Two showcase tabs:
 
-- **Pump tab** — deploys two Code Assets (DSP feature extractor + RUL regressor), then streams 10 vibration windows through them; severity classifier triages each window; final output is a work-order draft for any window flagged `high`.
-- **Cold Chain tab** — deploys one Code Asset (excursion corrector); streams 20 SFO→LAX waypoints; runs an excursion adjudicator against pharma SOP KB; final output is a partial-loss claim draft.
+- **Pump tab** — deploys two Code Assets (DSP feature extractor + RUL regressor), then streams 10 vibration windows through them, severity classifier triages each window, final output is a work-order draft for any window flagged `high`.
+- **Cold Chain tab** — deploys one Code Asset (excursion corrector), streams 20 SFO→LAX waypoints, runs an excursion adjudicator against pharma SOP KB; final output is a partial-loss claim draft.
 
 **Business problem solved.** Two of the highest-frequency industrial use cases (rotating-equipment maintenance, pharma cold-chain excursion handling) need ML inference + LLM reasoning + structured downstream artefacts (work orders, claim drafts) in the same flow. Industrial-IoT shows the Abenix [Code Runner](#code-runner--bring-your-own-repo) primitive carrying the ML weight while agents handle reasoning.
 
@@ -334,7 +334,7 @@ open http://localhost:3003
 | **Post-QA** | on case close | scores agent performance, drafts coaching note |
 | **Trend Mining** | weekly / button | clusters resolved cases, surfaces emerging issues |
 
-**Business problem solved.** Customer-service teams drown in repetitive triage; their highest-leverage moves (deflection, tone calibration, trend detection) get neglected because nobody has time. ResolveAI runs all four loops continuously while a human stays in approve / takeover mode.
+**Business problem solved.** Customer-service teams drown in repetitive triage, their highest-leverage moves (deflection, tone calibration, trend detection) get neglected because nobody has time. ResolveAI runs all four loops continuously while a human stays in approve / takeover mode.
 
 **Tools + KB.** `kb_search` over `resolveai-policy` ([`seeds/kb/resolveai-policy.yaml`](packages/db/seeds/kb/resolveai-policy.yaml)) — refund tiers, escalation paths, tone guidelines. Persona + precedent collections are seeded on first deploy. Action Executor uses `webhook` and `email_sender` tools (latter requires `SMTP_*` env).
 
@@ -374,7 +374,7 @@ Five hardening landings over the last sprint that every showcase app benefits fr
 |---|---|
 | **Standalone API-key bootstrap is automatic** | [`scripts/seed-standalone-keys.sh`](scripts/seed-standalone-keys.sh) reconciles `*_ABENIX_API_KEY` rows in `api_keys` on every deploy. No more `kubectl patch secret` round-trips. Wired into `deploy-azure.sh deploy`, `deploy-azure.sh seed`, and `dev-local.sh`. |
 | **SDK drift pre-flight (Phase 0)** | Every deploy + every `dev-local.sh` boot calls [`scripts/sync-sdks.sh --check`](scripts/sync-sdks.sh) — fails fast if any of the 5 vendored copies of `abenix_sdk` drifts from `packages/sdk/python`. `SKIP_SDK_SYNC_CHECK=1` to bypass (not recommended). |
-| **`/api/agents/{slug}/self-check` endpoint** | Validates an agent's seed YAML, model availability, tool grants, and KB bindings without running it. Used by the deploy gate. Schema enforced by [`packages/db/seeds/agent_seed_schema.py`](packages/db/seeds/agent_seed_schema.py); lint by [`scripts/lint-agent-seeds.py`](scripts/lint-agent-seeds.py). |
+| **`/api/agents/{slug}/self-check` endpoint** | Validates an agent's seed YAML, model availability, tool grants, and KB bindings without running it. Used by the deploy gate. Schema enforced by [`packages/db/seeds/agent_seed_schema.py`](packages/db/seeds/agent_seed_schema.py), lint by [`scripts/lint-agent-seeds.py`](scripts/lint-agent-seeds.py). |
 | **`seed_kb.py` populates 6 KB collections on every deploy** | [`packages/db/seeds/seed_kb.py`](packages/db/seeds/seed_kb.py) reads everything in [`packages/db/seeds/kb/`](packages/db/seeds/kb/) (claimsiq-policies, industrial-iot-knowledge, resolveai-policy, plus oraclenet, sauditourism, example_app collections) and idempotently upserts them. |
 | **Tools return structured warnings instead of silent empties** | Every tool now returns `{output, warnings: [...]}`; the runtime surfaces warnings into the execution trace. The `wait=True` server-side default for X-API-Key callers + the SDK's `Abenix.execute()` wait-for-completion default kill the silent-empty-output failure mode end-to-end. |
 
@@ -410,8 +410,8 @@ A pipeline is a DAG of agents and tools. Switch nodes branch on output, loop nod
 
 ### Multimodal end-to-end + self-healing + workflow shell
 
-- **Multimodal** — drop a PDF, image, audio, video, DOCX, or text file anywhere Abenix accepts uploads; the platform routes the modality to the right provider (Claude/Gemini/GPT-4o for vision, Gemini for audio+video).
-- **Self-healing** — node crashes capture a structured failure-diff; the [Pipeline Surgeon](apps/api/app/routers/pipeline_healing.py) proposes a JSON-Patch (RFC 6902) you Apply or Reject from `/agents/{id}/healing`. Never auto-applied; one-click rollback to `dsl_before`.
+- **Multimodal** — drop a PDF, image, audio, video, DOCX, or text file anywhere Abenix accepts uploads, the platform routes the modality to the right provider (Claude/Gemini/GPT-4o for vision, Gemini for audio+video).
+- **Self-healing** — node crashes capture a structured failure-diff, the [Pipeline Surgeon](apps/api/app/routers/pipeline_healing.py) proposes a JSON-Patch (RFC 6902) you Apply or Reject from `/agents/{id}/healing`. Never auto-applied, one-click rollback to `dsl_before`.
 - **Talk-to-workflow shell** — 30+ verbs across five intents (INSPECT · MUTATE · EXECUTE · GOVERN · LEARN) drive every change through the same JSON-Patch ledger:
   ```bash
   > show failures
@@ -450,7 +450,7 @@ flowchart TB
     style PG fill:#1e3a8a,stroke:#3b82f6,color:#fff
 ```
 
-Three independently scalable tiers, one shared Postgres. The agent runtime scales horizontally per agent type via KEDA queue-depth scaling. Production traffic flows API → NATS → runtime; the API never executes agent code itself when `RUNTIME_MODE=remote`. Full operator guide (sizing tables, read replicas, pgvector → Pinecone migration, Redis cluster mode, multi-region) lives at `/help` under **Scale & operate**.
+Three independently scalable tiers, one shared Postgres. The agent runtime scales horizontally per agent type via KEDA queue-depth scaling. Production traffic flows API → NATS → runtime, the API never executes agent code itself when `RUNTIME_MODE=remote`. Full operator guide (sizing tables, read replicas, pgvector → Pinecone migration, Redis cluster mode, multi-region) lives at `/help` under **Scale & operate**.
 
 ---
 
@@ -528,14 +528,14 @@ Tested on AKS, EKS, GKE, and bare metal.
 
 | Concern | What ships |
 |---|---|
-| **Tenant isolation** | `tenant_id` on every row; cross-tenant reads return `404` (not `403`). Vector backends enforce the same filter at the index level. |
+| **Tenant isolation** | `tenant_id` on every row, cross-tenant reads return `404` (not `403`). Vector backends enforce the same filter at the index level. |
 | **RBAC + multiplexing** | 3 roles (admin/creator/user) + per-feature flags via `/api/me/permissions`. `ResourceShare` for cross-team grants. **actAs** lets a SaaS app holding a platform key serve N end-users via `X-Abenix-Subject` per request. |
-| **Auth** | Email+bcrypt; JWT with refresh; per-key scopes (`execute`, `read`, `write`, `can_delegate`); API keys SHA-256-hashed at rest. |
+| **Auth** | Email+bcrypt, JWT with refresh, per-key scopes (`execute`, `read`, `write`, `can_delegate`), API keys SHA-256-hashed at rest. |
 | **Moderation + DLP** | Pre-LLM gate on input + post-LLM gate on output. Actions: `block`, `redact`, `flag`, `allow`. Tenant-scoped, non-bypassable. |
 | **Quotas + budgets** | Per-tenant + per-user monthly USD cap, executions/day, tokens/day. Overage returns `BUDGET_EXCEEDED`. |
 | **Audit log + GDPR** | Every execution, tool call, KB query, atlas mutation, role change — tenant-scoped, integrity-hashed. Per-tenant data export, soft delete + scheduled hard purge, per-tenant retention windows. |
 | **Observability** | Prometheus + Grafana bundled. Stable failure codes (`LLM_RATE_LIMIT`, `SANDBOX_TIMEOUT`, `MODERATION_BLOCKED`). `/alerts` page groups by code. Slack + email fan-out via env var. |
-| **HA + self-host** | Stateless API + web tiers; per-pool runtimes with KEDA autoscaling; NATS for at-least-once + replay; stale-execution sweeper. One Helm chart on AKS / minikube / EKS / GKE. MIT license. |
+| **HA + self-host** | Stateless API + web tiers, per-pool runtimes with KEDA autoscaling, NATS for at-least-once + replay, stale-execution sweeper. One Helm chart on AKS / minikube / EKS / GKE. MIT license. |
 
 <p align="center">
   <img src="docs/screenshots/08-alerts-page.png" alt="Alerts page" width="100%" />
