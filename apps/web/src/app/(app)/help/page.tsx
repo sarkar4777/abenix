@@ -106,14 +106,14 @@ const categories: Category[] = [
         icon: <BookOpen className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Abenix is the open-source platform for building AI agents that <em>think in graphs</em>. You drop in your domain knowledge as documents, ontologies, or live data; Abenix turns it into a typed graph; agents traverse the graph to answer questions, run pipelines, or act on schedules.</p>
+            <p>Abenix is the open-source platform for building AI agents that <em>think in graphs</em>. You drop in your domain knowledge as documents, ontologies, or live data, Abenix turns it into a typed graph, agents traverse the graph to answer questions, run pipelines, or act on schedules.</p>
             <p>Three things make Abenix different from every other agent platform:</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               <FeatureCard icon={Network} accent="violet" title="Atlas — ontology + KB canvas" body="Documents and concepts share one canvas. Drop a PDF, type a sentence, draw a relationship. Agents query the graph, not raw vectors." />
               <FeatureCard icon={Brain} accent="cyan" title="Knowledge Engine" body="Graph-aware retrieval. Token cost drops 5–10× because agents read curated evidence, not noisy near-neighbours." />
               <FeatureCard icon={Workflow} accent="emerald" title="Pipelines + 100+ tools" body="Visual builder for multi-agent DAGs. Switch nodes, loops, sandboxed code, MCP integrations." />
             </div>
-            <Hero src={SS('01-dashboard.png')} alt="Abenix dashboard" caption="Dashboard — live agents, executions, cost, observability" />
+            <Hero src={SS('04-atlas-canvas.png')} alt="Atlas — thinking in graphs" caption="Atlas — drop documents, draw concepts, edges and instances live on one canvas" />
           </div>
         ),
       },
@@ -188,7 +188,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <Steps items={[
               'Click <strong>+ New agent</strong> to open the Agent Builder.',
               'Use the <strong>filter chips</strong> to narrow by category — onboarding, finance, compliance, ops, custom.',
-              'Click an agent to see its full config; click <strong>Run</strong> to fire a one-shot, or <strong>Chat</strong> to open a thread.',
+              'Click an agent to see its full config, click <strong>Run</strong> to fire a one-shot, or <strong>Chat</strong> to open a thread.',
               'Use <strong>Share</strong> to grant access to teammates with read or edit scope.',
             ]} />
           </div>
@@ -227,7 +227,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><code>SANDBOX_TIMEOUT</code> · <code>SANDBOX_NONZERO_EXIT</code> · <code>SANDBOX_OOM</code> · <code>SANDBOX_IMAGE_BLOCKED</code> — sandbox</li>
               <li><code>TOOL_NOT_FOUND</code> · <code>TOOL_ERROR</code> — tool layer</li>
               <li><code>BUDGET_EXCEEDED</code> · <code>RATE_LIMITED</code> — quota</li>
-              <li><code>STALE_SWEEP</code> — owning pod crashed; sweeper marked the run failed</li>
+              <li><code>STALE_SWEEP</code> — owning pod crashed, sweeper marked the run failed</li>
               <li><code>MODERATION_BLOCKED</code> — moderation gate refused the input/output</li>
               <li><code>INFRA_CRASH</code> · <code>INFRA_AUTH_ERROR</code> · <code>UNKNOWN_ERROR</code></li>
             </ul>
@@ -252,7 +252,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <Hero src={SS('02-agent-builder.png')} alt="Agent Builder canvas" />
             <Steps items={[
               'Click <strong>+ New agent</strong> or <strong>+ New pipeline</strong>.',
-              'Use the AI Builder field — describe what you want in one sentence; a draft pops onto the canvas.',
+              'Use the AI Builder field — describe what you want in one sentence, a draft pops onto the canvas.',
               'Drag <strong>tools</strong> from the right rail onto the canvas. Drop them on the agent node to attach.',
               'Drop a <strong>knowledge collection</strong> for graph-aware retrieval inside the agent.',
               'For pipelines: use <strong>switch</strong> nodes to branch on output, <strong>loop</strong> nodes to iterate, <strong>code asset</strong> nodes to invoke sandboxed code.',
@@ -362,7 +362,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <h4 className="text-white font-semibold pt-3">How isolation works under the hood</h4>
             <p>Three checks run on every read of a knowledge collection:</p>
             <ol className="list-decimal pl-5 space-y-1.5 text-[13px]">
-              <li><strong>Tenant boundary</strong> — every <code>knowledge_collections</code> row carries a <code>tenant_id</code>. Routers hard-filter on the calling user&apos;s tenant; cross-tenant reads return 404.</li>
+              <li><strong>Tenant boundary</strong> — every <code>knowledge_collections</code> row carries a <code>tenant_id</code>. Routers hard-filter on the calling user&apos;s tenant, cross-tenant reads return 404.</li>
               <li><strong>Project visibility</strong> — collections live inside a project. Default visibility is <code>PROJECT</code>: only project members can see them. <code>PRIVATE</code> restricts to the creator. <code>TENANT</code> opens it to anyone in the tenant.</li>
               <li><strong>Per-resource sharing</strong> — <code>ResourceShare</code> grants override visibility for a specific user with explicit <code>READ</code> or <code>EDIT</code> scope. Used for cross-team handoffs without changing the collection&apos;s default.</li>
             </ol>
@@ -376,7 +376,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
               <li>Extracts entities (people, companies, concepts, dates, amounts) and relationships (CAUSED_BY, OWNS, MENTIONS, …).</li>
               <li>Stores them as nodes + edges in a typed graph alongside the chunks.</li>
-              <li>Strengthens edges that lead to good answers; weakens those that don&apos;t (the Knowledge Engine self-tunes).</li>
+              <li>Strengthens edges that lead to good answers, weakens those that don&apos;t (the Knowledge Engine self-tunes).</li>
             </ol>
             <p>Agents using <code>knowledge_search</code> on a graph-enabled collection get hybrid retrieval: vector similarity AND multi-hop graph walks. This is the 5–10× token reduction story.</p>
 
@@ -464,7 +464,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><strong>Bind a knowledge collection</strong> — when bound, <em>Project KB</em> pulls every existing document onto the canvas as a <code>document</code>-kind node. Drop new files on the canvas and they round-trip into the KB.</li>
               <li><strong>Draw it manually</strong> — add concepts and instances by hand. Drag from the right edge of one node to the left edge of another to create a relationship.</li>
             </ul>
-            <Hero src={SS('04-atlas-canvas.png')} alt="Atlas with FIBO Core imported" caption="After importing the FIBO Core starter — concepts, edges, cardinalities" />
+            <Hero src={SS('06-atlas-extract.png')} alt="Atlas — extracted ontology proposal" caption="After dropping a document — entities and edges proposed for review at the bottom" />
 
             <h4 className="text-white font-semibold pt-3">Inspector — five lenses</h4>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
@@ -490,7 +490,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><strong>Better-than-vector retrieval</strong> — agents walk the graph, then pull only the chunks bound to those nodes. Token cost drops 5–10×.</li>
               <li><strong>Cross-agent disambiguation</strong> — “Trade” means the same thing across every agent reading this domain.</li>
               <li><strong>Multi-hop reasoning</strong> — the visual-query endpoint exposed as a tool lets agents draw patterns instead of stitching SQL.</li>
-              <li><strong>Validation</strong> — outputs validated against the ontology&apos;s cardinalities and types; bad outputs reject before they land.</li>
+              <li><strong>Validation</strong> — outputs validated against the ontology&apos;s cardinalities and types, bad outputs reject before they land.</li>
               <li><strong>Provenance</strong> — every agent answer cites the Atlas nodes it walked.</li>
             </ul>
 
@@ -498,7 +498,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <p>Four tools ship in the catalogue. Attach them to any agent in the Builder:</p>
             <ul className="list-disc pl-5 space-y-1.5 text-[13px]">
               <li><code className="text-cyan-300">atlas_describe</code> — summarise the graph (counts by kind, top edge labels, most-connected concepts). Use first when the user asks "what do you know about X?".</li>
-              <li><code className="text-cyan-300">atlas_query</code> — pattern-match nodes by <code>label_like</code> + <code>kind</code>. Returns structured rows; the typed alternative to vector search.</li>
+              <li><code className="text-cyan-300">atlas_query</code> — pattern-match nodes by <code>label_like</code> + <code>kind</code>. Returns structured rows, the typed alternative to vector search.</li>
               <li><code className="text-cyan-300">atlas_traverse</code> — 1-hop neighbourhood of a node. Use after locating a concept to walk to related concepts.</li>
               <li><code className="text-cyan-300">atlas_search_grounded</code> — find KB documents bound to nodes near a target term. Better than vector-only when the chunks must be tied to a typed concept.</li>
             </ul>
@@ -518,7 +518,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               When the allow-list is non-empty, the tool can <em>only</em> see those graph IDs — even if other graphs exist in the same tenant. This lets you ship agents that read FIBO + your house ontology while a sibling agent sees a different domain (HL7 / FHIR for healthcare, FIX for trading) without leakage. Empty list = the agent sees every graph in its tenant (the default tenant boundary).
             </p>
             <p className="text-[12px]">
-              <strong className="text-white">Per-application:</strong> standalone apps using the actAs delegation pattern pass <code>X-Abenix-Subject</code> per request. The subject inherits the agent&apos;s allow-list; the data still flows under the agent's <code>tenant_id</code>, so cross-app reads stay impossible at the SQL layer.
+              <strong className="text-white">Per-application:</strong> standalone apps using the actAs delegation pattern pass <code>X-Abenix-Subject</code> per request. The subject inherits the agent&apos;s allow-list, the data still flows under the agent's <code>tenant_id</code>, so cross-app reads stay impossible at the SQL layer.
             </p>
           </div>
         ),
@@ -557,7 +557,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Terminal className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>A typed verb grammar — over 30 verbs across five intents — that drives every aspect of a pipeline. The LLM is only used to translate natural language into a verb invocation (when you type prose); the parser, the dispatcher, and every mutating verb are deterministic.</p>
+            <p>A typed verb grammar — over 30 verbs across five intents — that drives every aspect of a pipeline. The LLM is only used to translate natural language into a verb invocation (when you type prose), the parser, the dispatcher, and every mutating verb are deterministic.</p>
             <p>Open it from any pipeline agent's <code>/info</code> page via the <strong>Shell</strong> button next to <strong>Healing</strong>. Tab-completion comes from the live verb registry. Up/down recalls history. Mutating verbs draft a Healing patch you Apply or Reject — same ledger as the Surgeon, same one-click rollback.</p>
             <p><strong className="text-white">Five intents, ~30 verbs:</strong></p>
             <table className="w-full text-xs">
@@ -647,7 +647,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Gauge className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Fire N parallel executions against any agent or pipeline; watch p50/p99/p999 latency and per-tool timing. Use it before promoting an agent to production.</p>
+            <p>Fire N parallel executions against any agent or pipeline, watch p50/p99/p999 latency and per-tool timing. Use it before promoting an agent to production.</p>
             <Hero src={SS('17-load-playground.png')} alt="Load Playground" />
           </div>
         ),
@@ -663,7 +663,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <Steps items={[
               'Click <strong>+ New trigger</strong>.',
               'Pick <strong>cron</strong> or <strong>webhook</strong>.',
-              'Select the agent or pipeline; provide the input template.',
+              'Select the agent or pipeline, provide the input template.',
               'For cron: pick a timezone, set the schedule. For webhook: copy the URL + secret.',
               'Hit <strong>Save</strong>. Activations show up in <em>Executions</em> with a <code>trigger_id</code> tag.',
             ]} />
@@ -702,7 +702,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Radio className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Streams every active execution in real time. Open it in a side window during a load test or a stuck-agent investigation; you see every tool call as it happens.</p>
+            <p>Streams every active execution in real time. Open it in a side window during a load test or a stuck-agent investigation, you see every tool call as it happens.</p>
           </div>
         ),
       },
@@ -727,12 +727,12 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <Hero src={SS('20-moderation.png')} alt="Moderation" />
             <p><strong className="text-white">Actions:</strong></p>
             <ul className="list-disc pl-5 space-y-0.5 text-[12px]">
-              <li><code className="text-rose-300">block</code> — refuse; execution fails with <code>MODERATION_BLOCKED</code>.</li>
+              <li><code className="text-rose-300">block</code> — refuse, execution fails with <code>MODERATION_BLOCKED</code>.</li>
               <li><code className="text-violet-300">redact</code> — mask matching spans, allow through.</li>
               <li><code className="text-amber-300">flag</code> — pass through, log + notify only.</li>
               <li><code className="text-emerald-300">allow</code> — default for un-triggered categories.</li>
             </ul>
-            <p>Provider: OpenAI <code>omni-moderation-latest</code> (free for OpenAI customers, ~40–150ms). Falls open if the API key is missing; tenants who want strict fail-closed can set <code>fail_closed=true</code> on the policy.</p>
+            <p>Provider: OpenAI <code>omni-moderation-latest</code> (free for OpenAI customers, ~40–150ms). Falls open if the API key is missing, tenants who want strict fail-closed can set <code>fail_closed=true</code> on the policy.</p>
             <p>The Observability section&apos;s observability stack also gives you the <code>/alerts</code> page, which surfaces moderation blocks alongside other failure codes — see <a href="#alerts" className="text-violet-300 underline">Alerts</a>.</p>
           </div>
         ),
@@ -908,7 +908,7 @@ kubectl -n abenix set env deployment/abenix-api RUNTIME_MODE=remote
 kubectl -n abenix set env deployment/abenix-api RUNTIME_MODE=embedded`}</pre>
 
             <Callout tone="info">
-              All Atlas tools work in both modes. In embedded mode the tools execute in-process; in remote mode they execute on the runtime pod. The tenant + per-agent <code>atlas_graphs</code> allow-list is enforced identically in both code paths.
+              All Atlas tools work in both modes. In embedded mode the tools execute in-process, in remote mode they execute on the runtime pod. The tenant + per-agent <code>atlas_graphs</code> allow-list is enforced identically in both code paths.
             </Callout>
           </div>
         ),
@@ -924,7 +924,7 @@ kubectl -n abenix set env deployment/abenix-api RUNTIME_MODE=embedded`}</pre>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong>chat</strong> — short-lived (under 30s), low memory, autoscales aggressively.</li>
               <li><strong>default</strong> — bulk workhorse for typical agents.</li>
-              <li><strong>long-running</strong> — over-30s executions; bigger CPU/RAM, slower scale.</li>
+              <li><strong>long-running</strong> — over-30s executions, bigger CPU/RAM, slower scale.</li>
               <li><strong>heavy-reasoning</strong> — 8GB RAM, large-context models, tightest concurrency cap.</li>
             </ul>
             <p>Why split? A long-running research agent shouldn&apos;t starve a chat session. Different concurrency, different SLOs, different LLM rate-limit budgets per pool.</p>
@@ -949,8 +949,7 @@ spec:
       address: redis:6379
       listName: chat-queue
       listLength: "10"        # target items per pod`}</pre>
-            <p>Tune <code>listLength</code> down for lower latency at higher cost; tune up to save money at the cost of queue wait. The <code>/admin/scaling</code> page exposes these knobs to admins without a helm upgrade.</p>
-            <Hero src={SS('23-admin-scaling.png')} alt="Admin scaling console" />
+            <p>Tune <code>listLength</code> down for lower latency at higher cost, tune up to save money at the cost of queue wait. The <code>/admin/scaling</code> page exposes these knobs to admins without a helm upgrade — see the <a href="#admin-scaling" className="text-violet-300 underline">Scaling Console</a> topic below.</p>
           </div>
         ),
       },
@@ -965,8 +964,8 @@ spec:
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong>Read replicas</strong> for the <em>list</em> endpoints (executions, dashboards, analytics). The API supports a <code>DATABASE_URL_RO</code> env var that read-routes those queries.</li>
               <li><strong>Partitioning</strong> on <code>executions</code> and <code>messages</code> by <code>created_at</code> (monthly). A migration helper lives in <code>packages/db/scripts/partition_executions.py</code>.</li>
-              <li><strong>Connection pooling</strong> via PgBouncer. The default pod-side pool is 20 per API replica; PgBouncer collapses N×20 client conns to a fixed primary-side limit.</li>
-              <li><strong>pgvector → Pinecone</strong> when embeddings exceed ~5M rows. Per-collection toggle; no code change.</li>
+              <li><strong>Connection pooling</strong> via PgBouncer. The default pod-side pool is 20 per API replica, PgBouncer collapses N×20 client conns to a fixed primary-side limit.</li>
+              <li><strong>pgvector → Pinecone</strong> when embeddings exceed ~5M rows. Per-collection toggle, no code change.</li>
               <li><strong>Aggressive vacuum</strong> on the <code>executions</code> table — it&apos;s the high-churn one.</li>
             </ul>
             <Callout tone="warn">Running embeddings on the same Postgres as the OLTP workload is fine until it&apos;s not. Watch <code>p99(http_request_duration)</code> — if it doubles when a Cognify job runs, move embeddings to Pinecone or a dedicated pgvector.</Callout>
@@ -995,7 +994,7 @@ spec:
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>
-              <strong className="text-white">NATS JetStream is the production queue backend</strong> for agent execution. The Helm chart deploys an <code>abenix-nats</code> StatefulSet alongside the API + runtime; KEDA scales the runtime pools by NATS stream depth.
+              <strong className="text-white">NATS JetStream is the production queue backend</strong> for agent execution. The Helm chart deploys an <code>abenix-nats</code> StatefulSet alongside the API + runtime, KEDA scales the runtime pools by NATS stream depth.
             </p>
 
             <h4 className="text-white font-semibold pt-3">Why NATS over Redis lists</h4>
@@ -1028,7 +1027,7 @@ spec:
 
             <h4 className="text-white font-semibold pt-3">Falling back to Celery + Redis</h4>
             <p>
-              Set <code>QUEUE_BACKEND=celery</code> if you want a simpler stack. The runtime detects a missing <code>nats-py</code> client and silently degrades to Celery without redeploy. Useful for laptop dev runs; not recommended above 50 RPS or in any deploy where ack-loss matters.
+              Set <code>QUEUE_BACKEND=celery</code> if you want a simpler stack. The runtime detects a missing <code>nats-py</code> client and silently degrades to Celery without redeploy. Useful for laptop dev runs, not recommended above 50 RPS or in any deploy where ack-loss matters.
             </p>
           </div>
         ),
@@ -1039,7 +1038,7 @@ spec:
         icon: <Terminal className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Each runtime pod ships Docker / Podman; sandboxes are spawned per-execution. Resource caps live on <code>SandboxImagePolicy</code>: default 512 MB / 30s / no network. Three things matter at scale:</p>
+            <p>Each runtime pod ships Docker / Podman, sandboxes are spawned per-execution. Resource caps live on <code>SandboxImagePolicy</code>: default 512 MB / 30s / no network. Three things matter at scale:</p>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
               <li><strong>Image pre-warming</strong> — pull the standard images (python, node, go, …) into the runtime nodes via a DaemonSet. Cold pulls add 8–15s of latency on the first execution per pod.</li>
               <li><strong>Per-tenant quotas</strong> — set <code>tenant.sandbox_concurrency_max</code> so a runaway agent in one tenant can&apos;t exhaust a runtime pod.</li>
@@ -1060,8 +1059,8 @@ spec:
                 <tr><th className="text-left py-1.5">Backend</th><th className="text-left py-1.5">Best for</th><th className="text-left py-1.5">Limits</th></tr>
               </thead>
               <tbody className="text-slate-300">
-                <tr className="border-b border-slate-800/60"><td className="py-1.5"><strong>pgvector</strong></td><td>Up to ~5M chunks per collection. In-cluster, no extra cost.</td><td>Single primary; vacuum windows can pause ingestion.</td></tr>
-                <tr><td className="py-1.5"><strong>Pinecone</strong></td><td>10M+ chunks; multi-tenant cost amortisation.</td><td>External dep + cost; ~50 ms network round-trip.</td></tr>
+                <tr className="border-b border-slate-800/60"><td className="py-1.5"><strong>pgvector</strong></td><td>Up to ~5M chunks per collection. In-cluster, no extra cost.</td><td>Single primary, vacuum windows can pause ingestion.</td></tr>
+                <tr><td className="py-1.5"><strong>Pinecone</strong></td><td>10M+ chunks, multi-tenant cost amortisation.</td><td>External dep + cost; ~50 ms network round-trip.</td></tr>
               </tbody>
             </table>
             <p>Switch by setting <code>collection.vector_backend</code>. Existing chunks aren&apos;t migrated automatically — re-Cognify the collection.</p>
@@ -1075,7 +1074,7 @@ spec:
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>KB documents, code-asset zips, exported PDFs, and BPM-analyzer attachments live on object storage. Default: a PVC inside the cluster (good for dev). Production: S3 / Azure Blob / GCS.</p>
-            <p>Set <code>STORAGE_BACKEND=s3</code> and the standard AWS env vars; the API + worker share the bucket through the <code>StorageService</code> abstraction. Multi-region: set the bucket region close to the cluster; large blobs are streamed, not buffered, so latency doesn&apos;t spike memory.</p>
+            <p>Set <code>STORAGE_BACKEND=s3</code> and the standard AWS env vars, the API + worker share the bucket through the <code>StorageService</code> abstraction. Multi-region: set the bucket region close to the cluster, large blobs are streamed, not buffered, so latency doesn&apos;t spike memory.</p>
           </div>
         ),
       },
@@ -1088,10 +1087,10 @@ spec:
             <p>Multi-tenant fairness is enforced at three places:</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong>Rate limiter middleware</strong> — per-tenant token bucket on the API, configurable via <code>tenant.rate_limit_per_minute</code>.</li>
-              <li><strong>Budget</strong> — per-tenant monthly USD cap; on overage the gate returns <code>BUDGET_EXCEEDED</code>.</li>
+              <li><strong>Budget</strong> — per-tenant monthly USD cap, on overage the gate returns <code>BUDGET_EXCEEDED</code>.</li>
               <li><strong>Sandbox concurrency</strong> — described above.</li>
             </ul>
-            <p>Surface tenant fairness on the dashboard: the <code>abenix_active_executions{`{tenant_id}`}</code> gauge is per-tenant; Grafana&apos;s &quot;Top tenants&quot; panel highlights the loud neighbours.</p>
+            <p>Surface tenant fairness on the dashboard: the <code>abenix_active_executions{`{tenant_id}`}</code> gauge is per-tenant, Grafana&apos;s &quot;Top tenants&quot; panel highlights the loud neighbours.</p>
           </div>
         ),
       },
@@ -1104,10 +1103,10 @@ spec:
             <p>The default Helm chart deploys to one region. For a global footprint:</p>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
               <li>Pick a write region. Postgres + Redis live there. Read replicas in other regions.</li>
-              <li>Deploy the full stack per region; route traffic via Cloudflare / Akamai based on lowest latency.</li>
+              <li>Deploy the full stack per region, route traffic via Cloudflare / Akamai based on lowest latency.</li>
               <li>Set <code>DATABASE_URL_RO</code> in non-write regions so list endpoints stay local.</li>
               <li>Object storage: prefer a single bucket with cross-region replication enabled.</li>
-              <li>LLM provider keys: keep one set globally; provider rate-limits aggregate across regions.</li>
+              <li>LLM provider keys: keep one set globally, provider rate-limits aggregate across regions.</li>
             </ol>
             <Callout tone="warn">Cross-region writes are eventually consistent. The Atlas time-slider is an exception — it serialises through the write region. If you need strict regional isolation, deploy independent clusters and federate via the SDK.</Callout>
           </div>
@@ -1131,7 +1130,7 @@ spec:
         icon: <BarChart3 className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Pre-wired observability ships with <code>scripts/deploy.sh</code>. <strong>Prometheus</strong> scrapes <code>/api/metrics</code> on the API every 15s; <strong>Grafana</strong> renders the bundled &quot;Abenix Operations&quot; dashboard.</p>
+            <p>Pre-wired observability ships with <code>scripts/deploy.sh</code>. <strong>Prometheus</strong> scrapes <code>/api/metrics</code> on the API every 15s, <strong>Grafana</strong> renders the bundled &quot;Abenix Operations&quot; dashboard.</p>
             <Hero src={SS('09-grafana-dashboard.png')} alt="Grafana — Abenix Operations dashboard" caption="Operations Overview — LLM spend, tokens, execution outcomes, failure breakdown by code, stale sweeps" />
             <Callout tone="info">
               Grafana is intentionally <strong>not exposed on the public ingress</strong>. Reach it via port-forward:
@@ -1154,7 +1153,7 @@ spec:
             </ul>
             <h4 className="text-white font-semibold pt-3">Notification fan-out</h4>
             <ul className="list-disc pl-5 space-y-0.5 text-[12px]">
-              <li><strong>WebSocket</strong> — always on; powers the bell.</li>
+              <li><strong>WebSocket</strong> — always on, powers the bell.</li>
               <li><strong>Slack</strong> — set <code>ABENIX_SLACK_WEBHOOK_URL</code>. Per-user opt-in via Settings.</li>
               <li><strong>Email</strong> — set <code>SMTP_HOST / SMTP_USER / SMTP_PASS / SMTP_FROM</code>.</li>
             </ul>
@@ -1174,7 +1173,7 @@ spec:
             <Hero src={SS('25-admin-llm-pricing.png')} alt="LLM pricing" />
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><code>/admin/llm-pricing</code> — provider × model price overrides. The router multiplies these by <code>tokens_in × cost_in + tokens_out × cost_out</code> and writes per-execution cost.</li>
-              <li><code>/admin/llm-settings</code> — which models are exposed to which agents. Disable expensive models tenant-wide; force a fallback to cheaper ones.</li>
+              <li><code>/admin/llm-settings</code> — which models are exposed to which agents. Disable expensive models tenant-wide, force a fallback to cheaper ones.</li>
             </ul>
             <Hero src={SS('24-admin-llm-settings.png')} alt="Model selection" />
           </div>
@@ -1235,7 +1234,7 @@ spec:
         icon: <Key className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Mint platform keys for SDK use. Scopes: <code>execute</code>, <code>read</code>, <code>write</code>, <code>can_delegate</code>. Bcrypt-hashed at rest; the plaintext is shown once at creation.</p>
+            <p>Mint platform keys for SDK use. Scopes: <code>execute</code>, <code>read</code>, <code>write</code>, <code>can_delegate</code>. Bcrypt-hashed at rest, the plaintext is shown once at creation.</p>
             <Hero src={SS('27-api-keys.png')} alt="API keys" />
             <h4 className="text-white font-semibold pt-3">actAs delegation</h4>
             <p>For third-party apps holding a platform key: pass <code>X-Abenix-Subject: &lt;end-user-id&gt;</code> on every request. The runtime treats the request as if that subject were calling, and applies row-level RBAC accordingly.</p>
@@ -1305,7 +1304,7 @@ spec:
               <li>Mints a JWT scoped to that tenant.</li>
             </ol>
             <p className="text-[12px] text-slate-400">
-              There is <strong>no global super-admin endpoint</strong> that lists or creates tenants. The seeded <code>admin@abenix.dev</code> account is admin of the seeded tenant only — it can&apos;t see any other tenant&apos;s data. To run N organisations on one Abenix instance, have one person from each organisation register; they each get their own tenant + admin.
+              There is <strong>no global super-admin endpoint</strong> that lists or creates tenants. The seeded <code>admin@abenix.dev</code> account is admin of the seeded tenant only — it can&apos;t see any other tenant&apos;s data. To run N organisations on one Abenix instance, have one person from each organisation register, they each get their own tenant + admin.
             </p>
 
             <h4 className="text-white font-semibold pt-3">2 · Adding users to a tenant</h4>
@@ -1318,16 +1317,15 @@ spec:
                 <tr className="border-b border-slate-800/60">
                   <td className="py-2"><strong>Invite by email</strong></td>
                   <td><code>POST /api/team/invite</code></td>
-                  <td>Real users; they accept via emailed link, set their own password.</td>
+                  <td>Real users, they accept via emailed link, set their own password.</td>
                 </tr>
                 <tr>
                   <td className="py-2"><strong>Dev create</strong></td>
                   <td><code>POST /api/team/dev-create-member</code></td>
-                  <td>E2E tests / immediate provisioning; admin sets the password.</td>
+                  <td>E2E tests / immediate provisioning, admin sets the password.</td>
                 </tr>
               </tbody>
             </table>
-            <Hero src={SS('26-team.png')} alt="Team management page" />
             <Callout tone="info">
               Both paths require <code>role=admin</code> and hard-scope the new user to the caller&apos;s tenant — <strong>no cross-tenant invites are possible</strong>. The backend enforces the scope on the route, not just the UI.
             </Callout>
@@ -1337,7 +1335,7 @@ spec:
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong>admin</strong> — full control inside the tenant. Can invite, change roles, set quotas, configure tenant settings, see all members&apos; activity, hit every <code>/admin/*</code> page.</li>
               <li><strong>creator</strong> — same as user, plus can publish agents/pipelines to the marketplace and earn from subscriptions.</li>
-              <li><strong>user</strong> — default. Builds and runs their own agents; cannot manage team / quotas / tenant settings.</li>
+              <li><strong>user</strong> — default. Builds and runs their own agents, cannot manage team / quotas / tenant settings.</li>
             </ul>
             <p className="text-[12px]">Change a member&apos;s role: <code>PUT /api/team/members/{`{id}`}/role</code> with body <code>{`{"role": "admin" | "creator" | "user"}`}</code>.</p>
 
@@ -1362,8 +1360,8 @@ spec:
             </Callout>
 
             <h4 className="text-white font-semibold pt-3">6 · Per-resource sharing</h4>
-            <p>The <code>ResourceShare</code> table grants a specific user <code>READ</code> or <code>EDIT</code> on a specific agent / pipeline / KB / atlas — without changing their role. Click <strong>Share</strong> on any agent / KB / atlas detail page; pick teammates + scope. Used for cross-team handoffs without elevating roles.</p>
-            <p className="text-[12px]">A <code>creator</code> shared into <code>EDIT</code> on a single agent gets to edit only that one agent — nothing else changes about their permissions. Revoking a share is instant; the next API call from that user will fail.</p>
+            <p>The <code>ResourceShare</code> table grants a specific user <code>READ</code> or <code>EDIT</code> on a specific agent / pipeline / KB / atlas — without changing their role. Click <strong>Share</strong> on any agent / KB / atlas detail page, pick teammates + scope. Used for cross-team handoffs without elevating roles.</p>
+            <p className="text-[12px]">A <code>creator</code> shared into <code>EDIT</code> on a single agent gets to edit only that one agent — nothing else changes about their permissions. Revoking a share is instant, the next API call from that user will fail.</p>
 
             <h4 className="text-white font-semibold pt-3">7 · Multiplexing many end-users through one tenant — actAs</h4>
             <p>When a SaaS app holds a platform API key and serves many end-users (a typical &quot;build on top of Abenix&quot; scenario), the app passes <code>X-Abenix-Subject: &lt;end-user-id&gt;</code> on every request. The API treats the request as if that subject were calling — applies row-level RBAC, attributes audit-log events to that subject, scopes resource lookups to subject-bound collections.</p>
@@ -1382,7 +1380,7 @@ spec:
             <h4 className="text-white font-semibold pt-3">9 · The end-to-end &quot;I want N organisations&quot; flow</h4>
             <Steps items={[
               'Each organisation has one person sign up at <code>/</code>. That mints their tenant + makes them admin.',
-              'They open <code>/settings/team</code> and invite teammates by email; choose <code>admin</code> / <code>creator</code> / <code>user</code> per invite.',
+              'They open <code>/settings/team</code> and invite teammates by email, choose <code>admin</code> / <code>creator</code> / <code>user</code> per invite.',
               'Teammates click the email link, set a password, are dropped into the same tenant with the assigned role.',
               'Admin sets per-user quotas in <code>Settings → Team → ⋮ → Quotas</code>.',
               'Resource-level sharing happens organically — every Share button on an agent / KB / atlas page goes through ResourceShare.',
