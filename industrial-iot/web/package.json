@@ -43,6 +43,8 @@
     },
     "@eslint/eslintrc": {
       "minimatch": "^3.1.5"
-    }
+    },
+    "vite": "^6.4.2",
+    "esbuild": "^0.25.12"
   }
 }

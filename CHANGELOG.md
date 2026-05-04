@@ -10,6 +10,14 @@
 
 ## v1.0.10 — 2026-05-04
 
+### Added
+
+### Changed
+
+### Fixed
+
+## v1.0.10 — 2026-05-04
+
 ### Changed
 - `/atlas`: collapsed the Atlas Agent suggestions panel into a click-to-expand chip in the canvas top-left. Previously it was a 288 px always-on box pinned top-right that covered live nodes whenever the inspector was open.
 - `/atlas`: removed the bottom-right minimap (was non-pannable and added visual noise without navigation value). The zoom + fit-view Controls cover the same need.
