@@ -87,7 +87,6 @@ The full list lives in [`.env.example`](.env.example) — Postgres / Redis / Neo
 | Industrial-IoT | http://localhost:3003 | uses platform login |
 | ResolveAI | http://localhost:3004 | `agent@resolveai.local` / `agent123` |
 | ClaimsIQ | http://localhost:3005 | uses platform login |
-| the example app | http://localhost:3001 | `test@example_app.com` / `TestPass123!` |
 
 Same accounts work on the AKS UAT cluster (`admin@abenix.dev` / `Admin123456`).
 
@@ -101,7 +100,6 @@ npx tsx scripts/uat-sauditourism-ui.ts     # KPIs, NLQ chat, 5 reports, simulato
 npx tsx scripts/uat-claimsiq-ui.ts         # FNOL → 6-stage adjudicate
 npx tsx scripts/uat-industrial-iot-ui.ts   # pump + cold-chain code-asset deploys
 npx tsx scripts/uat-resolveai-ui.ts        # 4 pipelines + SLA sweep + trends
-npx tsx scripts/uat-example_app-ui.ts       # extraction + valuation + benchmark
 ```
 
 For the all-in deploy gate (111 tests, sanity + deep + industrial), run `bash scripts/uat.sh`.
@@ -360,12 +358,6 @@ open http://localhost:3004
 
 ---
 
-### Other apps in the repo
-
-[`example_app/`](example_app/) is a contract-intelligence standalone (Wave 1 + Wave 2 — extraction, valuation, benchmarking) that uses the same SDK + actAs pattern. It runs on ports `:8001` / `:3001` and is auto-started by `dev-local.sh` and `deploy-azure.sh`. Demo creds: `test@example_app.com` / `TestPass123!`. See [`example_app/README.md`](example_app/README.md).
-
----
-
 ## 🛠️ Phase A platform improvements
 
 Five hardening landings over the last sprint that every showcase app benefits from:
@@ -375,7 +367,7 @@ Five hardening landings over the last sprint that every showcase app benefits fr
 | **Standalone API-key bootstrap is automatic** | [`scripts/seed-standalone-keys.sh`](scripts/seed-standalone-keys.sh) reconciles `*_ABENIX_API_KEY` rows in `api_keys` on every deploy. No more `kubectl patch secret` round-trips. Wired into `deploy-azure.sh deploy`, `deploy-azure.sh seed`, and `dev-local.sh`. |
 | **SDK drift pre-flight (Phase 0)** | Every deploy + every `dev-local.sh` boot calls [`scripts/sync-sdks.sh --check`](scripts/sync-sdks.sh) — fails fast if any of the 5 vendored copies of `abenix_sdk` drifts from `packages/sdk/python`. `SKIP_SDK_SYNC_CHECK=1` to bypass (not recommended). |
 | **`/api/agents/{slug}/self-check` endpoint** | Validates an agent's seed YAML, model availability, tool grants, and KB bindings without running it. Used by the deploy gate. Schema enforced by [`packages/db/seeds/agent_seed_schema.py`](packages/db/seeds/agent_seed_schema.py), lint by [`scripts/lint-agent-seeds.py`](scripts/lint-agent-seeds.py). |
-| **`seed_kb.py` populates 6 KB collections on every deploy** | [`packages/db/seeds/seed_kb.py`](packages/db/seeds/seed_kb.py) reads everything in [`packages/db/seeds/kb/`](packages/db/seeds/kb/) (claimsiq-policies, industrial-iot-knowledge, resolveai-policy, plus oraclenet, sauditourism, example_app collections) and idempotently upserts them. |
+| **`seed_kb.py` populates 6 KB collections on every deploy** | [`packages/db/seeds/seed_kb.py`](packages/db/seeds/seed_kb.py) reads everything in [`packages/db/seeds/kb/`](packages/db/seeds/kb/) (claimsiq-policies, industrial-iot-knowledge, resolveai-policy, plus oraclenet, sauditourism collections) and idempotently upserts them. |
 | **Tools return structured warnings instead of silent empties** | Every tool now returns `{output, warnings: [...]}`; the runtime surfaces warnings into the execution trace. The `wait=True` server-side default for X-API-Key callers + the SDK's `Abenix.execute()` wait-for-completion default kill the silent-empty-output failure mode end-to-end. |
 
 ---
@@ -458,7 +450,7 @@ Three independently scalable tiers, one shared Postgres. The agent runtime scale
 
 Three SDKs ship with the platform:
 
-- **Python** — [`packages/sdk/python`](packages/sdk/python). Used by the example app, Saudi Tourism, Industrial-IoT, and ResolveAI in this repo. `Abenix.execute()` defaults to wait-for-completion via the new server-side tri-state.
+- **Python** — [`packages/sdk/python`](packages/sdk/python). Used by Saudi Tourism, Industrial-IoT, and ResolveAI in this repo. `Abenix.execute()` defaults to wait-for-completion via the new server-side tri-state.
 - **TypeScript** — [`packages/sdk/js`](packages/sdk/js).
 - **Java / JVM** — [`claimsiq/sdk`](claimsiq/sdk). Stdlib-only public surface. JDK 21 `HttpClient` for HTTP + SSE; Jackson is the only runtime dep besides SLF4J. [ClaimsIQ](claimsiq/) is the reference consumer.
 

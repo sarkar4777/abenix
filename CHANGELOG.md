@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.10 — 2026-05-04
+
+### Changed
+- `/atlas`: collapsed the Atlas Agent suggestions panel into a click-to-expand chip in the canvas top-left. Previously it was a 288 px always-on box pinned top-right that covered live nodes whenever the inspector was open.
+- `/atlas`: removed the bottom-right minimap (was non-pannable and added visual noise without navigation value). The zoom + fit-view Controls cover the same need.
+- `/help`: removed three duplicate screenshot embeds (dashboard, scaling console, team page) and switched the welcome-page hero to the Atlas canvas image, which matches the "thinking in graphs" thesis on that section.
+- `/help`, `/docs`, README: replaced prose semicolons with commas across all narrative copy, ~70 sites total. Type-def and bash-comment semicolons were left intact.
+
 ## v1.0.8 — 2026-05-03
 
 ### Changed

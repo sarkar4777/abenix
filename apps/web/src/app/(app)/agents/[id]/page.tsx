@@ -3,6 +3,7 @@
 // because Next.js's static optimization elides simple if-checks here.
 import { redirect } from 'next/navigation';
 
-export default function AgentIndex({ params }: { params: { id: string } }) {
+export default async function AgentIndex(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   redirect(`/agents/${params.id}/info`);
 }

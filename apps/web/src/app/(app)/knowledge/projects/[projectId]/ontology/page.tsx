@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, use } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft, Brain, Loader2, Network, Plus, Save, Sparkles, Trash2,
@@ -411,7 +411,8 @@ function CorrelationsView({ projectId }: { projectId: string }) {
 
 // ─── Page ───────────────────────────────────────────────────────────
 
-export default function OntologyPage({ params }: { params: { projectId: string } }) {
+export default function OntologyPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = use(props.params);
   const { projectId } = params;
   usePageTitle('Ontology');
   const [tab, setTab] = useState<Tab>('schema');
