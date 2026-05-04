@@ -1253,7 +1253,7 @@ export default function OracleNetPage() {
       setPastAnalyses(next);
       localStorage.setItem('oraclenet_history', JSON.stringify(next));
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [phase, brief]);
 
   // Close history dropdown on outside click

@@ -195,7 +195,7 @@ function GrantsModal({
       setNewId('');
       setNewPerm('READ');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [open, collectionId]);
 
   const grant = async () => {

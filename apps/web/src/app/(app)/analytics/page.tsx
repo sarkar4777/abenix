@@ -711,7 +711,7 @@ function DriftAlertsCard({ agentId }: { agentId: string | null }) {
     setLoading(false);
   };
 
-  React.useEffect(() => { loadToggle(); load(); }, [agentId, onlyUnacked, sev]); // eslint-disable-line
+  React.useEffect(() => { loadToggle(); load(); }, [agentId, onlyUnacked, sev]);  
 
   const ack = async (id: string) => {
     try {

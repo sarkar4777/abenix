@@ -39,7 +39,7 @@ export default function AgentChatPage() {
   // Clear chat when switching between agents
   useEffect(() => {
     clearChat();
-  }, [agentId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agentId]);  
 
   usePageTitle(agentInfo?.name ? `Chat - ${agentInfo.name}` : 'Chat');
 
