@@ -17,6 +17,14 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: '',
     NEXT_PUBLIC_ABENIX_WEB_URL: process.env.NEXT_PUBLIC_ABENIX_WEB_URL || '',
   },
+  // ValueEdge / FieldEdge / BedROCC pipelines hit the agent runtime
+  // sequentially through 4-9 LLM nodes — total wall time runs 2-5 min.
+  // Default 30s proxy timeout was returning HTTP 500 to the browser
+  // mid-pipeline; the standalone API itself caps wait at 240s. Match the
+  // example_app config (600s) so the long-running paths complete.
+  experimental: {
+    proxyTimeout: 600_000,
+  },
   async rewrites() {
     return [
       {

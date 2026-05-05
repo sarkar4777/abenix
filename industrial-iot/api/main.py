@@ -233,10 +233,18 @@ async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
         except Exception:
             pass
 
+    # SDK ExecutionResult doesn't carry execution_id directly — pull it
+    # from tool_calls (where the runtime stamps the watch handle) or fall
+    # back to None. Drop the field rather than 500 the whole response.
+    exec_id = getattr(result, "execution_id", None)
+    if not exec_id:
+        for tc in (getattr(result, "tool_calls", None) or []):
+            cand = (tc.get("execution_id") if isinstance(tc, dict) else None)
+            if cand: exec_id = cand; break
     return JSONResponse({
         "ok": True,
         "status": "completed",
-        "execution_id": result.execution_id,
+        "execution_id": exec_id,
         "final_output": result.output,
         "node_results": getattr(result, "node_results", None) or {},
         "input_tokens": result.input_tokens,

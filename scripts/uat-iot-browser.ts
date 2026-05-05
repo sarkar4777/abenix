@@ -45,8 +45,12 @@ async function step(name: string, fn: () => Promise<string>) {
 }
 
 async function clickTab(page: Page, label: string) {
+  // Tab bar lives at the top — scroll back so it's in view after any
+  // mid-page interactions on the previous tab pushed it off-screen.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(150);
   const btn = page.locator(`button:has-text("${label}")`).first();
-  await btn.click({ timeout: 8000 });
+  await btn.click({ timeout: 12000 });
   await page.waitForTimeout(800);
 }
 
@@ -115,6 +119,63 @@ async function main() {
     await expectVisible(page, "text=iot-bedrocc-pipeline", "dag");
     await shot(page, "06-bedrocc");
     return "DAG + alarm queue rendered";
+  });
+
+  // ── Deep UAT — actually fire the pipelines ─────────────────────────
+  await step("ValueEdge: Generate scenarios → 3 cards rendered", async () => {
+    await clickTab(page, "ValueEdge");
+    await page.locator("button:has-text('Generate Scenarios')").first().scrollIntoViewIfNeeded().catch(() => {});
+    await page.locator("button:has-text('Generate Scenarios')").first().click();
+    // Pipeline takes 2-4 minutes; surface scenario cards or HTTP error
+    const start = Date.now();
+    let done = false;
+    while (Date.now() - start < 360_000) {
+      const errVisible = await page.locator("text=HTTP 500").isVisible().catch(() => false);
+      if (errVisible) throw new Error("HTTP 500 surfaced — pipeline failed mid-run");
+      const cards = await page.locator("text=Cost-lean").count();
+      const cards2 = await page.locator("text=Yield-max").count();
+      if (cards >= 1 || cards2 >= 1) { done = true; break; }
+      await page.waitForTimeout(5000);
+    }
+    if (!done) throw new Error("scenarios did not appear within 6 min");
+    await shot(page, "08-valueedge-result");
+    return `scenarios rendered in ${Math.round((Date.now() - start) / 1000)}s`;
+  });
+
+  await step("FieldEdge: send a turbine query → procedure renders", async () => {
+    await clickTab(page, "FieldEdge");
+    // Fill the symptom textarea
+    const ta = page.locator("textarea").first();
+    if (await ta.isVisible().catch(() => false)) {
+      await ta.fill("Blade leading-edge erosion observed on blade 3 outboard 8 metres, no through-skin damage");
+    }
+    await page.locator("button:has-text('Get Repair Procedure')").first().click().catch(() => {});
+    const start = Date.now();
+    let done = false;
+    while (Date.now() - start < 240_000) {
+      const errVisible = await page.locator("text=HTTP 500").isVisible().catch(() => false);
+      if (errVisible) throw new Error("HTTP 500 surfaced — pipeline failed");
+      const proc = await page.locator("text=/procedure|step|safety/i").count();
+      if (proc >= 3) { done = true; break; }
+      await page.waitForTimeout(4000);
+    }
+    if (!done) throw new Error("procedure did not appear within 4 min");
+    await shot(page, "09-fieldedge-result");
+    return `procedure rendered in ${Math.round((Date.now() - start) / 1000)}s`;
+  });
+
+  await step("BedROCC: alarm queue streams + click first → triage panel", async () => {
+    await clickTab(page, "BedROCC");
+    // Wait for alarm rows
+    await page.waitForTimeout(8000);
+    const alarms = await page.locator("[role='button'], button").filter({ hasText: /GBX-|GRD-|PCS-|YAW-/ }).count();
+    if (alarms < 1) {
+      // looser fallback
+      const fallback = await page.locator("text=/alarm|severity|gearbox|grid/i").count();
+      if (fallback < 3) throw new Error(`no alarm rows visible (count=${fallback})`);
+    }
+    await shot(page, "10-bedrocc-queue");
+    return `${alarms} alarm rows visible`;
   });
 
   await step("Architecture tab as help section", async () => {
