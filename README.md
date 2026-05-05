@@ -227,17 +227,32 @@ A 7-agent pipeline inside the main web app. Type a strategic decision in plain E
 
 *Why it's interesting.* Big decisions usually fail because nobody seriously simulated who would oppose them. OracleNet bakes Stakeholder Sim, Second-Order, and Contrarian into every brief.
 
+<p align="center">
+  <img src="docs/screenshots/usecases/oraclenet-brief.png" alt="OracleNet Decision Brief" width="100%" />
+  <br/><em>OracleNet Decision Brief — confidence + recommendation card, 6 tabs</em>
+</p>
+
 ### Saudi Tourism — Vision-2030 analytics
 
 A standalone analytics app for the Saudi Ministry of Tourism. 5 agents, 7 pages (Dashboard · Regional · Analytics · Chat NLQ · Reports · Simulations · Upload), 5 report templates, 5 simulator presets. Test data is baked into the API image — no manual seed.
 
 *Why it's interesting.* Vision-2030 ministries need to track 100M-visitor targets, regional revenue, and seasonal demand against the actual data they already have — without a year-long BI buildout.
 
+<p align="center">
+  <img src="docs/screenshots/usecases/sauditourism-dashboard.png" alt="Saudi Tourism dashboard" width="100%" />
+  <br/><em>Saudi Tourism dashboard — KPIs computed live from baked test data</em>
+</p>
+
 ### ClaimsIQ — insurance claim adjudication (Java)
 
 A Java/Vaadin showcase that proves the **Java SDK is feature-complete**. 6-stage `claimsiq-adjudicate` pipeline (FNOL Intake → Policy Match → Damage Assess → Fraud Screen → Valuator → Claim Decider) with photo upload routed to vision models and a live DAG view streaming over SSE.
 
 *Why it's interesting.* Claim shops want explainable adjudication — every decision must cite the policy clause it relied on. The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4J) so Kotlin and Scala consumers get zero glue.
+
+<p align="center">
+  <img src="docs/screenshots/usecases/claimsiq-final.png" alt="ClaimsIQ final adjudication" width="100%" />
+  <br/><em>ClaimsIQ — final adjudication with cited clauses, fraud score, live DAG</em>
+</p>
 
 ### Industrial-IoT — predictive maintenance + cold chain + edge
 
@@ -252,11 +267,21 @@ Six tabs covering the highest-frequency industrial use cases:
 
 *Why it's interesting.* Two adjacent industrial domains, one platform. Every tab has a **Live mode** toggle that flips it from synthetic data to live MQTT + connector + TSDB feeds. The Pump tab is the end-to-end edge demo — bundle digest, agent slug, gateway, latency comparison vs cloud pipeline.
 
+<p align="center">
+  <img src="docs/screenshots/usecases/industrial-iot-pump.png" alt="Industrial-IoT pump tab" width="100%" />
+  <br/><em>Industrial-IoT — pump tab after both code assets deployed, with edge runtime panel</em>
+</p>
+
 ### ResolveAI — customer-resolution case management
 
 Four pipelines on the same case data: Inbound Resolution (6-agent), SLA Sweep (cron), Post-QA (on case close), Trend Mining (weekly). Refund tiers + escalation paths + tone guidelines live in a seeded KB.
 
 *Why it's interesting.* Customer-service teams drown in repetitive triage; their highest-leverage moves (deflection, tone calibration, trend detection) get neglected. ResolveAI runs all four loops continuously while a human stays in approve / takeover mode.
+
+<p align="center">
+  <img src="docs/screenshots/usecases/resolveai-case.png" alt="ResolveAI case detail" width="100%" />
+  <br/><em>ResolveAI — case detail with inbound-resolution DAG and cited policy</em>
+</p>
 
 ---
 

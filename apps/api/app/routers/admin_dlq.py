@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, require_role
+from app.core.deps import get_db, require_role
 from app.core.responses import error, success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
