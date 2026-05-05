@@ -25,12 +25,14 @@ export interface DagDef {
   edges: DagEdge[];
 }
 
-const KIND_TONE: Record<DagNode['kind'], string> = {
-  agent:  'fill-cyan-500/15 stroke-cyan-400 text-cyan-100',
-  tool:   'fill-emerald-500/15 stroke-emerald-400 text-emerald-100',
-  switch: 'fill-amber-500/15 stroke-amber-400 text-amber-100',
-  final:  'fill-purple-500/15 stroke-purple-400 text-purple-100',
-  inline: 'fill-slate-700/40 stroke-slate-500 text-slate-200',
+// SVG fill + stroke colours per node kind — set explicitly because SVG
+// <text> doesn't pick up Tailwind text-color utilities.
+const KIND_STYLE: Record<DagNode['kind'], { box: string; stroke: string; label: string }> = {
+  agent:  { box: 'rgba(6, 182, 212, 0.18)',   stroke: '#22d3ee', label: '#e0f2fe' },
+  tool:   { box: 'rgba(16, 185, 129, 0.18)',  stroke: '#34d399', label: '#d1fae5' },
+  switch: { box: 'rgba(245, 158, 11, 0.18)',  stroke: '#fbbf24', label: '#fef3c7' },
+  final:  { box: 'rgba(168, 85, 247, 0.20)',  stroke: '#c084fc', label: '#f3e8ff' },
+  inline: { box: 'rgba(71, 85, 105, 0.45)',   stroke: '#94a3b8', label: '#e2e8f0' },
 };
 
 const KIND_LABEL: Record<DagNode['kind'], string> = {
@@ -40,6 +42,10 @@ const KIND_LABEL: Record<DagNode['kind'], string> = {
   final:  'output',
   inline: 'inline',
 };
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
 
 // BFS-based level assignment, then within-level positioning.
 function layout(nodes: DagNode[], edges: DagEdge[]) {
@@ -74,10 +80,10 @@ function layout(nodes: DagNode[], edges: DagEdge[]) {
     byLevel.get(l)!.push(n.id);
   }
   const positions = new Map<string, { x: number; y: number }>();
-  const NODE_W = 170;
-  const NODE_H = 56;
-  const GAP_X = 50;
-  const GAP_Y = 30;
+  const NODE_W = 200;
+  const NODE_H = 64;
+  const GAP_X = 56;
+  const GAP_Y = 36;
   let maxX = 0;
   for (const [l, ids] of byLevel) {
     ids.forEach((id, i) => {
@@ -160,13 +166,15 @@ export default function PipelineDagViz({ dag }: { dag: DagDef }) {
                 const path = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
                 return (
                   <g key={i}>
-                    <path d={path} className="stroke-slate-600 fill-none" strokeWidth="1.5" markerEnd="url(#dag-arrow)" />
+                    <path d={path} stroke="#475569" strokeWidth="1.5" fill="none" markerEnd="url(#dag-arrow)" />
                     {e.condition && (
                       <text
                         x={(x1 + x2) / 2}
                         y={midY - 4}
                         textAnchor="middle"
-                        className="fill-amber-300 text-[10px] font-medium"
+                        fill="#fcd34d"
+                        fontSize="10"
+                        fontWeight="500"
                       >
                         {e.condition}
                       </text>
@@ -178,7 +186,7 @@ export default function PipelineDagViz({ dag }: { dag: DagDef }) {
               {dag.nodes.map((n) => {
                 const p = positions.get(n.id);
                 if (!p) return null;
-                const tone = KIND_TONE[n.kind];
+                const style = KIND_STYLE[n.kind];
                 return (
                   <g key={n.id} transform={`translate(${p.x}, ${p.y})`}>
                     <rect
@@ -186,15 +194,31 @@ export default function PipelineDagViz({ dag }: { dag: DagDef }) {
                       height={NODE_H}
                       rx={10}
                       ry={10}
-                      className={tone}
+                      fill={style.box}
+                      stroke={style.stroke}
                       strokeWidth="1.5"
                     >
                       <title>{n.description || n.label}</title>
                     </rect>
-                    <text x={NODE_W / 2} y={22} textAnchor="middle" className={`${tone} font-semibold text-[12px]`}>
-                      {n.label}
+                    <text
+                      x={NODE_W / 2}
+                      y={26}
+                      textAnchor="middle"
+                      fill={style.label}
+                      fontSize="13"
+                      fontWeight="600"
+                    >
+                      {truncate(n.label, 26)}
                     </text>
-                    <text x={NODE_W / 2} y={40} textAnchor="middle" className="fill-slate-500 text-[10px] uppercase tracking-wider">
+                    <text
+                      x={NODE_W / 2}
+                      y={48}
+                      textAnchor="middle"
+                      fill="#94a3b8"
+                      fontSize="10"
+                      letterSpacing="0.08em"
+                      style={{ textTransform: 'uppercase' }}
+                    >
                       {KIND_LABEL[n.kind]}
                     </text>
                   </g>

@@ -1,6 +1,6 @@
 'use client';
 
-import { LucideIcon } from 'lucide-react';
+import { LucideIcon, Workflow, Database, Cpu } from 'lucide-react';
 
 export interface ExplainerSection {
   icon: LucideIcon;
@@ -9,14 +9,36 @@ export interface ExplainerSection {
   tone?: 'cyan' | 'amber' | 'purple' | 'emerald';
 }
 
+export interface AgentTraceEntry {
+  agent_slug: string;            // e.g. "iot-valueedge-scenario-configurator"
+  when: string;                  // when in the flow
+  inputs: string;                // human description of input data
+  outputs: string;               // human description of expected output
+  source?: 'agent' | 'inline' | 'tool';  // 'inline' = code_executor in pipeline, not LLM
+}
+
 export interface ExplainerProps {
   eyebrow: string;
   title: string;
   lede: React.ReactNode;
   sections: ExplainerSection[];
   callouts?: { label: string; value: string }[];
+  /**
+   * Each entry describes what gets called when the user fires the
+   * pipeline — agent slug, the data it receives, what it returns, and
+   * whether it's a real LLM agent or an inline pipeline step.
+   */
+  agentTrace?: AgentTraceEntry[];
+  /** Tag any data the UI renders that came from a static fixture. */
+  simulationNote?: React.ReactNode;
   footer?: React.ReactNode;
 }
+
+const SOURCE_TONE: Record<NonNullable<AgentTraceEntry['source']>, { label: string; cls: string }> = {
+  agent:  { label: 'agent',  cls: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40' },
+  inline: { label: 'inline', cls: 'bg-slate-700/40 text-slate-300 border-slate-600/40' },
+  tool:   { label: 'tool',   cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
+};
 
 const toneClasses: Record<NonNullable<ExplainerSection['tone']>, string> = {
   cyan:    'bg-cyan-500/10 text-cyan-300 border-cyan-500/30',
@@ -32,7 +54,7 @@ const toneClasses: Record<NonNullable<ExplainerSection['tone']>, string> = {
  * drowning them in prose.
  */
 export default function ScenarioExplainer({
-  eyebrow, title, lede, sections, callouts, footer,
+  eyebrow, title, lede, sections, callouts, agentTrace, simulationNote, footer,
 }: ExplainerProps) {
   return (
     <aside className="lg:sticky lg:top-6 space-y-4">
@@ -79,6 +101,49 @@ export default function ScenarioExplainer({
           </div>
         ))}
       </div>
+
+      {agentTrace && agentTrace.length > 0 && (
+        <div className="rounded-2xl bg-slate-900/50 border border-slate-800 overflow-hidden">
+          <div className="px-5 pt-4 pb-3 border-b border-slate-800/60 flex items-center gap-2">
+            <Workflow className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-sm font-semibold text-white">What runs under the hood</h3>
+          </div>
+          <div className="px-5 py-4 space-y-3">
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Every output on this page comes from one of the agents below. No client-side
+              rule engine. The pipeline is wired live to the platform runtime.
+            </p>
+            {agentTrace.map((t, i) => {
+              const tone = SOURCE_TONE[t.source ?? 'agent'];
+              return (
+                <div key={i} className="rounded-lg border border-slate-800/70 bg-slate-950/40 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${tone.cls}`}>
+                      {tone.label}
+                    </span>
+                    <code className="text-[11px] text-cyan-300 font-mono break-all">{t.agent_slug}</code>
+                  </div>
+                  <div className="text-[11px] text-slate-400 leading-relaxed pl-1 space-y-1">
+                    <div><span className="text-slate-500">when</span> · {t.when}</div>
+                    <div><span className="text-slate-500">inputs</span> · {t.inputs}</div>
+                    <div><span className="text-slate-500">outputs</span> · {t.outputs}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {simulationNote && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3">
+          <Database className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <div className="text-[11px] text-amber-200/90 leading-relaxed">
+            <p className="font-semibold text-amber-300 mb-1">What's simulated vs. live</p>
+            {simulationNote}
+          </div>
+        </div>
+      )}
 
       {footer && (
         <div className="rounded-2xl p-5 bg-slate-900/40 border border-slate-800">

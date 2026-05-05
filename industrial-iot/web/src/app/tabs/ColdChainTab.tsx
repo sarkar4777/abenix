@@ -482,6 +482,53 @@ export default function ColdChainTab() {
             ),
           },
         ]}
+        agentTrace={[
+          {
+            agent_slug: 'iot-coldchain-pipeline',
+            source: 'agent',
+            when: 'click "Start Shipment"',
+            inputs: '20 SFO→LAX waypoints {ts, temp_c, lat, lon, door_open, gps_quality} + product_spec (e.g. mRNA vaccine, 2-8°C)',
+            outputs: 'excursion verdict (compliant / partial loss / total loss) + draft FSMA claim narrative + adjuster notes',
+          },
+          {
+            agent_slug: 'coldchain-corrector',
+            source: 'tool',
+            when: 'pipeline node 2 — Code Asset (Python)',
+            inputs: 'raw waypoint stream with sensor noise + GPS drop-outs',
+            outputs: 'Kalman-smoothed temperature trajectory + flagged excursion intervals (start_ts, end_ts, peak_temp, duration_min)',
+          },
+          {
+            agent_slug: 'iot-coldchain-monitor',
+            source: 'agent',
+            when: 'pipeline node 3 — interprets corrected stream',
+            inputs: 'smoothed waypoints + excursion intervals + product_spec',
+            outputs: 'severity per excursion + first-pass liability hypothesis (carrier vs. shipper vs. environment)',
+          },
+          {
+            agent_slug: 'iot-excursion-adjudicator',
+            source: 'agent',
+            when: 'pipeline node 4 — KB-grounded adjudication',
+            inputs: 'monitor output + the industrial-iot-knowledge KB (FAA AC 120-78, GDP Annex 15, FSMA STF rule)',
+            outputs: 'final adjudication: compliant / partial-loss / total-loss + cited regulation + draft claim narrative',
+          },
+          {
+            agent_slug: 'iot-claims-dispatcher',
+            source: 'agent',
+            when: 'pipeline node 5 — fires only on partial-loss / total-loss',
+            inputs: 'adjudication + carrier on file + insurer on file',
+            outputs: 'structured claim packet ready for the broker portal (loss valuation, regulatory cite, recommended action)',
+          },
+        ]}
+        simulationNote={(
+          <>
+            The 20-waypoint SFO→LAX trajectory with one scripted excursion is a{' '}
+            <strong>simulation input</strong> — fixed so the demo always shows
+            the partial-loss path. <strong>Kalman smoothing, excursion
+            classification, regulatory citing, and claim narrative</strong> all
+            come from the agents and sandboxed Code Asset above. No client-side
+            rule engine, no local templates.
+          </>
+        )}
         footer={
           <p className="text-xs text-slate-400 leading-relaxed">
             <FlaskConical className="w-3.5 h-3.5 inline mr-1.5 text-cyan-400" />

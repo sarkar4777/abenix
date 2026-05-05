@@ -169,6 +169,8 @@ export default function FieldEdgeTab() {
   const [troubleshoot, setTroubleshoot] = useState<TroubleshootResult | null>(null);
   const [streamLog, setStreamLog] = useState<string[]>([]);
   const [error, setError] = useState<string>('');
+  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
+  const [photoName, setPhotoName] = useState<string>('');
 
   const [submittingCloseout, setSubmittingCloseout] = useState(false);
   const [closeout, setCloseout] = useState<CloseoutResult | null>(null);
@@ -239,7 +241,7 @@ export default function FieldEdgeTab() {
       outcome: w.outcome,
     }));
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       turbine_id: selectedTurbine.id,
       model: selectedTurbine.model,
       symptom: query.trim(),
@@ -247,6 +249,13 @@ export default function FieldEdgeTab() {
       weather: DEFAULT_WEATHER,
       fleet_history,
     };
+    // Optional photo — only attach if the technician picked one. The
+    // troubleshoot agent runs on Claude Sonnet which can read base64
+    // image data URLs, so we forward the data URL verbatim.
+    if (photoDataUrl) {
+      payload.photo_data_url = photoDataUrl;
+      payload.photo_filename = photoName;
+    }
 
     const result = await runPipeline(pipelineId, payload, {}, {
       waitSeconds: 240,
@@ -450,6 +459,61 @@ export default function FieldEdgeTab() {
                 >
                   <Mic className="w-4 h-4" />
                 </button>
+              </div>
+
+              {/* Optional photo — sent to the troubleshoot agent as a
+                  base64 data URL for multimodal reasoning. Common case:
+                  the technician snaps the blade-erosion or the gearbox
+                  oil-film and lets the agent reason over what it sees. */}
+              <div className="pt-2">
+                <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">
+                  Attach a photo of the damage (optional)
+                </label>
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="fieldedge-photo"
+                    className="flex-1 cursor-pointer rounded-lg border border-dashed border-slate-700 hover:border-cyan-500/60 bg-slate-950 px-3 py-2 text-xs text-slate-400 transition-colors"
+                  >
+                    {photoDataUrl
+                      ? `📎 ${photoName} attached — click to replace`
+                      : 'Tap to choose / drag-drop a JPG/PNG (≤4 MB)'}
+                  </label>
+                  {photoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => { setPhotoDataUrl(null); setPhotoName(''); }}
+                      className="px-2 py-1 text-[10px] text-slate-400 hover:text-rose-300 border border-slate-700 rounded"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <input
+                  id="fieldedge-photo"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    if (f.size > 4 * 1024 * 1024) {
+                      setError('Photo must be ≤4 MB.');
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setPhotoDataUrl(typeof reader.result === 'string' ? reader.result : null);
+                      setPhotoName(f.name);
+                    };
+                    reader.readAsDataURL(f);
+                  }}
+                />
+                {photoDataUrl && (
+                  <div className="mt-2 rounded-lg border border-slate-800 overflow-hidden bg-slate-950 max-w-xs">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photoDataUrl} alt={photoName} className="w-full max-h-44 object-contain" />
+                  </div>
+                )}
               </div>
 
               <button
@@ -895,6 +959,55 @@ export default function FieldEdgeTab() {
             ),
           },
         ]}
+        agentTrace={[
+          {
+            agent_slug: 'iot-fieldedge-pipeline',
+            source: 'agent',
+            when: 'click "Get Repair Procedure"',
+            inputs: 'turbine_id (TURB-01..12), model + install_date pulled from fleet.json, plus the free-text or dictated issue',
+            outputs: 'JSON with cited procedure steps, parts list, similar past WOs, safety gate flag',
+          },
+          {
+            agent_slug: 'iot-fieldedge-fleet-history-searcher',
+            source: 'agent',
+            when: 'pipeline branch — runs in parallel with troubleshoot',
+            inputs: 'turbine model + issue text + the historical-wos.json corpus indexed in rwe-fieldedge-oem-manuals',
+            outputs: 'top-3 similar past WOs with date, technician, parts, hours, outcome',
+          },
+          {
+            agent_slug: 'iot-fieldedge-troubleshoot-assistant',
+            source: 'agent',
+            when: 'pipeline branch — KB-grounded, multimodal',
+            inputs: 'issue text + (optional) base64 photo data URL the technician attaches + fleet-history results + the rwe-fieldedge-oem-manuals KB (V120 / SG-3.4 manual excerpts). Claude Sonnet reads the image directly when present.',
+            outputs: 'procedure with cited manual sections (e.g. "V120-2.0 §5.4.7"), torque values, safety preconditions, and (when a photo was given) what the agent observed in the image',
+          },
+          {
+            agent_slug: 'iot-fieldedge-schedule-optimizer',
+            source: 'agent',
+            when: 'click "Re-optimise schedule"',
+            inputs: 'work_orders[] + technicians[] + 7-day weather forecast + the OR-tools or-tools_scheduler code asset',
+            outputs: 'technician × day assignment matrix with priority scoring, weather-windowing, parts-availability gates',
+          },
+          {
+            agent_slug: 'iot-fieldedge-closeout-documenter',
+            source: 'agent',
+            when: 'click "Convert to WO"',
+            inputs: 'free-form close-out narrative the technician dictates / types',
+            outputs: 'structured WO record (parts used, hours, root cause, follow-up flag) ready for the CMMS',
+          },
+        ]}
+        simulationNote={(
+          <>
+            The 12-turbine fleet, 30 historical WOs, and 6-technician roster
+            in [<code>scaffolding/fieldedge/data/</code>] are{' '}
+            <strong>simulation inputs</strong> — fixed so the demo is reproducible.
+            The <strong>repair procedure, parts list, safety gate, and schedule</strong>
+            you see on screen all come from the agents above. The OR-tools solver
+            either runs the real CP-SAT model (when ortools is installed in the
+            sandbox) or falls back to a greedy heuristic — either path is server-side,
+            never hardcoded.
+          </>
+        )}
         footer={
           <p className="text-xs text-slate-400 leading-relaxed">
             <Sparkles className="w-3.5 h-3.5 inline mr-1.5 text-cyan-400" />
