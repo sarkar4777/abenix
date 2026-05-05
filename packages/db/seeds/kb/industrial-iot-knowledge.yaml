@@ -69,3 +69,1044 @@ collections:
           temperature rise > 15°C above baseline → inspect within 48h.
           Cold-chain compressor duty cycle > 80% sustained 6h → inspect.
           Always link the work order to the originating sensor event.
+
+  - slug: rwe-valueedge-design-standards
+    name: "RWE ValueEdge Design Standards"
+    description: >-
+      Offshore-wind FEED standards stack used by the ValueEdge
+      scenario configurator, VE optimiser, compliance checker, and
+      RFI drafter. Mix of public IEC / NEC / IEEE excerpts and
+      RWE-style EPC clauses synthesised for the showcase.
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - iot-valueedge-scenario-configurator
+      - iot-valueedge-compliance-checker
+      - iot-valueedge-ve-optimizer
+      - iot-valueedge-rfi-drafter
+    agent_permission: READ
+    documents:
+      - id: ve-knw-001
+        title: "IEC 61400-3 §7.6 Foundation Loads & Fatigue (extract)"
+        metadata: { standard: "IEC-61400-3", topic: "foundation" }
+        content: |
+          IEC 61400-3 — DESIGN REQUIREMENTS FOR OFFSHORE WIND TURBINES
+          (FIXED-FOUNDATION) — clauses §7.6.1 through §7.6.7
+
+          §7.6.1 General. The support structure shall be designed
+          for the combined effect of wind, wave, current, sea ice
+          and earthquake loads in the limit states defined in §7.4.
+          Coupled aero-hydro-elastic time-domain simulation is
+          required; a quasi-static approach is acceptable only when
+          dynamic amplification factors are demonstrably below 1.05
+          across the design wind range.
+
+          §7.6.4 Fatigue. The fatigue analysis shall apply the
+          DLC 1.2 (power production with normal turbulence) and
+          DLC 6.4 (idling with extreme turbulence) cases to the
+          full Markov matrix of wave heights and wind speeds for
+          the site. The S-N curves used must be those of DNV-RP-C203
+          for the chosen steel grade, with stress concentration
+          factors derived from finite-element analysis at every
+          tubular intersection. A minimum life of 25 years and a
+          fatigue safety factor of 1.25 (consequence class 2) shall
+          be applied. Inspection intervals are 5 years for monopile
+          and 3 years for jacket/tripod welded joints.
+
+          §7.6.5 Scour and seabed. For monopile foundations in
+          erodible seabeds the scour depth shall be assumed equal
+          to 1.3D where D is the pile diameter, unless site-specific
+          modelling supports a lower value with a 50-year return
+          period storm. Scour protection shall extend at least 2D
+          radially from the pile axis.
+
+          §7.6.6 Pile-soil interaction. P-y curves shall be derived
+          per API RP 2GEO; for cyclic degradation the modified
+          procedure of Jeanjean (2009) is acceptable for normally
+          consolidated clays.
+
+          §7.6.7 Welded joints. All primary welds shall be Class
+          B (DNV) with 100% UT inspection on the seabed-facing
+          weld toes during pre-installation NDT.
+
+      - id: ve-knw-002
+        title: "IEC 61400-3-2 Floating Offshore Turbines — key deltas"
+        metadata: { standard: "IEC-61400-3-2", topic: "floating" }
+        content: |
+          IEC 61400-3-2 — FLOATING OFFSHORE WIND TURBINE STRUCTURES
+          (RELATIVE TO 61400-3 BASE)
+
+          §6.4 Mooring system. The mooring system shall be designed
+          to limit horizontal offset under DLC 1.6 (operating with
+          1-year extreme wave) to no more than 10% of water depth.
+          Single-line failure (DLC 7.1c) shall not result in offset
+          exceeding 15% nor in turbine controller switching out of
+          power-production mode within the 6-hour redundancy window.
+
+          §6.5 Stability. Intact stability shall meet IMO MODU
+          intact criteria; damaged stability shall recover positive
+          righting arm within 60° heel under any single watertight
+          compartment flooding.
+
+          §6.6 Mean-tilt allowance. The turbine controller shall
+          tolerate continuous mean tilt up to 5° without curtailment;
+          peak tilt up to 10° without trip.
+
+          §6.8 Pendulum modes. The natural periods of surge, sway,
+          heave, roll, pitch, yaw shall be outside the 5–15 s
+          first-order wave excitation band by at least 20%. Coupled
+          aero-hydro-servo-elastic analysis is mandatory.
+
+          NOTE for VE engineers: spar platforms tolerate deeper
+          water (>200 m) but require deep-water tow channels and
+          load-out yards; semi-submersibles install in shallower
+          assembly basins (15-20 m) but carry ~12% higher steel
+          weight per MW than spars.
+
+      - id: ve-knw-003
+        title: "NEC 690 — Cable & Wiring Methods (offshore-wind application)"
+        metadata: { standard: "NEC-690", topic: "electrical" }
+        content: |
+          NEC ARTICLE 690 — APPLIED TO OFFSHORE WIND BY ANALOGY
+
+          NEC 690 is written for photovoltaic systems; in
+          jurisdictions without a dedicated offshore-wind code
+          (notably US-Atlantic federal waters under BOEM), the
+          electrical authority of jurisdiction (AHJ) commonly
+          requires offshore-wind feeder design to comply with the
+          690 cable derating, grounding, and disconnect rules
+          where they translate sensibly.
+
+          §690.8 Ampacity. Conductor ampacity shall be calculated
+          at the higher of:
+            (a) 125% of the calculated continuous current, OR
+            (b) the maximum current after applying the temperature
+                and conduit-fill correction factors of Table 310.15.
+          For 66 kV submarine three-core cables the buried-depth
+          correction factor is 0.92 at 1.5 m burial; below 1.0 m
+          burial a separate site-specific thermal CFD is required.
+
+          §690.31(C) Wiring methods on the installation. Cables
+          run on a fixed offshore substation jacket structure shall
+          be supported at intervals not exceeding 1.0 m for
+          conductors smaller than 1000 kcmil and 1.5 m for larger.
+          Cable trays shall be hot-dip galvanised or 316L stainless
+          per the marine-corrosivity category C5-M of ISO 12944.
+
+          §690.43(D) Equipment grounding. Every metallic structural
+          element of an offshore wind tower (transition piece, tower
+          shells, nacelle, hub) shall be bonded to a single common
+          ground bus, which in turn bonds to the seawater electrode
+          via a dedicated copper or aluminium-bronze rod of minimum
+          50 mm² CSA.
+
+          §690.64 Point of common coupling. Where the offshore
+          substation interconnects to onshore transmission, the PCC
+          relay scheme shall comply with IEEE 1547 §4.10
+          interoperability and §5 ride-through.
+
+      - id: ve-knw-004
+        title: "IEEE 1547-2018 — Interconnection Requirements (extract)"
+        metadata: { standard: "IEEE-1547", topic: "grid" }
+        content: |
+          IEEE 1547-2018 — STANDARD FOR INTERCONNECTION AND
+          INTEROPERABILITY OF DISTRIBUTED ENERGY RESOURCES
+
+          §4.2 Reactive power capability. Category B DER (which
+          covers offshore wind ≥ 25 MW) shall provide injection
+          and absorption capability of at least 0.44 pu kVAr at
+          rated kW output, throughout the 0.95 lag to 0.95 lead
+          power factor envelope, at the reference point of
+          applicability (RPA).
+
+          §5.1 Voltage ride-through. Category III DER shall remain
+          connected during voltage excursions per the trip-vs-ride
+          curve in Figure H.5: ≥ 1.10 pu for 12 s; 0.88-0.90 pu
+          continuously; 0.50-0.88 pu for at least 21 s; 0.30 pu
+          for 0.32 s; below 0.30 pu may trip.
+
+          §5.2 Frequency ride-through. The DER shall remain
+          connected for frequency excursions of 57.0–61.8 Hz on
+          a 60 Hz system per Figure H.7.
+
+          §5.3 Frequency-watt response. A droop response with
+          gradient 5% (default) shall be enabled; the system
+          operator may direct values from 3% to 10%.
+
+          §10.4 Black-start capability. Optional, but where
+          enabled the DER shall be capable of energising the
+          designated network section within 90 minutes of dispatch
+          and supporting cold-load pickup of at least 30% of
+          nameplate without trip.
+
+      - id: ve-knw-005
+        title: "RWE-EPC-S-001 — Offshore Wind EPC Tenant Standard (synth.)"
+        metadata: { standard: "RWE-EPC-S-001", topic: "epc" }
+        content: |
+          RWE-EPC-S-001 (REV 4.2) — TENANT STANDARD FOR OFFSHORE
+          WIND EPC PACKAGES — KEY CLAUSES
+
+          §3.4 Turbine spacing. Minimum spacing in the prevailing
+          wind direction shall be 7.0 rotor diameters (D); minimum
+          cross-wind spacing shall be 5.0 D. Wake-loss CFD studies
+          may justify a relaxation to 6.0 D / 4.5 D only when the
+          combined annual energy production loss across the array
+          is documented to remain below 8.5%.
+
+          §3.7 Foundation standardisation. For arrays of 12 or
+          more turbines on a single soil regime, no more than two
+          foundation design variants are permitted; the additional
+          steel weight from over-engineering the lighter variant
+          to share fabrication tooling is accepted as the trade-off.
+
+          §4.2 Array voltage. New designs shall standardise on
+          66 kV array cables. 33 kV array systems are permitted
+          only on refurbishments or when integrating with an
+          existing 33 kV offshore substation.
+
+          §4.5 Offshore substations. One offshore substation
+          per 600 MW of installed capacity, with the following
+          exceptions: (a) projects under 400 MW may use a single
+          OSS or direct-to-shore export at 66 kV with owner
+          approval; (b) projects above 1.2 GW shall be split into
+          two electrical zones with cross-zone redundancy.
+
+          §5.1 Owner's Engineer authority. The Owner's Engineer
+          shall issue all RFIs through the document control system
+          using a sequential RFI-YYYY-NNNN identifier. Response
+          deadlines: BLOCKER = 5 business days, MAJOR = 10 BD,
+          MINOR = 15 BD. Late responses trigger LD per Schedule 8.
+
+          §6.3 Health, safety and environment. All vessel
+          operations shall comply with the G+ Global Offshore Wind
+          Health & Safety Organisation guidelines current as of
+          contract effective date, including walk-to-work transfer
+          protocols and SIMOPS exclusion zones.
+
+      - id: ve-knw-006
+        title: "Offshore Wind CapEx & LCOE 2026 Benchmarks"
+        metadata: { topic: "cost", region: "global" }
+        content: |
+          OFFSHORE WIND CAPEX / LCOE — 2026 BENCHMARKS
+
+          Reference benchmarks compiled from BloombergNEF, IRENA,
+          and project FID announcements through Q1 2026. Use these
+          for sanity-check ranges; project-specific factors swing
+          ± 15% routinely.
+
+          CapEx per installed MW (USD M):
+            Shallow-water monopile (≤ 30 m):       2.6 – 3.1
+            Transitional jacket (30 – 60 m):       3.2 – 3.7
+            Floating semi-submersible (≥ 60 m):    4.0 – 4.5
+            Floating spar:                          4.4 – 4.9
+            HVDC export adder (per MW, ≥ 80 km):   +0.45 – +0.70
+
+          LCOE 2026 (USD/MWh, post-CfD strike comparable):
+            UK Round 5 monopile sites:             58 – 72
+            German North Sea jackets:               68 – 84
+            US East Coast monopile (BOEM lease):   78 – 95
+            Asian floating (Korea, Japan):          95 – 120
+
+          Annual O&M as % of CapEx:
+            Monopile/Jacket: 4.2 – 5.5 %/y
+            Floating:        5.8 – 7.0 %/y
+
+          Lifecycle CO2 (kt CO2e per 100 MW, manufacture
+          + install + decom, excluding operation):
+            Monopile shallow:  140 – 170
+            Jacket transitional: 170 – 210
+            Floating semisub:    210 – 260
+
+      - id: ve-knw-007
+        title: "Wake Modelling Quick Reference (Jensen / Bastankhah)"
+        metadata: { topic: "yield", standard: "internal" }
+        content: |
+          WAKE MODELLING QUICK REFERENCE
+
+          Two engineering models are accepted at FEED gate:
+
+          1. Jensen / Park (top-hat). Wake deficit at distance x
+             behind rotor:
+                u(x) / u0 = 1 − (1 − √(1 − Ct)) × (D / (D + 2kx))²
+             where k is the wake decay constant: 0.075 onshore,
+             0.04–0.05 offshore. Quick to evaluate, conservatively
+             over-predicts deep-array losses by ~3–5% vs. Bastankhah.
+
+          2. Bastankhah-Porté-Agel (Gaussian). Smooth radial
+             velocity profile, calibrated on LES; preferred for
+             arrays with non-aligned rows and for waked yield used
+             in financial-close documents.
+
+          Typical full-array yield losses on a 100-turbine
+          regular grid at 7D × 5D spacing: 8 – 12 %.
+          Reduce one stage of spacing → loss creeps to 14 – 18 %.
+
+      - id: ve-knw-008
+        title: "BOEM / DNV Permitting Touch-points (US Federal Waters)"
+        metadata: { topic: "permitting", region: "US" }
+        content: |
+          BOEM + DNV PERMITTING TOUCH-POINTS
+
+          Bureau of Ocean Energy Management (BOEM) lease lifecycle:
+            1. Lease auction → Site Assessment Plan (SAP) — 1 yr
+            2. Construction & Operations Plan (COP) — 2-3 yrs review
+            3. Facility Design Report (FDR) + Fabrication & Install
+               Report (FIR) — 6-12 months pre-construction
+            4. Notice to Proceed → operation → decom bond.
+
+          DNV-OS-J101 / DNV-ST-0119 (floating) sit alongside IEC
+          61400-3 series; the AHJ typically defers to whichever is
+          cited in the project Basis of Design as long as a single
+          coherent code basis is documented.
+
+          Critical-path RFIs in 2026 BOEM reviews focus on:
+            (a) marine-mammal mitigation during pile-driving
+                (NOAA NMFS take limits);
+            (b) fishing-industry compatibility (turbine spacing
+                and cable-corridor depth);
+            (c) Jones Act compliance for installation vessels.
+
+  - slug: rwe-fieldedge-oem-manuals
+    name: "RWE FieldEdge — OEM Service Manuals"
+    description: >-
+      Curated extracts from Vestas / Siemens-Gamesa-style turbine
+      service manuals + climbing-safety procedures. Synthesised
+      from publicly known maintenance practices for the FieldEdge
+      showcase; phrasing and section numbers are illustrative.
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - iot-fieldedge-troubleshoot-assistant
+      - iot-fieldedge-fleet-history-searcher
+      - iot-fieldedge-schedule-optimizer
+      - iot-fieldedge-closeout-documenter
+    agent_permission: READ
+    documents:
+      - id: fe-manual-001
+        title: "V120-2.0 MW Service Manual §5.4 — Leading-Edge Erosion Repair"
+        metadata:
+          equipment: "wind_turbine"
+          model: "Vestas V120-2.0 MW"
+          section: "§5.4"
+          topic: "blade_repair"
+        content: |
+          V120-2.0 MW SERVICE MANUAL §5.4 — LEADING-EDGE EROSION REPAIR
+
+          Scope. Procedure for in-situ repair of leading-edge erosion
+          on the outer 8 m of the LP (low-pressure) blade surface.
+          Applies to GFRP blades manufactured under part numbers
+          B120-GE-001 through B120-GE-014. For damage extending into
+          the structural laminate, escalate to the V120 Blade
+          Engineering team — this procedure covers cosmetic and
+          surface-protection repairs only.
+
+          Tools required.
+            - Surface preparation kit (PN VBI-PREP-01) — solvent
+              wipes, abrasive pads (P180/P320), masking tape.
+            - Leading-edge protection tape, 2 m roll (PN VBI-LE-2M),
+              minimum 1 roll per 2 m of damaged length.
+            - Two-part epoxy fairing kit (PN VBI-EPOXY-FAIR), one
+              kit fills up to 80 cm² of pitting at <= 3 mm depth.
+            - Calibrated torque wrench (only required if access
+              cover is removed in §5.4.7).
+
+          Procedure.
+          1. LOTO. Apply lockout-tagout to the rotor lock per §3.2.
+             Confirm zero-energy state on the brake hydraulics. Two
+             independent verifications — see §3.2.4 dual-witness rule.
+          2. Position the blade vertically with the LP surface
+             facing the nacelle. Lock the rotor.
+          3. Inspect the damaged area visually and with the
+             ultrasonic thickness gauge per §5.2 if any pit looks
+             deeper than 3 mm. Pits beyond 5 mm depth are NOT
+             eligible for this procedure — escalate.
+          4. Surface preparation. Wipe with isopropyl alcohol,
+             abrade with P180 then P320. The repair area must be
+             dust-free, oil-free, and dry. Ambient must be
+             10–35 °C and RH < 70 % during cure.
+          5. Fill all pits > 1 mm with epoxy fairing compound.
+             Apply in passes of <= 2 mm to avoid exotherm. Cure
+             time: 4 h at 20 °C.
+          6. After cure, sand flush with P320, wipe clean.
+          7. Apply the leading-edge protection tape, working from
+             root toward tip. Press firmly with the felt roller;
+             air bubbles must be smaller than 5 mm and < 3 per
+             square metre. Overlap each strip by 25 mm.
+          8. Photograph the repair from three angles. Upload to
+             the WO record. Re-inspect at next 6-month service.
+
+          Weather constraints. Do not attempt this procedure with
+          steady wind > 12 m/s, gusts > 16 m/s, or any precipitation —
+          tape adhesion fails. See climbing-safety SOP §4.
+
+      - id: fe-manual-002
+        title: "V120-2.0 MW Service Manual §6.2 — Gearbox Oil Change"
+        metadata:
+          equipment: "wind_turbine"
+          model: "Vestas V120-2.0 MW"
+          section: "§6.2"
+          topic: "gearbox"
+        content: |
+          V120-2.0 MW SERVICE MANUAL §6.2 — GEARBOX OIL CHANGE
+
+          Interval. Every 18,000 operating hours OR 36 months,
+          whichever comes first. Trigger early if oil-particle
+          monitoring shows iron > 50 ppm or any non-ferrous metal
+          > 10 ppm.
+
+          Oil specification. Mobil SHC Gear 320 WT (PN VBI-OIL-SHC320)
+          or qualified equivalent (PAO base, ISO VG 320, micropitting
+          rated FZG > 14). Quantity: 240 L per gearbox.
+
+          Tools.
+            - Oil-extraction pump rated 50 L/min minimum.
+            - Filter cart with 3 µm absolute filtration (PN VBI-FC-03).
+            - Particle counter per ISO 4406.
+            - 24 mm and 36 mm sockets, calibrated torque wrench.
+
+          Procedure summary.
+          1. LOTO the rotor and main shaft per §3.2. Confirm gearbox
+             temp < 40 °C — wait if hotter; pumping hot oil damages
+             the seals.
+          2. Drain via the bottom port (24 mm plug), capture in
+             clean drums for waste disposal. Keep one 250 ml sample
+             for lab analysis.
+          3. Replace the gearbox magnetic plug — inspect for chips
+             before replacement. Any chip > 3 mm: STOP and call the
+             V120 Drivetrain team.
+          4. Flush the case with 60 L of fresh oil through the
+             filter cart, recirculate 20 minutes, drain again.
+          5. Refill to the upper sight-glass mark with the new
+             charge through the filter cart. Re-torque the fill
+             port to 60 Nm.
+          6. Run on no-load idle 30 min. Re-check level — top up
+             if needed.
+          7. Send the captured samples to the lab. WO cannot close
+             until lab confirms ISO 4406 cleanliness <= 18/16/13.
+
+          Estimated time: 6.5 hours per turbine (single technician)
+          or 4.0 hours (two technicians).
+
+      - id: fe-manual-003
+        title: "Climbing Safety SOP §4 — Tower Climb Limits + LOTO"
+        metadata:
+          equipment: "wind_turbine"
+          section: "§4"
+          topic: "safety"
+        content: |
+          CLIMBING SAFETY SOP §4 — TOWER CLIMB LIMITS + LOCKOUT-TAGOUT
+
+          Hard limits (per IEC 61400-3 and OSHA 1926 Subpart M):
+            - Wind speed at hub height > 12 m/s sustained -> NO CLIMB.
+            - Gusts > 16 m/s -> NO CLIMB.
+            - Lightning detected within 25 km -> NO CLIMB; if
+              already in tower, descend immediately.
+            - Visible precipitation (rain, snow, ice, sleet) +
+              external work planned -> NO EXTERNAL WORK; internal
+              nacelle/tower work permitted with extra slip caution.
+            - Ambient temp < -20 °C or > 40 °C -> NO CLIMB without
+              site-specific written authorisation.
+
+          Personal protective equipment.
+            - Full-body harness, certified < 5 years from manufacture
+              date. Inspect webbing daily.
+            - Twin-leg shock-absorbing lanyard.
+            - Climber-back protection (CBP) kit attached to ladder
+              fall-arrest line.
+            - Hard hat with chinstrap (mandatory above 5 m).
+            - Self-rescue descender (CE EN 341 Class A).
+
+          Lockout-tagout for rotor work.
+            - Apply rotor lock pin. Confirm pin-engaged sensor
+              shows green. Witness must independently verify.
+            - Open and tag the main breaker at the base of the
+              tower. Apply personal padlock.
+            - Bleed brake hydraulic pressure to zero, confirm at
+              the pressure gauge.
+            - Two-person rule: two technicians MUST be on site
+              for all rotor / blade work. Solo work is allowed only
+              for nacelle internal inspections without rotor entry.
+
+          Communication. Continuous radio contact with site control.
+          Lost contact > 15 minutes triggers a welfare check.
+
+      - id: fe-manual-004
+        title: "SG-3.4-132 Service Manual §7.1 — Yaw Motor Replacement"
+        metadata:
+          equipment: "wind_turbine"
+          model: "Siemens SG-3.4-132"
+          section: "§7.1"
+          topic: "yaw_drive"
+        content: |
+          SG-3.4-132 SERVICE MANUAL §7.1 — YAW MOTOR REPLACEMENT
+
+          Symptoms triggering this procedure.
+            - SCADA fault code 4711 ("yaw drive overcurrent")
+              recurring more than 3× in 24 h.
+            - Yaw position error > 2° persistent for > 5 minutes.
+            - Audible grinding from yaw drive ring.
+
+          Parts.
+            - Yaw motor assembly, PN SGY-MOT-04 (one of six per
+              turbine — confirm which on the SCADA event log).
+            - Brake actuator, PN SGY-BRK-04 (replace as a set with
+              the motor — they wear together).
+            - Drive shim kit, PN SGY-SHIM-KIT (always use a fresh
+              kit; do not reuse old shims).
+            - Lubricant, Mobilith SHC PM 220 (PN VBI-OIL-MOB220),
+              0.5 L per drive.
+
+          Procedure summary.
+          1. LOTO the yaw drive AND the rotor (a free-yawing rotor
+             will damage the partially-disassembled drive). Two
+             padlocks, two tags.
+          2. De-energise the yaw drive cabinet. Verify zero volts
+             on terminals 1L1, 1L2, 1L3 before touching anything.
+          3. Disconnect the motor's power and brake-feedback
+             connectors. Label them — the connectors are
+             interchangeable but the wiring is not.
+          4. Unbolt the motor flange (M16 x 8 bolts, 235 Nm). Use a
+             chain hoist rated 250 kg minimum to lower the motor
+             onto the nacelle floor — DO NOT carry by hand.
+          5. Inspect the drive ring teeth on the side adjacent to
+             the removed motor for pitting or spalling. > 1 mm
+             pitting on > 5 % of teeth: escalate to drivetrain.
+          6. Install the new motor + brake assembly. Use a fresh
+             shim kit; backlash should measure 0.10–0.15 mm with the
+             dial gauge against the ring tooth.
+          7. Re-torque flange bolts in cross pattern: 80 Nm pass 1,
+             160 Nm pass 2, 235 Nm pass 3. Mark each bolt with
+             yellow paint after final pass.
+          8. Re-energise. Run yaw drive through ±30° calibration
+             sweep from the SCADA test screen. No fault codes
+             permitted on the second pass.
+
+          Estimated time: 8–10 hours, two technicians, crane not
+          required (chain hoist sufficient at 250 kg).
+
+      - id: fe-manual-005
+        title: "Service Crane Operations — Wind & Load Limits"
+        metadata:
+          equipment: "wind_turbine"
+          topic: "crane_ops"
+        content: |
+          SERVICE CRANE OPERATIONS — WIND & LOAD LIMITS
+
+          Applicability. Whenever the on-board service crane (rated
+          1,000 kg) or a ground-based mobile crane is used to lift
+          components up to / down from the nacelle.
+
+          Wind limits (manufacturer + ANSI B30.5).
+            - On-board service crane (1,000 kg max):
+                wind at hub height > 10 m/s -> NO LIFT.
+                gusts > 14 m/s -> NO LIFT (boom-mounted vibration
+                amplifies the swing).
+            - Mobile crane lifting full blade (~12,000 kg, 60+ m
+              long): wind > 8 m/s sustained, gusts > 11 m/s -> NO
+              LIFT. Manufacturer's load chart trumps this if more
+              restrictive.
+
+          Pre-lift checklist.
+            1. Crane operator certified for the unit type within
+               the last 24 months. Verify card.
+            2. Rigging gear: shackles + slings rated 2x the load.
+               Inspected and tagged within 12 months. WLL stamp
+               must be legible.
+            3. Tag lines on every load > 200 kg to control swing.
+            4. Exclusion zone: 1.5x the lift height, no personnel.
+            5. Anemometer reading at hub height (not ground level)
+               within the last 5 minutes; recorded in the lift log.
+
+          During lift.
+            - Maintain radio contact between operator + signaller.
+            - If the load starts to swing > 10° off vertical:
+              STOP, lower carefully, wait for wind to drop.
+            - Any change in audible motor / hydraulic noise:
+              STOP and inspect.
+
+          Logging. The lift log is a regulated document — preserve
+          for 7 years post-decommissioning.
+
+      - id: fe-manual-006
+        title: "V120-2.0 MW Service Manual §5.4.7 — Lightning Receptor Inspection"
+        metadata:
+          equipment: "wind_turbine"
+          model: "Vestas V120-2.0 MW"
+          section: "§5.4.7"
+          topic: "lightning"
+        content: |
+          V120-2.0 MW SERVICE MANUAL §5.4.7 — LIGHTNING RECEPTOR INSPECTION
+
+          Trigger. After any IEC 62305 Class III+ lightning event
+          recorded on the lightning detection system within 1 km of
+          the turbine, OR every 24 months scheduled.
+
+          Procedure.
+          1. LOTO + rotor lock per §3.2. Climbing-safety SOP §4
+             applies.
+          2. From the nacelle, deploy the access platform onto the
+             blade with the suspected receptor (usually the blade
+             pointing down post-event). Two-technician minimum.
+          3. Visually inspect the receptor head — should be flush
+             with the surface, no melt deformation > 2 mm, no
+             carbon scoring visible on the GFRP around the receptor.
+          4. Down-conductor continuity test. Use the megger
+             between the receptor head and the hub-base earth
+             stud. Expected resistance < 0.05 Ω (hot, < 0.10 Ω
+             cold). > 0.20 Ω: down-conductor compromised, escalate.
+          5. If receptor is damaged: replace with PN VBI-LIGHT-
+             RCPTR-V120. Apply silicone sealant (PN VBI-SEAL-SI),
+             cure 24h before flying again.
+          6. Check the surge protection devices in the nacelle
+             cabinet for the burned-out indicator. Replace as
+             needed (PN VBI-SPD-NAC).
+          7. Update the lightning event log. Photograph the
+             receptor from above, side, and below.
+
+          Estimated time: 3 hours inspection only; 6 hours with
+          receptor replacement; 8 hours if down-conductor work
+          required.
+
+      - id: fe-manual-007
+        title: "Common Wind-Turbine Failure Modes — Reference"
+        metadata:
+          equipment: "wind_turbine"
+          topic: "failure_modes"
+        content: |
+          COMMON WIND-TURBINE FAILURE MODES — REFERENCE TABLE
+
+          Bearing failure (main shaft / generator).
+            Symptoms: rising vibration > 7 mm/s RMS at 1x shaft
+            speed; temperature rise > 15 °C above baseline; audible
+            rumble. Common causes: lubrication starvation, contam-
+            inated grease, micro-pitting from low-speed start-stop
+            cycles. Typical repair: bearing change-out, 18-24 hours
+            with crane assist; or in-situ if accessible.
+
+          Blade leading-edge erosion.
+            Symptoms: visible pitting, surface roughness, ~1-3 % AEP
+            loss. Cause: rain / particulate impact at tip speeds
+            > 80 m/s. Repair per V120 §5.4 / SG §6.3 leading-edge
+            tape + epoxy. Catch early — once cracks reach the
+            structural laminate the blade goes off-line.
+
+          Gearbox failure.
+            Symptoms: oil-particle iron > 100 ppm; vibration in 2-3
+            kHz band; temperature rise. Causes: tooth-flank fatigue,
+            white-etching cracks (notorious in WT gearboxes),
+            seal failure. Major event — 60+ hour replacement,
+            crane required, ~$300k cost. Predictive maintenance
+            should catch it 3-6 months ahead via oil monitoring.
+
+          Generator winding insulation failure.
+            Symptoms: insulation resistance test < 5 MΩ; partial
+            discharge events on PD monitor. Causes: thermal cycling,
+            moisture ingress, contamination. Repair: rewind in
+            shop, 4-6 weeks downtime; some sites swap a spare
+            generator while the failed unit is rewound.
+
+          Pitch / yaw control faults.
+            Symptoms: SCADA fault codes 47xx (yaw) / 51xx (pitch);
+            erratic blade angles; over-speed trips. Causes: motor /
+            drive failure, encoder misalignment, slip-ring wear.
+            Usually on-tower repair, 4-10 hours.
+
+      - id: fe-manual-008
+        title: "Crane Operation in High Winds — Safe Practices"
+        metadata:
+          equipment: "wind_turbine"
+          topic: "crane_safety"
+        content: |
+          CRANE OPERATION IN HIGH WINDS — SAFE PRACTICES
+
+          Wind is the dominant safety variable for any wind-farm
+          lift. The blade itself (60+ m long, ~12 t) acts like a
+          giant aerofoil — even 6 m/s of wind generates lift forces
+          that can swing a partially-rigged load violently.
+
+          Tip-speed reasoning. The aerodynamic moment grows with
+          v² of relative wind. A blade at 8 m/s wind sees 16x the
+          force of the same blade at 2 m/s. This is why the
+          manufacturer load charts derate so aggressively above
+          6 m/s for full-blade lifts.
+
+          Operational guidance.
+            - Plan the lift the day before. Check 24h forecast for
+              wind speed at hub height (not ground), gust factor,
+              and the timing of any approaching front.
+            - Wind veers more with altitude — what's 5 m/s at
+              ground may be 10 m/s at 90 m hub height. Always use
+              hub-height anemometry.
+            - "Calm" mornings are misleading near coastal or ridge-
+              line sites. Diurnal wind cycles can push from 3 m/s
+              at 6am to 12 m/s by 11am.
+            - Lift the heaviest / longest components in the early
+              morning slot before thermal turbulence builds.
+            - Keep a "bail-out" position planned — somewhere the
+              load can be safely set down within 5 minutes if the
+              wind freshens unexpectedly.
+
+          Comms protocol. Crane operator, signaller, and rigger
+          on a dedicated radio channel; site control monitoring on
+          a second channel for backup. Hand signals only as
+          fallback when radios fail.
+
+  - slug: rwe-bedrocc-sop-procedures
+    name: "BedROCC Operations SOPs"
+    description: >-
+      Wind-farm operations control-room SOPs covering safe remote-reset
+      authority, cascade alarm suppression, EOD shift reporting,
+      critical-alarm dispatch rules, lockout-tagout procedures, and
+      cases requiring two-person confirmation.
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - iot-bedrocc-alarm-classifier
+      - iot-bedrocc-noise-filter
+      - iot-bedrocc-safe-reset-advisor
+      - iot-bedrocc-shift-reporter
+    agent_permission: READ
+    documents:
+      - id: bedrocc-sop-001
+        title: "Safe Reset Authorisation Matrix"
+        metadata: { topic: "reset_authority", criticality: "high" }
+        content: |
+          SAFE RESET AUTHORISATION MATRIX — REV 7.2
+
+          This matrix maps every SCADA alarm class to the minimum
+          operator authority tier permitted to approve a remote
+          reset, the reset command of last-resort, and any
+          contextual gating preconditions. It is the single source
+          of truth for the safe_reset_advisor agent.
+
+          Authority tiers:
+            T1  Junior Operator      — routine tasks, monitored
+            T2  Operator              — full console authority
+            T3  Shift Supervisor      — overrides, dispatch sign-off
+
+          ────────────────────────────────────────────────────────
+          Code prefix      Allowed Tier    Two-Person   Reset Cmd
+          ────────────────────────────────────────────────────────
+          COMMS-*          T1              No           COMMS_LATCH_CLR
+          NET-LATCH-*      T1              No           COMMS_LATCH_CLR
+          YAW-MOTOR-OL     T2              No           PCC_RESET yaw   (only if <= 2 prior in 1h)
+          PITCH-DRIFT-LO   T2              No           PCC_RESET pitch
+          GEN-TEMP-HI      T2              No           PARK_AND_RESTART (only if trend stable 60s)
+          GEN-WINDING-HI   T3              YES          PARK_AND_RESTART (must verify cooling)
+          GBX-VIB-HI       T2              No           PCC_RESET gearbox  (DENY if raw > 8 mm/s)
+          GBX-OIL-LO       T3              YES          NO_REMOTE_RESET — dispatch
+          OVT-DC-LINK      T2              No           PCC_RESET converter (only if grid stable)
+          GRD-FRT-*        T3              No           PARK_AND_RESTART (after grid clears 5 min)
+          FIRE-*           —               —            NO_REMOTE_RESET — physical inspection
+          GAS-*            —               —            NO_REMOTE_RESET — physical inspection
+          ICE-*            T3              YES          NO_REMOTE_RESET — wait for thaw
+          BIRD-STRIKE-*    —               —            NO_REMOTE_RESET — biologist on call
+          LOTO-*           —               —            NO_REMOTE_RESET — LOTO must clear first
+          *-PROT, *-SAFE   —               —            NO_REMOTE_RESET — protection trip
+          ────────────────────────────────────────────────────────
+
+          ALWAYS pick the minimum-privilege command that clears the
+          alarm. COMMS_LATCH_CLR is preferred over PCC_RESET; PCC_RESET
+          is preferred over PARK_AND_RESTART. Use PARK_AND_RESTART only
+          when the controller's own diagnostic flag indicates a state
+          that COMMS_LATCH_CLR + PCC_RESET cannot recover.
+
+          Rolling-recurrence rule: if the SAME alarm code on the SAME
+          turbine has been reset 3 times in 24h, the matrix downgrades
+          to NO_REMOTE_RESET regardless of tier — escalate to dispatch.
+          The pattern means the soft reset is masking a real fault.
+
+      - id: bedrocc-sop-002
+        title: "Cascade Alarm Suppression Policy"
+        metadata: { topic: "cascade_filter", criticality: "high" }
+        content: |
+          CASCADE ALARM SUPPRESSION POLICY — REV 4.0
+
+          PURPOSE
+          When a turbine fails, ten to twenty alarms typically light
+          up across subsystems within 60 seconds. Operators get
+          drowned in red banners and miss the primary cause. The
+          noise_filter agent compresses these into the single root
+          cause plus a list of suppressed downstream IDs, while the
+          full audit trail is preserved.
+
+          DEFINITIONS
+            CASCADE: 3+ alarms within 60s on the same turbine, OR 3+
+            alarms across turbines on the same grid feeder where the
+            FIRST alarm is a grid event (GRD-*, FRT-*, OVT-*).
+            PRIMARY: the alarm representing the physical root cause.
+            SUPPRESSED: alarms causally downstream of the primary —
+            still recorded in the audit log, hidden from the operator
+            queue.
+
+          KNOWN CASCADE CHAINS (primary → downstream)
+            GBX-VIB-HI → GEN-TEMP-HI → OVT-DC-LINK → GRD-FRT-RIDE
+            GEN-WINDING-HI → GEN-TEMP-HI → CONV-IGBT-OT
+            HYD-PRESS-LO → PITCH-DRIFT-LO → BLADE-ANGLE-FAULT
+            GRD-FRT-* (one feeder, multi-turbine) → individual
+              turbine OVT and FRT trips on every machine on that
+              feeder
+            COMMS-LOSS → all downstream telemetry "stale" alarms
+
+          NEVER-SUPPRESS LIST
+          Even when they look downstream, NEVER suppress:
+            FIRE-*, GAS-*, BIRD-*, ICE-*, LOTO-*, *-PROT, *-SAFE.
+          These are safety-critical and stay visible regardless of
+          cascade analysis.
+
+          UNCERTAINTY RULE
+          If the noise filter is less than 0.7 confident a downstream
+          alarm is in the chain, KEEP it visible. Operators forgive
+          false positives; they do not forgive a missed primary
+          because we hid evidence.
+
+          CONFIRMATION
+          Suppression of 5+ alarms triggers a banner the supervisor
+          must acknowledge ("Cascade detected — N alarms suppressed,
+          primary = <code>"). The acknowledgement is logged.
+
+      - id: bedrocc-sop-003
+        title: "EOD Shift Report Template"
+        metadata: { topic: "shift_report", criticality: "medium" }
+        content: |
+          END-OF-DAY SHIFT REPORT TEMPLATE — REV 6.1
+
+          PURPOSE
+          Standardised handover document. Outgoing supervisor signs;
+          incoming team's first task is to read the top-priority
+          item. The report MUST be specific. "Several alarms today,
+          all handled" is worse than no report — it costs the
+          incoming team a re-read of the raw log.
+
+          STRUCTURE — EXACTLY THESE SECTIONS, IN ORDER
+
+          ## Shift Summary
+            One paragraph. Lead with the takeaway, not the
+            chronology. Headline uptime number; biggest event;
+            single most important thing the next shift needs to
+            know.
+
+          ## KPIs
+            Markdown table — uptime %, alarms total, alarms
+            suppressed, resets attempted vs. succeeded, mean-time-
+            to-triage, lost generation in MWh (or kWh if < 1).
+
+          ## Alarms Triaged
+            Grouped by site / turbine. For every turbine with
+            alarms, bullet the alarms with AI severity, action
+            taken, and any AI-vs-SCADA severity override.
+
+          ## Resets Approved
+            One bullet per reset — operator initials, two-person
+            sign-off Y/N, outcome (cleared / recurred / in-flight).
+            Bold any reset that recurred.
+
+          ## Dispatches
+            Table — turbine, crew, ETA, WO id. Mark techs still on
+            site at handover.
+
+          ## Suppressed Cascades
+            One bullet per cascade — primary code → suppressed
+            codes, plus operator's call.
+
+          ## Open Issues for Next Shift
+            Numbered. Top item bolded. Be ruthless about priority.
+
+          ## Trends Worth Watching
+            Patterns — one turbine, one code, fleet-wide trend. If
+            none, write "No significant trends — quiet shift."
+
+          STYLE
+            Tone of a pilot's logbook. ~600 words max. Never invent
+            data. No "Generated by" footer.
+
+      - id: bedrocc-sop-004
+        title: "Critical Alarms Requiring Immediate Dispatch"
+        metadata: { topic: "dispatch_rules", criticality: "high" }
+        content: |
+          IMMEDIATE-DISPATCH ALARM CLASSES — REV 3.4
+
+          The following alarm classes ALWAYS bypass the soft-reset
+          advisor and trigger a same-shift truck-roll. The classifier
+          must set recommended_action="dispatch_technician" or
+          "escalate_supervisor" for any of these regardless of
+          cascade context.
+
+          GBX-OIL-LO
+            Gearbox oil-pressure low. Loss of lubrication risks
+            catastrophic gearbox failure within hours. Cost: ~$180k
+            replacement. Dispatch lubrication crew within 4 hours.
+
+          GBX-PARTICLE-CRIT
+            Particle-counter on gearbox oil exceeds D-class. Wear
+            metal exceeds 100 ppm. Schedule borescope within 24h.
+
+          BLADE-LIGHTNING-STRIKE
+            Lightning detection in the rotor. Inspect leading-edge
+            and tip for delamination within 48h regardless of
+            visible damage. Insurance requires inspection log.
+
+          FIRE-NACELLE
+            Fire-detection in nacelle. Park immediately, isolate
+            grid, dispatch fire suppression and operations team.
+            Notify utility liaison and local fire authority.
+
+          BLADE-CRACK-DETECT
+            Modal-frequency anomaly indicating crack initiation.
+            Down-rate to 30% power immediately, dispatch within 12h.
+
+          GEN-WINDING-BURN
+            Winding-temperature trip with rate-of-rise > 5 C/min
+            even after parking. Risk of insulation breakdown.
+            Dispatch electrical crew within 6h.
+
+          ICE-THROW-DETECT
+            Anti-ice algorithm + vibration anomaly indicating ice
+            shedding from blades. Park, lock, evacuate site
+            personnel within 500m radius. Resume after thaw +
+            inspection.
+
+          BIRD-STRIKE-MASS
+            Multiple bird-strike events within 60s. Park; biologist
+            on-call evaluates raptor-protection compliance.
+
+      - id: bedrocc-sop-005
+        title: "Lockout-Tagout Pre-Reset Checklist"
+        metadata: { topic: "loto", criticality: "high" }
+        content: |
+          LOCKOUT-TAGOUT PRE-RESET CHECKLIST — REV 5.0
+
+          Before ANY remote reset is approved, the safe_reset_advisor
+          MUST verify ALL of the following preconditions:
+
+          1. LOTO STATUS
+             Pull the latest LOTO database snapshot for this turbine.
+             If loto_active == true, DENY the reset — energising
+             machinery while a technician has it locked out is
+             potentially fatal.
+
+          2. NACELLE OCCUPANCY
+             Check the access-card / harness-tether telemetry for
+             the turbine. If technician_in_nacelle == true, DENY.
+             Treat unknown occupancy as occupied.
+
+          3. WEATHER
+             - Lightning detected within 5 km → DENY any reset
+             - Wind speed > 25 m/s → DENY (cut-out condition)
+             - Ice-on-blades detection → DENY
+
+          4. ENERGY ISOLATION
+             For any subsystem-level reset (PCC_RESET *), the
+             subsystem must be in IDLE or PARKED state before
+             power-cycle. The advisor reads the controller flag to
+             confirm.
+
+          5. PRIOR-RESET WINDOW
+             No more than 2 resets of the same code on the same
+             turbine in the last hour, no more than 3 in the last
+             24h. Beyond either threshold, the matrix downgrades to
+             NO_REMOTE_RESET.
+
+          6. ROLLBACK PLAN
+             The advisor MUST emit a one-line rollback plan describing
+             what happens if the alarm returns within 5 minutes
+             post-reset (typically: park the turbine, dispatch).
+
+          ANY UNKNOWN STATUS = FAILED CHECK
+          If a precondition can't be verified (telemetry stale,
+          weather feed offline, LOTO database unreachable), treat
+          the precondition as FAILED. Operators forgive a false
+          deny; they do not forgive an injury.
+
+          AUDIT
+          Every checklist evaluation — pass and deny — is recorded
+          with the operator id, timestamp, alarm id, and the full
+          precondition list. Subject to monthly safety review.
+
+      - id: bedrocc-sop-006
+        title: "Two-Person Confirmation Required Cases"
+        metadata: { topic: "two_person", criticality: "high" }
+        content: |
+          TWO-PERSON CONFIRMATION CASES — REV 2.6
+
+          The following resets require BOTH operator approval AND a
+          shift-supervisor (or peer T2/T3) confirmation. The UI
+          shows a second-signoff modal; both signoffs are recorded.
+
+          ALWAYS-TWO-PERSON CASES
+
+          GEN-WINDING-HI
+            Generator winding temperature high. Re-energising a
+            potentially overheated machine without a witness is
+            an industry-wide post-incident finding from multiple
+            insurance reports.
+
+          GBX-OIL-LO followed by reset attempt
+            Even though the matrix says NO_REMOTE_RESET for this
+            class, if a supervisor authorises an exceptional reset
+            (e.g. confirmed sensor fault), it is two-person.
+
+          ICE-* class
+            Anti-ice resets must wait for thaw confirmation; the
+            second person verifies temperature and weather forecast.
+
+          ANY GRD-* feeder-level reset
+            A reset that re-energises the entire feeder affects
+            multiple turbines and the local utility interface.
+            Second person checks utility liaison clearance.
+
+          ANY reset following a LOTO-CLEARED event in the last 60min
+            Belt-and-braces — second person verifies the technician
+            has actually departed before re-energising.
+
+          ROLE OF SECOND PERSON
+          Not a rubber stamp — the second person re-evaluates the
+          decision independently, including:
+            - Re-pulling LOTO and occupancy status
+            - Confirming the alarm matches the reset command
+            - Confirming the weather window
+          Either party may DENY without the other.
+
+          AUDIT
+          The two signatures, both timestamps, and the deltas (e.g.
+          how long between signature 1 and signature 2) are logged
+          and reviewed monthly.
+
+      - id: bedrocc-sop-007
+        title: "ROI Estimation Reference"
+        metadata: { topic: "roi", criticality: "medium" }
+        content: |
+          ROI ESTIMATION REFERENCE — REV 1.3
+
+          Numbers used by the alarm classifier when estimating
+          $/h saved by resolving an alarm. Updated quarterly from
+          the fleet's commercial team.
+
+          LOST GENERATION
+            Typical PPA price             $42-$58 / MWh
+            Typical 3-MW turbine output   2,200 kW (avg capacity)
+            Cost of one turbine offline   $850-$1,200 / hour
+            Whole-feeder offline (12 t)   $14k / hour
+
+          AVERTED CATASTROPHIC LOSSES (one-time)
+            Gearbox replacement (full)    $180k + 5-10 days lost gen
+            Generator rewind              $90k + 3-5 days
+            Blade replacement             $250-400k + crane mob
+            Converter replacement         $35k + 1 day
+            Yaw motor replacement         $8k + half day
+
+          CASCADE-TO-FAILURE WINDOWS (used to spread one-time costs
+          into a $/h figure for the recommended_action UI)
+            Gearbox wear                  ~72 hours
+            Generator thermal             ~24 hours
+            Converter IGBT                ~6 hours
+            Hydraulic pressure leak       ~12 hours
+            Pitch drift                   ~48 hours
+
+          OPERATOR-HOURS SAVED (false-positive clearance)
+            Cleared sensor fault          $80 / hour
+            Cleared cascade duplicate     $60 / hour
+
+          When uncertain, the classifier should pick the LOW end of
+          the range and note the assumption in the rationale. The
+          ROI is a decision aid, not a billing line item.

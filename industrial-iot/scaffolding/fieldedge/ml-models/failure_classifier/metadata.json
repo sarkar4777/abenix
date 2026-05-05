@@ -1,0 +1,37 @@
+{
+  "model_type": "RandomForestClassifier",
+  "feature_names": [
+    "vibration_rms_mm_s",
+    "vibration_hf_band_g",
+    "gearbox_oil_iron_ppm",
+    "generator_winding_temp_c",
+    "generator_insulation_mohm",
+    "yaw_position_error_deg",
+    "fault_code_rate_per_hour",
+    "ambient_wind_mps"
+  ],
+  "class_names": [
+    "bearing",
+    "blade",
+    "gearbox",
+    "generator",
+    "control"
+  ],
+  "n_train_samples": 1200,
+  "n_test_samples": 300,
+  "test_accuracy": 0.9833,
+  "train_time_seconds": 0.344,
+  "trained_at_utc": "2026-05-05T10:20:56Z",
+  "feature_importances": {
+    "vibration_rms_mm_s": 0.115,
+    "vibration_hf_band_g": 0.1541,
+    "gearbox_oil_iron_ppm": 0.2244,
+    "generator_winding_temp_c": 0.1417,
+    "generator_insulation_mohm": 0.1136,
+    "yaw_position_error_deg": 0.1185,
+    "fault_code_rate_per_hour": 0.1275,
+    "ambient_wind_mps": 0.0051
+  },
+  "synthetic": true,
+  "random_state": 42
+}

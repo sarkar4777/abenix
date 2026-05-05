@@ -1,0 +1,257 @@
+name: "IoT BedROCC Alarm Triage Pipeline"
+slug: iot-bedrocc-pipeline
+description: >-
+  Operations control-room triage pipeline. Takes ONE incoming SCADA
+  alarm plus a short window of recent alarms for context, runs:
+    1. classifier — produce AI severity + ROI + recommended action
+    2. noise_filter — is this part of a cascade and should it be
+       visually suppressed
+    3. safe_reset_advisor — if the recommended action is a remote
+       reset, decide whether it is safe and draft the command
+  Emits a single triage envelope the UI can render alongside the
+  alarm row in the operator queue.
+agent_type: oob
+category: operations
+icon: ShieldAlert
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  Industrial IoT BedROCC alarm-triage pipeline. Wires the alarm
+  classifier, cascade noise filter, and safe-reset advisor into a
+  single deterministic flow.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.2
+  max_iterations: 20
+  max_tokens: 4096
+  tools:
+    - agent_step
+    - code_executor
+    - current_time
+    - knowledge_search
+
+input_variables:
+  - name: message
+    type: string
+    description: >-
+      JSON envelope shaped like
+      {"alarm": {...current alarm...},
+       "recent_alarms": [...recent N alarms...],
+       "operator": {operator_id, authority_tier},
+       "loto_active": bool, "technician_in_nacelle": bool,
+       "weather": {wind_mps, lightning_within_km}}.
+    required: true
+
+example_prompts:
+  - '{"alarm":{"alarm_id":"ALM-001","timestamp":"2026-04-30T14:22:11Z","asset":{"site":"Northern Lights","turbine":"NL-T-08","subsystem":"gearbox"},"code":"GBX-VIB-HI","description":"Gearbox vibration RMS above threshold","scada_severity":"HIGH","raw_value":7.4,"unit":"mm/s","context":{"wind_mps":11.2,"power_kw":2150}},"recent_alarms":[],"operator":{"operator_id":"OP-jsmith","authority_tier":"T2"},"loto_active":false,"technician_in_nacelle":false,"weather":{"wind_mps":11.2,"lightning_within_km":99}}'
+
+pipeline_config:
+  nodes:
+    - id: timestamp
+      tool_name: current_time
+      label: "Timestamp"
+      arguments: { timezone: "UTC" }
+      depends_on: []
+      position: { x: 80, y: 60 }
+
+    - id: validate_input
+      tool_name: code_executor
+      label: "1. Validate Alarm Envelope"
+      arguments:
+        code: |
+          import json
+          raw = context.get("message", "{}")
+          if isinstance(raw, str):
+              try: data = json.loads(raw)
+              except Exception: data = {}
+          elif isinstance(raw, dict):
+              data = raw
+          else:
+              data = {}
+
+          alarm = data.get("alarm") or {}
+          if not alarm.get("alarm_id") or not alarm.get("code"):
+              result = {
+                  "ok": False,
+                  "error": "BAD_INPUT",
+                  "message": "alarm.alarm_id and alarm.code are required",
+              }
+          else:
+              result = {
+                  "ok": True,
+                  "alarm": alarm,
+                  "recent_alarms": data.get("recent_alarms") or [],
+                  "operator": data.get("operator") or {"operator_id": "anonymous", "authority_tier": "T1"},
+                  "loto_active": bool(data.get("loto_active", False)),
+                  "technician_in_nacelle": bool(data.get("technician_in_nacelle", False)),
+                  "weather": data.get("weather") or {"wind_mps": 0, "lightning_within_km": 99},
+              }
+          print(json.dumps(result))
+      depends_on:
+        - timestamp
+      position: { x: 360, y: 60 }
+
+    - id: classify
+      tool_name: agent_step
+      label: "2. Classify alarm (severity + RC + ROI)"
+      arguments:
+        agent_slug: iot-bedrocc-alarm-classifier
+        input_message: |
+          Triage this alarm:
+          {{validate_input.alarm}}
+
+          Recent history (within prior 60s, may be empty):
+          {{validate_input.recent_alarms}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 5
+        temperature: 0.2
+      depends_on:
+        - validate_input
+      position: { x: 360, y: 220 }
+
+    - id: noise_filter
+      tool_name: agent_step
+      label: "3. Cascade noise filter"
+      arguments:
+        agent_slug: iot-bedrocc-noise-filter
+        input_message: |
+          Window of recent alarms (this alarm + recent_alarms) — decide
+          whether this is part of a cascade and what to suppress:
+          {
+            "window_seconds": 60,
+            "alarms": [
+              {{validate_input.alarm}},
+              ...{{validate_input.recent_alarms}}
+            ]
+          }
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 3
+        temperature: 0.15
+      depends_on:
+        - validate_input
+      position: { x: 100, y: 380 }
+
+    - id: reset_router
+      tool_name: code_executor
+      label: "4. Route — does the verdict want a reset?"
+      arguments:
+        code: |
+          import json
+          cls_env = context.get("classify", {}) or {}
+          resp = cls_env.get("response") if isinstance(cls_env, dict) else cls_env
+          if isinstance(resp, str):
+              try: resp = json.loads(resp)
+              except Exception: resp = {}
+          recommended = (resp or {}).get("recommended_action") or "wait_for_cascade"
+          ai_sev = (resp or {}).get("ai_severity") or "INFO"
+          # Only ask the safe-reset advisor when the classifier itself
+          # nominated a reset. Anything else short-circuits.
+          result = {
+              "advisor_required": recommended == "safe_remote_reset" and ai_sev != "CRIT",
+              "recommended_action": recommended,
+              "ai_severity": ai_sev,
+          }
+          print(json.dumps(result))
+      depends_on:
+        - classify
+      position: { x: 620, y: 380 }
+
+    - id: safe_reset
+      tool_name: agent_step
+      label: "5. Safe-reset advisor (only if reset proposed)"
+      condition:
+        source_node: reset_router
+        field: advisor_required
+        operator: eq
+        value: true
+      arguments:
+        agent_slug: iot-bedrocc-safe-reset-advisor
+        input_message: |
+          Adjudicate whether this alarm can be remotely reset:
+          {
+            "alarm": {{validate_input.alarm}},
+            "operator": {{validate_input.operator}},
+            "loto_active": {{validate_input.loto_active}},
+            "technician_in_nacelle": {{validate_input.technician_in_nacelle}},
+            "weather": {{validate_input.weather}}
+          }
+
+          Classifier's verdict for context (do not let it pressure
+          you — if a precondition fails you DENY):
+          {{classify.response}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 5
+        temperature: 0.1
+      depends_on:
+        - reset_router
+        - validate_input
+      position: { x: 620, y: 540 }
+
+    - id: final_envelope
+      tool_name: code_executor
+      label: "6. Assemble triage envelope"
+      arguments:
+        code: |
+          import json
+
+          def as_dict(x):
+              if isinstance(x, dict): return x
+              if isinstance(x, str):
+                  try: return json.loads(x)
+                  except Exception: return {"raw": x}
+              return {}
+
+          def unwrap(node_key):
+              env = as_dict(context.get(node_key))
+              return as_dict(env.get("response") if isinstance(env, dict) else env) or env
+
+          validate = as_dict(context.get("validate_input"))
+          if not validate.get("ok"):
+              result = {
+                  "status": "blocked",
+                  "error": validate.get("error"),
+                  "message": validate.get("message"),
+              }
+          else:
+              classification = unwrap("classify")
+              cascade = unwrap("noise_filter")
+              router = as_dict(context.get("reset_router"))
+              reset = unwrap("safe_reset") if router.get("advisor_required") else None
+
+              result = {
+                  "status": "ok",
+                  "timestamp": context.get("timestamp"),
+                  "alarm_id": (validate.get("alarm") or {}).get("alarm_id"),
+                  "classification": classification,
+                  "cascade": cascade,
+                  "reset_advice": reset,
+                  "recommended_action": classification.get("recommended_action"),
+                  "ai_severity": classification.get("ai_severity"),
+              }
+          print(json.dumps(result, default=str))
+      depends_on:
+        - classify
+        - noise_filter
+        - reset_router
+        - safe_reset
+      position: { x: 360, y: 720 }
+
+  edges:
+    - { source: timestamp,       target: validate_input }
+    - { source: validate_input,  target: classify }
+    - { source: validate_input,  target: noise_filter }
+    - { source: classify,        target: reset_router }
+    - { source: reset_router,    target: safe_reset }
+    - { source: validate_input,  target: safe_reset }
+    - { source: classify,        target: final_envelope }
+    - { source: noise_filter,    target: final_envelope }
+    - { source: reset_router,    target: final_envelope }
+    - { source: safe_reset,      target: final_envelope }
+
+  viewport: { x: 0, y: 0, zoom: 0.7 }

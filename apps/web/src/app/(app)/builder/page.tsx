@@ -103,6 +103,17 @@ interface AgentConfig {
   // prompts that no UI edit could ever change.
   icon?: string;
   example_prompts?: string[];
+  // Runtime + scaling parity with the seed schema (KEDA pool routing,
+  // per-agent caps). All optional — server defaults if unset.
+  runtime_pool?: 'chat' | 'default' | 'heavy-reasoning' | 'long-running';
+  min_replicas?: number;
+  max_replicas?: number;
+  concurrency_per_replica?: number;
+  rate_limit_qps?: number;
+  daily_budget_usd?: number;
+  slug?: string;
+  output_schema?: string;
+  knowledge_collection_ids?: string[];
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -335,13 +346,25 @@ export default function BuilderPage() {
           model: mc.model || DEFAULT_CONFIG.model,
           temperature: mc.temperature ?? DEFAULT_CONFIG.temperature,
           max_tokens: mc.max_tokens ?? DEFAULT_CONFIG.max_tokens,
-          max_iterations: 10,
-          timeout: 120,
+          max_iterations: mc.max_iterations ?? 10,
+          timeout: mc.timeout ?? 120,
           mcp_extensions: loadedMcpExtensions,
           input_variables: mc.input_variables || [],
           tool_config: mc.tool_config || {},
           icon: a.icon_url || mc.icon || '',
           example_prompts: mc.example_prompts || [],
+          // Runtime + scaling that used to be hidden — now editable.
+          runtime_pool: mc.runtime_pool || a.runtime_pool || undefined,
+          min_replicas: mc.min_replicas ?? a.min_replicas ?? undefined,
+          max_replicas: mc.max_replicas ?? a.max_replicas ?? undefined,
+          concurrency_per_replica: mc.concurrency_per_replica ?? a.concurrency_per_replica ?? undefined,
+          rate_limit_qps: mc.rate_limit_qps ?? undefined,
+          daily_budget_usd: mc.daily_budget_usd ?? undefined,
+          slug: a.slug || undefined,
+          output_schema: typeof mc.output_schema === 'string'
+            ? mc.output_schema
+            : mc.output_schema ? JSON.stringify(mc.output_schema, null, 2) : '',
+          knowledge_collection_ids: a.knowledge_collection_ids || mc.knowledge_collection_ids || [],
         };
         setConfig(loaded);
         setMcpExtensions(loadedMcpExtensions);
@@ -641,6 +664,29 @@ export default function BuilderPage() {
       }
     }
 
+    // Runtime + scaling overrides — flow through the model_config bag
+    // (the seed-schema marks these as top-level YAML keys but at the
+    // wire level the API accepts them in model_config via extra='allow').
+    if (config.runtime_pool) modelConfig.runtime_pool = config.runtime_pool;
+    if (Number.isFinite(config.min_replicas as number)) modelConfig.min_replicas = config.min_replicas;
+    if (Number.isFinite(config.max_replicas as number)) modelConfig.max_replicas = config.max_replicas;
+    if (Number.isFinite(config.concurrency_per_replica as number)) modelConfig.concurrency_per_replica = config.concurrency_per_replica;
+    if (Number.isFinite(config.rate_limit_qps as number)) modelConfig.rate_limit_qps = config.rate_limit_qps;
+    if (Number.isFinite(config.daily_budget_usd as number)) modelConfig.daily_budget_usd = config.daily_budget_usd;
+    if (config.timeout) modelConfig.timeout = config.timeout;
+    if (config.max_iterations) modelConfig.max_iterations = config.max_iterations;
+
+    // Output schema — store as parsed JSON if valid, otherwise the raw
+    // string so the user doesn't lose work. Post-process layer reads
+    // either form.
+    if (config.output_schema && config.output_schema.trim()) {
+      try {
+        modelConfig.output_schema = JSON.parse(config.output_schema);
+      } catch {
+        modelConfig.output_schema = config.output_schema;
+      }
+    }
+
     const payload: Record<string, unknown> = {
       name: config.name,
       description: config.description,
@@ -648,6 +694,10 @@ export default function BuilderPage() {
       model_config: modelConfig,
       category: config.category || null,
     };
+    // Optional slug pin — server still de-dupes against existing rows.
+    if (config.slug && config.slug.trim() && !agentId) {
+      payload.slug = config.slug.trim();
+    }
     // The icon lives as a top-level column (icon_url) on the agents
     // table, not inside model_config — the API accepts either name.
     if (config.icon && config.icon.trim()) {
@@ -655,6 +705,7 @@ export default function BuilderPage() {
     }
 
     try {
+      let resolvedAgentId: string | null = agentId;
       if (agentId) {
         await fetch(`${API_URL}/api/agents/${agentId}`, {
           method: 'PUT',
@@ -669,10 +720,49 @@ export default function BuilderPage() {
         });
         const json = await res.json();
         if (json.data?.id) {
+          resolvedAgentId = json.data.id;
           setAgentId(json.data.id);
           router.replace(`/builder?agent=${json.data.id}`);
         }
       }
+
+      // Reconcile knowledge-collection grants. Compare the user's
+      // current selection against what the server has and post-or-
+      // delete the diff. Best-effort — failures don't block save.
+      if (resolvedAgentId) {
+        const want = new Set(config.knowledge_collection_ids || []);
+        try {
+          const listRes = await fetch(`${API_URL}/api/knowledge-bases?limit=200`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const listJson = listRes.ok ? await listRes.json() : { data: [] };
+          const all: { id: string }[] = Array.isArray(listJson.data) ? listJson.data : (listJson.data?.collections || []);
+          const grantOps = all.map(async (c) => {
+            const grantsRes = await fetch(`${API_URL}/api/knowledge-collections/${c.id}/agents`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!grantsRes.ok) return;
+            const grantsJson = await grantsRes.json();
+            const granted = (grantsJson.data || []).some((g: { agent_id: string }) => g.agent_id === resolvedAgentId);
+            if (want.has(c.id) && !granted) {
+              await fetch(`${API_URL}/api/knowledge-collections/${c.id}/agents`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ agent_id: resolvedAgentId, permission: 'READ' }),
+              });
+            } else if (!want.has(c.id) && granted) {
+              await fetch(`${API_URL}/api/knowledge-collections/${c.id}/agents/${resolvedAgentId}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+              });
+            }
+          });
+          await Promise.allSettled(grantOps);
+        } catch {
+          // grants are best-effort; surfacing this to the UI is left for a follow-up
+        }
+      }
+
       setDirty(false);
     } catch {
     } finally {

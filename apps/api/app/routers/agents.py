@@ -662,7 +662,10 @@ async def create_agent(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    slug = _slugify(body.name)
+    # Honour an explicit slug if the caller asked for one, otherwise
+    # auto-derive from name. Collisions still get a 6-char suffix so a
+    # malicious / racing caller can't squat on someone else's slug.
+    slug = body.slug or _slugify(body.name)
 
     existing = await db.execute(
         select(Agent).where(Agent.slug == slug, Agent.tenant_id == user.tenant_id)

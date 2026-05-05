@@ -19,13 +19,19 @@ export interface PipelineRunResult {
   duration_ms?: number;
 }
 
-export type PipelineKey = 'pump' | 'cold-chain';
+export type PipelineKey = 'pump' | 'cold-chain' | 'valueedge' | 'fieldedge' | 'bedrocc';
 
 const SLUG_TO_KEY: Record<string, PipelineKey> = {
   'pump': 'pump',
   'iot-pump-pipeline': 'pump',
   'cold-chain': 'cold-chain',
   'iot-coldchain-pipeline': 'cold-chain',
+  'valueedge': 'valueedge',
+  'iot-valueedge-pipeline': 'valueedge',
+  'fieldedge': 'fieldedge',
+  'iot-fieldedge-pipeline': 'fieldedge',
+  'bedrocc': 'bedrocc',
+  'iot-bedrocc-pipeline': 'bedrocc',
 };
 
 export async function findPipelineBySlug(slug: string): Promise<PipelineKey | null> {

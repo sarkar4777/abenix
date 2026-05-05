@@ -67,6 +67,37 @@ PIPELINES: dict[str, dict[str, Any]] = {
         ),
         "wait_seconds": 240,
     },
+    "valueedge": {
+        "slug": "iot-valueedge-pipeline",
+        "label": "ValueEdge — Offshore-Wind FEED Designer",
+        "description": (
+            "From a one-line offshore-wind site brief, generates 3 distinct design "
+            "scenarios, recomputes CapEx + CO2 + IRR + LCOE per scenario, ranks "
+            "value-engineering opportunities, and drafts compliance RFIs against "
+            "IEC 61400-3 / NEC 690 / IEEE 1547 / RWE-EPC."
+        ),
+        "wait_seconds": 240,
+    },
+    "bedrocc": {
+        "slug": "iot-bedrocc-pipeline",
+        "label": "BedROCC Operations Alarm Triage",
+        "description": (
+            "Operations control-room triage for a single SCADA alarm — runs the "
+            "alarm classifier, cascade noise filter, and safe-reset advisor and "
+            "returns a triage envelope the UI renders next to the alarm row."
+        ),
+        "wait_seconds": 120,
+    },
+    "fieldedge": {
+        "slug": "iot-fieldedge-pipeline",
+        "label": "FieldEdge Wind-Turbine Maintenance Copilot",
+        "description": (
+            "Voice/text symptom from a technician on the nacelle -> fleet-wide "
+            "history search -> OEM-manual-grounded repair procedure with safety "
+            "gates, parts, cited manual sections, and confidence."
+        ),
+        "wait_seconds": 180,
+    },
 }
 
 

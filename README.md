@@ -279,7 +279,10 @@ open http://localhost:3005/fnol
 **What it is.** A standalone showcase for two adjacent industrial domains. Web on `:3003`, API on `:8003`. Two showcase tabs:
 
 - **Pump tab** — deploys two Code Assets (DSP feature extractor + RUL regressor), then streams 10 vibration windows through them, severity classifier triages each window, final output is a work-order draft for any window flagged `high`.
-- **Cold Chain tab** — deploys one Code Asset (excursion corrector), streams 20 SFO→LAX waypoints, runs an excursion adjudicator against pharma SOP KB; final output is a partial-loss claim draft.
+- **Cold Chain tab** — deploys one Code Asset (excursion corrector), streams 20 SFO→LAX waypoints, runs an excursion adjudicator against pharma SOP KB, final output is a partial-loss claim draft.
+- **ValueEdge tab** — RWE-inspired engineering & EPC copilot. Pick a site template (Dogger Bank, German North Sea, US East Coast) or enter capacity/water-depth/distance-to-shore/soil/wind-class/grid voltage. The 9-node DAG validates the brief, configures 3 ranked design scenarios via `iot-valueedge-scenario-configurator`, recomputes deterministic CapEx + LCOE, runs `iot-valueedge-ve-optimizer` and `iot-valueedge-compliance-checker` in parallel, then conditionally invokes `iot-valueedge-rfi-drafter` for any blocker / major findings. Knowledge base: `rwe-valueedge-design-standards` (IEC 61400-3 / NEC 690 / IEEE 1547 / RWE EPC excerpts).
+- **FieldEdge tab** — wind-farm maintenance copilot + scheduler. Pick a turbine, dictate or type the issue, get back an OEM-cited repair procedure with similar past WOs and a safety gate. Voice-close-out converts free text into a structured WO; the OR-tools scheduler (with greedy fallback) re-optimises the 7-day technician matrix on demand. Includes a synthetic-trained Random Forest failure classifier (98.33% test accuracy) at `industrial-iot/scaffolding/fieldedge/ml-models/`.
+- **BedROCC tab** — operations control-room alarm triage. A 30-alarm replay streams into the queue; the AI overrides SCADA severity, surfaces the cascade banner when correlated alarms fire, and the safe-reset advisor enforces a 4-stage gate (hard gates → authority matrix → context preconditions → minimum-privilege command) before recommending a remote reset. Two-step modal confirmation for any reset; "Generate EOD shift report" composes a Markdown-formatted handover.
 
 **Business problem solved.** Two of the highest-frequency industrial use cases (rotating-equipment maintenance, pharma cold-chain excursion handling) need ML inference + LLM reasoning + structured downstream artefacts (work orders, claim drafts) in the same flow. Industrial-IoT shows the Abenix [Code Runner](#code-runner--bring-your-own-repo) primitive carrying the ML weight while agents handle reasoning.
 
@@ -299,7 +302,9 @@ flowchart LR
     class WO agent;
 ```
 
-**Tools + KB.** `code_asset` (Python sandboxed jobs), `kb_search` against `industrial-iot-knowledge` ([`seeds/kb/industrial-iot-knowledge.yaml`](packages/db/seeds/kb/industrial-iot-knowledge.yaml)) — SOPs, FAA AC 120-78, GDP guidelines.
+**Tools + KB.** `code_asset` (Python sandboxed jobs), `kb_search` against `industrial-iot-knowledge` ([`seeds/kb/industrial-iot-knowledge.yaml`](packages/db/seeds/kb/industrial-iot-knowledge.yaml)) — SOPs, FAA AC 120-78, GDP guidelines, plus three new RWE-aligned collections: `rwe-valueedge-design-standards`, `rwe-fieldedge-oem-manuals`, `rwe-bedrocc-sop-procedures`. Each tab renders its own execution DAG (`<PipelineDagViz />`) so end users can inspect every node + the routing conditions live.
+
+**Help section.** The Architecture tab inside the Industrial-IoT app doubles as the in-product UAT guide — every scenario card lists the click-by-click steps, the seeded pipeline slug, and the linked KB collection. Bring-your-own assets live in [`industrial-iot/scaffolding/`](industrial-iot/scaffolding/) (per-app images with source + license, sample data, Python code-assets, ML models).
 
 **Try it now.**
 

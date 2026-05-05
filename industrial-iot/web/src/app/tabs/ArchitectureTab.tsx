@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Cpu, Database, GitBranch, HardDrive, Server } from 'lucide-react';
+import { Box, Cpu, Database, GitBranch, HardDrive, Server, Wind, Wrench, ShieldAlert, Activity, Thermometer, BookOpen } from 'lucide-react';
 
 // Abenix's main UI lives on a different origin in cluster (e.g.
 // http://20.72.73.141.nip.io). Falling back to localhost:3000 keeps dev
@@ -12,13 +12,82 @@ export default function ArchitectureTab() {
   return (
     <div className="space-y-6">
       <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6">
-        <h2 className="text-lg font-semibold text-white mb-2">How the Industrial IoT showcase fits together</h2>
+        <h2 className="text-lg font-semibold text-white mb-2">Industrial-IoT — Help &amp; UAT Guide</h2>
         <p className="text-sm text-slate-400">
-          Both scenarios ride the exact same production chassis — the only
-          difference is which Go program gets uploaded, which pipeline gets
-          called, and what the downstream LLM is reasoning about. Nothing in
-          the request path is scenario-specific.
+          Five end-to-end industrial scenarios all riding the same production chassis — the only
+          difference is which sandboxed code gets uploaded, which pipeline gets called, and what
+          the LLM is reasoning about. This page walks the operator through every tab + how to
+          run a UAT pass against each.
         </p>
+      </div>
+
+      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6">
+        <div className="flex items-center gap-2 mb-3">
+          <BookOpen className="w-4 h-4 text-cyan-400" />
+          <h3 className="text-white font-semibold text-sm">Scenario tour</h3>
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          <ScenarioCard
+            icon={Activity}
+            name="Pump Vibration"
+            tagline="Predictive maintenance on rotating machinery"
+            steps={[
+              'Click "Deploy DSP" — uploads the Go FFT analyser to a k8s sandbox.',
+              'Click "Deploy RUL" — uploads the Python remaining-useful-life regressor.',
+              'Click "Stream 10 windows" — synthetic vibration data fans through the pipeline.',
+              'Inspect each window\'s severity (OK / WATCH / WARN / CRITICAL) + root cause.',
+            ]}
+            pipeline="iot-pump-pipeline"
+          />
+          <ScenarioCard
+            icon={Thermometer}
+            name="Cold Chain"
+            tagline="Reefer-container FSMA excursion monitoring"
+            steps={[
+              'Click "Deploy excursion corrector" — Python time-series patcher.',
+              'Click "Stream 20 waypoints" — synthetic SFO→LAX run with 2 excursions.',
+              'Watch the adjudicator agent classify partial-loss vs total-loss.',
+              'Final output is a draft FSMA claim with regulator-ready narrative.',
+            ]}
+            pipeline="iot-coldchain-pipeline"
+          />
+          <ScenarioCard
+            icon={Wind}
+            name="ValueEdge"
+            tagline="Engineering & EPC copilot — site brief → 3 ranked designs"
+            steps={[
+              'Pick a site template (Dogger Bank / North Sea / US East Coast) or fill the form.',
+              'Click "Generate scenarios" — pipeline ranks 3 designs against IEC 61400-3, NEC 690, IEEE 1547.',
+              'Drill into a card to see VE opportunities (CapEx vs CO₂ vs risk) + compliance findings.',
+              'Open any blocker finding to see its pre-drafted RFI ready for the EPC.',
+            ]}
+            pipeline="iot-valueedge-pipeline"
+          />
+          <ScenarioCard
+            icon={Wrench}
+            name="FieldEdge"
+            tagline="Wind-farm maintenance copilot + scheduler"
+            steps={[
+              'Pick a turbine (TURB-01 through TURB-12) or scan the QR mock.',
+              'Type or dictate the issue ("blade leading-edge erosion") — hit "Get Repair Procedure".',
+              'Read the cited OEM manual sections, similar past WOs + safety gate.',
+              'Use the "Voice close-out" panel to convert the WO into structured fields, then re-optimise the schedule.',
+            ]}
+            pipeline="iot-fieldedge-pipeline"
+          />
+          <ScenarioCard
+            icon={ShieldAlert}
+            name="BedROCC"
+            tagline="Operations control-room alarm triage"
+            steps={[
+              'Watch alarms stream into the queue (synthetic 30-alarm replay).',
+              'Click any alarm to triage — see severity override, root-cause hypothesis, ROI estimate.',
+              'When a cascade fires, the banner suppresses correlated alarms while preserving safety codes.',
+              'Approve a safe remote reset via the two-step modal, or Generate the EOD shift report.',
+            ]}
+            pipeline="iot-bedrocc-pipeline"
+          />
+        </div>
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
@@ -129,6 +198,30 @@ export default function ArchitectureTab() {
           </li>
         </ul>
       </div>
+    </div>
+  );
+}
+
+function ScenarioCard({
+  icon: Icon, name, tagline, steps, pipeline,
+}: {
+  icon: typeof Box;
+  name: string;
+  tagline: string;
+  steps: string[];
+  pipeline: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <Icon className="w-4 h-4 text-cyan-400" />
+        <h4 className="text-white font-semibold text-sm">{name}</h4>
+      </div>
+      <p className="text-xs text-slate-400 mb-3">{tagline}</p>
+      <ol className="text-[12px] text-slate-300 space-y-1 list-decimal list-outside pl-5">
+        {steps.map((s, i) => <li key={i}>{s}</li>)}
+      </ol>
+      <p className="text-[10px] text-slate-500 mt-3 font-mono">pipeline: {pipeline}</p>
     </div>
   );
 }

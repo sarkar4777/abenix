@@ -1,0 +1,375 @@
+name: "IoT ValueEdge Design Pipeline"
+slug: iot-valueedge-pipeline
+description: >-
+  Industrial-IoT pipeline for offshore-wind FEED scenario
+  generation. Takes a one-line site brief and produces three
+  fully-specified design scenarios, a CapEx + CO2 + IRR + LCOE
+  recompute via the valueedge cost-calculator code asset, a
+  Pareto-ranked value-engineering opportunity list, a compliance
+  review against IEC 61400-3 / NEC 690 / IEEE 1547 / RWE-EPC, and
+  a batch of formal RFIs drafted from the BLOCKER/MAJOR findings.
+
+  The pipeline does NOT require any uploaded code asset to run —
+  if `cost_asset_id` is not in context the cost-recompute step
+  short-circuits and the agent estimates from the configurator's
+  rule-of-thumb numbers.
+agent_type: oob
+category: engineering
+icon: Wind
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  Industrial IoT ValueEdge offshore-wind FEED pipeline.
+  Orchestrates 4 LLM agents (configure → optimize → check →
+  draft RFIs) with an optional Python cost-recompute step in
+  between. Output is one report block consumed by the
+  /industrial-iot ValueEdge tab.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.3
+  max_iterations: 24
+  max_tokens: 6000
+  tools:
+    - code_asset
+    - code_executor
+    - agent_step
+    - database_query
+    - current_time
+    - knowledge_search
+
+input_variables:
+  - name: message
+    type: string
+    description: >-
+      JSON site brief with capacity_mw, location, water_depth_m,
+      distance_to_shore_km, soil_type, wind_class, grid_voltage_kv.
+    required: true
+  - name: cost_asset_id
+    type: string
+    description: "Optional UUID of the uploaded valueedge-cost-calculator asset."
+    required: false
+  - name: site_context
+    type: object
+    description: "Optional metadata used in the report."
+    required: false
+
+example_prompts:
+  - '{"capacity_mw":200,"location":"Dogger Bank, UK","water_depth_m":28,"distance_to_shore_km":130,"soil_type":"sand","wind_class":"I","grid_voltage_kv":275}'
+
+pipeline_config:
+  nodes:
+    - id: timestamp
+      tool_name: current_time
+      label: "Timestamp"
+      arguments:
+        timezone: "UTC"
+      depends_on: []
+      position: { x: 80, y: 60 }
+
+    - id: validate_input
+      tool_name: code_executor
+      label: "1. Validate Site Brief"
+      arguments:
+        code: |
+          import json
+          raw = context.get("message", "{}")
+          if isinstance(raw, str):
+              try: data = json.loads(raw)
+              except Exception: data = {}
+          elif isinstance(raw, dict):
+              data = raw
+          else:
+              data = {}
+          required = ["capacity_mw", "location", "water_depth_m"]
+          missing = [k for k in required if not data.get(k)]
+          if missing:
+              result = {
+                  "ok": False,
+                  "error": "BAD_INPUT",
+                  "message": f"site brief missing fields: {missing}",
+              }
+          else:
+              # fill in sensible defaults so downstream agents never see nulls
+              data.setdefault("distance_to_shore_km", 80)
+              data.setdefault("soil_type", "mixed")
+              data.setdefault("wind_class", "I")
+              data.setdefault("grid_voltage_kv", 220)
+              result = {"ok": True, "site": data}
+          print(json.dumps(result))
+      depends_on:
+        - timestamp
+      position: { x: 360, y: 60 }
+
+    - id: configure_scenarios
+      tool_name: agent_step
+      label: "2. Generate 3 Design Scenarios"
+      arguments:
+        system_prompt: |
+          You are an offshore-wind FEED scenario configurator.
+          Emit EXACTLY 3 distinct scenarios (cost-lean,
+          yield-max, risk-balanced). Match the schema documented
+          on the iot-valueedge-scenario-configurator agent.
+          Return JSON only, no markdown.
+        input_message: "Configure scenarios for: {{validate_input.site}}"
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 6
+        temperature: 0.4
+      depends_on:
+        - validate_input
+      position: { x: 360, y: 220 }
+
+    - id: cost_recompute
+      tool_name: code_executor
+      label: "3. Recompute CapEx / CO2 / IRR / LCOE"
+      arguments:
+        code: |
+          # Inline cost recompute. We do NOT depend on a code asset
+          # here because the showcase must work even before the
+          # tenant uploads valueedge_cost_calculator. Coefficients
+          # mirror the asset under industrial-iot/scaffolding/
+          # valueedge/code-assets/cost_calculator/main.py so the
+          # numbers stay consistent across UI and pipeline.
+          import json, math
+
+          cfg = context.get("configure_scenarios", {}) or {}
+          resp = cfg.get("response") if isinstance(cfg, dict) else cfg
+          if isinstance(resp, str):
+              try: resp = json.loads(resp)
+              except Exception: resp = {}
+          scenarios = (resp or {}).get("scenarios") or []
+
+          # Per-MW coefficients (USD/MW or kt/MW) by foundation type.
+          BASE = {
+              "monopile":         {"capex": 2.85, "co2": 1.55, "om": 0.045},
+              "jacket":           {"capex": 3.40, "co2": 1.85, "om": 0.052},
+              "floating-semisub": {"capex": 4.20, "co2": 2.30, "om": 0.063},
+              "floating-spar":    {"capex": 4.55, "co2": 2.45, "om": 0.066},
+          }
+
+          recomputed = []
+          for s in scenarios:
+              cap_mw = float(s.get("turbine_count", 0)) * float(s.get("turbine_rating_mw", 0))
+              if cap_mw <= 0:
+                  continue
+              base = BASE.get(s.get("foundation_type"), BASE["jacket"])
+              # depth + distance multipliers — distance hurts cabling,
+              # depth hurts foundation steel weight quadratically.
+              site = (context.get("validate_input") or {}).get("site") or {}
+              d = float(site.get("water_depth_m") or 30)
+              dist = float(site.get("distance_to_shore_km") or 60)
+              depth_mult = 1.0 + max(0.0, (d - 25) / 100.0) ** 1.5
+              dist_mult = 1.0 + max(0.0, (dist - 50) / 150.0)
+              capex = round(cap_mw * base["capex"] * depth_mult * dist_mult, 1)
+              co2_kt = round(cap_mw * base["co2"] * (1.0 + (d - 25) / 200.0), 1)
+              # Crude IRR: revenue ~ 4500 full-load-hours × LCOE
+              # discount ~ 8%; hold capex+OM stable so deltas are real.
+              annual_rev = cap_mw * 4500 * 75 / 1e6
+              annual_om = capex * base["om"]
+              # 25y NPV → IRR via shortcut: solve for r where NPV=0
+              # using Newton on closed-form annuity. Good enough for
+              # showcase; avoids importing numpy.
+              def irr(cap, net):
+                  r = 0.08
+                  for _ in range(50):
+                      f = -cap + sum(net / (1 + r) ** t for t in range(1, 26))
+                      df = sum(-t * net / (1 + r) ** (t + 1) for t in range(1, 26))
+                      if abs(df) < 1e-9: break
+                      r -= f / df
+                      if r < -0.5 or r > 0.5: r = 0.08; break
+                  return r
+              rate = irr(capex, annual_rev - annual_om) * 100
+              lcoe = (capex / 25 + annual_om) / max(cap_mw * 4500 / 1000, 1) * 1000
+              recomputed.append({
+                  "id": s.get("id"),
+                  "name": s.get("name"),
+                  "capacity_mw": cap_mw,
+                  "capex_musd": capex,
+                  "co2_kt": co2_kt,
+                  "irr_pct": round(rate, 2),
+                  "lcoe_usd_mwh": round(lcoe, 1),
+                  "depth_multiplier": round(depth_mult, 3),
+                  "distance_multiplier": round(dist_mult, 3),
+              })
+
+          result = {
+              "ok": True,
+              "method": "inline_rule_of_thumb",
+              "scenarios": recomputed,
+          }
+          print(json.dumps(result))
+      depends_on:
+        - configure_scenarios
+      position: { x: 360, y: 380 }
+
+    - id: ve_optimize
+      tool_name: agent_step
+      label: "4. Rank VE Opportunities"
+      arguments:
+        system_prompt: |
+          You are a value-engineering analyst for offshore-wind
+          EPC. Surface 5–8 ranked value-engineering opportunities
+          across the supplied scenarios. Match the schema on the
+          iot-valueedge-ve-optimizer agent. Return JSON only.
+        input_message: |
+          Scenarios (configurator):
+          {{configure_scenarios.response}}
+
+          Recomputed costs:
+          {{cost_recompute.__all__}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 6
+        temperature: 0.3
+      depends_on:
+        - cost_recompute
+      position: { x: 100, y: 540 }
+
+    - id: compliance_check
+      tool_name: agent_step
+      label: "5. Compliance Review (IEC / NEC / IEEE)"
+      arguments:
+        system_prompt: |
+          You are a compliance reviewer for offshore-wind FEED.
+          Check each scenario against IEC 61400-3, NEC 690, IEEE
+          1547, and RWE-EPC standards. Return findings JSON
+          matching the iot-valueedge-compliance-checker schema.
+        input_message: |
+          Review these scenarios:
+          {{configure_scenarios.response}}
+
+          Site context: {{validate_input.site}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 6
+        temperature: 0.15
+      depends_on:
+        - configure_scenarios
+      position: { x: 620, y: 540 }
+
+    - id: rfi_router
+      tool_name: code_executor
+      label: "6. Filter findings → RFI batch"
+      arguments:
+        code: |
+          import json
+          comp = context.get("compliance_check", {}) or {}
+          resp = comp.get("response") if isinstance(comp, dict) else comp
+          if isinstance(resp, str):
+              try: resp = json.loads(resp)
+              except Exception: resp = {}
+          findings = (resp or {}).get("findings") or []
+          rfi_findings = [f for f in findings if f.get("rfi_required")]
+          result = {
+              "needs_rfi": bool(rfi_findings),
+              "rfi_findings": rfi_findings,
+              "count": len(rfi_findings),
+          }
+          print(json.dumps(result))
+      depends_on:
+        - compliance_check
+      position: { x: 620, y: 700 }
+
+    - id: rfi_drafter
+      tool_name: agent_step
+      label: "7. Draft RFIs (if needed)"
+      condition:
+        source_node: rfi_router
+        field: needs_rfi
+        operator: eq
+        value: true
+      arguments:
+        system_prompt: |
+          You are an EPC contract administrator drafting formal
+          RFIs. Match the iot-valueedge-rfi-drafter schema.
+          Return JSON only.
+        input_message: |
+          Draft RFIs from these findings:
+          {{rfi_router.rfi_findings}}
+
+          Current time: {{timestamp}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 5
+        temperature: 0.25
+      depends_on:
+        - rfi_router
+      position: { x: 620, y: 860 }
+
+    - id: final_report
+      tool_name: code_executor
+      label: "8. Assemble Final Report"
+      arguments:
+        code: |
+          import json
+
+          def as_dict(x):
+              if isinstance(x, dict): return x
+              if isinstance(x, str):
+                  try: return json.loads(x)
+                  except Exception: return {"raw": x}
+              return {}
+
+          def unwrap(node):
+              n = as_dict(node)
+              if "response" in n:
+                  return as_dict(n["response"])
+              return n
+
+          validate = as_dict(context.get("validate_input"))
+          if not validate.get("ok"):
+              result = {
+                  "status": "blocked",
+                  "error": validate.get("error"),
+                  "message": validate.get("message"),
+              }
+          else:
+              cfg = unwrap(context.get("configure_scenarios"))
+              cost = as_dict(context.get("cost_recompute"))
+              ve = unwrap(context.get("ve_optimize"))
+              comp = unwrap(context.get("compliance_check"))
+              router = as_dict(context.get("rfi_router"))
+              rfi_env = context.get("rfi_drafter")
+              rfi = unwrap(rfi_env) if rfi_env else {"rfis": [], "summary": {"rfi_count": 0}}
+
+              result = {
+                  "status": "ok",
+                  "timestamp": context.get("timestamp"),
+                  "site": validate.get("site"),
+                  "site_summary": cfg.get("site_summary"),
+                  "scenarios": cfg.get("scenarios", []),
+                  "cost_recompute": cost.get("scenarios", []),
+                  "ve_opportunities": ve.get("opportunities", []),
+                  "ve_portfolio_summary": ve.get("portfolio_summary"),
+                  "compliance_findings": comp.get("findings", []),
+                  "compliance_summary": comp.get("summary"),
+                  "rfis": rfi.get("rfis", []),
+                  "rfi_summary": rfi.get("summary"),
+              }
+          print(json.dumps(result, default=str))
+      depends_on:
+        - cost_recompute
+        - ve_optimize
+        - compliance_check
+        - rfi_router
+        - rfi_drafter
+      position: { x: 360, y: 1020 }
+
+  edges:
+    - { source: timestamp,            target: validate_input }
+    - { source: validate_input,       target: configure_scenarios }
+    - { source: configure_scenarios,  target: cost_recompute }
+    - { source: cost_recompute,       target: ve_optimize }
+    - { source: configure_scenarios,  target: compliance_check }
+    - { source: compliance_check,     target: rfi_router }
+    - { source: rfi_router,           target: rfi_drafter }
+    - { source: cost_recompute,       target: final_report }
+    - { source: ve_optimize,          target: final_report }
+    - { source: compliance_check,     target: final_report }
+    - { source: rfi_router,           target: final_report }
+    - { source: rfi_drafter,          target: final_report }
+
+  viewport: { x: 0, y: 0, zoom: 0.7 }

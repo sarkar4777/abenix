@@ -1,0 +1,294 @@
+{
+  "work_orders": [
+    {
+      "wo_id": "WO-2024-0712", "turbine_id": "TURB-04",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2024-07-12", "closed": "2024-07-13",
+      "issue": "Blade LE erosion, outer 4m, LP side",
+      "parts": ["VBI-LE-2M x3", "VBI-EPOXY-FAIR"],
+      "hours": 6.5, "technician": "T-01",
+      "outcome": "resolved",
+      "service_summary": "Surface prep + epoxy fill + LE tape per V120 §5.4."
+    },
+    {
+      "wo_id": "WO-2024-0731", "turbine_id": "TURB-02",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2024-08-12", "closed": "2024-08-14",
+      "issue": "Gearbox oil change scheduled, 18000h interval",
+      "parts": ["VBI-OIL-SHC320 x240L", "VBI-FC-03"],
+      "hours": 6.0, "technician": "T-03",
+      "outcome": "resolved",
+      "service_summary": "Drain, flush, refill. Lab confirmed 17/15/12 cleanliness."
+    },
+    {
+      "wo_id": "WO-2024-0817", "turbine_id": "TURB-07",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2024-09-02", "closed": "2024-09-02",
+      "issue": "Lightning receptor inspection post strike event",
+      "parts": [],
+      "hours": 3.0, "technician": "T-02",
+      "outcome": "resolved",
+      "service_summary": "Visual + megger; receptor intact, 0.04 ohm."
+    },
+    {
+      "wo_id": "WO-2024-0903", "turbine_id": "TURB-09",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2024-10-04", "closed": "2024-10-04",
+      "issue": "Yaw motor 4 overcurrent fault code 4711 recurring",
+      "parts": ["SGY-MOT-04", "SGY-BRK-04", "SGY-SHIM-KIT"],
+      "hours": 9.0, "technician": "T-02",
+      "outcome": "resolved",
+      "service_summary": "Replaced motor + brake; backlash 0.12 mm; calibration sweep clean."
+    },
+    {
+      "wo_id": "WO-2024-1011", "turbine_id": "TURB-01",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2024-11-22", "closed": "2024-11-23",
+      "issue": "Blade LE erosion outer 5m HP side",
+      "parts": ["VBI-LE-2M x4", "VBI-EPOXY-FAIR x2"],
+      "hours": 7.5, "technician": "T-06",
+      "outcome": "resolved",
+      "service_summary": "Larger area than expected; required two epoxy passes."
+    },
+    {
+      "wo_id": "WO-2024-1102", "turbine_id": "TURB-12",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2024-12-15", "closed": "2024-12-17",
+      "issue": "Generator winding temp 138C trip; insulation test 4.2 MOhm",
+      "parts": [],
+      "hours": 14.0, "technician": "T-05",
+      "outcome": "escalated",
+      "service_summary": "Insulation degraded; generator pulled for shop rewind."
+    },
+    {
+      "wo_id": "WO-2025-0102", "turbine_id": "TURB-05",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2025-01-18", "closed": "2025-01-19",
+      "issue": "Pitch cylinder seal leak blade 2",
+      "parts": ["VBI-PITCH-SEAL-V120"],
+      "hours": 5.0, "technician": "T-02",
+      "outcome": "resolved",
+      "service_summary": "Replaced seal kit; bled hydraulics; recalibrated."
+    },
+    {
+      "wo_id": "WO-2025-0204", "turbine_id": "TURB-08",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2025-02-08", "closed": "2025-02-08",
+      "issue": "Anemometer #2 frozen output",
+      "parts": ["SGY-ANEMO-04"],
+      "hours": 2.5, "technician": "T-02",
+      "outcome": "resolved",
+      "service_summary": "Replaced anemometer; verified SCADA readings."
+    },
+    {
+      "wo_id": "WO-2025-0226", "turbine_id": "TURB-11",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2025-03-04", "closed": "2025-03-05",
+      "issue": "Blade LE erosion outer 8m LP side",
+      "parts": ["VBI-LE-2M x5", "VBI-EPOXY-FAIR x2"],
+      "hours": 9.0, "technician": "T-01",
+      "outcome": "resolved",
+      "service_summary": "Largest LE repair on the SG fleet to date."
+    },
+    {
+      "wo_id": "WO-2025-0314", "turbine_id": "TURB-06",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2025-03-19", "closed": "2025-03-19",
+      "issue": "Tower bolt torque verification 24-month interval",
+      "parts": [],
+      "hours": 4.0, "technician": "T-04",
+      "outcome": "resolved",
+      "service_summary": "All tower flange bolts within 5% of spec; 3 marker dots refreshed."
+    },
+    {
+      "wo_id": "WO-2025-0408", "turbine_id": "TURB-03",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2025-04-15", "closed": "2025-04-16",
+      "issue": "Yaw drive grinding noise; SCADA 4711 fault 2x in 6h",
+      "parts": ["SGY-MOT-04"],
+      "hours": 9.5, "technician": "T-02",
+      "outcome": "resolved",
+      "service_summary": "Replaced motor #3; minor pitting on drive ring teeth, monitored."
+    },
+    {
+      "wo_id": "WO-2025-0517", "turbine_id": "TURB-04",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2025-05-23", "closed": "2025-05-23",
+      "issue": "Gearbox oil sample iron 62 ppm — early warning",
+      "parts": [],
+      "hours": 1.5, "technician": "T-03",
+      "outcome": "monitoring",
+      "service_summary": "Pulled sample; lab confirmed iron rising; scheduled change-out."
+    },
+    {
+      "wo_id": "WO-2025-0601", "turbine_id": "TURB-04",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2025-06-08", "closed": "2025-06-09",
+      "issue": "Gearbox oil change early due to iron trending",
+      "parts": ["VBI-OIL-SHC320 x240L"],
+      "hours": 6.5, "technician": "T-03",
+      "outcome": "resolved",
+      "service_summary": "Magnetic plug had small chip; sent to drivetrain for analysis."
+    },
+    {
+      "wo_id": "WO-2025-0712", "turbine_id": "TURB-10",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2025-07-19", "closed": "2025-07-19",
+      "issue": "Nacelle interior sound dampening loose panel",
+      "parts": ["SGY-PANEL-CLIP-K"],
+      "hours": 2.0, "technician": "T-06",
+      "outcome": "resolved",
+      "service_summary": "Re-secured panel; replaced 4 plastic clips."
+    },
+    {
+      "wo_id": "WO-2025-0805", "turbine_id": "TURB-11",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2025-08-15", "closed": "2025-08-16",
+      "issue": "Gearbox oil 18000h scheduled change",
+      "parts": ["VBI-OIL-SHC320 x240L"],
+      "hours": 6.0, "technician": "T-03",
+      "outcome": "resolved",
+      "service_summary": "Routine change; cleanliness 17/15/12 confirmed."
+    },
+    {
+      "wo_id": "WO-2025-0904", "turbine_id": "TURB-07",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2025-09-30", "closed": "2025-09-30",
+      "issue": "6-month routine inspection",
+      "parts": [],
+      "hours": 5.0, "technician": "T-06",
+      "outcome": "resolved",
+      "service_summary": "Drone scan flagged minor LE wear outer 4m, deferred for repair."
+    },
+    {
+      "wo_id": "WO-2025-1011", "turbine_id": "TURB-09",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2025-10-19", "closed": "2025-10-19",
+      "issue": "Routine 6-month gearbox oil sample",
+      "parts": [],
+      "hours": 1.5, "technician": "T-03",
+      "outcome": "monitoring",
+      "service_summary": "Iron 71 ppm — above baseline, watching."
+    },
+    {
+      "wo_id": "WO-2025-1108", "turbine_id": "TURB-03",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2025-11-08", "closed": "2025-11-09",
+      "issue": "Pitch encoder #1 drift",
+      "parts": ["VBI-PITCH-ENC-V120"],
+      "hours": 4.5, "technician": "T-02",
+      "outcome": "resolved",
+      "service_summary": "Replaced encoder; recalibrated zero; verified through 0-90deg sweep."
+    },
+    {
+      "wo_id": "WO-2025-1207", "turbine_id": "TURB-06",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2025-12-04", "closed": "2025-12-04",
+      "issue": "Lightning receptor inspection scheduled 24-month",
+      "parts": [],
+      "hours": 3.5, "technician": "T-02",
+      "outcome": "resolved",
+      "service_summary": "Receptors all intact; megger 0.06 ohm worst case."
+    },
+    {
+      "wo_id": "WO-2026-0102", "turbine_id": "TURB-02",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2026-01-22", "closed": "2026-01-22",
+      "issue": "6-month inspection",
+      "parts": [],
+      "hours": 4.5, "technician": "T-06",
+      "outcome": "resolved",
+      "service_summary": "All in spec; minor LE roughness noted, not yet repair-grade."
+    },
+    {
+      "wo_id": "WO-2026-0214", "turbine_id": "TURB-01",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2026-02-14", "closed": "2026-02-14",
+      "issue": "Vibration alarm zone B sustained 4h",
+      "parts": [],
+      "hours": 3.0, "technician": "T-02",
+      "outcome": "monitoring",
+      "service_summary": "RMS 5.2 mm/s — within zone B; cleared after main-shaft regrease."
+    },
+    {
+      "wo_id": "WO-2026-0228", "turbine_id": "TURB-10",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2026-02-28", "closed": "2026-02-28",
+      "issue": "6-month inspection",
+      "parts": [],
+      "hours": 4.0, "technician": "T-06",
+      "outcome": "resolved",
+      "service_summary": "Clean inspection."
+    },
+    {
+      "wo_id": "WO-2026-0301", "turbine_id": "TURB-09",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2026-03-09", "closed": "2026-03-09",
+      "issue": "Gearbox oil quarterly sample",
+      "parts": [],
+      "hours": 1.5, "technician": "T-03",
+      "outcome": "monitoring",
+      "service_summary": "Iron 81 ppm — change-out scheduled for May."
+    },
+    {
+      "wo_id": "WO-2026-0319", "turbine_id": "TURB-05",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2026-03-19", "closed": "2026-03-19",
+      "issue": "6-month inspection + LE protection check",
+      "parts": ["VBI-LE-2M x1"],
+      "hours": 4.5, "technician": "T-01",
+      "outcome": "resolved",
+      "service_summary": "Touch-up LE tape outer 1m; otherwise clean."
+    },
+    {
+      "wo_id": "WO-2026-0402", "turbine_id": "TURB-08",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2026-04-02", "closed": "2026-04-02",
+      "issue": "6-month inspection",
+      "parts": [],
+      "hours": 4.0, "technician": "T-06",
+      "outcome": "resolved",
+      "service_summary": "Clean."
+    },
+    {
+      "wo_id": "WO-2026-0414", "turbine_id": "TURB-04",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2026-04-14", "closed": "2026-04-15",
+      "issue": "Drone-detected hairline crack at 4.5m from tip blade 1 LP",
+      "parts": ["VBI-EPOXY-FAIR", "VBI-LE-2M x2"],
+      "hours": 7.0, "technician": "T-01",
+      "outcome": "resolved",
+      "service_summary": "Crack stabilised with epoxy + LE tape; re-inspect in 6 months."
+    },
+    {
+      "wo_id": "WO-2026-0421", "turbine_id": "TURB-12",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2026-04-21", "closed": null,
+      "issue": "Generator winding overtemp trip 142C",
+      "parts": [],
+      "hours": null, "technician": "T-05",
+      "outcome": "ongoing",
+      "service_summary": "Insulation 3.8 MOhm; planning generator pull. WO open."
+    },
+    {
+      "wo_id": "WO-2026-0427", "turbine_id": "TURB-03",
+      "model": "Vestas V120-2.0 MW",
+      "opened": "2026-04-27", "closed": null,
+      "issue": "Yaw position error 1.2deg sustained > 8h",
+      "parts": [],
+      "hours": null, "technician": null,
+      "outcome": "open",
+      "service_summary": "Awaiting weather window for tower work."
+    },
+    {
+      "wo_id": "WO-2026-0501", "turbine_id": "TURB-09",
+      "model": "Siemens SG-3.4-132",
+      "opened": "2026-05-01", "closed": null,
+      "issue": "Gearbox oil iron 88 ppm — overdue change",
+      "parts": [],
+      "hours": null, "technician": null,
+      "outcome": "open",
+      "service_summary": "Parts dispatched, awaiting arrival."
+    }
+  ]
+}

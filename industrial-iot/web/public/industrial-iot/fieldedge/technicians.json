@@ -1,0 +1,46 @@
+{
+  "technicians": [
+    {
+      "id": "T-01", "name": "Mira Patel",
+      "skills": ["blade-repair", "climbing-cert", "rope-access-l2"],
+      "shift": "day", "hours_per_day": 9,
+      "site_base": "Brevard Mesa", "years_experience": 11,
+      "languages": ["en", "hi"]
+    },
+    {
+      "id": "T-02", "name": "James O'Connor",
+      "skills": ["electrical", "climbing-cert", "scada-l3", "lightning-cert"],
+      "shift": "day", "hours_per_day": 9,
+      "site_base": "Brevard Mesa", "years_experience": 14,
+      "languages": ["en"]
+    },
+    {
+      "id": "T-03", "name": "Aisha Rahman",
+      "skills": ["gearbox", "lubrication-cert", "climbing-cert"],
+      "shift": "day", "hours_per_day": 8,
+      "site_base": "Brevard Mesa", "years_experience": 7,
+      "languages": ["en", "ar"]
+    },
+    {
+      "id": "T-04", "name": "Diego Salazar",
+      "skills": ["crane-op", "rigging-cert", "blade-repair"],
+      "shift": "day", "hours_per_day": 10,
+      "site_base": "Brevard Mesa", "years_experience": 16,
+      "languages": ["en", "es"]
+    },
+    {
+      "id": "T-05", "name": "Lena Schmidt",
+      "skills": ["generator", "electrical", "climbing-cert", "hv-cert"],
+      "shift": "day", "hours_per_day": 9,
+      "site_base": "Brevard Mesa", "years_experience": 9,
+      "languages": ["en", "de"]
+    },
+    {
+      "id": "T-06", "name": "Mahesh Iyer",
+      "skills": ["blade-repair", "rope-access-l2", "climbing-cert", "drone-pilot"],
+      "shift": "swing", "hours_per_day": 8,
+      "site_base": "Brevard Mesa", "years_experience": 5,
+      "languages": ["en", "ta"]
+    }
+  ]
+}

@@ -43,6 +43,9 @@ class CreateAgentRequest(BaseModel):
     )
     category: str | None = None
     icon_url: str | None = None
+    # Optional slug pin for SDK callers that need a stable identifier.
+    # Server-side _slugify still applies if omitted or already taken.
+    slug: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]*$")
 
     model_config = {"populate_by_name": True}
 
@@ -58,6 +61,7 @@ class UpdateAgentRequest(BaseModel):
     icon_url: str | None = None
     status: str | None = None
     version: str | None = None
+    knowledge_collection_ids: list[str] | None = None
 
     model_config = {"populate_by_name": True}
 

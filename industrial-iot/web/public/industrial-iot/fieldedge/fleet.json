@@ -1,0 +1,94 @@
+{
+  "site": "Brevard Mesa Wind Farm",
+  "operator": "RWE Renewables (showcase)",
+  "turbines": [
+    {
+      "id": "TURB-01", "model": "Vestas V120-2.0 MW",
+      "install_date": "2018-04-12", "last_service_date": "2026-02-14",
+      "status": "running", "hub_height_m": 90,
+      "rotor_diameter_m": 120, "rated_kw": 2000,
+      "lat": 28.4521, "lon": -80.6711
+    },
+    {
+      "id": "TURB-02", "model": "Vestas V120-2.0 MW",
+      "install_date": "2018-04-15", "last_service_date": "2026-01-22",
+      "status": "running", "hub_height_m": 90,
+      "rotor_diameter_m": 120, "rated_kw": 2000,
+      "lat": 28.4534, "lon": -80.6722
+    },
+    {
+      "id": "TURB-03", "model": "Vestas V120-2.0 MW",
+      "install_date": "2018-04-18", "last_service_date": "2025-11-08",
+      "status": "warning",
+      "active_alarms": ["Yaw position error 1.2deg sustained"],
+      "hub_height_m": 90, "rotor_diameter_m": 120, "rated_kw": 2000,
+      "lat": 28.4548, "lon": -80.6733
+    },
+    {
+      "id": "TURB-04", "model": "Vestas V120-2.0 MW",
+      "install_date": "2018-04-21", "last_service_date": "2024-08-12",
+      "status": "running", "hub_height_m": 90,
+      "rotor_diameter_m": 120, "rated_kw": 2000,
+      "lat": 28.4561, "lon": -80.6745
+    },
+    {
+      "id": "TURB-05", "model": "Vestas V120-2.0 MW",
+      "install_date": "2018-04-25", "last_service_date": "2026-03-19",
+      "status": "running", "hub_height_m": 90,
+      "rotor_diameter_m": 120, "rated_kw": 2000,
+      "lat": 28.4574, "lon": -80.6757
+    },
+    {
+      "id": "TURB-06", "model": "Vestas V120-2.0 MW",
+      "install_date": "2018-05-02", "last_service_date": "2025-12-04",
+      "status": "running", "hub_height_m": 90,
+      "rotor_diameter_m": 120, "rated_kw": 2000,
+      "lat": 28.4586, "lon": -80.6770
+    },
+    {
+      "id": "TURB-07", "model": "Vestas V120-2.0 MW",
+      "install_date": "2018-05-08", "last_service_date": "2025-09-30",
+      "status": "warning",
+      "active_alarms": ["Blade LE erosion outer 6m LP side (drone scan)"],
+      "hub_height_m": 90, "rotor_diameter_m": 120, "rated_kw": 2000,
+      "lat": 28.4599, "lon": -80.6783
+    },
+    {
+      "id": "TURB-08", "model": "Siemens SG-3.4-132",
+      "install_date": "2020-09-14", "last_service_date": "2026-04-02",
+      "status": "running", "hub_height_m": 110,
+      "rotor_diameter_m": 132, "rated_kw": 3400,
+      "lat": 28.4612, "lon": -80.6796
+    },
+    {
+      "id": "TURB-09", "model": "Siemens SG-3.4-132",
+      "install_date": "2020-09-17", "last_service_date": "2025-10-19",
+      "status": "warning",
+      "active_alarms": ["Gearbox oil iron 88 ppm trending up"],
+      "hub_height_m": 110, "rotor_diameter_m": 132, "rated_kw": 3400,
+      "lat": 28.4625, "lon": -80.6809
+    },
+    {
+      "id": "TURB-10", "model": "Siemens SG-3.4-132",
+      "install_date": "2020-09-20", "last_service_date": "2026-02-28",
+      "status": "running", "hub_height_m": 110,
+      "rotor_diameter_m": 132, "rated_kw": 3400,
+      "lat": 28.4639, "lon": -80.6822
+    },
+    {
+      "id": "TURB-11", "model": "Siemens SG-3.4-132",
+      "install_date": "2020-09-23", "last_service_date": "2025-08-15",
+      "status": "running", "hub_height_m": 110,
+      "rotor_diameter_m": 132, "rated_kw": 3400,
+      "lat": 28.4652, "lon": -80.6835
+    },
+    {
+      "id": "TURB-12", "model": "Siemens SG-3.4-132",
+      "install_date": "2020-09-26", "last_service_date": "2026-04-21",
+      "status": "offline",
+      "active_alarms": ["Generator winding temp 142C - tripped"],
+      "hub_height_m": 110, "rotor_diameter_m": 132, "rated_kw": 3400,
+      "lat": 28.4665, "lon": -80.6848
+    }
+  ]
+}

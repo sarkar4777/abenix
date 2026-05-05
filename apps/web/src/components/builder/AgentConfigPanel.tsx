@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import {
   Wrench, Database, Plug, ArrowLeft, Plus, Star, Unplug,
   Shield, Hash, MessageSquareText, Trash2, CheckCircle2, AlertCircle,
@@ -57,6 +57,25 @@ interface AgentConfig {
   // Parity with YAML seed fields that used to be UI-invisible.
   icon?: string;
   example_prompts?: string[];
+  // Runtime + scaling (KEDA pool routing, per-agent caps).
+  runtime_pool?: 'chat' | 'default' | 'heavy-reasoning' | 'long-running';
+  min_replicas?: number;
+  max_replicas?: number;
+  concurrency_per_replica?: number;
+  rate_limit_qps?: number;
+  daily_budget_usd?: number;
+  // Slug pin (for SDK callers that need a stable identifier).
+  slug?: string;
+  // Structured-output JSON Schema enforced by post-process.
+  output_schema?: string;
+  // Knowledge bindings — collection IDs the agent can read.
+  knowledge_collection_ids?: string[];
+}
+
+interface KbCollectionRow {
+  id: string;
+  name: string;
+  description?: string;
 }
 
 interface MCPExtensions {
@@ -99,7 +118,14 @@ const CATEGORIES = [
   'other',
 ];
 
-type Tab = 'general' | 'model' | 'prompt' | 'advanced' | 'mcp';
+type Tab = 'general' | 'model' | 'prompt' | 'advanced' | 'knowledge' | 'mcp';
+
+const RUNTIME_POOLS: { value: NonNullable<AgentConfig['runtime_pool']>; label: string; hint: string }[] = [
+  { value: 'chat',             label: 'Chat',             hint: 'low-latency, many concurrent — short interactive turns' },
+  { value: 'default',          label: 'Default',          hint: 'general-purpose — most agents start here' },
+  { value: 'heavy-reasoning',  label: 'Heavy reasoning',  hint: 'big context, slow turns — analysis, planning, RFI drafting' },
+  { value: 'long-running',     label: 'Long running',     hint: 'over-30s pipelines — extraction, orchestration' },
+];
 
 function formatRegistryId(registryId: string): string {
   return registryId
@@ -487,6 +513,29 @@ export default function AgentConfigPanel({
   onDisconnectMcp,
 }: AgentConfigPanelProps) {
   const [tab, setTab] = useState<Tab>('general');
+  // KB collections — declared up here, before any early return, so the
+  // hooks-rules linter is happy and the order is stable across renders.
+  const [kbCollections, setKbCollections] = useState<KbCollectionRow[] | null>(null);
+  const [kbLoading, setKbLoading] = useState(false);
+  useEffect(() => {
+    if (tab !== 'knowledge' || kbCollections !== null) return;
+    setKbLoading(true);
+    const tok = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    fetch('/api/knowledge-bases?limit=100', {
+      credentials: 'include',
+      headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((j) => {
+        const list = Array.isArray(j.data) ? j.data : j.data?.collections || j.collections || [];
+        const rows: KbCollectionRow[] = list.map((c: { id: string; name: string; description?: string }) => ({
+          id: c.id, name: c.name, description: c.description,
+        }));
+        setKbCollections(rows);
+      })
+      .catch(() => setKbCollections([]))
+      .finally(() => setKbLoading(false));
+  }, [tab, kbCollections]);
 
   // Get/set tool config for selected tool node
   const selectedToolId = selectedNode?.id?.replace('tool-', '') || '';
@@ -515,8 +564,14 @@ export default function AgentConfigPanel({
     { key: 'model', label: 'Model' },
     { key: 'prompt', label: 'Prompt' },
     { key: 'advanced', label: 'Advanced' },
+    { key: 'knowledge', label: 'Knowledge', icon: Database },
     { key: 'mcp', label: 'MCP', icon: Plug },
   ];
+
+  const toggleKb = (id: string) => {
+    const cur = config.knowledge_collection_ids || [];
+    onChange({ knowledge_collection_ids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  };
 
   const handleText = (field: keyof AgentConfig) => (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     onChange({ [field]: e.target.value });
@@ -722,6 +777,116 @@ export default function AgentConfigPanel({
 
         {tab === 'advanced' && (
           <>
+            {/* ── Runtime + scaling ─────────────────────────────────── */}
+            <div className="border-b border-slate-700/50 pb-4">
+              <h4 className="text-xs font-semibold text-white mb-2">Runtime &amp; scaling</h4>
+              <p className="text-[10px] text-slate-500 mb-3">KEDA pool routing + per-agent caps. Most agents leave these on default.</p>
+
+              <label className="block text-xs text-slate-400 mb-1.5">Runtime pool</label>
+              <select
+                value={config.runtime_pool || 'default'}
+                onChange={(e) => onChange({ runtime_pool: e.target.value as AgentConfig['runtime_pool'] })}
+                className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
+              >
+                {RUNTIME_POOLS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-600 mt-1">
+                {RUNTIME_POOLS.find((p) => p.value === (config.runtime_pool || 'default'))?.hint}
+              </p>
+
+              <div className="grid grid-cols-3 gap-2 mt-3">
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-1">Min replicas</label>
+                  <input
+                    type="number" min={0} max={200}
+                    value={config.min_replicas ?? ''}
+                    placeholder="auto"
+                    onChange={(e) => onChange({ min_replicas: e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value)) })}
+                    className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-1">Max replicas</label>
+                  <input
+                    type="number" min={0} max={500}
+                    value={config.max_replicas ?? ''}
+                    placeholder="auto"
+                    onChange={(e) => onChange({ max_replicas: e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value)) })}
+                    className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-1">Conc/replica</label>
+                  <input
+                    type="number" min={1} max={200}
+                    value={config.concurrency_per_replica ?? ''}
+                    placeholder="auto"
+                    onChange={(e) => onChange({ concurrency_per_replica: e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value)) })}
+                    className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-1">Rate limit (qps)</label>
+                  <input
+                    type="number" min={0} step="0.1"
+                    value={config.rate_limit_qps ?? ''}
+                    placeholder="off"
+                    onChange={(e) => onChange({ rate_limit_qps: e.target.value === '' ? undefined : Math.max(0, parseFloat(e.target.value)) })}
+                    className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-1">Daily budget (USD)</label>
+                  <input
+                    type="number" min={0} step="0.01"
+                    value={config.daily_budget_usd ?? ''}
+                    placeholder="no cap"
+                    onChange={(e) => onChange({ daily_budget_usd: e.target.value === '' ? undefined : Math.max(0, parseFloat(e.target.value)) })}
+                    className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ── Slug pin ──────────────────────────────────────────── */}
+            <div className="border-b border-slate-700/50 pb-4">
+              <label className="block text-xs text-slate-400 mb-1.5">Slug (optional)</label>
+              <input
+                type="text"
+                value={config.slug || ''}
+                placeholder="auto-generated from name"
+                onChange={(e) => onChange({ slug: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-') })}
+                className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 font-mono"
+              />
+              <p className="text-[10px] text-slate-600 mt-1">Stable identifier used by the SDK and pipeline references. Lowercase, dashes/underscores only.</p>
+            </div>
+
+            {/* ── Structured output ─────────────────────────────────── */}
+            <div className="border-b border-slate-700/50 pb-4">
+              <label className="block text-xs text-slate-400 mb-1.5">Output JSON Schema (optional)</label>
+              <textarea
+                value={config.output_schema || ''}
+                placeholder={'{\n  "type": "object",\n  "required": ["severity", "root_cause"],\n  "properties": {\n    "severity": { "enum": ["OK","WATCH","WARN","CRITICAL"] },\n    "root_cause": { "type": "string" }\n  }\n}'}
+                onChange={(e) => onChange({ output_schema: e.target.value })}
+                rows={6}
+                className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+              />
+              <p className="text-[10px] text-slate-600 mt-1">
+                If set, the runtime post-processes the agent's response against this schema and rejects malformed output.
+                {(() => {
+                  const t = (config.output_schema || '').trim();
+                  if (!t) return null;
+                  try { JSON.parse(t); return <span className="text-emerald-400"> · Valid JSON</span>; }
+                  catch (e) { return <span className="text-red-400"> · Invalid JSON: {(e as Error).message.slice(0, 60)}</span>; }
+                })()}
+              </p>
+            </div>
+
             <div>
               <label className="block text-xs text-slate-400 mb-1.5">Max Iterations</label>
               <input
@@ -916,6 +1081,66 @@ export default function AgentConfigPanel({
                 ))}
               </div>
             </div>
+          </>
+        )}
+
+        {tab === 'knowledge' && (
+          <>
+            <div>
+              <h4 className="text-xs font-semibold text-white mb-1">Knowledge bindings</h4>
+              <p className="text-[10px] text-slate-500 mb-3">
+                Pick the collections the agent can read at runtime. Bindings are scoped to your tenant. Tool grants like
+                <code className="text-cyan-300 mx-1">knowledge_search</code>or
+                <code className="text-cyan-300 mx-1">atlas_search_grounded</code>
+                will only see these collections.
+              </p>
+            </div>
+
+            {kbLoading && (
+              <div className="text-[10px] text-slate-500">Loading collections…</div>
+            )}
+
+            {!kbLoading && kbCollections !== null && kbCollections.length === 0 && (
+              <div className="bg-slate-800/30 border border-slate-700/40 rounded-lg p-3">
+                <p className="text-[11px] text-slate-300">No collections yet.</p>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Create one in <a href="/knowledge" className="text-cyan-400 hover:underline">Knowledge Bases</a>, then come back here to bind it.
+                </p>
+              </div>
+            )}
+
+            {!kbLoading && kbCollections && kbCollections.length > 0 && (
+              <div className="space-y-1.5">
+                {kbCollections.map((c) => {
+                  const checked = (config.knowledge_collection_ids || []).includes(c.id);
+                  return (
+                    <label
+                      key={c.id}
+                      className={`flex items-start gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition-colors ${
+                        checked ? 'bg-cyan-500/10 border-cyan-500/40' : 'bg-slate-800/30 border-slate-700/40 hover:border-slate-600'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleKb(c.id)}
+                        className="mt-0.5 rounded border-slate-600"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-white truncate">{c.name}</p>
+                        {c.description && <p className="text-[10px] text-slate-500 truncate">{c.description}</p>}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            {(config.knowledge_collection_ids || []).length > 0 && (
+              <div className="text-[10px] text-slate-500 pt-2 border-t border-slate-700/40">
+                {config.knowledge_collection_ids!.length} collection{config.knowledge_collection_ids!.length === 1 ? '' : 's'} bound.
+              </div>
+            )}
           </>
         )}
 

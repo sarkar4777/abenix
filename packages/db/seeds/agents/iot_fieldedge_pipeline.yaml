@@ -1,0 +1,236 @@
+name: "IoT FieldEdge Pipeline"
+slug: iot-fieldedge-pipeline
+description: >-
+  Industrial-IoT pipeline for wind-turbine field maintenance.
+  Takes a technician's symptom report (voice/text) plus turbine
+  + weather context, runs a fleet-wide history search to surface
+  similar past work orders, then asks the troubleshoot agent for
+  a grounded repair procedure with cited OEM-manual sections,
+  parts, safety gates, and confidence. The UI then optionally
+  feeds the result into close-out and schedule-optimisation
+  flows; this pipeline only covers the diagnose-and-procedure leg.
+agent_type: oob
+category: maintenance
+icon: Wrench
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  Industrial IoT FieldEdge pipeline. Orchestrates fleet-history
+  retrieval and OEM-manual-grounded troubleshooting so a wind-farm
+  technician on the nacelle gets a trustworthy procedure in
+  seconds.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.2
+  max_iterations: 20
+  max_tokens: 4096
+  tools:
+    - agent_step
+    - code_executor
+    - knowledge_search
+    - current_time
+
+input_variables:
+  - name: message
+    type: string
+    description: >-
+      JSON payload {turbine_id, model, symptom, site, weather,
+      fleet_history?}. Built by FieldEdgeTab from the dropdown
+      selection + the typed/voice query + the bundled fleet
+      history JSON.
+    required: true
+
+example_prompts:
+  - '{"turbine_id":"TURB-07","model":"Vestas V120-2.0 MW","symptom":"leading-edge erosion outer 6m LP side","site":"Brevard Mesa","weather":{"wind_mps":7,"gusts_mps":9,"temp_c":12,"precip":"none"},"fleet_history":[]}'
+
+pipeline_config:
+  nodes:
+    - id: timestamp
+      tool_name: current_time
+      label: "Timestamp"
+      arguments: { timezone: "UTC" }
+      depends_on: []
+      position: { x: 80, y: 60 }
+
+    - id: validate_input
+      tool_name: code_executor
+      label: "1. Parse + Validate Symptom"
+      arguments:
+        code: |
+          # The pipeline engine injects context with prior node
+          # outputs + user-supplied keys + the message field.
+          import json
+
+          raw = context.get("message", "{}")
+          if isinstance(raw, str):
+              try: data = json.loads(raw)
+              except Exception: data = {}
+          elif isinstance(raw, dict):
+              data = raw
+          else:
+              data = {}
+
+          symptom = (data.get("symptom") or "").strip()
+          turbine_id = (data.get("turbine_id") or "").strip()
+
+          if not symptom or not turbine_id:
+              result = {
+                  "ok": False,
+                  "error": "BAD_INPUT",
+                  "message": "Need turbine_id + symptom.",
+              }
+          else:
+              # Default the fleet history to empty list — the agent
+              # tolerates that and falls back to KB-only grounding.
+              data["fleet_history"] = data.get("fleet_history") or []
+              data["weather"] = data.get("weather") or {
+                  "wind_mps": 0, "gusts_mps": 0,
+                  "temp_c": 15, "precip": "none",
+              }
+              result = { "ok": True, "input": data }
+          print(json.dumps(result))
+      depends_on:
+        - timestamp
+      position: { x: 360, y: 60 }
+
+    - id: fleet_history_search
+      tool_name: agent_step
+      label: "2. Fleet History Searcher"
+      arguments:
+        system_prompt: |
+          You are a fleet-history retrieval specialist. Score each
+          past WO 0.0-1.0 by model match (+0.5), failure-mode
+          keyword overlap (+0.3), part-list overlap (+0.1),
+          resolved outcome (+0.05), same site (+0.05); subtract
+          0.1 for >5y old. Drop scores below 0.25. Return JSON
+          with `matches[]` (sorted desc), `match_count`,
+          `manual_fallback`, `fleet_stats`, `rationale`. NO markdown.
+        input_message: |
+          Find similar past work orders:
+            current_symptom: {{validate_input.input.symptom}}
+            current_turbine: {{validate_input.input.turbine_id}} ({{validate_input.input.model}})
+            fleet_wos: {{validate_input.input.fleet_history}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 4
+        temperature: 0.1
+      depends_on:
+        - validate_input
+      position: { x: 360, y: 220 }
+
+    - id: troubleshoot
+      tool_name: agent_step
+      label: "3. Troubleshoot Assistant (manual-grounded)"
+      arguments:
+        system_prompt: |
+          You are FieldEdge — an on-the-nacelle troubleshooting
+          copilot for wind-turbine technicians. The technician is
+          90m up, possibly in wind, on a tablet in sunlight. Be
+          fast, grounded, safe.
+
+          SAFETY GATES (decide first):
+            - wind_mps > 12 OR gusts_mps > 16 OR precip in
+              (rain,snow,ice) AND work is rotor/blade exterior
+              -> safety_gate = STAND_DOWN_WEATHER, return WITHOUT
+              a procedure (cite IEC 61400-3 climbing limits).
+            - smoke / fire / arcing -> safety_gate = EVACUATE_AND_LOTO,
+              stop.
+            - else safety_gate = PROCEED_WITH_LOTO.
+
+          GROUNDING:
+            - Call knowledge_search ONCE with model + failure-mode
+              query. Cite top hit verbatim under manual_citations.
+              Never fabricate a citation.
+            - Use the upstream fleet_history matches (passed in
+              the input) for parts and labour-hour anchors.
+
+          PROCEDURE: 4-10 numbered steps. Step 1 is LOTO unless
+          safety_gate already covered it. Reference manual sections
+          where possible.
+
+          PARTS: aggregate part_number + qty from procedure +
+          history. Flag part_lookup_required: true for unknowns.
+
+          ESTIMATE hours from fleet_history median, fall back to
+          manual, last resort give a conservative range.
+
+          CONFIDENCE: 0.9+ if KB and history align; 0.6-0.8 if one;
+          <0.5 set escalate_to_engineering: true.
+
+          Return JSON only:
+            {
+              "safety_gate": "...",
+              "confidence": 0.0-1.0,
+              "diagnosis_summary": "1 sentence",
+              "manual_citations": [{ "section": "...", "excerpt": "..." }],
+              "similar_past_wos": [...],
+              "procedure": [{"step":1,"action":"...","tool_required":"...","warning":"..."}],
+              "parts_required": [{"part_number":"...","description":"...","qty":N}],
+              "estimated_hours": <number>,
+              "rationale": "2-3 sentences",
+              "escalate_to_engineering": false,
+              "part_lookup_required": false
+            }
+        input_message: |
+          Diagnose:
+            input: {{validate_input.input}}
+            fleet_history_matches: {{fleet_history_search.response}}
+        tools: "knowledge_search,current_time"
+        model: claude-sonnet-4-5-20250929
+        max_iterations: 6
+        temperature: 0.2
+      depends_on:
+        - fleet_history_search
+      position: { x: 360, y: 380 }
+
+    - id: final_report
+      tool_name: code_executor
+      label: "4. Assemble Final Report"
+      arguments:
+        code: |
+          import json
+
+          def as_dict(x):
+              if isinstance(x, dict): return x
+              if isinstance(x, str):
+                  try: return json.loads(x)
+                  except Exception: return {"raw": x}
+              return {}
+
+          validate = as_dict(context.get("validate_input"))
+          if not validate.get("ok"):
+              result = {
+                  "status": "blocked",
+                  "error": validate.get("error"),
+                  "message": validate.get("message"),
+              }
+          else:
+              hist_env = as_dict(context.get("fleet_history_search"))
+              hist = as_dict(hist_env.get("response") if isinstance(hist_env, dict) else {})
+              tr_env = as_dict(context.get("troubleshoot"))
+              tr = as_dict(tr_env.get("response") if isinstance(tr_env, dict) else {})
+
+              result = {
+                  "status": "ok",
+                  "timestamp": context.get("timestamp"),
+                  "turbine_id": (validate.get("input") or {}).get("turbine_id"),
+                  "model": (validate.get("input") or {}).get("model"),
+                  "symptom": (validate.get("input") or {}).get("symptom"),
+                  "fleet_history": hist,
+                  "troubleshoot": tr,
+              }
+          print(json.dumps(result, default=str))
+      depends_on:
+        - troubleshoot
+      position: { x: 360, y: 540 }
+
+  edges:
+    - { source: timestamp,           target: validate_input }
+    - { source: validate_input,      target: fleet_history_search }
+    - { source: fleet_history_search, target: troubleshoot }
+    - { source: troubleshoot,        target: final_report }
+
+  viewport: { x: 0, y: 0, zoom: 0.75 }
