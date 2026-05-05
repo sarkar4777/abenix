@@ -14,9 +14,9 @@ type TabKey = 'pump' | 'coldchain' | 'valueedge' | 'fieldedge' | 'bedrocc' | 'ar
 const TABS: { key: TabKey; label: string; icon: typeof Activity; desc: string }[] = [
   { key: 'pump',         label: 'Pump Vibration',  icon: Activity,     desc: 'Predictive maintenance on rotating machinery' },
   { key: 'coldchain',    label: 'Cold Chain',      icon: Thermometer,  desc: 'Reefer-container FSMA excursion monitoring'   },
-  { key: 'valueedge',    label: 'ValueEdge',       icon: Wind,         desc: 'Engineering & EPC copilot — site brief to ranked designs' },
-  { key: 'fieldedge',    label: 'FieldEdge',       icon: Wrench,       desc: 'Wind-farm maintenance copilot + scheduler' },
-  { key: 'bedrocc',      label: 'BedROCC',         icon: ShieldAlert,  desc: 'Operations control-room alarm triage' },
+  { key: 'valueedge',    label: 'Design Studio',   icon: Wind,         desc: 'Engineering & EPC copilot — site brief to ranked designs' },
+  { key: 'fieldedge',    label: 'Field Guide',     icon: Wrench,       desc: 'Wind-farm maintenance copilot + scheduler' },
+  { key: 'bedrocc',      label: 'Alarm Desk',      icon: ShieldAlert,  desc: 'Operations control-room alarm triage' },
   { key: 'architecture', label: 'Architecture',    icon: Layers,       desc: 'How it all fits together' },
 ];
 

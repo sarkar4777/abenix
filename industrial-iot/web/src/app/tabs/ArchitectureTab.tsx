@@ -53,7 +53,7 @@ export default function ArchitectureTab() {
           />
           <ScenarioCard
             icon={Wind}
-            name="ValueEdge"
+            name="Design Studio"
             tagline="Engineering & EPC copilot — site brief → 3 ranked designs"
             steps={[
               'Pick a site template (Dogger Bank / North Sea / US East Coast) or fill the form.',
@@ -65,7 +65,7 @@ export default function ArchitectureTab() {
           />
           <ScenarioCard
             icon={Wrench}
-            name="FieldEdge"
+            name="Field Guide"
             tagline="Wind-farm maintenance copilot + scheduler"
             steps={[
               'Pick a turbine (TURB-01 through TURB-12) or scan the QR mock.',
@@ -77,7 +77,7 @@ export default function ArchitectureTab() {
           />
           <ScenarioCard
             icon={ShieldAlert}
-            name="BedROCC"
+            name="Alarm Desk"
             tagline="Operations control-room alarm triage"
             steps={[
               'Watch alarms stream into the queue (synthetic 30-alarm replay).',

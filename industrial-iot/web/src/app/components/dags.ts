@@ -1,7 +1,7 @@
 import type { DagDef } from './PipelineDagViz';
 
 export const VALUEEDGE_DAG: DagDef = {
-  title: 'ValueEdge — Engineering & EPC copilot',
+  title: 'Design Studio — Engineering & EPC copilot',
   pipelineSlug: 'iot-valueedge-pipeline',
   description:
     'A site brief flows through a 9-node DAG: validate → configure 3 design scenarios → recompute deterministic costs → run VE optimisation and compliance checking in parallel → conditional RFI drafting only if blocker findings exist → assemble the final report.',
@@ -30,7 +30,7 @@ export const VALUEEDGE_DAG: DagDef = {
 };
 
 export const FIELDEDGE_DAG: DagDef = {
-  title: 'FieldEdge — Wind-farm maintenance copilot',
+  title: 'Field Guide — Wind-farm maintenance copilot',
   pipelineSlug: 'iot-fieldedge-pipeline',
   description:
     'A technician\'s voice/text query is validated, fanned out to fleet-history search and the troubleshoot assistant in parallel, then merged into a procedure with cited manual sections + similar past WOs.',
@@ -49,7 +49,7 @@ export const FIELDEDGE_DAG: DagDef = {
 };
 
 export const BEDROCC_DAG: DagDef = {
-  title: 'BedROCC — Operations control-room triage',
+  title: 'Alarm Desk — Operations control-room triage',
   pipelineSlug: 'iot-bedrocc-pipeline',
   description:
     'A SCADA alarm is validated, classified for severity + ROI in parallel with cascade-correlation, then routed: only nominated safe-reset candidates with non-CRIT severity reach the safe-reset advisor, which enforces a 4-stage gate before recommending a command.',

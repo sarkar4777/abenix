@@ -521,12 +521,23 @@ export default function ColdChainTab() {
         ]}
         simulationNote={(
           <>
-            The 20-waypoint SFO→LAX trajectory with one scripted excursion is a{' '}
-            <strong>simulation input</strong> — fixed so the demo always shows
-            the partial-loss path. <strong>Kalman smoothing, excursion
-            classification, regulatory citing, and claim narrative</strong> all
-            come from the agents and sandboxed Code Asset above. No client-side
-            rule engine, no local templates.
+            <p className="mb-2">
+              <strong>In production —</strong> waypoints come from GPS+temperature loggers
+              (Sensitech TempTale, ELPRO, Tive Solo) that push every 5–15&nbsp;min over
+              cellular/satellite to a fleet-ingest endpoint. Or on-arrival batch upload
+              from reefer telematics (Carrier Lynx Fleet, Thermo King ConnectedSuite).
+              Adjudicated claims drop into the broker portal (e.g. ServiceNow GRC)
+              while the FSMA narrative rides along as a structured document.
+            </p>
+            <p>
+              <strong>In the demo —</strong> the 20-waypoint SFO→LAX trajectory with one
+              scripted excursion is built in-memory by <code className="text-cyan-300 mx-1">lib/synthetic.ts</code> when
+              you click <strong>Start Shipment</strong>. The waypoints animate for ~4&nbsp;s
+              for visual effect, then the full window is sent once to the pipeline — there's
+              no live telematics feed. <strong>Kalman smoothing, excursion classification,
+              regulatory citing, and claim narrative</strong> all come from the agents and
+              sandboxed Code Asset above. No client-side rule engine.
+            </p>
           </>
         )}
         footer={
