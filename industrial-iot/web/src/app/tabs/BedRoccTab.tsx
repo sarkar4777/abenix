@@ -14,7 +14,10 @@ import ScenarioExplainer from '../components/ScenarioExplainer';
 import PipelineDagViz from '../components/PipelineDagViz';
 import { BEDROCC_DAG } from '../components/dags';
 import KbBadge from '../components/KbBadge';
+import LiveStatusPanel from '../components/LiveStatusPanel';
+import LiveModeToggle from '../components/LiveModeToggle';
 import { findPipelineBySlug, runPipeline, type PipelineKey } from '../lib/pipelineRunner';
+import { subscribeLive, toggleLiveTrigger } from '../lib/liveStream';
 
 // ── Types ────────────────────────────────────────────────────────────
 type ScadaSeverity = 'INFO' | 'LOW' | 'MED' | 'HIGH' | 'CRIT';
@@ -171,6 +174,14 @@ export default function BedRoccTab() {
 
   const streamIdxRef = useRef(0);
   const streamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live mode swaps the bundled SAMPLE_ALARMS stream for an SSE feed
+  // of real MQTT messages on alarms.realtime. Demo path is unchanged.
+  const [liveMode, setLiveMode] = useState(false);
+  const liveSubRef = useRef<{ close: () => void } | null>(null);
+  // Approval ID returned by /api/approvals when the operator confirms
+  // a reset. Polled until status flips to approved/denied/expired.
+  const [pendingApprovalId, setPendingApprovalId] = useState<string | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState<string>('');
 
   // Resolve the bedrocc pipeline slug at mount. The standalone API
   // exposes it via the listPipelines catalog.
@@ -181,9 +192,37 @@ export default function BedRoccTab() {
     })();
   }, []);
 
+  // Live alarm subscription. When liveMode flips on, enable the
+  // server-side mqtt_subscribe trigger and stream incoming alarms via
+  // SSE into the same alarms[] state the demo uses.
+  useEffect(() => {
+    if (!liveMode) {
+      if (liveSubRef.current) { liveSubRef.current.close(); liveSubRef.current = null; }
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      await toggleLiveTrigger('iot-bedrocc-alarm-listener', true);
+      if (cancelled) return;
+      liveSubRef.current = subscribeLive<RawAlarm>('alarms.realtime', (msg) => {
+        setAlarms((prev) => [{ ...msg, status: 'NEW' as AlarmStatus }, ...prev]);
+        if (pipelineId) setTimeout(() => triageAlarm(msg.alarm_id), 50);
+      });
+    })();
+    return () => {
+      cancelled = true;
+      if (liveSubRef.current) { liveSubRef.current.close(); liveSubRef.current = null; }
+      toggleLiveTrigger('iot-bedrocc-alarm-listener', false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode, pipelineId]);
+
   // Stream new alarms in every 4-6 seconds while streaming=true.
   useEffect(() => {
     if (!streaming) return;
+    // In live mode the server feeds alarms via SSE — the bundled
+    // sample stream stays paused so we don't double-up rows.
+    if (liveMode) return;
     if (streamIdxRef.current >= SAMPLE_ALARMS.length) {
       setStreaming(false);
       return;
@@ -349,11 +388,62 @@ export default function BedRoccTab() {
     }
     setResetSubmitting(true);
     setResetError('');
-    // We don't actually fire a control command from the showcase — log
-    // the approval to the audit trail (visible in the row) and mark
-    // the alarm RESOLVED. A production wire-up would POST to a
-    // control-bus endpoint here.
-    await new Promise((r) => setTimeout(r, 600));
+    setApprovalStatus('pending');
+
+    // Create a real approval record. The pipeline's approval_gate node
+    // also creates one on the server side, but the operator-initiated
+    // path here goes direct to /api/approvals so the supervisor's
+    // signoff comes through the same UI surface as the gated agents.
+    let approvalId: string | null = null;
+    try {
+      const r = await fetch('/api/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: 'iot-bedrocc-pipeline',
+          required_signoffs: 2,
+          expires_seconds: 300,
+          payload: {
+            kind: 'safe_remote_reset',
+            alarm_id: pendingReset.alarm_id,
+            reset_command: advice.reset_command,
+            asset: pendingReset.asset,
+          },
+        }),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        approvalId = (j?.data?.id as string) ?? null;
+      }
+    } catch { /* tolerate absence — fall through to demo path */ }
+
+    if (approvalId) {
+      setPendingApprovalId(approvalId);
+      // Poll until approved / denied / expired or the user cancels.
+      // 2s cadence, 150s ceiling so we don't poll forever.
+      let approved = false;
+      for (let i = 0; i < 75; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          const r = await fetch('/api/approvals/' + approvalId);
+          if (!r.ok) continue;
+          const j = await r.json();
+          const status = j?.data?.status ?? 'pending';
+          setApprovalStatus(status);
+          if (status === 'approved') { approved = true; break; }
+          if (status === 'denied' || status === 'expired') { break; }
+        } catch { /* keep polling */ }
+      }
+      if (!approved) {
+        setResetError(`Approval ${approvalStatus || 'pending'} — reset NOT issued.`);
+        setResetSubmitting(false);
+        return;
+      }
+    } else {
+      // Demo / offline: keep the original animation so the showcase
+      // still tells a coherent story when /api/approvals is missing.
+      await new Promise((r) => setTimeout(r, 600));
+    }
 
     setAlarms((curr) => curr.map((a) =>
       a.alarm_id === pendingReset.alarm_id
@@ -371,6 +461,8 @@ export default function BedRoccTab() {
     ));
     setResetSubmitting(false);
     setPendingReset(null);
+    setPendingApprovalId(null);
+    setApprovalStatus('');
     setResetStep(1);
   };
 
@@ -485,6 +577,16 @@ export default function BedRoccTab() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
       <div className="space-y-6 min-w-0">
+
+        {/* Live system status row */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <LiveStatusPanel liveModeActive={liveMode} />
+          <LiveModeToggle
+            value={liveMode}
+            onChange={setLiveMode}
+            hint="Live: subscribe to alarms.realtime via SSE; demo: scripted 30-event stream."
+          />
+        </div>
 
         {/* ── Header strip ─────────────────────────────────────── */}
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -951,6 +1053,15 @@ export default function BedRoccTab() {
               </div>
 
               <ResetModalBody alarm={pendingReset} step={resetStep} />
+
+              {pendingApprovalId && (
+                <div className="mt-3 text-xs text-cyan-300 bg-cyan-500/10 border border-cyan-500/30 rounded p-2">
+                  Awaiting supervisor signoff — approval&nbsp;
+                  <span className="font-mono">{pendingApprovalId}</span>
+                  {' · status '}
+                  <span className="font-mono">{approvalStatus || 'pending'}</span>
+                </div>
+              )}
 
               {resetError && (
                 <div className="mt-3 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded p-2">

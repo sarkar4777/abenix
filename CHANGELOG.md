@@ -1,5 +1,47 @@
 # Changelog
 
+## v1.1.1 — 2026-05-05
+
+## v1.1.0 — Production tooling
+
+Thirteen new primitives that turn the five Industrial-IoT showcases from demos into something an enterprise can run live: streaming triggers, bidirectional writes, a connector framework, sliding-window state, server-enforced approvals, a time-series store, idempotency + DLQ, subscribed feeds, audio STT, and an edge runtime with signed `.agent` bundles.
+
+### Added
+
+- **MQTT trigger** — agents subscribe directly to MQTT topics with QoS 0/1/2, wildcards, and tenant-scoped consumers backed by an in-cluster mosquitto broker.
+- **Kafka trigger** — same shape as MQTT, against any reachable Kafka cluster, with consumer-group isolation per tenant.
+- **OPC-UA write tool** — `opcua_write` palette tool (`asyncua`-backed) for pushing setpoints back to PLCs, audit-logged on every fire.
+- **MQTT publish tool** — `mqtt_publish` palette tool with retain flag, QoS picker, and topic templating.
+- **CMMS write tool** — `cmms_write` palette tool that creates work orders, updates statuses, and attaches photos via the connector framework.
+- **Connector framework** — new `connectors` table, `/admin/connectors` CRUD UI, generic `connector_call(connector_id, operation, payload)` palette tool, presets for SAP / ServiceNow / Workday / Sensitech / Geotab / BNEF / ECMWF / Open-Meteo.
+- **Sliding-window state** — `windowed_state` palette tool with `append`, `query`, `count`, and `pattern_match` ops over a per-`(tenant, asset, name)` Redis sorted set.
+- **Backend approvals** — `approvals` table, `POST/GET /api/approvals` + `/api/approvals/{id}/signoff` endpoints, `approval_gate` palette tool that blocks server-side, `/approvals` sidebar page, Slack + email notifications.
+- **Time-series store** — TimescaleDB sidecar in dev-local on port 5433, helm chart at `infra/helm/timescaledb`, `tsdb_query` palette tool with `insert / select / recent / aggregate` ops, hypertables seeded for the IoT showcase tables.
+- **Idempotency keys** — `Idempotency-Key` header accepted on `/api/agents/{id}/execute`; same key + tenant inside 24 h returns the original execution ID.
+- **Dead-letter queue** — `dead_letter_executions` table populated by the stale sweeper; `/admin/dlq` page with sort, filter, **Replay**, and **Discard** actions.
+- **Subscribed feeds** — `subscribed_feed` palette tool with TTL cache; presets for `weather.open-meteo`, `fx.exchangerate-host`, `bnef.cost-coefficients`.
+- **Audio STT** — `audio_stt` palette tool (Deepgram preset, Gemini fallback) with language auto-detect and optional speaker diarisation.
+- **Edge runtime** — `agentforge/edge-runtime:1.1.0` image (~80 MB), helm chart at `infra/helm/edge-runtime`, `.agent` bundle compiler with RSA-PSS signatures, `/edge` page for gateway registration + agent deploy, hot-reload via `edge.{gateway_id}.deploy` MQTT topic.
+- **DWG/DXF + GeoJSON parsers** — two new file kinds the document ingest pipeline understands.
+- **Atlas `branch_scenario` op** — server-side scenario branching for what-if analysis (UI tree deferred to Phase-2).
+- **Regulated-environment flag** — per-tenant feature flag that forces approvals on every bidirectional write, full audit-log integrity hashing, and PII-redacted prompts.
+- **`/help` → Production tools (v1.1)** — one help section per primitive with end-user copy, screenshots, gotchas, and "Live mode" example workflows for each Industrial-IoT showcase.
+
+### Changed
+
+- The five Industrial-IoT showcases (Pump Vibration, Cold Chain, Design Studio, Field Guide, Alarm Desk) each gained a **Live mode** toggle that wires the tab end-to-end through the new primitives — real MQTT topics, real TSDB writes, real connector calls — instead of the synthetic in-memory generator from v1.0.
+- README updated with a new **Production-grade tooling (v1.1)** section, an updated tool catalogue line ("100+ built-in tools"), and a **Run with infra** subsection covering mosquitto + timescaledb + edge runtime install.
+- VERSION bumped to **1.1.0** (feature-additive, not patch-level).
+
+### Migration notes
+
+- Five Alembic revisions ship: `1100_a_connectors`, `1100_b_approvals`, `1100_c_execution_idempotency`, `1100_d_dead_letter_executions`, `1100_e_tsdb_hypertables`. None are destructive — every change is a new table, a new column with a default, or a new index.
+- First `dev-local.sh` boot will pull two new images: `eclipse-mosquitto:2` and `timescale/timescaledb:latest-pg16` (~80 MB combined). Existing `dev-local.sh` deployments without the new compose services keep working — the new tools degrade to a clear `MQTT_NOT_CONFIGURED` / `TSDB_NOT_CONFIGURED` failure code instead of crashing.
+- Helm: the new `infra/helm/mosquitto`, `infra/helm/timescaledb`, and `infra/helm/edge-runtime` charts are opt-in. The umbrella `abenix` chart pulls them in by default; set `mosquitto.enabled=false` / `timescaledb.enabled=false` / `edge.enabled=false` to skip.
+- No environment variable is required for v1.0 → v1.1 to keep working. New optional vars: `DEEPGRAM_API_KEY` (audio STT), `BNEF_API_KEY` (BNEF subscribed feed), `EDGE_BUNDLE_SIGNING_KEY` (edge runtime; auto-generated on first deploy if missing).
+
+### Fixed
+
 ## v1.0.10 — 2026-05-05
 
 ### Added

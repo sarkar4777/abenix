@@ -7,9 +7,9 @@
  *   1. /  page loads + 6 tabs visible
  *   2. Pump tab — scenario explainer + DAG render
  *   3. Cold Chain tab — explainer + DAG render
- *   4. ValueEdge tab — DAG render + 2-col layout
- *   5. FieldEdge tab — DAG render + technician panel
- *   6. BedROCC tab — alarm queue + DAG render + cascade banner
+ *   4. Design Studio tab — DAG render + 2-col layout
+ *   5. Field Guide tab — DAG render + technician panel
+ *   6. Alarm Desk tab — alarm queue + DAG render + cascade banner
  *   7. Architecture tab — Help section + 5 scenario cards
  *
  * Saves screenshots to logs/uat-iot-browser/<tab>.png so you can eyeball
@@ -76,7 +76,7 @@ async function main() {
   });
 
   await step("6 tabs visible", async () => {
-    for (const t of ["Pump Vibration", "Cold Chain", "ValueEdge", "FieldEdge", "BedROCC", "Architecture"]) {
+    for (const t of ["Pump Vibration", "Cold Chain", "Design Studio", "Field Guide", "Alarm Desk", "Architecture"]) {
       await expectVisible(page, `button:has-text("${t}")`, t);
     }
     return "all 6 tabs present";
@@ -96,8 +96,8 @@ async function main() {
     return "tab content rendered";
   });
 
-  await step("ValueEdge tab + DAG", async () => {
-    await clickTab(page, "ValueEdge");
+  await step("Design Studio tab + DAG", async () => {
+    await clickTab(page, "Design Studio");
     await expectVisible(page, "text=Engineering & EPC Copilot", "valueedge hero");
     await page.locator("text=Execution DAG").first().scrollIntoViewIfNeeded().catch(() => {});
     await expectVisible(page, "text=iot-valueedge-pipeline", "dag pipelineSlug label");
@@ -105,16 +105,16 @@ async function main() {
     return "DAG + explainer rendered";
   });
 
-  await step("FieldEdge tab + DAG", async () => {
-    await clickTab(page, "FieldEdge");
+  await step("Field Guide tab + DAG", async () => {
+    await clickTab(page, "Field Guide");
     await expectVisible(page, "text=Get Repair Procedure", "main CTA");
     await expectVisible(page, "text=iot-fieldedge-pipeline", "dag");
     await shot(page, "05-fieldedge");
     return "DAG + repair CTA rendered";
   });
 
-  await step("BedROCC tab + DAG", async () => {
-    await clickTab(page, "BedROCC");
+  await step("Alarm Desk tab + DAG", async () => {
+    await clickTab(page, "Alarm Desk");
     await expectVisible(page, "text=Operations Control Room", "bedrocc explainer");
     await expectVisible(page, "text=iot-bedrocc-pipeline", "dag");
     await shot(page, "06-bedrocc");
@@ -122,8 +122,8 @@ async function main() {
   });
 
   // ── Deep UAT — actually fire the pipelines ─────────────────────────
-  await step("ValueEdge: Generate scenarios → 3 cards rendered", async () => {
-    await clickTab(page, "ValueEdge");
+  await step("Design Studio: Generate scenarios → 3 cards rendered", async () => {
+    await clickTab(page, "Design Studio");
     await page.locator("button:has-text('Generate Scenarios')").first().scrollIntoViewIfNeeded().catch(() => {});
     await page.locator("button:has-text('Generate Scenarios')").first().click();
     // Pipeline takes 2-4 minutes; surface scenario cards or HTTP error
@@ -142,8 +142,8 @@ async function main() {
     return `scenarios rendered in ${Math.round((Date.now() - start) / 1000)}s`;
   });
 
-  await step("FieldEdge: send a turbine query → procedure renders", async () => {
-    await clickTab(page, "FieldEdge");
+  await step("Field Guide: send a turbine query → procedure renders", async () => {
+    await clickTab(page, "Field Guide");
     // Fill the symptom textarea
     const ta = page.locator("textarea").first();
     if (await ta.isVisible().catch(() => false)) {
@@ -164,8 +164,8 @@ async function main() {
     return `procedure rendered in ${Math.round((Date.now() - start) / 1000)}s`;
   });
 
-  await step("BedROCC: alarm queue streams + click first → triage panel", async () => {
-    await clickTab(page, "BedROCC");
+  await step("Alarm Desk: alarm queue streams + click first → triage panel", async () => {
+    await clickTab(page, "Alarm Desk");
     // Wait for alarm rows
     await page.waitForTimeout(8000);
     const alarms = await page.locator("[role='button'], button").filter({ hasText: /GBX-|GRD-|PCS-|YAW-/ }).count();

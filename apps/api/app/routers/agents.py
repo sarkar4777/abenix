@@ -1263,10 +1263,49 @@ async def validate_agent_smart(
 async def execute_agent(
     agent_id: uuid.UUID,
     body: ExecuteRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse | JSONResponse:
     from app.core.usage import check_limit, check_user_quota
+    from datetime import timedelta as _td
+
+    idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get(
+        "idempotency-key"
+    )
+    if idempotency_key and not body.stream:
+        from models.idempotency import ExecutionIdempotency
+
+        existing = await db.execute(
+            select(ExecutionIdempotency).where(
+                ExecutionIdempotency.tenant_id == user.tenant_id,
+                ExecutionIdempotency.key == idempotency_key,
+            )
+        )
+        idem_row = existing.scalar_one_or_none()
+        now_utc = datetime.now(timezone.utc)
+        if idem_row and idem_row.expires_at and idem_row.expires_at < now_utc:
+            await db.delete(idem_row)
+            await db.commit()
+            idem_row = None
+        if idem_row and idem_row.cached_response is not None:
+            return success({**idem_row.cached_response, "idempotent_replay": True})
+        if not idem_row:
+            db.add(
+                ExecutionIdempotency(
+                    tenant_id=user.tenant_id,
+                    key=idempotency_key,
+                    agent_id=agent_id,
+                    status="pending",
+                    expires_at=now_utc + _td(hours=24),
+                )
+            )
+            try:
+                await db.commit()
+            except Exception:
+                # Race: another concurrent request inserted first; fall through
+                # and let the dedupe check on next attempt return the cached row.
+                await db.rollback()
 
     # Tri-state wait resolution (belt-and-suspenders for the SDK fix).
     # If the client did not specify wait, default based on caller type:
@@ -1480,17 +1519,36 @@ async def execute_agent(
                 # Surface pipeline status from the consumer's done event so
                 # callers see status=completed/failed without a follow-up GET.
                 _qstatus = summary.get("status") if isinstance(summary, dict) else None
-                return success(
-                    {
-                        "execution_id": str(execution.id),
-                        "task_id": task_id,
-                        "pool": agent_pool,
-                        "mode": "sync_via_queue",
-                        "status": _qstatus or "completed",
-                        "output": output_text,
-                        "summary": summary,
-                    }
-                )
+                _resp_payload = {
+                    "execution_id": str(execution.id),
+                    "task_id": task_id,
+                    "pool": agent_pool,
+                    "mode": "sync_via_queue",
+                    "status": _qstatus or "completed",
+                    "output": output_text,
+                    "summary": summary,
+                }
+                if idempotency_key:
+                    try:
+                        from models.idempotency import (
+                            ExecutionIdempotency as _Idem,
+                        )
+
+                        ir = await db.execute(
+                            select(_Idem).where(
+                                _Idem.tenant_id == user.tenant_id,
+                                _Idem.key == idempotency_key,
+                            )
+                        )
+                        irow = ir.scalar_one_or_none()
+                        if irow is not None:
+                            irow.cached_response = _resp_payload
+                            irow.execution_id = execution.id
+                            irow.status = "completed"
+                            await db.commit()
+                    except Exception:
+                        await db.rollback()
+                return success(_resp_payload)
 
             return success(
                 {

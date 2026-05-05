@@ -80,6 +80,10 @@ from models.pipeline_healing import (
     PipelinePatchStatus,
     PipelineRunDiff,
 )
+from models.connector import Connector, ConnectorAuthType, ConnectorKind
+from models.approval import Approval, ApprovalStatus
+from models.idempotency import ExecutionIdempotency
+from models.dead_letter import DeadLetterExecution
 
 __all__ = [
     "Base",
@@ -172,4 +176,11 @@ __all__ = [
     "PipelineRunDiff",
     "PipelinePatchProposal",
     "PipelinePatchStatus",
+    "Connector",
+    "ConnectorKind",
+    "ConnectorAuthType",
+    "Approval",
+    "ApprovalStatus",
+    "ExecutionIdempotency",
+    "DeadLetterExecution",
 ]

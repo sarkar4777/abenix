@@ -1,0 +1,62 @@
+# IBM Maximo — Work Orders via MAS (Maximo Application Suite) REST API
+# Modeled on /maximo/oslc/os/mxwo from the Maximo public docs.
+key: cmms_maximo
+label: IBM Maximo
+kind: cmms
+docs_url: https://www.ibm.com/docs/en/maximo-rest-apis
+base_url_template: https://{maximo_host}/maximo/oslc
+auth_type: api_key
+auth_hints:
+  header_name: maxauth
+operations:
+  create_work_order:
+    method: POST
+    path: /os/mxapiwodetail
+    description: Create a Maximo work order in mxapiwodetail.
+    args:
+      siteid: { type: string, required: true }
+      description: { type: string, required: true }
+      worktype: { type: string, required: true, example: CM }
+      assetnum: { type: string, required: false }
+      location: { type: string, required: false }
+      wopriority: { type: integer, required: false, example: 2 }
+    body_template:
+      siteid: "{siteid}"
+      description: "{description}"
+      worktype: "{worktype}"
+      assetnum: "{assetnum}"
+      location: "{location}"
+      wopriority: "{wopriority}"
+  update_status:
+    method: POST
+    path: /os/mxapiwodetail/{wonum}?action=wsmethod:changeStatus
+    description: Change workflow status of a Maximo work order.
+    args:
+      wonum: { type: string, required: true }
+      status: { type: string, required: true, example: APPR }
+      memo: { type: string, required: false }
+    body_template:
+      status: "{status}"
+      memo: "{memo}"
+  attach_photo:
+    method: POST
+    path: /os/mxapiwodetail/{wonum}/doclinks
+    description: Attach a document link (photo, drawing) to a work order.
+    args:
+      wonum: { type: string, required: true }
+      document: { type: string, required: true }
+      url: { type: string, required: true }
+    body_template:
+      document: "{document}"
+      url: "{url}"
+  query_wos:
+    method: GET
+    path: /os/mxapiwodetail
+    description: Query Maximo work orders using oslc.where filter.
+    args:
+      where: { type: string, required: false, example: "status=\"APPR\"" }
+      page_size: { type: integer, required: false, example: 50 }
+    query_params:
+      "oslc.where": "{where}"
+      "oslc.pageSize": "{page_size}"
+      "lean": "1"

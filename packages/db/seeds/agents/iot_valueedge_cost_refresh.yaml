@@ -1,0 +1,50 @@
+name: "IoT ValueEdge Cost Refresh"
+slug: iot-valueedge-cost-refresh
+description: >-
+  Daily refresh job for offshore-wind cost coefficients used by the
+  ValueEdge pipeline. Cron-driven once per day at 03:00 UTC. Calls
+  `connector_call` against the `cost_data_bnef` preset to pull the
+  latest CapEx-per-MW + LCOE coefficients, then writes them into the
+  tenant `subscribed_feed` cache under the key
+  `bnef-offshore-wind-capex-per-mw`.
+
+  The ValueEdge pipeline's cost_recompute step reads this feed and
+  falls back to hardcoded coefficients if the feed is stale or
+  missing.
+agent_type: oob
+category: engineering
+icon: TrendingUp
+version: "1.0.0"
+status: draft
+
+system_prompt: |
+  Refresh BNEF cost coefficients once per day. Validate the
+  payload shape before persisting.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.0
+  max_iterations: 5
+  max_tokens: 2048
+  tools:
+    - connector_call
+    - subscribed_feed
+    - code_executor
+    - current_time
+
+triggers:
+  - kind: cron
+    expression: "0 0 3 * * *"
+    enabled: false
+    payload:
+      preset: cost_data_bnef
+      feed_key: bnef-offshore-wind-capex-per-mw
+
+input_variables:
+  - name: message
+    type: string
+    description: "Optional connector_id override JSON."
+    required: false
+
+example_prompts:
+  - '{"connector_id":"bnef-prod"}'

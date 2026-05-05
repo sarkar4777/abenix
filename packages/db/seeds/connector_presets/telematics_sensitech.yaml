@@ -1,0 +1,35 @@
+# Sensitech ColdStream — Cold-chain temperature loggers + shipment data
+# Modeled on the Sensitech ColdStream public API. Concrete tenants use
+# https://api.coldstream.sensitech.com.
+key: telematics_sensitech
+label: Sensitech ColdStream
+kind: telematics
+docs_url: https://www.sensitech.com/en/api/
+base_url_template: https://api.coldstream.sensitech.com/v1
+auth_type: bearer
+operations:
+  list_loggers:
+    method: GET
+    path: /loggers
+    description: List active temperature loggers in the customer account.
+    args:
+      shipment_id: { type: string, required: false }
+      status: { type: string, required: false, example: in_transit }
+      limit: { type: integer, required: false, example: 100 }
+    query_params:
+      shipmentId: "{shipment_id}"
+      status: "{status}"
+      limit: "{limit}"
+  get_temperature_log:
+    method: GET
+    path: /loggers/{logger_id}/temperature
+    description: Time-series temperature points for one logger across a window.
+    args:
+      logger_id: { type: string, required: true }
+      from_iso: { type: string, required: true, example: "2026-04-01T00:00:00Z" }
+      to_iso: { type: string, required: true, example: "2026-04-15T00:00:00Z" }
+      sample_minutes: { type: integer, required: false, example: 5 }
+    query_params:
+      from: "{from_iso}"
+      to: "{to_iso}"
+      sample: "{sample_minutes}"

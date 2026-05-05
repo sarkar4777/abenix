@@ -27,3 +27,5 @@ kubernetes>=29.0.0
 # Meeting Representative — LiveKit RTC + API client
 livekit>=0.17.0
 livekit-api>=0.7.0
+# v1.1 production tooling — MQTT (mqtt_publish + subscribed_feed tools)
+paho-mqtt>=2.0.0

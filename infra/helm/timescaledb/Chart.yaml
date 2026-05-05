@@ -1,0 +1,6 @@
+apiVersion: v2
+name: timescaledb
+version: 0.1.0
+appVersion: "pg16"
+description: TimescaleDB time-series store for AgentForge tsdb_query tool
+type: application

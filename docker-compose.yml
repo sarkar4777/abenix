@@ -100,6 +100,46 @@ services:
       timeout: 5s
       retries: 10
 
+  # Mosquitto — MQTT broker for the streaming/event-trigger primitive.
+  # Anonymous + open by default to keep dev-local single-command. Prod
+  # swaps in EMQX / AWS IoT Core / Azure IoT Hub via the helm values.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: abenix-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    command: >
+      sh -c "printf 'listener 1883 0.0.0.0\nallow_anonymous true\npersistence true\npersistence_location /mosquitto/data/\nlog_dest stdout\n' > /mosquitto/config/mosquitto.conf
+      && exec /docker-entrypoint.sh /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -t '$$SYS/#' -C 1 -W 2 || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # TimescaleDB — time-series store for the tsdb_query tool. Bound to
+  # 5433 so it doesn't collide with the existing abenix-postgres on 5432.
+  # Same SQL surface as Postgres + hypertable extension.
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: abenix-timescaledb
+    environment:
+      POSTGRES_USER: ${TSDB_USER:-abenix}
+      POSTGRES_PASSWORD: ${TSDB_PASSWORD:-abenix}
+      POSTGRES_DB: ${TSDB_DB:-abenix_tsdb}
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abenix -d abenix_tsdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   neo4j:
     image: neo4j:5-community
     container_name: abenix-neo4j
@@ -128,3 +168,6 @@ volumes:
   neo4j_data:
   neo4j_logs:
   nats_data:
+  mosquitto_data:
+  mosquitto_log:
+  timescaledb_data:

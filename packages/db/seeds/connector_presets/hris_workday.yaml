@@ -1,0 +1,28 @@
+# Workday HCM — Workers + Worker Skills/Certifications
+# Modeled on the Workday REST API v1 (/ccx/api/v1/{tenant}/...).
+key: hris_workday
+label: Workday HCM
+kind: hris
+docs_url: https://community.workday.com/sites/default/files/file-hosted/restapi/index.html
+base_url_template: https://{wd_host}/ccx/api/v1/{tenant}
+auth_type: oauth2
+operations:
+  list_employees:
+    method: GET
+    path: /workers
+    description: List active workers (employees + contingent).
+    args:
+      search: { type: string, required: false, description: full-name search filter }
+      limit: { type: integer, required: false, example: 100 }
+    query_params:
+      search: "{search}"
+      limit: "{limit}"
+  get_certifications:
+    method: GET
+    path: /workers/{worker_id}/certifications
+    description: List a worker's professional certifications and skills.
+    args:
+      worker_id: { type: string, required: true }
+      include_expired: { type: boolean, required: false, example: false }
+    query_params:
+      includeExpired: "{include_expired}"

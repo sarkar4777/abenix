@@ -10,6 +10,8 @@ import ScenarioExplainer from '../components/ScenarioExplainer';
 import PipelineDagViz from '../components/PipelineDagViz';
 import { FIELDEDGE_DAG } from '../components/dags';
 import KbBadge from '../components/KbBadge';
+import LiveStatusPanel from '../components/LiveStatusPanel';
+import LiveModeToggle from '../components/LiveModeToggle';
 import { findPipelineBySlug, runPipeline, type PipelineKey } from '../lib/pipelineRunner';
 
 // ── Types matching the backend agent JSON shapes ─────────────────────
@@ -184,21 +186,56 @@ export default function FieldEdgeTab() {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  // Live mode + connector state. When a CMMS connector is bound the
+  // tab swaps the historical-wos.json fetch for `query_wos` against
+  // it and the Convert-to-WO action calls `create_work_order`.
+  const [liveMode, setLiveMode] = useState(false);
+  const [showCmmsModal, setShowCmmsModal] = useState(false);
+  const [cmmsConnectors, setCmmsConnectors] = useState<{ id: string; name: string; kind: string }[]>([]);
+  const [activeCmmsConnectorId, setActiveCmmsConnectorId] = useState<string | null>(null);
+  const [convertWoBusy, setConvertWoBusy] = useState(false);
+  const [convertWoResult, setConvertWoResult] = useState<{ ok: boolean; message: string } | null>(null);
+
   // ── Initial bootstrap — fetch fleet / WO / techs / pipeline id in parallel ──
   useEffect(() => {
     (async () => {
-      const [pid, fleetRes, woRes, techRes] = await Promise.all([
+      const [pid, fleetRes, woRes, techRes, connRes] = await Promise.all([
         findPipelineBySlug('iot-fieldedge-pipeline'),
         fetch('/industrial-iot/fieldedge/fleet.json').then((r) => r.json()).catch(() => null),
         fetch('/industrial-iot/fieldedge/historical-wos.json').then((r) => r.json()).catch(() => null),
         fetch('/industrial-iot/fieldedge/technicians.json').then((r) => r.json()).catch(() => null),
+        // List CMMS connectors. Endpoint may not exist in older
+        // standalones — tolerate the 404 silently.
+        fetch('/api/connectors?kind=cmms').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
       ]);
       setPipelineId(pid);
       if (fleetRes) setFleet((fleetRes as Fleet).turbines || []);
       if (woRes) setWos((woRes as WorkOrders).work_orders || []);
       if (techRes) setTechs((techRes as Technicians).technicians || []);
+      const conns = ((connRes as { data?: { id: string; name: string; kind: string }[] })?.data) || [];
+      setCmmsConnectors(conns.filter((c) => c.kind?.startsWith('cmms')));
     })();
   }, []);
+
+  // When a CMMS connector is bound, swap historical-wos.json for the
+  // connector's query_wos operation. Fall back to the static JSON on
+  // any error so the demo still works.
+  useEffect(() => {
+    if (!activeCmmsConnectorId) return;
+    (async () => {
+      try {
+        const r = await fetch('/api/connectors/' + activeCmmsConnectorId + '/operations/query_wos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 100 }),
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        const live = ((j?.data?.work_orders) ?? j?.data) as WO[] | undefined;
+        if (live && live.length > 0) setWos(live);
+      } catch { /* keep static JSON */ }
+    })();
+  }, [activeCmmsConnectorId]);
 
   const selectedTurbine = useMemo(
     () => fleet.find((t) => t.id === selectedTurbineId) || null,
@@ -281,6 +318,41 @@ export default function FieldEdgeTab() {
   const stopStream = () => {
     abortRef.current?.abort();
     setStreaming(false);
+  };
+
+  // ── Convert troubleshooting result into a CMMS work order ────────
+  // When a connector is bound, POSTs to its create_work_order operation;
+  // otherwise simulates locally so the demo path still works.
+  const convertToWorkOrder = async () => {
+    setConvertWoBusy(true); setConvertWoResult(null);
+    const payload = {
+      turbine_id: selectedTurbineId,
+      title: troubleshoot?.diagnosis_summary ?? 'Symptom triage',
+      description: query,
+      parts: troubleshoot?.parts_required ?? [],
+      estimated_hours: troubleshoot?.estimated_hours ?? null,
+      procedure: troubleshoot?.procedure ?? [],
+    };
+    if (!activeCmmsConnectorId) {
+      // Local-only path.
+      setConvertWoResult({ ok: true, message: 'Demo mode: WO drafted locally. Connect a CMMS connector to write back.' });
+      setConvertWoBusy(false);
+      return;
+    }
+    try {
+      const r = await fetch('/api/connectors/' + activeCmmsConnectorId + '/operations/create_work_order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      setConvertWoResult({ ok: true, message: 'Created in CMMS: ' + (j?.data?.wo_id ?? 'ok') });
+    } catch (e) {
+      setConvertWoResult({ ok: false, message: (e as Error).message });
+    } finally {
+      setConvertWoBusy(false);
+    }
   };
 
   // ── Closeout (calls the closeout_documenter agent via /api/agents proxy) ──
@@ -369,6 +441,84 @@ export default function FieldEdgeTab() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
       <div className="space-y-6 min-w-0">
+
+        {/* Live status + Connect-to-CMMS row — single line, fully
+            additive. Demo path stays identical when no connector is bound. */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <LiveStatusPanel liveModeActive={liveMode || !!activeCmmsConnectorId} />
+          <div className="flex items-center gap-3">
+            {activeCmmsConnectorId && (
+              <span className="text-[10.5px] text-emerald-300 font-mono">
+                CMMS: {cmmsConnectors.find((c) => c.id === activeCmmsConnectorId)?.name ?? activeCmmsConnectorId}
+              </span>
+            )}
+            <button
+              onClick={() => setShowCmmsModal(true)}
+              className="text-[11px] px-2.5 py-1 rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+            >
+              {activeCmmsConnectorId ? 'Change CMMS' : 'Connect to CMMS'}
+            </button>
+            <LiveModeToggle
+              value={liveMode}
+              onChange={setLiveMode}
+              hint="Live: pre-fetched DTN weather + CMMS connector wiring; demo: bundled JSON."
+            />
+          </div>
+        </div>
+
+        {showCmmsModal && (
+          <div
+            onClick={() => setShowCmmsModal(false)}
+            className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-md"
+            >
+              <h3 className="text-white font-semibold mb-3">Pick a CMMS connector</h3>
+              {cmmsConnectors.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  No connectors of kind <code>cmms_*</code> are configured for your tenant.
+                  Create one under Admin → Connectors.
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {cmmsConnectors.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        onClick={() => { setActiveCmmsConnectorId(c.id); setShowCmmsModal(false); }}
+                        className={`w-full text-left px-3 py-2 rounded-md border text-sm ${
+                          activeCmmsConnectorId === c.id
+                            ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-100'
+                            : 'bg-slate-800/40 border-slate-700 text-slate-200 hover:border-slate-600'
+                        }`}
+                      >
+                        <div>{c.name}</div>
+                        <div className="text-[10.5px] font-mono text-slate-500">{c.kind} · {c.id}</div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-4 flex justify-end gap-2">
+                {activeCmmsConnectorId && (
+                  <button
+                    onClick={() => { setActiveCmmsConnectorId(null); setShowCmmsModal(false); }}
+                    className="text-[11px] px-2.5 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800"
+                  >
+                    Disconnect
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowCmmsModal(false)}
+                  className="text-[11px] px-2.5 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Mobile-first symptom card — capped to max-w-md so it visually feels
             like a tablet pane even when the desktop layout is wide. */}
@@ -703,6 +853,29 @@ export default function FieldEdgeTab() {
                   {troubleshoot.part_lookup_required && (
                     <p className="text-[11px] text-amber-300 mt-2">Some parts need engineer-side lookup.</p>
                   )}
+                </div>
+              )}
+
+              {/* Convert this triage into a CMMS work order. When a
+                  connector is bound it writes back; otherwise it just
+                  acknowledges locally so the demo flow stays intact. */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center gap-3 justify-between">
+                <div className="text-xs text-slate-400">
+                  {activeCmmsConnectorId
+                    ? <>Will POST to <code className="text-cyan-300">create_work_order</code> on the bound CMMS connector.</>
+                    : 'No CMMS connector bound — demo mode drafts the WO locally.'}
+                </div>
+                <button
+                  onClick={convertToWorkOrder}
+                  disabled={convertWoBusy}
+                  className="text-[11px] px-3 py-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
+                >
+                  {convertWoBusy ? 'Submitting…' : 'Convert to Work Order'}
+                </button>
+              </div>
+              {convertWoResult && (
+                <div className={`text-xs ${convertWoResult.ok ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {convertWoResult.message}
                 </div>
               )}
             </motion.div>

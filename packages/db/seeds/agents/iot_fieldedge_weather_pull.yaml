@@ -1,0 +1,48 @@
+name: "IoT FieldEdge Weather Pull"
+slug: iot-fieldedge-weather-pull
+description: >-
+  Pre-fetches DTN weather forecasts every 6 hours for each turbine
+  site so FieldEdge troubleshooting + safety-gate decisions can read
+  fresh wind / gust / precipitation data without per-request DTN
+  round-trips.
+
+  Cron-driven. Calls `connector_call` against the `weather_dtn`
+  preset for every site listed in fleet.json, then writes each
+  forecast into the tenant `subscribed_feed` cache under the key
+  `weather-dtn:{site_id}`.
+agent_type: oob
+category: maintenance
+icon: Wind
+version: "1.0.0"
+status: draft
+
+system_prompt: |
+  Iterate over the configured turbine sites, fetch the DTN
+  forecast, cache it. No reasoning needed beyond simple looping.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.0
+  max_iterations: 8
+  max_tokens: 2048
+  tools:
+    - connector_call
+    - subscribed_feed
+    - code_executor
+    - current_time
+
+triggers:
+  - kind: cron
+    expression: "0 0 */6 * * *"
+    enabled: false
+    payload:
+      preset: weather_dtn
+
+input_variables:
+  - name: message
+    type: string
+    description: "Optional override JSON {connector_id, site_ids?}."
+    required: false
+
+example_prompts:
+  - '{"site_ids":["BREVARD-MESA","NORTHERN-LIGHTS"]}'

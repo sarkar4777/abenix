@@ -143,6 +143,11 @@ kubectl -n "$NS" get svc abenix-neo4j &>/dev/null 2>&1 && pf abenix-neo4j 7474 7
 kubectl -n "$NS" get svc abenix-prometheus &>/dev/null 2>&1 && pf abenix-prometheus 9090 9090
 kubectl -n "$NS" get svc abenix-grafana &>/dev/null 2>&1 && pf abenix-grafana 3030 3000
 
+# v1.1 production tooling — MQTT broker, TimescaleDB, edge-runtime gateway
+kubectl -n "$NS" get svc abenix-mosquitto &>/dev/null 2>&1 && pf abenix-mosquitto 1883 1883
+kubectl -n "$NS" get svc abenix-timescaledb &>/dev/null 2>&1 && pf abenix-timescaledb 5433 5432
+kubectl -n "$NS" get svc abenix-edge &>/dev/null 2>&1 && pf abenix-edge 8088 8080
+
 sleep 2
 
 # Helper: read a key from .env reliably

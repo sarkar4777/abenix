@@ -1,0 +1,52 @@
+name: "IoT Cold Chain Telematics Pull"
+slug: iot-coldchain-telematics-pull
+description: >-
+  Live-mode telemetry source for the cold-chain showcase. Cron-driven
+  every 60s. Calls `connector_call` against the
+  `telematics_sensitech` preset to pull the latest waypoints for each
+  active shipment, then publishes one MQTT message per shipment to
+  `cold-chain.waypoints`.
+
+  Disabled by default — the ColdChainTab "Live mode" toggle flips the
+  trigger on. When inactive, the tab keeps using the in-browser
+  synthetic generator.
+agent_type: oob
+category: logistics
+icon: Truck
+version: "1.0.0"
+status: draft
+
+system_prompt: |
+  Single-purpose telematics puller. For each active shipment, call
+  the telematics connector's `latest_waypoints` operation and
+  publish the result to MQTT.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.0
+  max_iterations: 6
+  max_tokens: 2048
+  tools:
+    - connector_call
+    - mqtt_publish
+    - code_executor
+
+triggers:
+  - kind: cron
+    expression: "0 */1 * * * *"
+    enabled: false
+    payload:
+      preset: telematics_sensitech
+      mqtt_topic: "cold-chain.waypoints"
+
+input_variables:
+  - name: message
+    type: string
+    description: >-
+      Optional JSON override {connector_id, shipment_ids?}.
+      When empty, the agent enumerates active shipments from the
+      tenant connector config.
+    required: false
+
+example_prompts:
+  - '{"connector_id":"telematics-sensitech-prod","shipment_ids":["SHP-001"]}'

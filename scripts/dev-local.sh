@@ -319,13 +319,15 @@ PG_HEALTHY=false
 REDIS_HEALTHY=false
 NEO4J_HEALTHY=false
 NATS_HEALTHY=false
+TSDB_HEALTHY=false
 docker compose ps 2>/dev/null | grep "abenix-postgres" | grep -q "healthy" && PG_HEALTHY=true
 docker compose ps 2>/dev/null | grep "abenix-redis" | grep -q "healthy" && REDIS_HEALTHY=true
 docker compose ps 2>/dev/null | grep "abenix-neo4j" | grep -q "healthy" && NEO4J_HEALTHY=true
 docker compose ps 2>/dev/null | grep "abenix-nats" | grep -q "healthy" && NATS_HEALTHY=true
+docker compose ps 2>/dev/null | grep "abenix-timescaledb" | grep -q "healthy" && TSDB_HEALTHY=true
 
-if [ "$PG_HEALTHY" = true ] && [ "$REDIS_HEALTHY" = true ] && [ "$NEO4J_HEALTHY" = true ] && [ "$NATS_HEALTHY" = true ]; then
-  ok "Postgres, Redis, Neo4j, and NATS already running and healthy"
+if [ "$PG_HEALTHY" = true ] && [ "$REDIS_HEALTHY" = true ] && [ "$NEO4J_HEALTHY" = true ] && [ "$NATS_HEALTHY" = true ] && [ "$TSDB_HEALTHY" = true ]; then
+  ok "Postgres, Redis, Neo4j, NATS, Mosquitto, and TimescaleDB already running and healthy"
 else
   docker compose up -d 2>&1 | sed 's/^/      /'
   log "Waiting for containers to be healthy..."
@@ -334,18 +336,20 @@ else
     RD_OK=false
     N4_OK=false
     NA_OK=false
+    TS_OK=false
     docker compose ps 2>/dev/null | grep "abenix-postgres" | grep -q "healthy" && PG_OK=true
     docker compose ps 2>/dev/null | grep "abenix-redis" | grep -q "healthy" && RD_OK=true
     docker compose ps 2>/dev/null | grep "abenix-neo4j" | grep -q "healthy" && N4_OK=true
     docker compose ps 2>/dev/null | grep "abenix-nats" | grep -q "healthy" && NA_OK=true
+    docker compose ps 2>/dev/null | grep "abenix-timescaledb" | grep -q "healthy" && TS_OK=true
 
-    if [ "$PG_OK" = true ] && [ "$RD_OK" = true ] && [ "$N4_OK" = true ] && [ "$NA_OK" = true ]; then
-      ok "Postgres, Redis, Neo4j, and NATS are healthy"
+    if [ "$PG_OK" = true ] && [ "$RD_OK" = true ] && [ "$N4_OK" = true ] && [ "$NA_OK" = true ] && [ "$TS_OK" = true ]; then
+      ok "Postgres, Redis, Neo4j, NATS, Mosquitto, and TimescaleDB are healthy"
       break
     fi
     if [ "$i" -eq 45 ]; then
       if [ "$PG_OK" = true ] && [ "$RD_OK" = true ] && [ "$NA_OK" = true ]; then
-        warn "Neo4j is still starting — Knowledge Engine features may be delayed"
+        warn "Neo4j/TimescaleDB still starting — knowledge or tsdb features may be delayed"
       elif [ "$PG_OK" = true ] && [ "$RD_OK" = true ]; then
         warn "NATS is still starting — agent execution will fall back to inline"
       else
@@ -357,6 +361,13 @@ else
     sleep 1
   done
 fi
+
+# ── Streaming + TSDB env vars (parity with the helm chart in AKS) ──
+# Tools (mqtt_publish, tsdb_query, subscribed_feed) read these at execute
+# time. Defaults match docker-compose.yml so agents work out-of-the-box.
+export MQTT_URL=${MQTT_URL:-mqtt://localhost:1883}
+export TSDB_URL=${TSDB_URL:-postgresql://abenix:abenix@localhost:5433/abenix_tsdb}
+ok "Streaming/TSDB env: MQTT_URL=$MQTT_URL, TSDB_URL=postgresql://abenix:***@localhost:5433/abenix_tsdb"
 
 # Export NATS env for the API + the consumer process start.sh launches.
 # These match what the Helm chart injects into AKS pods, so dev/prod

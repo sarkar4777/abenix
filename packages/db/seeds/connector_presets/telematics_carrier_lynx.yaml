@@ -1,0 +1,34 @@
+# Carrier Lynx Fleet — Reefer-truck telematics + alarms
+# Modeled on the public Carrier Lynx Fleet REST API.
+key: telematics_carrier_lynx
+label: Carrier Lynx Fleet
+kind: telematics
+docs_url: https://www.carrier.com/commercial-refrigeration/en/lynx-fleet/
+base_url_template: https://api.lynxfleet.carrier.com/v2
+auth_type: oauth2
+operations:
+  list_loggers:
+    method: GET
+    path: /assets
+    description: List reefer trucks (assets) assigned to the account.
+    args:
+      fleet_id: { type: string, required: false }
+      status: { type: string, required: false, example: active }
+      limit: { type: integer, required: false, example: 100 }
+    query_params:
+      fleetId: "{fleet_id}"
+      status: "{status}"
+      limit: "{limit}"
+  get_temperature_log:
+    method: GET
+    path: /assets/{asset_id}/telemetry
+    description: Telemetry stream for an asset including return-air, supply-air, setpoint, alarms.
+    args:
+      asset_id: { type: string, required: true }
+      from_iso: { type: string, required: true }
+      to_iso: { type: string, required: true }
+      metrics: { type: string, required: false, example: "returnAir,supplyAir,setpoint,alarms" }
+    query_params:
+      from: "{from_iso}"
+      to: "{to_iso}"
+      metrics: "{metrics}"

@@ -41,6 +41,8 @@ model_config:
     - current_time
     - knowledge_search
     - email_sender
+    - tsdb_query
+    - connector_call
 
 input_variables:
   - name: message
@@ -334,6 +336,50 @@ pipeline_config:
         - plan_maintenance
       position: { x: 360, y: 860 }
 
+    # Live-mode sink. Persists the diagnosed severity + key metrics
+    # to TimescaleDB so future runs can reference history. Idempotent;
+    # safe to keep in demo mode too — the tsdb_query tool is a no-op
+    # when no TSDB is wired.
+    - id: tsdb_sink
+      tool_name: tsdb_query
+      label: "8a. Persist severity to TSDB"
+      arguments:
+        operation: insert
+        table: pump_diagnoses
+        columns: ["ts", "sensor_id", "severity", "rms", "peak", "rul_hours"]
+        from_node: final_report
+        value_paths:
+          ts: "timestamp"
+          sensor_id: "sensor_id"
+          severity: "severity"
+          rms: "dsp.rms"
+          peak: "dsp.peak"
+          rul_hours: "rul_hours"
+      depends_on:
+        - final_report
+      position: { x: 100, y: 1020 }
+
+    # On CRITICAL only — open a work order in the CMMS via the
+    # configured `cmms_*` connector preset. Connector_id flows in via
+    # pipeline context; if missing the tool short-circuits cleanly.
+    - id: cmms_work_order
+      tool_name: connector_call
+      label: "8b. Create CMMS work order (CRITICAL only)"
+      condition:
+        source_node: severity_router
+        field: severity
+        operator: eq
+        value: "CRITICAL"
+      arguments:
+        connector_id: "{{context.cmms_connector_id}}"
+        operation: create_work_order
+        payload_from_node: plan_maintenance
+        payload_field: response
+      depends_on:
+        - final_report
+        - severity_router
+      position: { x: 620, y: 1020 }
+
   edges:
     - { source: timestamp,        target: validate_input }
     - { source: validate_input,   target: dsp }
@@ -345,5 +391,8 @@ pipeline_config:
     - { source: severity_router,  target: final_report }
     - { source: rul,              target: final_report }
     - { source: plan_maintenance, target: final_report }
+    - { source: final_report,     target: tsdb_sink }
+    - { source: final_report,     target: cmms_work_order }
+    - { source: severity_router,  target: cmms_work_order }
 
   viewport: { x: 0, y: 0, zoom: 0.7 }

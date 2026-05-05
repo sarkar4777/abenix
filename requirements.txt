@@ -48,6 +48,7 @@ croniter>=1.4.0
 
 # ── Event Streaming ─────────────────────────────────────
 aiokafka>=0.10.0
+paho-mqtt>=2.0.0
 
 # ── Document Processing ──────────────────────────────────
 PyPDF2>=3.0.0

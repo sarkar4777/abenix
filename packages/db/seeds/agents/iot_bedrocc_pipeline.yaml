@@ -32,6 +32,9 @@ model_config:
     - code_executor
     - current_time
     - knowledge_search
+    - windowed_state
+    - approval_gate
+    - mqtt_publish
 
 input_variables:
   - name: message
@@ -94,6 +97,22 @@ pipeline_config:
         - timestamp
       position: { x: 360, y: 60 }
 
+    # Live-mode cascade history. Pulls the last 60s of alarms for
+    # this asset from the windowed_state Redis-backed store. Falls
+    # back to the message-supplied recent_alarms[] when empty.
+    - id: window_history
+      tool_name: windowed_state
+      label: "1b. Last-60s alarm window for asset"
+      arguments:
+        operation: query
+        asset_id_from_node: validate_input
+        asset_id_field: alarm.asset.turbine
+        name: alarms
+        since_seconds: 60
+      depends_on:
+        - validate_input
+      position: { x: 100, y: 220 }
+
     - id: classify
       tool_name: agent_step
       label: "2. Classify alarm (severity + RC + ROI)"
@@ -103,14 +122,18 @@ pipeline_config:
           Triage this alarm:
           {{validate_input.alarm}}
 
-          Recent history (within prior 60s, may be empty):
-          {{validate_input.recent_alarms}}
+          Recent history (within prior 60s, may be empty).
+          Prefer the live windowed_state window if non-empty,
+          otherwise fall back to the message-supplied list.
+          live_window: {{window_history.items}}
+          fallback_recent: {{validate_input.recent_alarms}}
         tools: "knowledge_search,current_time"
         model: claude-sonnet-4-5-20250929
         max_iterations: 5
         temperature: 0.2
       depends_on:
         - validate_input
+        - window_history
       position: { x: 360, y: 220 }
 
     - id: noise_filter
@@ -193,6 +216,47 @@ pipeline_config:
         - validate_input
       position: { x: 620, y: 540 }
 
+    # Two-of-N supervisor signoff. Blocks until approved or denied.
+    # Only fires when the safe-reset advisor returned ALLOW.
+    - id: approval_gate
+      tool_name: approval_gate
+      label: "5b. Two-supervisor approval"
+      condition:
+        source_node: safe_reset
+        field: response.decision
+        operator: eq
+        value: "ALLOW"
+      arguments:
+        required_signoffs: 2
+        expires_seconds: 300
+        payload_from_node: safe_reset
+        payload_field: response
+      depends_on:
+        - safe_reset
+        - reset_router
+      position: { x: 620, y: 700 }
+
+    # Publish the actual reset command on `controls.write` only when
+    # the approval gate returns approved. On deny the publish step is
+    # skipped — the verdict still appears in the final envelope.
+    - id: controls_publish
+      tool_name: mqtt_publish
+      label: "5c. Publish reset to controls.write"
+      condition:
+        source_node: approval_gate
+        field: status
+        operator: eq
+        value: "approved"
+      arguments:
+        topic: "controls.write"
+        qos: 1
+        retain: false
+        payload_from_node: safe_reset
+        payload_field: response.reset_command
+      depends_on:
+        - approval_gate
+      position: { x: 620, y: 860 }
+
     - id: final_envelope
       tool_name: code_executor
       label: "6. Assemble triage envelope"
@@ -240,18 +304,27 @@ pipeline_config:
         - noise_filter
         - reset_router
         - safe_reset
-      position: { x: 360, y: 720 }
+        - approval_gate
+        - controls_publish
+      position: { x: 360, y: 1020 }
 
   edges:
     - { source: timestamp,       target: validate_input }
+    - { source: validate_input,  target: window_history }
     - { source: validate_input,  target: classify }
+    - { source: window_history,  target: classify }
     - { source: validate_input,  target: noise_filter }
     - { source: classify,        target: reset_router }
     - { source: reset_router,    target: safe_reset }
     - { source: validate_input,  target: safe_reset }
+    - { source: safe_reset,      target: approval_gate }
+    - { source: reset_router,    target: approval_gate }
+    - { source: approval_gate,   target: controls_publish }
     - { source: classify,        target: final_envelope }
     - { source: noise_filter,    target: final_envelope }
     - { source: reset_router,    target: final_envelope }
     - { source: safe_reset,      target: final_envelope }
+    - { source: approval_gate,   target: final_envelope }
+    - { source: controls_publish, target: final_envelope }
 
   viewport: { x: 0, y: 0, zoom: 0.7 }

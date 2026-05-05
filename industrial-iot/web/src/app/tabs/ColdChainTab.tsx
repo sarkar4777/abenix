@@ -18,6 +18,9 @@ import {
 import { findPipelineBySlug, runPipeline, type PipelineKey } from '../lib/pipelineRunner';
 import { coldChainShipment, parseColdChainQueryParams } from '../lib/synthetic';
 import KbBadge from '../components/KbBadge';
+import LiveModeToggle from '../components/LiveModeToggle';
+import LiveStatusPanel from '../components/LiveStatusPanel';
+import { toggleLiveTrigger } from '../lib/liveStream';
 
 interface Adjudication {
   severity?: string;
@@ -69,6 +72,10 @@ export default function ColdChainTab() {
   const [claim, setClaim] = useState<ClaimDraft | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  // Live mode tells the standalone API to enable the cron telemetry
+  // puller; the pipeline run still happens locally so the demo
+  // visuals keep working unchanged.
+  const [liveMode, setLiveMode] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -107,6 +114,14 @@ export default function ColdChainTab() {
     setLog([]);
     abortRef.current = new AbortController();
 
+    if (liveMode) {
+      // Flip the telematics-pull cron on so live waypoints arrive on
+      // cold-chain.waypoints. The downstream pipeline still drives
+      // off the synthetic shipment so demo visuals stay coherent.
+      const ok = await toggleLiveTrigger('iot-coldchain-telematics-pull', true);
+      setLog((p) => [...p, ok ? 'Live mode: telematics pull enabled.' : 'Live mode: trigger toggle failed (running synthetic).']);
+    }
+
     const shipment = coldChainShipment(parseColdChainQueryParams());
 
     // Animate the raw reading stream up front so the user can watch
@@ -122,9 +137,14 @@ export default function ColdChainTab() {
 
     // Now fire the pipeline against the full window.
     setLog((p) => [...p, 'Sending full window to pipeline…']);
+    const ctx: Record<string, unknown> = { coldchain_asset_id: asset.id };
+    if (liveMode) {
+      // Hand the pipeline the claims connector handle so the new
+      // file_claim_connector node can post on MEDIUM/HIGH severity.
+      ctx.claims_connector_id = 'claims-servicenow-default';
+    }
     const result = await runPipeline(
-      pipelineId, shipment,
-      { coldchain_asset_id: asset.id },
+      pipelineId, shipment, ctx,
       { waitSeconds: 180, signal: abortRef.current.signal },
     );
     if (!result.ok) {
@@ -142,7 +162,12 @@ export default function ColdChainTab() {
     setStreaming(false);
   };
 
-  const stop = () => abortRef.current?.abort();
+  const stop = async () => {
+    abortRef.current?.abort();
+    if (liveMode) {
+      await toggleLiveTrigger('iot-coldchain-telematics-pull', false);
+    }
+  };
 
   const chartData = rawReadings.map((r) => {
     const sm = monitor?.smoothed?.[r.i];
@@ -159,6 +184,15 @@ export default function ColdChainTab() {
       <DeployRow asset={asset} busy={deploying} onDeploy={deploy} />
       {probeStatus && <div className="text-xs text-slate-400">{probeStatus}</div>}
       <KbBadge />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <LiveStatusPanel liveModeActive={liveMode} />
+        <LiveModeToggle
+          value={liveMode}
+          onChange={setLiveMode}
+          disabled={streaming}
+          hint="Demo: in-browser shipment. Live: pull from telematics_sensitech preset, file claims via claims_servicenow."
+        />
+      </div>
       {deployError && (
         <div className="flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
           <AlertTriangle className="w-4 h-4 mt-0.5" />

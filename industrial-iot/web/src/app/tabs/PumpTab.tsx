@@ -18,6 +18,9 @@ import {
 import { findPipelineBySlug, runPipeline, type PipelineKey } from '../lib/pipelineRunner';
 import { vibrationWindow, VibrationWindow, parsePumpQueryParams } from '../lib/synthetic';
 import KbBadge from '../components/KbBadge';
+import LiveModeToggle from '../components/LiveModeToggle';
+import LiveStatusPanel from '../components/LiveStatusPanel';
+import { subscribeLive, toggleLiveTrigger } from '../lib/liveStream';
 
 interface WindowResult {
   index: number;
@@ -66,6 +69,11 @@ export default function PumpTab() {
   const [currentLog, setCurrentLog] = useState<string[]>([]);
   const [expandedWindow, setExpandedWindow] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Live mode reads vibration windows from MQTT topic
+  // pump.vibration.raw (the simulator agent publishes them every 15s).
+  // Demo mode keeps the in-browser synthetic.ts trajectory.
+  const [liveMode, setLiveMode] = useState(false);
+  const liveSubRef = useRef<{ close: () => void } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -123,6 +131,31 @@ export default function PumpTab() {
     setStreaming(true); setResults([]); setCurrentLog([]); setExpandedWindow(null);
     abortRef.current = new AbortController();
 
+    if (liveMode) {
+      // Flip the simulator trigger on so the broker starts receiving
+      // vibration windows; subscribe to SSE for the live feed.
+      await toggleLiveTrigger('iot-pump-data-simulator', true);
+      setCurrentLog((p) => [...p, 'Live mode: simulator trigger enabled, waiting on pump.vibration.raw…']);
+      let i = 0;
+      liveSubRef.current = subscribeLive<Record<string, unknown>>('pump.vibration.raw', async (msg) => {
+        if (abortRef.current?.signal.aborted) return;
+        i += 1;
+        setCurrentLog((p) => [...p.slice(-12), `Live window ${i} received from MQTT`]);
+        const ctx: Record<string, unknown> = {
+          pump_dsp_asset_id: dspAsset.id,
+          asset_context: { sensor_id: (msg as { sensor_id?: string }).sensor_id ?? 'PUMP-A-01' },
+        };
+        if (rulAsset) ctx.rul_asset_id = rulAsset.id;
+        const wr: WindowResult = { index: i, scenario: 'healthy' };
+        const result = await runPipeline(pipelineId, msg, ctx, {
+          waitSeconds: 180, signal: abortRef.current?.signal,
+        });
+        if (!result.ok) { wr.error = result.error ?? 'failed'; }
+        setResults((prev) => [...prev, wr]);
+      });
+      return;
+    }
+
     const overrides = parsePumpQueryParams();
     const total = 10; // 10 windows across ~5-10 min (LLM round-trip per window)
     for (let i = 1; i <= total; i++) {
@@ -179,7 +212,17 @@ export default function PumpTab() {
     setStreaming(false);
   };
 
-  const stopStream = () => { abortRef.current?.abort(); };
+  const stopStream = async () => {
+    abortRef.current?.abort();
+    if (liveSubRef.current) {
+      liveSubRef.current.close();
+      liveSubRef.current = null;
+    }
+    if (liveMode) {
+      await toggleLiveTrigger('iot-pump-data-simulator', false);
+    }
+    setStreaming(false);
+  };
 
   const latest = results[results.length - 1];
 
@@ -213,6 +256,15 @@ export default function PumpTab() {
         <div className="text-xs text-slate-400">{probeStatus}</div>
       )}
       <KbBadge />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <LiveStatusPanel liveModeActive={liveMode} />
+        <LiveModeToggle
+          value={liveMode}
+          onChange={setLiveMode}
+          disabled={streaming}
+          hint="Demo: in-browser scripted trajectory. Live: simulator publishes to MQTT pump.vibration.raw."
+        />
+      </div>
       {deployError && (
         <div className="flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
           <AlertTriangle className="w-4 h-4 mt-0.5" />

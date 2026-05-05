@@ -39,6 +39,8 @@ model_config:
     - database_query
     - current_time
     - knowledge_search
+    - subscribed_feed
+    - connector_call
 
 input_variables:
   - name: message
@@ -122,6 +124,21 @@ pipeline_config:
         - validate_input
       position: { x: 360, y: 220 }
 
+    # Live-mode pre-step. Reads the BNEF-refreshed cost coefficients
+    # from the tenant subscribed_feed cache. If stale or missing the
+    # downstream code falls back to the hardcoded BASE table — that's
+    # why this is a separate node, not inlined.
+    - id: cost_feed_lookup
+      tool_name: subscribed_feed
+      label: "2b. Lookup live BNEF cost coefficients"
+      arguments:
+        operation: get
+        feed_key: bnef-offshore-wind-capex-per-mw
+        max_age_seconds: 86400
+      depends_on:
+        - configure_scenarios
+      position: { x: 620, y: 220 }
+
     - id: cost_recompute
       tool_name: code_executor
       label: "3. Recompute CapEx / CO2 / IRR / LCOE"
@@ -143,12 +160,26 @@ pipeline_config:
           scenarios = (resp or {}).get("scenarios") or []
 
           # Per-MW coefficients (USD/MW or kt/MW) by foundation type.
+          # First try the live BNEF-refreshed feed; fall back to the
+          # hardcoded coefficients when the feed is stale or absent.
           BASE = {
               "monopile":         {"capex": 2.85, "co2": 1.55, "om": 0.045},
               "jacket":           {"capex": 3.40, "co2": 1.85, "om": 0.052},
               "floating-semisub": {"capex": 4.20, "co2": 2.30, "om": 0.063},
               "floating-spar":    {"capex": 4.55, "co2": 2.45, "om": 0.066},
           }
+          feed = context.get("cost_feed_lookup") or {}
+          if isinstance(feed, str):
+              try: feed = json.loads(feed)
+              except Exception: feed = {}
+          live_coefficients = (feed or {}).get("value") if isinstance(feed, dict) else None
+          coeff_source = "fallback_hardcoded"
+          if isinstance(live_coefficients, dict) and live_coefficients:
+              # Merge live values on top of BASE so a partial feed still works.
+              for key, v in live_coefficients.items():
+                  if key in BASE and isinstance(v, dict):
+                      BASE[key] = {**BASE[key], **v}
+              coeff_source = "live_bnef"
 
           recomputed = []
           for s in scenarios:
@@ -198,11 +229,13 @@ pipeline_config:
           result = {
               "ok": True,
               "method": "inline_rule_of_thumb",
+              "coefficient_source": coeff_source,
               "scenarios": recomputed,
           }
           print(json.dumps(result))
       depends_on:
         - configure_scenarios
+        - cost_feed_lookup
       position: { x: 360, y: 380 }
 
     - id: ve_optimize
@@ -361,6 +394,8 @@ pipeline_config:
   edges:
     - { source: timestamp,            target: validate_input }
     - { source: validate_input,       target: configure_scenarios }
+    - { source: configure_scenarios,  target: cost_feed_lookup }
+    - { source: cost_feed_lookup,     target: cost_recompute }
     - { source: configure_scenarios,  target: cost_recompute }
     - { source: cost_recompute,       target: ve_optimize }
     - { source: configure_scenarios,  target: compliance_check }

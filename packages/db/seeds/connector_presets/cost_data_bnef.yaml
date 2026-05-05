@@ -1,0 +1,22 @@
+# Bloomberg NEF (BNEF) — Levelized capex/opex for clean-energy assets
+# Modeled on the BNEF Terminal API. Real customers must license BNEF; the
+# preset shape is also used as a stub for the demo Design Studio.
+key: cost_data_bnef
+label: Bloomberg NEF
+kind: cost_data
+docs_url: https://www.bnef.com/insights/api
+base_url_template: https://api.bnef.com/v1
+auth_type: bearer
+operations:
+  get_offshore_wind_capex_per_mw:
+    method: GET
+    path: /benchmarks/offshore-wind/capex
+    description: Latest BNEF benchmark capex per MW for offshore wind in a region.
+    args:
+      region: { type: string, required: true, example: NW_EUROPE }
+      year: { type: integer, required: false, example: 2026 }
+      currency: { type: string, required: false, example: USD }
+    query_params:
+      region: "{region}"
+      year: "{year}"
+      currency: "{currency}"

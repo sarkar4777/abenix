@@ -30,7 +30,9 @@ import {
   Code2,
   Gauge,
   Cpu,
+  CircuitBoard,
   FileJson,
+  Inbox,
   Brain,
   Webhook,
   Wrench,
@@ -132,15 +134,17 @@ const NAV_GROUPS: NavGroup[] = [
     defaultOpen: false,
     items: [
       // Platform operations
-      { label: 'Scaling',         icon: Gauge,       href: '/admin/scaling',      adminOnly: true },
-      { label: 'Model Selection', icon: Cpu,         href: '/admin/llm-settings', adminOnly: true },
-      { label: 'LLM Pricing',     icon: DollarSign,  href: '/admin/llm-pricing',  adminOnly: true },
+      { label: 'Scaling',           icon: Gauge,       href: '/admin/scaling',      adminOnly: true },
+      { label: 'Model Selection',   icon: Cpu,         href: '/admin/llm-settings', adminOnly: true },
+      { label: 'LLM Pricing',       icon: DollarSign,  href: '/admin/llm-pricing',  adminOnly: true },
+      { label: 'Connectors',        icon: Plug,        href: '/admin/connectors',   adminOnly: true },
+      { label: 'Dead Letter Queue', icon: Inbox,       href: '/admin/dlq',          adminOnly: true },
       // Safety / governance — Moderation + Alerts already render under MONITOR
       // for every user with view_alerts; the ADMIN entries here would just be
       // duplicates. Review Queue is admin-only so it stays.
-      { label: 'Review Queue',    icon: ShieldCheck, href: '/review-queue',       adminOnly: true },
+      { label: 'Review Queue',      icon: ShieldCheck, href: '/review-queue',       adminOnly: true },
       // People + access
-      { label: 'Team',            icon: Users,       href: '/settings/team',      feature: 'manage_team' },
+      { label: 'Team',              icon: Users,       href: '/settings/team',      feature: 'manage_team' },
     ],
   },
   {
@@ -148,7 +152,9 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'WORKSPACE',
     defaultOpen: true,
     items: [
+      { label: 'Approvals',      icon: ShieldCheck, href: '/approvals' },
       { label: 'MCP Servers',    icon: Plug, href: '/mcp',                feature: 'manage_mcp' },
+      { label: 'Edge',           icon: CircuitBoard, href: '/edge' },
       { label: 'API Keys',       icon: Key,  href: '/settings/api-keys',  feature: 'manage_api_keys' },
       { label: 'Integrations',   icon: Plug, href: '/settings/integrations' },
       { label: 'Settings',       icon: Settings,   href: '/settings' },

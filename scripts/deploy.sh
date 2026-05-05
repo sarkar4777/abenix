@@ -721,6 +721,16 @@ deploy_local() {
   kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - &>/dev/null
   helm_deps
 
+  # MQTT broker + TimescaleDB — required by v1.1 production tooling
+  step "Installing mosquitto + timescaledb (v1.1 streaming + tsdb infra)"
+  helm upgrade --install abenix-mosquitto "${ROOT_DIR}/infra/helm/mosquitto" \
+    --namespace "${NAMESPACE}" --timeout 5m --wait=false 2>&1 | tail -3 \
+    || warn "mosquitto helm install failed"
+  helm upgrade --install abenix-timescaledb "${ROOT_DIR}/infra/helm/timescaledb" \
+    --namespace "${NAMESPACE}" --timeout 5m --wait=false 2>&1 | tail -3 \
+    || warn "timescaledb helm install failed"
+  ok "Streaming + tsdb infra installed"
+
   step "Installing/upgrading Helm release '${RELEASE_NAME}'"
   # shellcheck disable=SC2046
   helm upgrade --install "${RELEASE_NAME}" "${HELM_DIR}" \
@@ -744,6 +754,22 @@ deploy_local() {
   ensure_jwt_keys || true
   run_migrations || true
   seed_agents || true
+
+  if [[ "${EDGE_RUNTIME_ENABLED:-true}" == "true" ]]; then
+    step "Installing edge runtime (gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
+    helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
+      --namespace "${NAMESPACE}" \
+      --set image.tag="${IMAGE_TAG}" \
+      --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
+      --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
+      --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+      --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
+      --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+      --timeout 5m --wait=false 2>&1 | tail -3 \
+      || warn "edge-runtime helm install failed (non-fatal)"
+    ok "edge-runtime installed"
+  fi
+
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"
 
   # Deploy standalone apps after Abenix is running

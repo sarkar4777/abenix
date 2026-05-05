@@ -135,6 +135,13 @@ const BUILT_IN_TOOLS: ToolItem[] = [
   { id: 'legal_existence_verifier', name: 'Legal Existence Verifier', description: 'Verify entity exists & is in good standing via GLEIF + OpenCorporates + UK Companies House; detects shell / dissolved / mass-address', icon: Shield, source: 'builtin', badge: 'read-only' },
   { id: 'kyc_scorer', name: 'KYC Scorer', description: 'Deterministic scoring (CPI + notional + industry + signals) → Indicator I/II/III + Aggregated Score + Simplified/Standard/Enhanced check type', icon: Calculator, source: 'builtin' },
   { id: 'regulatory_enforcement', name: 'Regulatory Enforcement', description: 'Primary-source SEC EDGAR + DOJ + FCA + CourtListener + BAILII — extracts fines, action type, source URL', icon: ShieldAlert, source: 'builtin', badge: 'read-only' },
+  // Production-tooling primitives (PLAN_PROD_TOOLS Phase 2)
+  { id: 'connector_call', name: 'Connector Call', description: 'Run a CMMS / HRIS / telematics / weather / cost-data operation via a configured connector', icon: Plug, source: 'builtin' },
+  { id: 'approval_gate', name: 'Approval Gate', description: 'Block until N humans sign off; returns approved | denied | expired', icon: Shield, source: 'builtin' },
+  { id: 'mqtt_publish', name: 'MQTT Publish', description: 'Publish JSON payloads to an MQTT topic on the platform broker', icon: Plug, source: 'builtin', badge: 'destructive' },
+  { id: 'tsdb_query', name: 'TSDB Query', description: 'Read time-series points (avg/min/max/count) from the platform TimescaleDB', icon: TrendingUp, source: 'builtin', badge: 'read-only' },
+  { id: 'windowed_state', name: 'Windowed State', description: 'Per-asset sliding-window state — append, query, count, pattern_match', icon: Wrench, source: 'builtin' },
+  { id: 'subscribed_feed', name: 'Subscribed Feed', description: 'Read the latest sample from a live MQTT/Kafka/HTTP feed (TTL-cached)', icon: Globe, source: 'builtin', badge: 'read-only' },
 ];
 
 interface MCPConnection {

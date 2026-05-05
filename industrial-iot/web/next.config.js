@@ -53,6 +53,24 @@ const nextConfig = {
         source: '/api/agents/:path*',
         destination: `${INTERNAL_API}/api/agents/:path*`,
       },
+      // Connectors + approvals — routed through the standalone API
+      // so the browser never holds the platform API key.
+      {
+        source: '/api/connectors',
+        destination: `${INTERNAL_API}/api/connectors`,
+      },
+      {
+        source: '/api/connectors/:path*',
+        destination: `${INTERNAL_API}/api/connectors/:path*`,
+      },
+      {
+        source: '/api/approvals',
+        destination: `${INTERNAL_API}/api/approvals`,
+      },
+      {
+        source: '/api/approvals/:path*',
+        destination: `${INTERNAL_API}/api/approvals/:path*`,
+      },
     ];
   },
 };

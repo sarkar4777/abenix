@@ -1,0 +1,63 @@
+# ServiceNow — Work Order (sn_wm_workorder) table
+# Modeled on the ServiceNow Now Platform Table API. base_url should be the
+# tenant instance, e.g. https://acme.service-now.com.
+key: cmms_servicenow
+label: ServiceNow Work Orders
+kind: cmms
+docs_url: https://developer.servicenow.com/dev.do#!/reference/api/utah/rest/c_TableAPI
+base_url_template: https://{instance}.service-now.com/api/now
+auth_type: basic
+operations:
+  create_work_order:
+    method: POST
+    path: /table/sn_wm_workorder
+    description: Create a ServiceNow work order.
+    args:
+      short_description: { type: string, required: true }
+      description: { type: string, required: false }
+      priority: { type: integer, required: false, example: 3 }
+      assignment_group: { type: string, required: false }
+      cmdb_ci: { type: string, required: false, description: Configuration item sys_id }
+    body_template:
+      short_description: "{short_description}"
+      description: "{description}"
+      priority: "{priority}"
+      assignment_group: "{assignment_group}"
+      cmdb_ci: "{cmdb_ci}"
+  update_status:
+    method: PATCH
+    path: /table/sn_wm_workorder/{sys_id}
+    description: Update the state field of a work order.
+    args:
+      sys_id: { type: string, required: true }
+      state: { type: string, required: true, example: "3" }
+      work_notes: { type: string, required: false }
+    body_template:
+      state: "{state}"
+      work_notes: "{work_notes}"
+  attach_photo:
+    method: POST
+    path: /attachment/file
+    description: Attach a photo to a record.
+    args:
+      sys_id: { type: string, required: true }
+      table_name: { type: string, required: false, example: sn_wm_workorder }
+      file_name: { type: string, required: true }
+      content_base64: { type: string, required: true }
+    query_params:
+      table_name: "{table_name}"
+      table_sys_id: "{sys_id}"
+      file_name: "{file_name}"
+    body_template:
+      content_base64: "{content_base64}"
+  query_wos:
+    method: GET
+    path: /table/sn_wm_workorder
+    description: Query work orders using sysparm_query (encoded query string).
+    args:
+      query: { type: string, required: false, example: "active=true^priority<=2" }
+      limit: { type: integer, required: false, example: 50 }
+    query_params:
+      sysparm_query: "{query}"
+      sysparm_limit: "{limit}"
+      sysparm_display_value: "true"

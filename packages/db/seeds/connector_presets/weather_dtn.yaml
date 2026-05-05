@@ -1,0 +1,25 @@
+# DTN Weather — Hourly forecast feed used by ag, energy, marine, logistics
+# Modeled on the DTN Operational Forecast REST API.
+key: weather_dtn
+label: DTN Weather
+kind: weather
+docs_url: https://www.dtn.com/weather-api/
+base_url_template: https://api.dtn.com/weather/v1
+auth_type: api_key
+auth_hints:
+  header_name: x-api-key
+operations:
+  get_forecast:
+    method: GET
+    path: /forecast/hourly
+    description: Hourly forecast for a lat/lon point over the next N hours.
+    args:
+      lat: { type: number, required: true, example: 40.7128 }
+      lon: { type: number, required: true, example: -74.0060 }
+      hours: { type: integer, required: true, example: 48 }
+      parameters: { type: string, required: false, example: "airTemp,windSpeed,windGust,precip,solarRadiation" }
+    query_params:
+      latitude: "{lat}"
+      longitude: "{lon}"
+      hours: "{hours}"
+      parameters: "{parameters}"

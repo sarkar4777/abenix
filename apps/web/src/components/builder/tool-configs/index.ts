@@ -7,3 +7,5 @@ export { default as MLModelConfig } from './MLModelConfig';
 export { default as HttpClientConfig } from './HttpClientConfig';
 export { default as CodeAssetConfig } from './CodeAssetConfig';
 export { default as SandboxedJobConfig } from './SandboxedJobConfig';
+export { default as ConnectorCallConfig } from './ConnectorCallConfig';
+export { default as ApprovalGateConfig } from './ApprovalGateConfig';

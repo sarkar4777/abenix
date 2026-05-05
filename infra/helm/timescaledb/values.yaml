@@ -1,0 +1,32 @@
+image:
+  repository: timescale/timescaledb
+  tag: "latest-pg16"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Defaults match docker-compose.yml so dev↔prod parity is 1:1.
+auth:
+  database: abenix_tsdb
+  username: abenix
+  # Plain-text fallback for dev. Prod sets existingSecret instead.
+  password: "abenix"
+  existingSecret: ""
+  existingSecretPasswordKey: "tsdb-password"
+
+service:
+  type: ClusterIP
+  port: 5432
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi

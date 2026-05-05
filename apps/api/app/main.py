@@ -48,6 +48,7 @@ from app.routers import (
     code_assets,
     conversations,
     creator,
+    edge,
     executions,
     knowledge,
     marketplace,
@@ -167,6 +168,7 @@ app.include_router(pipelines.router)
 app.include_router(pipeline_healing.router)
 app.include_router(workflow_shell.router)
 app.include_router(executions.router)
+app.include_router(edge.router)
 app.include_router(webhook_config.router)
 app.include_router(batch.router)
 app.include_router(workspaces.router)
@@ -213,6 +215,16 @@ app.include_router(persona_router.router)
 from app.routers import moderation as moderation_router
 
 app.include_router(moderation_router.router)
+
+from app.routers import (
+    connectors as connectors_router,
+    approvals as approvals_router,
+    admin_dlq as admin_dlq_router,
+)
+
+app.include_router(connectors_router.router)
+app.include_router(approvals_router.router)
+app.include_router(admin_dlq_router.router)
 
 # the example app has been extracted to /example_app/ as a standalone application.
 # It uses the Abenix SDK for AI features via the actAs delegation pattern.

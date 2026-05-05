@@ -18,6 +18,8 @@ import {
   HttpClientConfig,
   CodeAssetConfig,
   SandboxedJobConfig,
+  ConnectorCallConfig,
+  ApprovalGateConfig,
 } from './tool-configs';
 
 interface InputVariable {
@@ -70,6 +72,14 @@ interface AgentConfig {
   output_schema?: string;
   // Knowledge bindings — collection IDs the agent can read.
   knowledge_collection_ids?: string[];
+  // Edge runtime — opt-in to compile this agent into a `.agent` bundle.
+  edge_compatible?: boolean;
+  edge_constraints?: {
+    max_payload_bytes?: number;
+    max_runtime_seconds?: number;
+    mqtt_subscribe?: string[];
+    mqtt_publish?: string[];
+  };
 }
 
 interface KbCollectionRow {
@@ -153,6 +163,8 @@ const SPECIALIZED_CONFIGS: Record<string, React.ComponentType<{ values: Record<s
   // with proper dropdowns, schema previews, and empty-state CTAs.
   code_asset: CodeAssetConfig,
   sandboxed_job: SandboxedJobConfig,
+  connector_call: ConnectorCallConfig,
+  approval_gate: ApprovalGateConfig,
 };
 
 function ToolConfigPanel({
@@ -885,6 +897,89 @@ export default function AgentConfigPanel({
                   catch (e) { return <span className="text-red-400"> · Invalid JSON: {(e as Error).message.slice(0, 60)}</span>; }
                 })()}
               </p>
+            </div>
+
+            {/* ── Edge runtime ──────────────────────────────────────── */}
+            <div className="border-b border-slate-700/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold text-white">Edge compatible</h4>
+                  <p className="text-[10px] text-slate-500">
+                    Compile this agent into a signed <code>.agent</code> bundle and push it to a remote gateway. Disables platform-only tools.
+                  </p>
+                </div>
+                <label className="inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!config.edge_compatible}
+                    onChange={(e) => onChange({ edge_compatible: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-checked:bg-cyan-500/70 rounded-full relative transition-colors">
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${config.edge_compatible ? 'translate-x-4' : ''}`} />
+                  </div>
+                </label>
+              </div>
+              {config.edge_compatible && (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-500 mb-1">Max payload bytes</label>
+                    <input
+                      type="number" min={1024} max={1048576}
+                      value={config.edge_constraints?.max_payload_bytes ?? 65536}
+                      onChange={(e) => onChange({
+                        edge_constraints: {
+                          ...(config.edge_constraints || {}),
+                          max_payload_bytes: parseInt(e.target.value) || 65536,
+                        },
+                      })}
+                      className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500 mb-1">Max runtime (s)</label>
+                    <input
+                      type="number" min={5} max={300}
+                      value={config.edge_constraints?.max_runtime_seconds ?? 30}
+                      onChange={(e) => onChange({
+                        edge_constraints: {
+                          ...(config.edge_constraints || {}),
+                          max_runtime_seconds: parseInt(e.target.value) || 30,
+                        },
+                      })}
+                      className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-[10px] text-slate-500 mb-1">MQTT subscribe topics (comma-separated)</label>
+                    <input
+                      type="text"
+                      value={(config.edge_constraints?.mqtt_subscribe || []).join(',')}
+                      onChange={(e) => onChange({
+                        edge_constraints: {
+                          ...(config.edge_constraints || {}),
+                          mqtt_subscribe: e.target.value.split(',').map(s => s.trim()).filter(Boolean),
+                        },
+                      })}
+                      className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-[10px] text-slate-500 mb-1">MQTT publish topics (comma-separated)</label>
+                    <input
+                      type="text"
+                      value={(config.edge_constraints?.mqtt_publish || []).join(',')}
+                      onChange={(e) => onChange({
+                        edge_constraints: {
+                          ...(config.edge_constraints || {}),
+                          mqtt_publish: e.target.value.split(',').map(s => s.trim()).filter(Boolean),
+                        },
+                      })}
+                      className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>

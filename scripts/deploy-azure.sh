@@ -485,6 +485,59 @@ wait_for_pods() {
   done
 }
 
+# Streaming + time-series infra for the v1.1.0 production-tooling primitives:
+# mosquitto (MQTT broker) + timescaledb (TSDB). Both run in the abenix
+# namespace so the agent-runtime tools can reach them via cluster-DNS
+# (mqtt://abenix-mosquitto:1883, postgres://abenix-timescaledb:5432).
+deploy_streaming_tsdb() {
+  if [ -n "${ONLY_CSV}" ] && ! _should_do "mosquitto" && ! _should_do "timescaledb" && ! _should_do "infra"; then
+    return 0
+  fi
+  step "Deploying mosquitto + timescaledb (streaming + tsdb infra)"
+  kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - &>/dev/null
+
+  helm upgrade --install abenix-mosquitto "${ROOT_DIR}/infra/helm/mosquitto" \
+    --namespace "${NAMESPACE}" \
+    --timeout 5m \
+    --wait=false \
+    2>&1 | tail -3 || warn "mosquitto helm install failed"
+  ok "mosquitto installed (mqtt://abenix-mosquitto:1883)"
+
+  helm upgrade --install abenix-timescaledb "${ROOT_DIR}/infra/helm/timescaledb" \
+    --namespace "${NAMESPACE}" \
+    --timeout 5m \
+    --wait=false \
+    2>&1 | tail -3 || warn "timescaledb helm install failed"
+  ok "timescaledb installed (postgres://abenix-timescaledb:5432)"
+}
+
+# Edge runtime — separate StatefulSet that registers back to the core API,
+# subscribes to MQTT for OTA bundle delivery, and runs `.agent` bundles
+# in-process. One install per gateway (gateway.id is the StatefulSet name).
+deploy_edge_runtime() {
+  if [ -n "${ONLY_CSV}" ] && ! _should_do "edge-runtime" && ! _should_do "infra"; then
+    return 0
+  fi
+  if [ "${EDGE_RUNTIME_ENABLED:-true}" != "true" ]; then
+    log "Edge runtime disabled (EDGE_RUNTIME_ENABLED=${EDGE_RUNTIME_ENABLED}) — skipping"
+    return 0
+  fi
+  step "Deploying edge runtime (gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
+  helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
+    --namespace "${NAMESPACE}" \
+    --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime" \
+    --set image.tag="${IMAGE_TAG}" \
+    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
+    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
+    --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+    --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
+    --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+    --timeout 5m \
+    --wait=false \
+    2>&1 | tail -3 || warn "edge-runtime helm install failed"
+  ok "edge-runtime installed (StatefulSet abenix-edge in ${NAMESPACE})"
+}
+
 deploy_abenix_helm() {
   if [ -n "${ONLY_CSV}" ] && ! _should_do "api" && ! _should_do "web" && ! _should_do "worker" && ! _should_do "agent-runtime" && ! _should_do "cognify-worker"; then
     log "Abenix core not in --only filter — skipping helm upgrade"
@@ -1110,7 +1163,9 @@ deploy_all() {
 
   # Idempotent: also ensure KEDA when entering deploy directly (skipping provision).
   ensure_keda || warn "KEDA install failed — ScaledObject resources will fail"
+  deploy_streaming_tsdb || warn "MQTT/TSDB infra deploy failed (non-fatal — tools fall back to local)"
   deploy_abenix_helm
+  deploy_edge_runtime || warn "Edge runtime deploy failed (non-fatal — set EDGE_RUNTIME_ENABLED=false to silence)"
   wait_for_pods 600 || true
   ensure_jwt_keys || true
   run_migrations || true

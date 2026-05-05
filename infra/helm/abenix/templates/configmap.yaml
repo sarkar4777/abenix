@@ -70,6 +70,9 @@ data:
   {{- if .Values.sandboxedJob.namespace }}
   SANDBOXED_JOB_NAMESPACE: {{ .Values.sandboxedJob.namespace | quote }}
   {{- end }}
+  # v1.1 production tooling — MQTT broker + TimescaleDB
+  MQTT_URL: "mqtt://{{ .Release.Name }}-mqtt-mosquitto.{{ .Release.Namespace }}.svc.cluster.local:1883"
+  TSDB_DSN: "postgresql://abenix:abenix@{{ .Release.Name }}-tsdb-timescaledb.{{ .Release.Namespace }}.svc.cluster.local:5432/abenix_tsdb"
   # Meeting Representative — LiveKit config. Secrets live in abenix-secrets.
   {{- if .Values.meeting }}
   LIVEKIT_URL: {{ .Values.meeting.livekit.url | default "" | quote }}

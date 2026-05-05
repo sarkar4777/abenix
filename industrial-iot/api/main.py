@@ -164,6 +164,181 @@ async def list_pipelines() -> dict[str, Any]:
     }
 
 
+@app.get("/api/industrial-iot/live-status")
+async def live_status() -> dict[str, Any]:
+    """Best-effort reachability probe for the live-mode wiring.
+
+    Returns simple booleans the LiveStatusPanel renders as ✓/✗ pills.
+    Each leg is independent — if mosquitto is up but timescaledb is
+    not, the UI shows that asymmetrically. We never raise here.
+    """
+    mqtt_host = os.environ.get("MQTT_BROKER_HOST", "localhost")
+    mqtt_port = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
+    tsdb_host = os.environ.get("TSDB_HOST", "localhost")
+    tsdb_port = int(os.environ.get("TSDB_PORT", "5433"))
+
+    import socket
+    def _reachable(host: str, port: int) -> bool:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.4)
+                s.connect((host, port))
+            return True
+        except Exception:
+            return False
+
+    mqtt_ok = _reachable(mqtt_host, mqtt_port)
+    tsdb_ok = _reachable(tsdb_host, tsdb_port)
+
+    # Connector count — fall back to 0 if the connectors API is not
+    # wired up on this AgentForge yet.
+    connectors = 0
+    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
+    if api_key:
+        base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(
+                    f"{base_url}/api/connectors?limit=200",
+                    headers={"X-API-Key": api_key},
+                )
+                if r.status_code == 200:
+                    items = r.json().get("data") or []
+                    connectors = len(items) if isinstance(items, list) else 0
+        except Exception:
+            connectors = 0
+
+    return {"data": {
+        "mqtt": {"reachable": mqtt_ok, "broker": f"{mqtt_host}:{mqtt_port}"},
+        "tsdb": {"reachable": tsdb_ok, "host": f"{tsdb_host}:{tsdb_port}"},
+        "connectors": {"count": connectors},
+    }}
+
+
+@app.post("/api/industrial-iot/live/trigger")
+async def live_trigger(request: Request) -> dict[str, Any]:
+    """Toggle a simulator / listener agent's trigger on or off.
+
+    The trigger registry on AgentForge isn't externalised yet; this
+    endpoint is a thin shim that forwards to the platform's
+    `/api/agents/{slug}/triggers` endpoint when present, and returns
+    `{ok: true, accepted: false}` when not — letting the UI keep
+    working in demo mode.
+    """
+    body = await request.json()
+    slug = body.get("agent_slug") or ""
+    enabled = bool(body.get("enabled", False))
+    if not slug:
+        raise HTTPException(status_code=400, detail="agent_slug is required")
+
+    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
+    if not api_key:
+        return {"ok": True, "accepted": False, "reason": "no_api_key"}
+
+    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(
+                f"{base_url}/api/agents/{slug}/triggers",
+                headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+                json={"enabled": enabled},
+            )
+        return {"ok": r.is_success, "accepted": r.is_success, "status": r.status_code}
+    except Exception as exc:
+        logger.warning("trigger toggle forward failed: %s", exc)
+        return {"ok": False, "accepted": False, "error": str(exc)}
+
+
+@app.get("/api/industrial-iot/live/sse")
+async def live_sse(topic: str) -> Response:
+    """Bridge an MQTT topic into a Server-Sent-Events stream.
+
+    The browser doesn't speak MQTT, so this endpoint subscribes on the
+    server side via paho-mqtt (when installed) and pushes each message
+    as one SSE frame. Falls back to an empty heartbeat stream when
+    paho-mqtt isn't installed so the UI fails closed without errors.
+    """
+    import asyncio
+    from fastapi.responses import StreamingResponse
+
+    try:
+        import paho.mqtt.client as mqtt  # type: ignore
+    except ImportError:
+        async def empty():
+            # Heartbeats only. Lets the UI render the SSE wiring even
+            # when the broker library isn't installed — production pods
+            # always have it; dev laptops sometimes skip it.
+            while True:
+                yield ": heartbeat\n\n"
+                await asyncio.sleep(15)
+        return StreamingResponse(empty(), media_type="text/event-stream")
+
+    queue: asyncio.Queue[str] = asyncio.Queue(maxsize=200)
+    loop = asyncio.get_running_loop()
+
+    def on_message(_client, _userdata, msg):  # noqa: ANN001
+        try:
+            payload = msg.payload.decode("utf-8")
+        except Exception:
+            return
+        # Hop back to the asyncio loop from paho's worker thread.
+        loop.call_soon_threadsafe(lambda: queue.put_nowait(payload))
+
+    client = mqtt.Client()
+    client.on_message = on_message
+    host = os.environ.get("MQTT_BROKER_HOST", "localhost")
+    port = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
+    try:
+        client.connect(host, port, keepalive=30)
+    except Exception as exc:
+        logger.warning("SSE bridge: cannot connect to MQTT %s:%d (%s)", host, port, exc)
+        async def err():
+            yield f"event: error\ndata: {{\"reachable\":false}}\n\n"
+        return StreamingResponse(err(), media_type="text/event-stream")
+    client.subscribe(topic)
+    client.loop_start()
+
+    async def stream():
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    # SSE frames need data: prefix + double-newline. The
+                    # browser EventSource auto-parses each frame.
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            client.loop_stop()
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.get("/api/industrial-iot/subscribed-feeds/{feed_key}")
+async def get_subscribed_feed(feed_key: str) -> dict[str, Any]:
+    """Forward a subscribed_feed lookup so the ValueEdge tab can show
+    when the BNEF coefficients were last refreshed."""
+    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
+    if not api_key:
+        return {"data": None}
+    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(
+                f"{base_url}/api/subscribed-feeds/{feed_key}",
+                headers={"X-API-Key": api_key},
+            )
+            if r.status_code != 200:
+                return {"data": None}
+            return r.json()
+    except Exception:
+        return {"data": None}
+
+
 @app.get("/api/industrial-iot/kb-status")
 async def kb_status() -> dict[str, Any]:
     """Check whether the tenant has at least one knowledge base ready.
@@ -259,7 +434,12 @@ async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
 # seeded service-account key so the showcase web doesn't have to expose
 # Abenix credentials in the browser. Read-only or upload-style routes
 # only — execution stays in the explicit pipelines endpoint above.
-_PASSTHROUGH_PREFIXES = ("/api/code-assets", "/api/agents")
+_PASSTHROUGH_PREFIXES = (
+    "/api/code-assets",
+    "/api/agents",
+    "/api/connectors",
+    "/api/approvals",
+)
 _HOP_BY_HOP_HEADERS = {
     "host", "content-length", "transfer-encoding", "connection",
     "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
@@ -345,6 +525,26 @@ async def proxy_agents_root(request: Request) -> Response:
 @app.api_route("/api/agents/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def proxy_agents(request: Request, rest: str) -> Response:
     return await _proxy(request, f"/api/agents/{rest}")
+
+
+@app.api_route("/api/connectors", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_connectors_root(request: Request) -> Response:
+    return await _proxy(request, "/api/connectors")
+
+
+@app.api_route("/api/connectors/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_connectors(request: Request, rest: str) -> Response:
+    return await _proxy(request, f"/api/connectors/{rest}")
+
+
+@app.api_route("/api/approvals", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_approvals_root(request: Request) -> Response:
+    return await _proxy(request, "/api/approvals")
+
+
+@app.api_route("/api/approvals/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_approvals(request: Request, rest: str) -> Response:
+    return await _proxy(request, f"/api/approvals/{rest}")
 
 
 if __name__ == "__main__":

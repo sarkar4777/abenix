@@ -946,6 +946,12 @@ def _ensure_tool_classes() -> None:
     from engine.tools.sandboxed_job import SandboxedJobTool
     from engine.tools.cloud_cost import CloudCostTool
     from engine.tools.zapier_pass_through import ZapierPassThroughTool
+    from engine.tools.connector_call import ConnectorCallTool
+    from engine.tools.approval_gate import ApprovalGateTool
+    from engine.tools.mqtt_publish import MqttPublishTool
+    from engine.tools.tsdb_query import TsdbQueryTool
+    from engine.tools.windowed_state import WindowedStateTool
+    from engine.tools.subscribed_feed import SubscribedFeedTool
 
     _TOOL_CLASSES.update(
         {
@@ -1062,6 +1068,12 @@ def _ensure_tool_classes() -> None:
             "legal_existence_verifier": LegalExistenceVerifierTool,
             "kyc_scorer": KYCScorerTool,
             "regulatory_enforcement": RegulatoryEnforcementTool,
+            "connector_call": ConnectorCallTool,
+            "approval_gate": ApprovalGateTool,
+            "mqtt_publish": MqttPublishTool,
+            "tsdb_query": TsdbQueryTool,
+            "windowed_state": WindowedStateTool,
+            "subscribed_feed": SubscribedFeedTool,
         }
     )
     # Store context tool factories (need constructor args)

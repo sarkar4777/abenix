@@ -44,11 +44,13 @@ COPY --from=builder /app/node_modules ./node_modules
 RUN find ./node_modules -type d \( -name '@esbuild' -o -name 'esbuild' \) \
         -prune -exec rm -rf {} + 2>/dev/null || true
 
-# Next.js standalone server reads static from `${__dirname}/.next/static`
-# Since server.js is at /app, static must be at /app/.next/static (not /app/apps/web/.next/static)
-COPY --from=builder /app/apps/web/.next/static ./.next/static
-COPY --from=builder /app/apps/web/public ./public
+# Next.js standalone server reads static from `${__dirname}/.next/static`.
+# server.js lives at /app/apps/web/server.js so static + public belong there.
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /app/apps/web/public ./apps/web/public
 
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME="0.0.0.0"
-CMD ["node", "server.js"]
+# Standalone build with outputFileTracingRoot=monorepo root puts server.js
+# under apps/web/ — run it from there.
+CMD ["node", "apps/web/server.js"]

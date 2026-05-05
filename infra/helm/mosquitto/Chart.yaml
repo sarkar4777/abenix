@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mosquitto
+version: 0.1.0
+appVersion: "2.0"
+description: Eclipse Mosquitto MQTT broker for AgentForge streaming triggers + write-back tools
+type: application

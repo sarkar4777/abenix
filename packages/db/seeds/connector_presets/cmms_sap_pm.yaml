@@ -1,0 +1,65 @@
+# SAP S/4HANA Plant Maintenance — Work Orders & Notifications
+# Modeled on the public SAP API Hub OData endpoints under
+# /sap/opu/odata/sap/API_MAINTENANCEORDER/. Concrete tenants must
+# replace base_url with their host (e.g. https://my300012.s4hana.ondemand.com).
+key: cmms_sap_pm
+label: SAP PM (Plant Maintenance)
+kind: cmms
+docs_url: https://api.sap.com/api/API_MAINTENANCEORDER/overview
+base_url_template: https://{sap_host}/sap/opu/odata/sap/API_MAINTENANCEORDER
+auth_type: oauth2
+auth_hints:
+  token_url_template: https://{sap_host}/sap/bc/sec/oauth2/token
+  scopes: [API_MAINTENANCEORDER_SRV_0001]
+operations:
+  create_work_order:
+    method: POST
+    path: /MaintenanceOrder
+    description: Create a new maintenance order (work order).
+    args:
+      MaintenanceOrderType: { type: string, required: true, example: PM01 }
+      MaintenancePriority: { type: integer, required: false, example: 2 }
+      MaintenanceOrderDesc: { type: string, required: true }
+      FunctionalLocation: { type: string, required: false }
+      Equipment: { type: string, required: false }
+      PlannerGroup: { type: string, required: false }
+    body_template:
+      MaintenanceOrderType: "{MaintenanceOrderType}"
+      MaintenancePriority: "{MaintenancePriority}"
+      MaintenanceOrderDesc: "{MaintenanceOrderDesc}"
+      FunctionalLocation: "{FunctionalLocation}"
+      Equipment: "{Equipment}"
+      PlannerGroup: "{PlannerGroup}"
+  update_status:
+    method: POST
+    path: /MaintenanceOrder('{MaintenanceOrder}')/SetStatus
+    description: Change status of an existing work order (RELEASE/COMPLETE/TECO).
+    args:
+      MaintenanceOrder: { type: string, required: true }
+      StatusCode: { type: string, required: true, example: REL }
+    body_template:
+      StatusCode: "{StatusCode}"
+  attach_photo:
+    method: POST
+    path: /MaintenanceOrder('{MaintenanceOrder}')/Attachment
+    description: Attach a photo or document to a work order.
+    args:
+      MaintenanceOrder: { type: string, required: true }
+      filename: { type: string, required: true }
+      content_base64: { type: string, required: true }
+      mime_type: { type: string, required: false, example: image/jpeg }
+    body_template:
+      Filename: "{filename}"
+      MimeType: "{mime_type}"
+      Content: "{content_base64}"
+  query_wos:
+    method: GET
+    path: /MaintenanceOrder
+    description: Query open work orders by filter (OData $filter syntax).
+    args:
+      filter: { type: string, required: false, example: "MaintenanceOrderType eq 'PM01'" }
+      top: { type: integer, required: false, example: 50 }
+    query_params:
+      "$filter": "{filter}"
+      "$top": "{top}"
+      "$format": "json"

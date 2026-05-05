@@ -1,0 +1,49 @@
+name: "IoT BedROCC Alarm Listener"
+slug: iot-bedrocc-alarm-listener
+description: >-
+  Live-mode alarm ingester for BedROCC. Subscribes via
+  `mqtt_subscribe` to topic `alarms.realtime` and, for each incoming
+  alarm envelope, kicks off the `iot-bedrocc-pipeline` to triage it.
+
+  Disabled by default — the BedROCC tab "Live mode" toggle flips the
+  subscriber on. When inactive, the tab keeps using its bundled
+  alarm-stream sample.
+agent_type: oob
+category: operations
+icon: Bell
+version: "1.0.0"
+status: draft
+
+system_prompt: |
+  For each alarm message arriving on `alarms.realtime`, forward
+  the envelope to the iot-bedrocc-pipeline as input. Do nothing
+  else.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.0
+  max_iterations: 6
+  max_tokens: 2048
+  tools:
+    - mqtt_subscribe
+    - agent_step
+    - code_executor
+
+triggers:
+  - kind: mqtt
+    topic: "alarms.realtime"
+    enabled: false
+    qos: 1
+    payload:
+      forward_to_pipeline: iot-bedrocc-pipeline
+
+input_variables:
+  - name: message
+    type: string
+    description: >-
+      Single alarm envelope JSON. When invoked by the MQTT trigger,
+      the message is the raw broker payload.
+    required: true
+
+example_prompts:
+  - '{"alarm":{"alarm_id":"ALM-001","code":"GBX-VIB-HI"},"recent_alarms":[]}'

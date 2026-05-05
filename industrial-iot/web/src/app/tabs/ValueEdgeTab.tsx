@@ -15,6 +15,8 @@ import KbBadge from '../components/KbBadge';
 import PipelineDagViz from '../components/PipelineDagViz';
 import { VALUEEDGE_DAG } from '../components/dags';
 import ScenarioExplainer from '../components/ScenarioExplainer';
+import LiveStatusPanel from '../components/LiveStatusPanel';
+import LiveModeToggle from '../components/LiveModeToggle';
 import { Database, Layers, ListChecks } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -215,6 +217,28 @@ export default function ValueEdgeTab() {
   const [error, setError] = useState<string>('');
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [expandedRfi, setExpandedRfi] = useState<string | null>(null);
+  // Live mode flag is informational on this tab — the cost-refresh
+  // cron runs server-side and the pipeline reads the cached feed
+  // either way. We surface the last refresh time so users can see
+  // if the BNEF coefficients are fresh.
+  const [liveMode, setLiveMode] = useState(false);
+  const [coeffRefreshedAt, setCoeffRefreshedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    // One-shot fetch of the last subscribed_feed update time. If the
+    // standalone API doesn't expose this yet, the timestamp stays
+    // null and the UI shows "—".
+    let mounted = true;
+    (async () => {
+      try {
+        const r = await fetch('/api/industrial-iot/subscribed-feeds/bnef-offshore-wind-capex-per-mw');
+        if (!r.ok) return;
+        const j = await r.json();
+        if (mounted) setCoeffRefreshedAt((j?.data?.refreshed_at as string) ?? null);
+      } catch { /* tolerate absence */ }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -338,6 +362,24 @@ export default function ValueEdgeTab() {
               </p>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Live system status + cost-coefficient freshness ─────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <LiveStatusPanel liveModeActive={liveMode} />
+        <div className="flex items-center gap-3">
+          <div className="text-[11px] text-slate-400">
+            Cost coefficients last refreshed:&nbsp;
+            <span className="font-mono text-slate-200">
+              {coeffRefreshedAt ?? '—'}
+            </span>
+          </div>
+          <LiveModeToggle
+            value={liveMode}
+            onChange={setLiveMode}
+            hint="Live: pipeline reads BNEF coefficients from subscribed_feed; demo uses hardcoded fallback."
+          />
         </div>
       </div>
 

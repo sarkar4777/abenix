@@ -37,6 +37,7 @@ model_config:
     - current_time
     - knowledge_search
     - email_sender
+    - connector_call
 
 input_variables:
   - name: message
@@ -279,6 +280,28 @@ pipeline_config:
         - draft_claim
       position: { x: 360, y: 700 }
 
+    # Live-mode hand-off. When adjudication is partial-loss
+    # (MEDIUM) or total-loss (HIGH), file the claim with the
+    # configured claims_servicenow connector. Skips otherwise.
+    - id: file_claim_connector
+      tool_name: connector_call
+      label: "7. File claim via connector (MED/HIGH only)"
+      condition:
+        source_node: route
+        field: claim_required
+        operator: eq
+        value: true
+      arguments:
+        connector_id: "{{context.claims_connector_id}}"
+        operation: file_claim
+        payload_from_node: draft_claim
+        payload_field: response
+      depends_on:
+        - final_report
+        - route
+        - draft_claim
+      position: { x: 620, y: 860 }
+
   edges:
     - { source: timestamp,      target: validate_input }
     - { source: validate_input, target: monitor }
@@ -287,5 +310,8 @@ pipeline_config:
     - { source: route,          target: draft_claim }
     - { source: route,          target: final_report }
     - { source: draft_claim,    target: final_report }
+    - { source: final_report,   target: file_claim_connector }
+    - { source: route,          target: file_claim_connector }
+    - { source: draft_claim,    target: file_claim_connector }
 
   viewport: { x: 0, y: 0, zoom: 0.75 }

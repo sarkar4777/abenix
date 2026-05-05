@@ -25,6 +25,7 @@ BUGS_*.md
 NEXT_STEPS.md
 UAT_REPORT.md
 RELEASE_NOTES_PENDING_*.md
+PLAN_*.md
 logs/uat/
 logs/build-*.log
 

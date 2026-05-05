@@ -127,6 +127,13 @@ async def get_current_user(
         raise _auth_error()
 
     token = authorization.removeprefix("Bearer ")
+    # Accept af_ API keys via Authorization: Bearer <key> too — easier for
+    # SDK / edge-runtime clients that already standardise on Bearer.
+    if token.startswith("af_"):
+        user = await _authenticate_via_api_key(token, db)
+        if user:
+            return user
+        raise _auth_error()
     payload = verify_token(token)
     sub = payload.get("sub")
     if not sub or payload.get("type") != "access":
