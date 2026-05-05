@@ -172,6 +172,53 @@ export default function ArchitectureTab() {
         />
       </div>
 
+      <div className="bg-orange-950/20 border border-orange-900/40 rounded-xl p-6">
+        <div className="flex items-center gap-2 mb-3">
+          <Cpu className="w-4 h-4 text-orange-300" />
+          <h3 className="text-white font-semibold text-sm">Edge runtimes — on the floor, not in the cloud</h3>
+        </div>
+        <p className="text-sm text-slate-400 mb-3">
+          Agents flagged <code className="text-orange-200">edge_compatible:&nbsp;true</code> compile to a signed{' '}
+          <code className="text-orange-200">.agent</code> bundle (RSA-PSS over a deterministic tar) and ship to a runtime
+          pod sitting next to the equipment. Three variants — same bundle, same MQTT delivery topic,
+          same HTTP contract — pick the one that matches plant hardware:
+        </p>
+        <div className="grid md:grid-cols-3 gap-3 mb-4">
+          <div className="rounded-lg border border-cyan-800/40 bg-cyan-950/20 p-3">
+            <div className="text-cyan-300 text-xs font-semibold mb-1">Python · 80 MB</div>
+            <div className="text-slate-400 text-[12.5px]">x86_64 / arm64. Default — best LLM SDK ergonomics, easiest to extend.</div>
+          </div>
+          <div className="rounded-lg border border-orange-800/40 bg-orange-950/20 p-3">
+            <div className="text-orange-300 text-xs font-semibold mb-1">Rust · 25 MB</div>
+            <div className="text-slate-400 text-[12.5px]">x86_64 / arm64 / armv7. Rugged industrial PCs — Moxa UC-8580, Siemens RUGGEDCOM, Beckhoff CX, NVIDIA Jetson.</div>
+          </div>
+          <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+            <div className="text-slate-300 text-xs font-semibold mb-1">C · 12 MB</div>
+            <div className="text-slate-400 text-[12.5px]">armv7 / arm64 / x86_64. Phoenix Contact PLCnext, Allen-Bradley CompactLogix, OpenWRT routers.</div>
+          </div>
+        </div>
+        <p className="text-sm text-slate-400 mb-2">
+          <b className="text-white">How a gateway gets created:</b> mint an <code>af_…</code> API key (scopes <code>edge:register, agents:execute</code>),
+          then{' '}
+          <code className="text-cyan-300">helm install abenix-edge ./infra/helm/edge-runtime --set platform.token=$AF</code>{' '}
+          (or <code>edge-runtime-rust</code> / <code>edge-runtime-c</code>). The pod registers with the platform
+          every 60 s and shows up in <a href={`${ABENIX_WEB}/edge`} target="_blank" rel="noopener noreferrer" className="text-cyan-300 underline">/edge</a>.
+        </p>
+        <p className="text-sm text-slate-400 mb-2">
+          <b className="text-white">How interactions work:</b> bundle delivery via MQTT topic{' '}
+          <code className="text-orange-200">edge.{'{gateway_id}'}.deploy</code> (HTTP POST fallback);
+          sync execute via <code>POST {'{gateway_url}'}/agents/{'{slug}'}/execute</code>; async via MQTT topic{' '}
+          <code className="text-orange-200">agents.{'{slug}'}.input</code>. Tool budget on edge:{' '}
+          <code>mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor</code>.
+        </p>
+        <p className="text-sm text-slate-400">
+          <b className="text-white">Wired into Pump Vibration:</b> the <code className="text-orange-200">iot-pump-edge-classifier</code>{' '}
+          agent (Haiku-4-5 + <code>code_executor</code> + <code>mqtt_publish</code>) ships to a Rust gateway,
+          runs FFT + RMS through the embedded Python interpreter, and returns a severity verdict in single-digit
+          milliseconds. See the <b>Run on the edge</b> section in the Pump Vibration tab for the live demo.
+        </p>
+      </div>
+
       <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6">
         <h3 className="text-white font-semibold text-sm mb-3">What's novel here?</h3>
         <ul className="text-sm text-slate-400 space-y-2 list-disc list-inside">

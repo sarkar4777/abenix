@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "edge-runtime-c.fullname" . }}
+  labels:
+    {{- include "edge-runtime-c.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "edge-runtime-c.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "edge-runtime-c.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "edge-runtime-c.selectorLabels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: edge-runtime-c
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: GATEWAY_ID
+              value: {{ .Values.gateway_id | quote }}
+            - name: GATEWAY_NAME
+              value: {{ .Values.gateway_name | quote }}
+            - name: PLATFORM_URL
+              value: {{ .Values.platform_url | quote }}
+            - name: PLATFORM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "edge-runtime-c.fullname" . }}-secret
+                  key: platform_token
+                  optional: true
+            - name: MQTT_URL
+              value: {{ .Values.mqtt_url | quote }}
+            - name: ENDPOINT_URL
+              value: {{ .Values.endpoint_url | quote }}
+            - name: SIGNING_PUBKEY_PATH
+              value: /etc/edge/signing_pub.pem
+            - name: BUNDLE_DIR
+              value: /var/edge/agents
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "edge-runtime-c.fullname" . }}-secret
+                  key: anthropic_api_key
+                  optional: true
+            - name: PORT
+              value: "{{ .Values.service.port }}"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: bundles
+              mountPath: /var/edge/agents
+            - name: signing
+              mountPath: /etc/edge
+              readOnly: true
+      volumes:
+        - name: signing
+          secret:
+            secretName: {{ include "edge-runtime-c.fullname" . }}-secret
+            items:
+              - key: signing_pubkey
+                path: signing_pub.pem
+            optional: true
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: bundles
+      spec:
+        accessModes: [ "{{ .Values.persistence.accessMode }}" ]
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- else }}
+      - name: bundles
+        emptyDir: {}
+  {{- end }}

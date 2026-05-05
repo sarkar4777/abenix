@@ -836,24 +836,39 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
       },
       {
         id: 'edge-runtime',
-        title: 'Edge runtime + .agent bundles',
+        title: 'Edge runtimes + .agent bundles',
         icon: <Cpu className="w-4 h-4" />,
         badge: 'new',
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>An offshore wind farm, a pharma cold-storage warehouse, a refinery — all of them have hours where the network is gone or the data is too sensitive to leave the site. The edge runtime is a single ~80 MB container that runs an Abenix agent locally on a gateway, queues events while disconnected, and flushes upstream when the link is back.</p>
+            <p>An offshore wind farm, a pharma cold-storage warehouse, a refinery — all of them have hours where the network is gone or the data is too sensitive to leave the site. The edge runtime takes any Abenix agent flagged <code>edge_compatible</code>, packages it into a signed <code>.agent</code> bundle, and runs it next to the equipment.</p>
             <Hero src={SS('38-edge-deploy.png')} alt="Edge gateway deploy flow" />
-            <p><strong className="text-white">What it solves.</strong> Pump Vibration can run the DSP + RUL agent at the gateway so a 4G outage doesn&apos;t stop the line. Cold Chain runs the excursion adjudicator on a refrigerated-truck tablet. Field Guide pre-computes work orders even when the technician&apos;s tablet is in a basement.</p>
-            <p><strong className="text-white">When to use.</strong> Latency-sensitive sites (sub-100 ms), intermittent connectivity, data-residency regulations. <strong className="text-white">When not to use.</strong> Anything that needs platform-only tools (<code>knowledge_search</code>, <code>atlas_*</code>, MCP) or a &gt;2 GB model.</p>
-            <p><strong className="text-white">How to wire.</strong></p>
+            <p><strong className="text-white">Three runtime variants ship.</strong> Same <code>.agent</code> bundle, same MQTT delivery topic, same HTTP contract — pick the one that matches the plant hardware:</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong className="text-cyan-300">Python</strong> (~80 MB, <code>agentforge/edge-runtime</code>) — default, easiest to extend with tool shims, runs on any box that already has python3.12+.</li>
+              <li><strong className="text-orange-300">Rust</strong> (~25 MB, <code>agentforge/edge-runtime-rust</code>) — single static binary for rugged industrial PCs (Moxa UC-8580, Siemens RUGGEDCOM, Beckhoff CX, NVIDIA Jetson). No Python needed on the box.</li>
+              <li><strong className="text-slate-300">C</strong> (~12 MB, <code>agentforge/edge-runtime-c</code>) — musl static, for ultra-constrained gateways (Allen-Bradley CompactLogix, Phoenix Contact PLCnext, OpenWRT, ARM Cortex-A7 with 256 MB RAM).</li>
+            </ul>
+            <p><strong className="text-white">Where to download.</strong> Open <code>/edge</code> in the sidebar — the top section shows all three variants with copy-to-clipboard <strong>Helm install</strong> and <strong>Docker pull</strong> commands. Or call <code>GET /api/edge/runtime/download</code> for the JSON manifest. Helm charts live at <code>infra/helm/edge-runtime/</code>, <code>infra/helm/edge-runtime-rust/</code>, <code>infra/helm/edge-runtime-c/</code>.</p>
+            <p><strong className="text-white">How to create a gateway in AgentForge.</strong></p>
             <Steps items={[
-              'Mark the agent <strong>Edge eligible</strong> in the Builder → Settings → Advanced tab. The server validates token budget + tool whitelist and shows a green badge if the agent qualifies.',
-              'Open <strong>/edge</strong> from the sidebar and click <strong>+ Register gateway</strong>. Copy the bootstrap command into the gateway shell — the runtime registers itself on first boot.',
-              'On the agent&apos;s row click <strong>Deploy to gateway</strong>. The platform builds a signed <code>.agent</code> bundle (tarball containing <code>agent.yaml</code>, <code>system_prompt.md</code>, optional <code>tools/*.py</code>, <code>signature.sig</code>) and publishes it to <code>edge.{`{gateway_id}`}.deploy</code>.',
-              'The runtime watches that topic, verifies the signature, and hot-reloads. Deploy status flips to <strong>active</strong> on the gateway card.',
+              'Mint a registration token: <strong>API Keys → New key</strong>, scopes <code>agents:execute, edge:register</code>. Copy the <code>af_…</code> value — that\'s the gateway\'s <code>PLATFORM_TOKEN</code>.',
+              'Helm-install the runtime variant on the plant gateway: <code>helm install abenix-edge ./infra/helm/edge-runtime --set platform.url=$URL --set platform.token=$AF_KEY --set gateway.id=$GW</code>. (Or <code>edge-runtime-rust</code> / <code>edge-runtime-c</code>.)',
+              'The pod boots, calls <code>POST /api/edge/gateways/register</code> every 60 s with <code>Authorization: Bearer af_…</code>. The first call inserts the row in <code>edge_gateways</code>; the gateway shows up in the platform UI under <strong>/edge → Registered gateways</strong> within ~60 s.',
+              'Mark an agent <strong>Edge eligible</strong> in the Builder → Settings → Advanced. Set <code>edge_constraints</code> (max payload, max runtime, allowed MQTT publish/subscribe topics).',
+              'On the gateway card click <strong>Deploy agent</strong>. The platform compiles the <code>.agent</code> bundle (tar with <code>agent.yaml</code>, <code>system_prompt.md</code>, optional <code>tools/*.py</code>, <code>signature.sig</code>), signs it with RSA-PSS / SHA-256, and publishes to <code>edge.{`{gateway_id}`}.deploy</code> over MQTT (HTTP POST fallback). The runtime hot-reloads and the bundle digest appears on the card.',
             ]} />
-            <Callout tone="info">Helm chart: <code>infra/helm/edge-runtime</code>. The <code>.agent</code> bundle format is documented at <a href="#edge-runtime" className="text-violet-300 underline">/help#edge-runtime</a> and in <code>docs/AGENT_BUNDLE_SPEC.md</code> in the repo.</Callout>
-            <Callout tone="warn"><strong>Gotcha.</strong> Inline LLM weights are reserved in the bundle but not shipped in v1.1 — the runtime calls back to a configurable LLM endpoint. Phase-2 will bundle a distilled small model for fully-air-gapped operation.</Callout>
+            <p><strong className="text-white">How interactions work.</strong></p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong>Bundle delivery (default):</strong> MQTT topic <code>edge.{`{gateway_id}`}.deploy</code> at QoS 1; the runtime verifies the RSA-PSS signature, refuses tampered bundles, extracts to <code>/var/edge/agents/{`{slug}`}/</code>.</li>
+              <li><strong>Bundle delivery (fallback):</strong> if MQTT publish fails, the platform <code>POST</code>s the tar bytes to <code>{`{endpoint_url}`}/agents/{`{slug}`}/bundle</code> on the gateway.</li>
+              <li><strong>Sync execution:</strong> <code>POST {`{endpoint_url}`}/agents/{`{slug}`}/execute</code> with a JSON body — runtime returns <code>{`{slug, duration_ms, result}`}</code>.</li>
+              <li><strong>Async execution:</strong> publish to <code>agents.{`{slug}`}.input</code> over MQTT — runtime invokes the agent and publishes the result on <code>agents.{`{slug}`}.output</code> (subject to <code>edge_constraints.mqtt_publish[]</code> ACL).</li>
+              <li><strong>Tool budget:</strong> only <code>mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor</code> are allowed on edge. Bundle compiler refuses anything else; runtime re-checks on load.</li>
+            </ul>
+            <p><strong className="text-white">When to use.</strong> Latency-sensitive sites (sub-100 ms), intermittent connectivity, data-residency regulations. <strong className="text-white">When NOT to use.</strong> Anything that needs platform-only tools (<code>knowledge_search</code>, <code>atlas_*</code>, MCP) or a &gt;2 GB model.</p>
+            <Callout tone="info">Bundle format, signing math, manifest schema, and failure modes are documented in <code>infra/edge-runtime/AGENT_BUNDLE_FORMAT.md</code>. End-to-end smoke: <code>scripts/edge-smoke.sh</code>. Pick the variant that matches plant hardware — they all interop with the same bundle.</Callout>
+            <Callout tone="warn"><strong>Gotcha.</strong> Inline LLM weights are reserved in the bundle but not shipped today — the runtime calls back to a configurable LLM endpoint. Set <code>ANTHROPIC_API_KEY</code> on the gateway. Phase-2 ships a distilled small model for fully-air-gapped operation.</Callout>
           </div>
         ),
       },

@@ -522,20 +522,64 @@ deploy_edge_runtime() {
     log "Edge runtime disabled (EDGE_RUNTIME_ENABLED=${EDGE_RUNTIME_ENABLED}) — skipping"
     return 0
   fi
-  step "Deploying edge runtime (gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
-  helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
+  EDGE_RUNTIME_VARIANT="${EDGE_RUNTIME_VARIANT:-python}"
+  EDGE_RUNTIME_ALL_VARIANTS="${EDGE_RUNTIME_ALL_VARIANTS:-false}"
+  if [ "${EDGE_RUNTIME_VARIANT}" = "python" ] || [ "${EDGE_RUNTIME_ALL_VARIANTS}" = "true" ]; then
+    step "Deploying edge runtime (python, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
+    helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
+      --namespace "${NAMESPACE}" \
+      --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime" \
+      --set image.tag="${IMAGE_TAG}" \
+      --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
+      --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
+      --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+      --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
+      --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+      --timeout 5m \
+      --wait=false \
+      2>&1 | tail -3 || warn "edge-runtime helm install failed"
+    ok "edge-runtime installed (StatefulSet abenix-edge in ${NAMESPACE})"
+  fi
+  if [ "${EDGE_RUNTIME_VARIANT}" = "rust" ] || [ "${EDGE_RUNTIME_ALL_VARIANTS}" = "true" ]; then
+    deploy_edge_runtime_rust
+  fi
+  if [ "${EDGE_RUNTIME_VARIANT}" = "c" ] || [ "${EDGE_RUNTIME_ALL_VARIANTS}" = "true" ]; then
+    deploy_edge_runtime_c
+  fi
+}
+
+deploy_edge_runtime_rust() {
+  step "Deploying edge runtime (rust, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default}-rust)"
+  helm upgrade --install abenix-edge-rust "${ROOT_DIR}/infra/helm/edge-runtime-rust" \
     --namespace "${NAMESPACE}" \
-    --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime" \
+    --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime-rust" \
     --set image.tag="${IMAGE_TAG}" \
-    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
-    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
+    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-rust" \
+    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-rust" \
     --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
     --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
     --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
     --timeout 5m \
     --wait=false \
-    2>&1 | tail -3 || warn "edge-runtime helm install failed"
-  ok "edge-runtime installed (StatefulSet abenix-edge in ${NAMESPACE})"
+    2>&1 | tail -3 || warn "edge-runtime-rust helm install failed"
+  ok "edge-runtime-rust installed (StatefulSet abenix-edge-rust in ${NAMESPACE})"
+}
+
+deploy_edge_runtime_c() {
+  step "Deploying edge runtime (c, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default}-c)"
+  helm upgrade --install abenix-edge-c "${ROOT_DIR}/infra/helm/edge-runtime-c" \
+    --namespace "${NAMESPACE}" \
+    --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime-c" \
+    --set image.tag="${IMAGE_TAG}" \
+    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-c" \
+    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-c" \
+    --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+    --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
+    --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+    --timeout 5m \
+    --wait=false \
+    2>&1 | tail -3 || warn "edge-runtime-c helm install failed"
+  ok "edge-runtime-c installed (StatefulSet abenix-edge-c in ${NAMESPACE})"
 }
 
 deploy_abenix_helm() {

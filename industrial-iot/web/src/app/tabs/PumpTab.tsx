@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, Binary, Boxes, Brain, ChevronDown, ChevronRight,
   ClipboardList, CloudUpload, Cpu, Database, FlaskConical, Loader2, Play,
-  Rocket, Square, Stethoscope, Timer, Waves,
+  Rocket, Send, Square, Stethoscope, Timer, Waves, Zap, CheckCircle2, Radio,
 } from 'lucide-react';
 import ScenarioExplainer from '../components/ScenarioExplainer';
 import {
@@ -69,6 +69,23 @@ export default function PumpTab() {
   const [currentLog, setCurrentLog] = useState<string[]>([]);
   const [expandedWindow, setExpandedWindow] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const [edgeBusy, setEdgeBusy] = useState<'idle' | 'compiling' | 'running'>('idle');
+  const [edgeError, setEdgeError] = useState<string>('');
+  const [edgeNotice, setEdgeNotice] = useState<string>('');
+  const [edgeBundleDigest, setEdgeBundleDigest] = useState<string | null>(null);
+  const [edgeDeployTransport, setEdgeDeployTransport] = useState<string | null>(null);
+  const [edgeDeployed, setEdgeDeployed] = useState(false);
+  const [edgeResult, setEdgeResult] = useState<{
+    severity?: string;
+    peak_hz?: number;
+    rms_g?: number;
+    edge_latency_ms?: number;
+    cloud_latency_ms?: number;
+    cloud_severity?: string;
+    raw?: string;
+    bundle_match?: boolean;
+  } | null>(null);
   // Live mode reads vibration windows from MQTT topic
   // pump.vibration.raw (the simulator agent publishes them every 15s).
   // Demo mode keeps the in-browser synthetic.ts trajectory.
@@ -212,6 +229,117 @@ export default function PumpTab() {
     setStreaming(false);
   };
 
+  const compileAndDeployEdge = async () => {
+    setEdgeError(''); setEdgeNotice('');
+    setEdgeBusy('compiling');
+    try {
+      const r = await fetch('/api/industrial-iot/edge/compile-and-deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_slug: 'iot-pump-edge-classifier',
+          gateway_id: 'edge-cluster-default',
+        }),
+      });
+      const body = await r.json();
+      if (!r.ok || body?.ok === false) {
+        if (body?.error === 'agent_not_seeded') {
+          setEdgeNotice('Run `python /app/packages/db/seeds/seed_agents.py` to register iot-pump-edge-classifier');
+        } else if (body?.error === 'no_gateway') {
+          setEdgeError(body.hint || 'No edge gateway registered.');
+        } else {
+          setEdgeError(body?.detail || body?.error || `HTTP ${r.status}`);
+        }
+        return;
+      }
+      const deploy = body.deploy?.data || body.deploy;
+      const digest = deploy?.bundle_digest || null;
+      const transport = deploy?.transport || null;
+      setEdgeBundleDigest(digest);
+      setEdgeDeployTransport(transport);
+      setEdgeDeployed(true);
+    } catch (e) {
+      setEdgeError((e as Error).message || 'compile/deploy failed');
+    } finally {
+      setEdgeBusy('idle');
+    }
+  };
+
+  const runOnEdge = async () => {
+    setEdgeError(''); setEdgeNotice('');
+    setEdgeBusy('running');
+    setEdgeResult(null);
+    try {
+      const win = vibrationWindow(7, 10, parsePumpQueryParams());
+      const payload = { samples: win.samples, sample_rate_hz: win.sample_rate_hz };
+
+      const t0 = performance.now();
+      const er = await fetch('/api/industrial-iot/edge/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_slug: 'iot-pump-edge-classifier',
+          gateway_id: 'edge-cluster-default',
+          payload,
+        }),
+      });
+      const ej = await er.json();
+      let cloudLatency: number | undefined;
+      let cloudSeverity: string | undefined;
+      if (pipelineId && dspAsset) {
+        const cloudT0 = performance.now();
+        const ctx: Record<string, unknown> = {
+          pump_dsp_asset_id: dspAsset.id,
+          asset_context: { sensor_id: win.sensor_id },
+        };
+        const cr = await runPipeline(pipelineId, payload, ctx, { waitSeconds: 180 });
+        cloudLatency = Math.round(performance.now() - cloudT0);
+        if (cr.ok) {
+          const fo = cr.final_output ?? {};
+          const diag = (fo.diagnosis as Record<string, unknown>) ?? {};
+          cloudSeverity = (diag.severity as string) ?? (fo.severity as string) ?? '—';
+        } else {
+          cloudSeverity = `err: ${cr.error ?? 'failed'}`;
+        }
+      }
+      const totalEdgeMs = Math.round(performance.now() - t0);
+      const result = ej?.result || {};
+      const inner = result?.output ?? result?.result ?? result;
+      let parsed: Record<string, unknown> = {};
+      if (typeof inner === 'string') {
+        try { parsed = JSON.parse(inner); } catch { parsed = { raw: inner }; }
+      } else if (inner && typeof inner === 'object') {
+        parsed = inner as Record<string, unknown>;
+      }
+      const edgeLatency = (ej?.edge_latency_ms as number | undefined) ?? totalEdgeMs;
+      const returnedDigest = (result?.bundle_digest as string | undefined)
+        || (ej?.bundle_digest as string | undefined);
+      const bundleMatch = !!(returnedDigest && edgeBundleDigest
+        && returnedDigest === edgeBundleDigest);
+
+      if (!ej?.ok) {
+        setEdgeError(
+          (ej?.error as string) ||
+          `Edge call failed (HTTP ${ej?.status ?? er.status})`,
+        );
+      }
+      setEdgeResult({
+        severity: parsed.severity as string | undefined,
+        peak_hz: parsed.peak_hz as number | undefined,
+        rms_g: parsed.rms_g as number | undefined,
+        edge_latency_ms: edgeLatency,
+        cloud_latency_ms: cloudLatency,
+        cloud_severity: cloudSeverity,
+        raw: typeof inner === 'string' ? inner : undefined,
+        bundle_match: bundleMatch,
+      });
+    } catch (e) {
+      setEdgeError((e as Error).message || 'edge run failed');
+    } finally {
+      setEdgeBusy('idle');
+    }
+  };
+
   const stopStream = async () => {
     abortRef.current?.abort();
     if (liveSubRef.current) {
@@ -320,6 +448,126 @@ export default function PumpTab() {
         {currentLog.length > 0 && (
           <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/70 p-3 font-mono text-[11px] text-slate-400 space-y-0.5 max-h-28 overflow-auto">
             {currentLog.slice(-8).map((l, i) => <div key={i}>{l}</div>)}
+          </div>
+        )}
+      </div>
+
+      {/* ── Run on the edge ─────────────────────────────────────── */}
+      <div className="bg-gradient-to-br from-orange-500/5 to-amber-500/5 border border-orange-500/30 rounded-xl p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-white font-semibold flex items-center gap-2">
+              <Zap className="w-4 h-4 text-orange-300" /> Run on the edge
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Same vibration window, but the classifier runs on a gateway pod next to the
+              sensor — no WAN round-trip. Compare cloud vs. edge severity + latency below.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-orange-500/20 bg-slate-900/50 p-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-slate-300 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span><span className="text-slate-500">Edge agent:&nbsp;</span><span className="font-mono text-orange-200">iot-pump-edge-classifier</span></span>
+            <span><span className="text-slate-500">Runtime:&nbsp;</span><span className="font-mono text-orange-200">Rust</span></span>
+            <span><span className="text-slate-500">Gateway:&nbsp;</span><span className="font-mono text-orange-200">edge-cluster-default</span></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={edgeBusy !== 'idle'}
+              onClick={compileAndDeployEdge}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-500/15 border border-orange-500/30 text-orange-200 rounded-lg hover:bg-orange-500/25 disabled:opacity-50">
+              {edgeBusy === 'compiling' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CloudUpload className="w-3.5 h-3.5" />}
+              {edgeDeployed ? 'Re-deploy' : 'Compile + deploy to edge'}
+            </button>
+            <button
+              disabled={edgeBusy !== 'idle' || !edgeDeployed}
+              onClick={runOnEdge}
+              title={!edgeDeployed ? 'Deploy the bundle first.' : 'Run one window through the edge classifier.'}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-500 text-slate-950 rounded-lg hover:bg-orange-400 disabled:bg-slate-700 disabled:text-slate-500 font-medium">
+              {edgeBusy === 'running' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              Run vibration window through edge
+            </button>
+          </div>
+        </div>
+
+        {edgeDeployed && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> Bundle pushed
+            </span>
+            {edgeBundleDigest && (
+              <span className="px-2 py-0.5 rounded-full bg-slate-800/60 border border-slate-700 text-slate-300 font-mono">
+                digest {edgeBundleDigest.slice(0, 12)}…
+              </span>
+            )}
+            {edgeDeployTransport && (
+              <span className="px-2 py-0.5 rounded-full bg-slate-800/60 border border-slate-700 text-slate-300 flex items-center gap-1">
+                <Radio className="w-3 h-3" /> {edgeDeployTransport}
+              </span>
+            )}
+          </div>
+        )}
+
+        {edgeNotice && (
+          <div className="mt-3 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 font-mono">
+            {edgeNotice}
+          </div>
+        )}
+        {edgeError && (
+          <div className="mt-3 flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+            <AlertTriangle className="w-4 h-4 mt-0.5" />
+            <span>{edgeError}</span>
+          </div>
+        )}
+
+        {edgeResult && (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="md:col-span-2 bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Edge verdict</p>
+              <div className="grid grid-cols-3 gap-3">
+                <Metric label="Severity" value={edgeResult.severity?.toUpperCase()} />
+                <Metric label="Peak Hz" value={edgeResult.peak_hz != null ? edgeResult.peak_hz.toFixed(1) : undefined} />
+                <Metric label="RMS g" value={edgeResult.rms_g != null ? edgeResult.rms_g.toFixed(3) : undefined} />
+              </div>
+              {edgeResult.bundle_match && (
+                <div className="mt-3 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
+                  <CheckCircle2 className="w-3 h-3" /> bundle digest matches
+                </div>
+              )}
+              {edgeResult.raw && !edgeResult.severity && (
+                <pre className="mt-3 text-[10.5px] text-slate-400 whitespace-pre-wrap font-mono">{edgeResult.raw}</pre>
+              )}
+            </div>
+            <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Latency</p>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-orange-300">Edge</span>
+                  <span className="font-mono text-sm text-white">
+                    {edgeResult.edge_latency_ms != null ? `${edgeResult.edge_latency_ms} ms` : '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-cyan-300">Cloud pipeline</span>
+                  <span className="font-mono text-sm text-white">
+                    {edgeResult.cloud_latency_ms != null ? `${edgeResult.cloud_latency_ms} ms` : '—'}
+                  </span>
+                </div>
+                {edgeResult.cloud_latency_ms != null && edgeResult.edge_latency_ms != null && (
+                  <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-200 text-[11px]">
+                    {edgeResult.edge_latency_ms < edgeResult.cloud_latency_ms
+                      ? `${Math.round(edgeResult.cloud_latency_ms / Math.max(1, edgeResult.edge_latency_ms))}× faster on edge`
+                      : 'cloud faster (warm cache)'}
+                  </div>
+                )}
+                {edgeResult.cloud_severity && (
+                  <p className="mt-2 text-[11px] text-slate-400">
+                    cloud severity: <span className="font-mono text-slate-200">{edgeResult.cloud_severity}</span>
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

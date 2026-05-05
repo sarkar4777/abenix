@@ -1,0 +1,51 @@
+name: "IoT Pump Edge Classifier"
+slug: iot-pump-edge-classifier
+description: >-
+  Edge-resident vibration classifier for rotating-machinery health.
+  Runs inside the abenix-edge runtime next to the sensor, takes one
+  vibration window, computes RMS + dominant FFT peak via the embedded
+  Python tool, and returns a tiny severity verdict over MQTT or HTTP.
+
+  Designed to keep the network round-trip out of the hot path: the
+  full diagnosis pipeline still lives in the cloud, but this agent
+  catches obvious imbalance / bearing signatures locally so plant ops
+  get an alert even when the WAN to AgentForge is flapping. Uses
+  claude-haiku-4-5 — small + fast, tolerant of flaky uplinks.
+agent_type: oob
+category: engineering
+icon: Cpu
+version: "1.0.0"
+status: draft
+
+system_prompt: |
+  You receive a JSON vibration window {samples: [float], sample_rate_hz: int}. Use the embedded Python tool to compute RMS amplitude and the dominant frequency via FFT. Return ONLY a JSON {severity: low|med|high, peak_hz: float, rms_g: float} based on these rules: rms_g>0.5 OR peak_hz between 95-105Hz=high, rms_g>0.3=med, else=low.
+
+model_config:
+  model: claude-haiku-4-5-20251001
+  model_provider: anthropic
+  temperature: 0.1
+  max_iterations: 2
+  max_tokens: 1024
+  tools:
+    - code_executor
+    - mqtt_publish
+  edge_compatible: true
+  edge_constraints:
+    max_payload_bytes: 8192
+    max_runtime_seconds: 5
+    mqtt_publish:
+      - "plant/pump/severity"
+    mqtt_subscribe:
+      - "plant/pump/vibration.raw"
+
+triggers:
+  - enabled: false
+
+input_variables:
+  - name: message
+    type: string
+    description: 'JSON window {samples: [float], sample_rate_hz: int}.'
+    required: true
+
+example_prompts:
+  - '{"samples":[0.01,0.03,-0.02,0.05,-0.04],"sample_rate_hz":2000}'

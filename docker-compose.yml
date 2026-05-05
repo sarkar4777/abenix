@@ -140,6 +140,77 @@ services:
       timeout: 5s
       retries: 5
 
+  # Python edge runtime — reference implementation, ~80 MB.
+  # Bring it up with: docker compose --profile edge-python up.
+  edge-runtime:
+    build:
+      context: .
+      dockerfile: apps/edge-runtime/Dockerfile
+    image: agentforge/edge-runtime:1.1.0
+    container_name: abenix-edge
+    environment:
+      GATEWAY_ID: ${EDGE_GATEWAY_ID:-edge-local-python}
+      GATEWAY_NAME: ${EDGE_GATEWAY_NAME:-edge-local-python}
+      PLATFORM_URL: ${PLATFORM_URL:-http://host.docker.internal:8000}
+      PLATFORM_TOKEN: ${PLATFORM_TOKEN:-}
+      MQTT_URL: mqtt://mosquitto:1883
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "8088:8080"
+    depends_on:
+      mosquitto:
+        condition: service_started
+    profiles:
+      - edge-python
+
+  # Rust edge runtime — disabled by profile so dev-local doesn't drag in a
+  # Rust toolchain. Bring it up with: docker compose --profile edge-rust up.
+  edge-runtime-rust:
+    build:
+      context: ./apps/edge-runtime-rust
+      dockerfile: Dockerfile
+    image: agentforge/edge-runtime-rust:1.1.0
+    container_name: abenix-edge-rust
+    environment:
+      GATEWAY_ID: ${EDGE_GATEWAY_ID:-edge-local-rust}
+      GATEWAY_NAME: ${EDGE_GATEWAY_NAME:-edge-local-rust}
+      PLATFORM_URL: ${PLATFORM_URL:-http://host.docker.internal:8000}
+      PLATFORM_TOKEN: ${PLATFORM_TOKEN:-}
+      MQTT_URL: mqtt://mosquitto:1883
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      RUST_LOG: info
+    ports:
+      - "8089:8080"
+    depends_on:
+      mosquitto:
+        condition: service_started
+    profiles:
+      - edge-rust
+
+  # C edge runtime — built off the alpine Dockerfile, ~12-20 MB image.
+  # Bring it up with: docker compose --profile edge-c up.
+  edge-runtime-c:
+    build:
+      context: ./apps/edge-runtime-c
+      dockerfile: Dockerfile
+    image: agentforge/edge-runtime-c:1.1.0
+    container_name: abenix-edge-c
+    environment:
+      GATEWAY_ID: ${EDGE_GATEWAY_ID:-edge-local-c}
+      GATEWAY_NAME: ${EDGE_GATEWAY_NAME:-edge-local-c}
+      PLATFORM_URL: ${PLATFORM_URL:-http://host.docker.internal:8000}
+      PLATFORM_TOKEN: ${PLATFORM_TOKEN:-}
+      MQTT_URL: mqtt://mosquitto:1883
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      PORT: "8080"
+    ports:
+      - "8090:8080"
+    depends_on:
+      mosquitto:
+        condition: service_started
+    profiles:
+      - edge-c
+
   neo4j:
     image: neo4j:5-community
     container_name: abenix-neo4j

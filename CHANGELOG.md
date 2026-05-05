@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.1.2 — 2026-05-05
+
+### Added
+
+### Changed
+
+### Fixed
+
 ## v1.1.1 — 2026-05-05
 
 ## v1.1.0 — Production tooling

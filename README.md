@@ -4,15 +4,15 @@
 
 <h1 align="center">Abenix</h1>
 
-<h3 align="center">The open-source AI agent platform that runs on the cloud <em>and</em> on the edge — and thinks in graphs, not chunks.</h3>
+<h3 align="center">The open-source AI agent platform — graph-grounded knowledge, production-grade orchestration, cloud or edge.</h3>
 
 <p align="center">
-  <a href="#-edge-runtime-v11"><strong>Edge runtime</strong></a> &nbsp;·&nbsp;
-  <a href="#-whats-new-in-v11"><strong>What's new in v1.1</strong></a> &nbsp;·&nbsp;
+  <a href="#-highlights"><strong>Highlights</strong></a> &nbsp;·&nbsp;
+  <a href="#-architecture"><strong>Architecture</strong></a> &nbsp;·&nbsp;
   <a href="#-quick-start"><strong>Quick start</strong></a> &nbsp;·&nbsp;
+  <a href="#-edge-runtimes"><strong>Edge runtimes</strong></a> &nbsp;·&nbsp;
   <a href="#-what-makes-abenix-different"><strong>Why Abenix</strong></a> &nbsp;·&nbsp;
   <a href="#-showcase-apps"><strong>Showcase apps</strong></a> &nbsp;·&nbsp;
-  <a href="#%EF%B8%8F-architecture"><strong>Architecture</strong></a> &nbsp;·&nbsp;
   <a href="#-deploy-anywhere"><strong>Deploy</strong></a>
 </p>
 
@@ -28,68 +28,78 @@
 
 ## TL;DR
 
-Most AI agent platforms give your agents amnesia — they retrieve documents, forget context, and re-derive the world model on every turn. Most also assume "agent" means "a thing that runs in the cloud talking to OpenAI." That's fine for a chatbot. It's not fine for a wind turbine, a refrigerated trailer, or a control room with a 50 ms hard limit.
+Most AI agent platforms give your agents amnesia — they retrieve documents, forget context, and re-derive the world model on every turn. Most also assume "agent" means "a chatbot in the cloud talking to OpenAI." That's fine for support tickets. It's not fine for a wind turbine, a refrigerated trailer, or a control room with a 50 ms hard limit.
 
-**Abenix gives agents a brain — and a body.** A typed graph that lives next to your knowledge base, agents that traverse it like a researcher follows citations, *and* a lean edge runtime that takes any agent flagged "edge-eligible," compiles it into a signed `.agent` bundle, and runs it inside a 80 MB pod next to the equipment. Same agent definition. Cloud or edge.
+**Abenix gives agents a brain — and a body.** A typed graph that lives next to your knowledge base, agents that traverse it like a researcher follows citations, multi-signoff approval gates and dead-letter replay so you actually trust them in production, *and* lean edge runtimes (Python / Rust / C) that take any agent flagged "edge-eligible," compile it into a signed `.agent` bundle, and run it next to the equipment. Same agent definition. Cloud or edge.
 
 <p align="center">
   <img src="docs/screenshots/01-dashboard.png" alt="Abenix Dashboard" width="100%" />
   <br/><em>The Abenix Dashboard — agents, executions, cost, and observability in one place</em>
 </p>
 
-> **Enterprise-ready.** Multi-tenant by design with hard SQL-level isolation. RBAC + per-resource sharing + actAs delegation for SaaS multiplexing. SHA-256-hashed API keys with per-key scopes + revocation. Pre-/post-LLM moderation with DLP redaction. Per-tenant + per-user budget caps. GDPR-friendly retention with hard purge. SOC 2 telemetry stack pre-wired (Prometheus + Grafana + structured failure codes + Slack/email fan-out). Helm chart deploys to AKS + minikube today, the same chart runs on EKS / GKE with a values override. **Production-grade tooling** as of v1.1 — connectors with secret-ref auth, multi-signoff approval gates, idempotency, dead-letter replay, time-series sink, MQTT triggers, and a signed edge-bundle pipeline.
+> **Enterprise-ready.** Multi-tenant by design with hard SQL-level isolation. RBAC + per-resource sharing + actAs delegation for SaaS multiplexing. SHA-256-hashed API keys with per-key scopes + revocation. Pre-/post-LLM moderation with DLP redaction. Per-tenant + per-user budget caps. GDPR-friendly retention with hard purge. SOC 2 telemetry stack pre-wired (Prometheus + Grafana + structured failure codes + Slack/email fan-out). Helm chart deploys to AKS + minikube today, the same chart runs on EKS / GKE with a values override. Connectors, multi-signoff approvals, idempotency, dead-letter replay, time-series + MQTT primitives, and signed edge-bundle delivery are all in the box.
 
 ---
 
-## 🛰️ Edge runtime (v1.1)
+## ✨ Highlights
 
-> **The bit nobody else ships.** Take any agent in your catalogue, tick **Edge eligible** in the Builder, click **Compile bundle**. You get a signed `.agent` file (RSA-PSS over a deterministic tar) that an 80 MB Python pod on the factory floor can hot-load over MQTT — no internet round-trip, no model API call from inside the DMZ, no rewrite of the agent in C++ or Go.
+Five things ship together — each one is what someone hits when they try to put an LLM agent in front of real ops:
 
-```bash
-# 1. Spin the edge runtime up next to the equipment (one helm install)
-helm install abenix-edge ./infra/helm/edge-runtime \
-  -n abenix-edge \
-  --set platform.url=https://abenix.your-corp.com \
-  --set gateway.id=plant-1 \
-  --set platform.token=$EDGE_REGISTRATION_TOKEN
+| Primitive | The reason | Where it lives |
+|---|---|---|
+| **Connector framework + 8 presets** | "How do I call SAP PM / ServiceNow / Maximo / Workday from an agent without burning a sprint per integration?" Secret-ref auth, `/test` button, retry policy, drop-down inside the agent builder. | `/admin/connectors` · `connector_call` palette tool · 8 YAMLs in [`packages/db/seeds/connector_presets/`](packages/db/seeds/connector_presets/) |
+| **Multi-signoff approval gates** | "An agent is about to file a $40k claim — I need two humans to sign off, and the gate has to expire if they don't." Pipeline node, real inbox at `/approvals`, TTL enforced. | `/approvals` · `approval_gate` palette tool |
+| **Time-series + MQTT primitives** | "My agent needs to read 24 h of pump vibration, publish a setpoint to a topic, and subscribe to a third-party feed." TimescaleDB hypertable, mosquitto broker, `tsdb_query` + `mqtt_publish` + `subscribed_feed` + `windowed_state` palette tools. | `tsdb_query` · `mqtt_publish` · `windowed_state` · `subscribed_feed` |
+| **Idempotency + DLQ** | "I retried because the network blipped — I do NOT want two work orders." `Idempotency-Key` header → 24h replay; failed executions land in `/admin/dlq` with one-click replay. | every `/execute` endpoint · `/admin/dlq` |
+| **Edge runtimes — Python · Rust · C** | "I want this agent on the SCADA VLAN with no internet, on a Moxa UC-8580, or on a Phoenix Contact PLC with 256 MB of RAM." Signed `.agent` bundle, OTA via MQTT, three runtime variants for three classes of plant hardware. | `/edge` · [`apps/edge-runtime/`](apps/edge-runtime/) · [`apps/edge-runtime-rust/`](apps/edge-runtime-rust/) · [`apps/edge-runtime-c/`](apps/edge-runtime-c/) |
 
-# 2. Bundle ships from /edge in the platform UI — pick agent, pick gateway, click Deploy.
-# 3. The runtime hot-reloads. /agents lists the slug. POST /agents/{slug}/execute runs it locally.
+Plus: live-mode toggles on every IoT showcase tab (synthetic ↔ live MQTT/TSDB/connectors), and a fully-wired pump-vibration-on-edge demo that compiles + signs + ships a Haiku agent to a Rust pod and runs FFT/RMS through `code_executor` locally.
+
+Full release notes: [`RELEASE_NOTES_PENDING.md`](RELEASE_NOTES_PENDING.md). In-product docs: **/help → Production tools**.
+
+---
+
+## 🏗 Architecture
+
+```mermaid
+flowchart LR
+    subgraph CTRL["AgentForge platform · cluster"]
+        WEB["apps/web<br/>/builder · /edge<br/>/admin/connectors<br/>/approvals · /admin/dlq"]
+        API["apps/api<br/>FastAPI"]
+        COMP["edge_compiler.py<br/>RSA-PSS sign"]
+        MQTT[("mosquitto<br/>topic: edge.{gw}.deploy")]
+        TSDB[("timescaledb<br/>hypertable: metrics")]
+        DB[("postgres + neo4j<br/>agents · gateways<br/>connectors · approvals")]
+        WEB --> API
+        API --> COMP
+        API --> DB
+        API <--> MQTT
+        API <--> TSDB
+    end
+
+    subgraph EDGE["Plant edge"]
+        RT["edge runtime<br/>(python · rust · c)<br/>:8080"]
+        BUNDLES["/var/edge/agents/<br/>signed .agent bundles"]
+        EQUIP[("Equipment<br/>OPC-UA · Modbus · MQTT")]
+        RT --> BUNDLES
+        EQUIP <--> RT
+    end
+
+    COMP -- ".agent bundle<br/>(tar + RSA-PSS sig)" --> MQTT
+    MQTT -- "edge.{gw}.deploy<br/>QoS 1" --> RT
+    RT -- "POST /api/edge/gateways/register<br/>(every 60s, Bearer af_)" --> API
+    RT -- "Anthropic / OpenAI<br/>HTTPS (or local model)" --> LLM[("LLM provider")]
+
+    classDef ctl fill:#0f172a,stroke:#22d3ee,color:#e0f2fe;
+    classDef edge fill:#1c1917,stroke:#fb923c,color:#fed7aa;
+    classDef ext fill:#1e1b4b,stroke:#a78bfa,color:#ddd6fe;
+    class WEB,API,COMP ctl;
+    class MQTT,TSDB,DB ctl;
+    class RT,BUNDLES,EQUIP edge;
+    class LLM ext;
 ```
 
-| | Cloud agent (control plane) | Edge agent (`.agent` bundle) |
-|---|---|---|
-| **Lives in** | AKS pod, full runtime, all 40+ tools | 80 MB pod, 6 whitelisted tools |
-| **Talks to** | LLM provider over HTTPS | LLM provider over HTTPS *or* a distilled local model (slot reserved) |
-| **Triggered by** | API / cron / MQTT / Kafka | MQTT topic `agents.<slug>.input` (configurable) |
-| **Tool budget** | unlimited | `mqtt_publish`, `mqtt_subscribe`, `current_time`, `windowed_state`, `connector_call`, `code_executor` |
-| **Side-effects** | full | constrained by `edge_constraints.mqtt_publish[]` ACL |
-| **Signing** | n/a | RSA-PSS / SHA-256, public key on the gateway, tampering = refuse-to-load |
-| **Update path** | helm rollout | over-the-air, one MQTT message |
-
-What this lights up: a vibration-anomaly classifier running on the SCADA VLAN with no internet, a cold-chain alarm reasoner inside a refrigerated trailer's 4G dead-zone, a pump RUL forecaster that only ships the work-order draft back to HQ over a 1 kbps satellite uplink. The platform already runs the same agent — you just tag it edge-eligible.
-
-Bundle format, signing math, manifest schema, and the failure modes the runtime guards against are documented in [`infra/edge-runtime/AGENT_BUNDLE_FORMAT.md`](infra/edge-runtime/AGENT_BUNDLE_FORMAT.md). Smoke script: [`scripts/edge-smoke.sh`](scripts/edge-smoke.sh).
-
----
-
-## ✨ What's new in v1.1
-
-The headline is the edge runtime. The rest is the production wiring you need to actually trust an agent in production:
-
-| Primitive | Why it matters | Where it lives |
-|---|---|---|
-| **Edge runtime + `.agent` bundles** | Cloud-built agents, edge-deployed pods, signed delivery, OTA updates over MQTT | [`apps/edge-runtime/`](apps/edge-runtime/) · [`infra/helm/edge-runtime/`](infra/helm/edge-runtime/) · `/edge` |
-| **Connector framework + 8 presets** | SAP PM, ServiceNow, Maximo, Workday, Sensitech, Carrier Lynx, DTN Weather, BNEF — secret-ref auth, `/test`, retry policy | `/admin/connectors` · `connector_call` tool |
-| **Multi-signoff approval gates** | Block any agent action behind N human approvals with TTL — built into the pipeline as a node, with a real `/approvals` inbox | `/approvals` · `approval_gate` tool |
-| **Time-series ingest + query** | TimescaleDB hypertable in the stack; `tsdb_query` tool reads windowed metrics for any agent | `tsdb_query` palette tool |
-| **MQTT triggers + publish + subscribed feeds** | mosquitto in the stack, agents can trigger off topic patterns and publish back, plus a `subscribed_feed` adapter | `mqtt_publish` · `subscribed_feed` palette tools |
-| **Windowed state** | Per-asset rolling windows (last N events) without writing your own Redis sketch each time | `windowed_state` palette tool |
-| **Idempotency keys** | `Idempotency-Key` header on `/api/agents/{slug}/execute` — replay returns the cached payload for 24 h | every execute endpoint |
-| **Dead-letter queue** | Failed executions land in `execution_dlq`; admins can replay or discard from `/admin/dlq` | `/admin/dlq` |
-| **Live-mode toggles in the IoT showcase** | All 5 showcase tabs flip from synthetic data to live MQTT + connector + TSDB feeds with one click | `/industrial-iot` |
-
-Full release notes: [`RELEASE_NOTES_PENDING.md`](RELEASE_NOTES_PENDING.md). Docs: in-product **/help → Production tools (v1.1)**.
+Three-layer model: **control plane** (web + api + signing + state), **transport** (MQTT for OTA + telemetry, TSDB for time-series), **edge fleet** (one helm install per gateway, runs the same `.agent` regardless of the runtime variant). Bundle delivery is MQTT-first with HTTP fallback. Auth uses `af_`-prefixed API keys via `Authorization: Bearer`.
 
 ---
 
@@ -114,7 +124,7 @@ bash scripts/dev-local.sh
 
 Open http://localhost:3000 and sign in.
 
-### Run with infra (v1.1)
+### Run with infra
 
 `dev-local.sh` now also boots two new services that the production-tooling primitives depend on:
 
@@ -127,7 +137,65 @@ Both come up as part of the same `docker-compose up` invocation `dev-local.sh` i
 
 To wire connectors locally, open `/admin/connectors` after sign-in, click **+ New connector**, pick a kind (cmms / hris / telematics / standards / market-data / custom), point at any reachable URL (the bundled mock servers under `infra/mocks/` cover SAP / ServiceNow / Sensitech / BNEF for offline development), and click **Test**. The connector then becomes selectable in the agent Builder under the **Knowledge → Connectors** sub-tab.
 
-> Edge runtime install + register is documented in [Edge runtime (v1.1)](#-edge-runtime-v11) above.
+## 🛰 Edge runtimes
+
+Three runtime variants ship — same `.agent` bundle format, same MQTT delivery topic, same HTTP contract. Pick the one that matches the plant hardware:
+
+| Variant | Image | Size | Targets | When to use |
+|---|---|---|---|---|
+| **Python** (reference) | `agentforge/edge-runtime` | ~80 MB | `x86_64-linux`, `arm64-linux` | Default. Best LLM SDK ergonomics, easiest to extend with new tool shims. Runs on any box that already has python3.12+. |
+| **Rust** (single static binary) | `agentforge/edge-runtime-rust` | ~25 MB | `x86_64-linux`, `arm64-linux`, `armv7-linux` | Rugged industrial PCs (Moxa UC-8580, Siemens RUGGEDCOM, Beckhoff CX series), NVIDIA Jetson. No Python interpreter required on the box. |
+| **C** (musl static) | `agentforge/edge-runtime-c` | ~12 MB | `armv7-linux`, `arm64-linux`, `x86_64-linux` | Ultra-constrained gateways (Allen-Bradley CompactLogix, Phoenix Contact PLCnext, OpenWRT routers, ARM Cortex-A7 with 256–512 MB RAM). |
+
+### Download / install
+
+The platform exposes `GET /api/edge/runtime/download` (no auth) — returns the helm-install command + docker-pull command for each variant. The `/edge` page in the web UI renders this as three cards with copy-to-clipboard buttons. Manual install:
+
+```bash
+# Python (default — works everywhere)
+helm install abenix-edge ./infra/helm/edge-runtime -n abenix-edge \
+  --set platform.url=$PLATFORM_URL --set platform.token=$EDGE_TOKEN --set gateway.id=$GW
+
+# Rust (rugged industrial PCs)
+helm install abenix-edge-rust ./infra/helm/edge-runtime-rust -n abenix-edge \
+  --set platform.url=$PLATFORM_URL --set platform.token=$EDGE_TOKEN --set gateway.id=$GW
+
+# C (low-RAM PLCs / OpenWRT)
+helm install abenix-edge-c ./infra/helm/edge-runtime-c -n abenix-edge \
+  --set platform.url=$PLATFORM_URL --set platform.token=$EDGE_TOKEN --set gateway.id=$GW
+```
+
+Without Helm (bare docker on a plant gateway):
+
+```bash
+docker run -d --name abenix-edge \
+  -e PLATFORM_URL=$PLATFORM_URL \
+  -e PLATFORM_TOKEN=$EDGE_TOKEN \
+  -e GATEWAY_ID=$GW \
+  -e MQTT_URL=mqtt://mqtt.your-plant:1883 \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -p 8080:8080 \
+  agentforge/edge-runtime:latest          # or :rust, :c — variant suffix lives in the image name
+```
+
+### How a gateway gets created in AgentForge
+
+1. **Mint a registration token.** From the platform UI: **API Keys → New key**, scopes `agents:execute, edge:register`. The `af_…` value is the gateway's `PLATFORM_TOKEN`.
+2. **Helm-install the runtime variant** (commands above) with `platform.token` set to that key. The pod boots, calls `POST /api/edge/gateways/register` every 60 s with `Authorization: Bearer af_…`. The first call inserts a row in `edge_gateways`; subsequent calls bump `last_seen_at`. The gateway shows up immediately in the platform UI under `/edge` → **Registered gateways**.
+3. **Pick an agent → Compile bundle → Deploy.** From `/edge`, click a gateway card → **Deploy agent** → pick from the list of `edge_compatible: true` agents. The platform compiles the `.agent` bundle (RSA-PSS signed), publishes to `edge.{gateway_id}.deploy` over MQTT (HTTP POST fallback if MQTT publish fails), and the runtime hot-loads it. The bundle digest appears next to the agent slug.
+
+### How interactions work (control plane ↔ edge)
+
+| What | Where | Direction | Auth |
+|---|---|---|---|
+| Gateway registers itself | `POST /api/edge/gateways/register` | edge → platform | `Authorization: Bearer af_…` |
+| Operator deploys an agent | `POST /api/edge/gateways/{id}/deploy` | UI → platform → MQTT | platform JWT |
+| Bundle delivery (default) | MQTT topic `edge.{gateway_id}.deploy` (QoS 1) | platform → edge | RSA-PSS signature on the bundle |
+| Bundle delivery (fallback) | `POST {endpoint_url}/agents/{slug}/bundle` | platform → edge | none (signature still verified) |
+| Sync execution | `POST {endpoint_url}/agents/{slug}/execute` | caller → edge runtime | none in dev, mTLS recommended in prod |
+| Async execution | MQTT topic `agents.{slug}.input` | publisher → edge runtime | constrained by `edge_constraints.mqtt_subscribe[]` ACL |
+
+Bundle format, signing math (RSA-PSS / SHA-256 / MGF1-SHA-256 / salt-len 32), manifest schema, and the failure modes the runtime guards against are documented in [`infra/edge-runtime/AGENT_BUNDLE_FORMAT.md`](infra/edge-runtime/AGENT_BUNDLE_FORMAT.md). Smoke script: [`scripts/edge-smoke.sh`](scripts/edge-smoke.sh).
 
 ### Required vs optional env vars
 
@@ -187,7 +255,7 @@ n8n / Zapier / LangChain are excellent for *"when a Salesforce row changes, drop
 3. **Multi-tenancy is real.** `tenant_id` on every row, [`ResourceShare`](packages/db/models/resource_share.py) for cross-tenant grants, [`actAs` delegation](packages/db/models/subject_policy.py) for SaaS multiplexing. The five showcase apps below all ride this exact path.
 4. **Failures are first-class.** Structured failure-diff on every node crash → [Pipeline Surgeon](apps/api/app/routers/pipeline_healing.py) proposes a JSON-Patch (RFC 6902) you can review and apply from `/agents/{id}/healing`. Stable `failure_code` badges on `/executions`. A typed [workflow shell REPL](apps/web/src/app/(app)/agents/[id]/shell/page.tsx) — *"kubectl for pipelines"* — drives the same machinery.
 5. **One Helm chart with observability inside.** [`infra/helm/abenix`](infra/helm/abenix/) deploys api + web + workers + per-agent-pool runtimes + Postgres + Redis + Neo4j + NATS + KEDA + Prometheus + Grafana + ingress. Every pod exposes `/metrics`. The [`/alerts`](apps/web/src/app/(app)/alerts/page.tsx) page groups by `failure_code`. Slack + email fan-out via env var.
-6. **Edge is a first-class deployment target, not a port.** Mark an agent **Edge eligible** in the Builder, the platform compiles a signed `.agent` bundle and ships it to an 80 MB runtime that runs next to the equipment. MQTT triggers, whitelisted tools, RSA-PSS signing, OTA updates. See [Edge runtime](#-edge-runtime-v11) above — that's the bit nobody else ships.
+6. **Edge is a first-class deployment target, not a port.** Mark an agent **Edge eligible** in the Builder, the platform compiles a signed `.agent` bundle and ships it to an 80 MB runtime that runs next to the equipment. MQTT triggers, whitelisted tools, RSA-PSS signing, OTA updates. See [Edge runtime](#-edge-runtimes) above — that's the bit nobody else ships.
 
 **TL;DR:** if the problem is *"chain these APIs together with an LLM step,"* use n8n. If it's *"agents that share knowledge, scale per-pool, isolate by tenant, run cloud-or-edge from the same definition, and ship as a self-hostable platform,"* try this.
 
@@ -446,9 +514,9 @@ Five hardening landings over the last sprint that every showcase app benefits fr
 
 ---
 
-## 🏭 Production-grade tooling (v1.1)
+## 🏭 Production-grade tooling
 
-v1.1.0 turns the five Industrial-IoT showcases into something an enterprise can run live. Thirteen primitives ship in the platform — every one of them has an end-user help section under `/help` → **Production tools (v1.1)**.
+The five Industrial-IoT showcases are wired against thirteen production primitives — every one of them has an end-user help section under `/help` → **Production tools**.
 
 | # | Primitive | What it does |
 |---|---|---|
@@ -496,7 +564,7 @@ Token cost typically drops **5–10×** because agents read curated evidence, no
   <img src="docs/screenshots/02-agent-builder.png" alt="Agent Builder" width="100%" />
 </p>
 
-A pipeline is a DAG of agents and tools. Switch nodes branch on output, loop nodes iterate, code-asset nodes execute sandboxed Python / Node / Go / Rust / Java / Ruby. Every step is logged, metered, and replayable. Tool families: web (search · scrape · structured extract), knowledge (search · ingest · graph-walk), code (execute · file-system), data (Postgres · S3 · CSV · Parquet · TimescaleDB), comms (Slack · email · webhook), productivity (Linear · Jira · Notion · GitHub), vision + audio, MCP, plus the v1.1 production tooling block (MQTT/Kafka triggers, OPC-UA write, connector framework, sliding-window state, approvals, time-series, idempotency, subscribed feeds, audio STT, edge runtime). See the full [tool catalogue](apps/agent-runtime/engine/tools/).
+A pipeline is a DAG of agents and tools. Switch nodes branch on output, loop nodes iterate, code-asset nodes execute sandboxed Python / Node / Go / Rust / Java / Ruby. Every step is logged, metered, and replayable. Tool families: web (search · scrape · structured extract), knowledge (search · ingest · graph-walk), code (execute · file-system), data (Postgres · S3 · CSV · Parquet · TimescaleDB), comms (Slack · email · webhook), productivity (Linear · Jira · Notion · GitHub), vision + audio, MCP, plus the production tooling block (MQTT/Kafka triggers, OPC-UA write, connector framework, sliding-window state, approvals, time-series, idempotency, subscribed feeds, audio STT, edge runtime). See the full [tool catalogue](apps/agent-runtime/engine/tools/).
 
 ### Multimodal end-to-end + self-healing + workflow shell
 

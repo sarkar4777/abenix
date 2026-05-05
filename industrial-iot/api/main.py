@@ -507,6 +507,173 @@ async def _proxy(request: Request, path: str) -> Response:
     )
 
 
+@app.post("/api/industrial-iot/edge/compile-and-deploy")
+async def edge_compile_and_deploy(request: Request) -> JSONResponse:
+    """Resolve an agent slug + gateway id, compile the bundle, and deploy.
+
+    Front-ends the two-step `compile -> deploy` dance with one POST so
+    the PumpTab can stay simple. Returns the deploy envelope unchanged.
+    """
+    body = await request.json()
+    agent_slug = (body.get("agent_slug") or "").strip()
+    gateway_id_or_pk = (body.get("gateway_id") or "").strip()
+    if not agent_slug:
+        raise HTTPException(status_code=400, detail="agent_slug is required")
+
+    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="no api key on industrial-iot pod")
+    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
+    headers = {"X-API-Key": api_key}
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        ar = await client.get(
+            f"{base_url}/api/agents?limit=500", headers=headers,
+        )
+        if ar.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"agents lookup http {ar.status_code}")
+        raw = ar.json().get("data") or {}
+        items = raw.get("agents") or raw.get("items") or raw if isinstance(raw, list) else (raw.get("agents") or raw.get("items") or [])
+        agent = next((a for a in items if a.get("slug") == agent_slug), None)
+        if not agent:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "ok": False,
+                    "error": "agent_not_seeded",
+                    "agent_slug": agent_slug,
+                    "hint": "Run `python /app/packages/db/seeds/seed_agents.py` to register iot-pump-edge-classifier",
+                },
+            )
+
+        gr = await client.get(f"{base_url}/api/edge/gateways", headers=headers)
+        if gr.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"gateways lookup http {gr.status_code}")
+        gateways = (gr.json().get("data") or {}).get("gateways") or []
+        gw = None
+        if gateway_id_or_pk:
+            gw = next(
+                (g for g in gateways if g.get("gateway_id") == gateway_id_or_pk
+                 or g.get("id") == gateway_id_or_pk),
+                None,
+            )
+        if not gw and gateways:
+            gw = gateways[0]
+        if not gw:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "ok": False,
+                    "error": "no_gateway",
+                    "hint": "Register an edge gateway first (helm install abenix-edge).",
+                },
+            )
+
+        dr = await client.post(
+            f"{base_url}/api/edge/gateways/{gw['id']}/deploy",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"agent_id": agent["id"]},
+        )
+        deploy_body = {}
+        try:
+            deploy_body = dr.json()
+        except Exception:
+            deploy_body = {"raw": dr.text}
+        return JSONResponse({
+            "ok": dr.is_success,
+            "agent": {"id": agent["id"], "slug": agent["slug"], "name": agent.get("name")},
+            "gateway": {
+                "id": gw["id"],
+                "gateway_id": gw.get("gateway_id"),
+                "name": gw.get("name"),
+                "endpoint_url": gw.get("endpoint_url"),
+            },
+            "deploy": deploy_body,
+        }, status_code=200 if dr.is_success else 502)
+
+
+@app.post("/api/industrial-iot/edge/execute")
+async def edge_execute(request: Request) -> JSONResponse:
+    """Send a payload to the edge runtime running an agent slug.
+
+    Resolves the gateway endpoint from the platform registry. Falls back
+    to the cluster-internal abenix-edge service when the registered
+    endpoint_url is empty (in-cluster runtime case).
+    """
+    import time
+    body = await request.json()
+    agent_slug = (body.get("agent_slug") or "").strip()
+    payload = body.get("payload")
+    gateway_id_or_pk = (body.get("gateway_id") or "").strip()
+    if not agent_slug or payload is None:
+        raise HTTPException(status_code=400, detail="agent_slug + payload required")
+
+    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="no api key on industrial-iot pod")
+    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        gr = await client.get(
+            f"{base_url}/api/edge/gateways", headers={"X-API-Key": api_key},
+        )
+        gateways = (gr.json().get("data") or {}).get("gateways") or []
+        gw = None
+        if gateway_id_or_pk:
+            gw = next(
+                (g for g in gateways if g.get("gateway_id") == gateway_id_or_pk
+                 or g.get("id") == gateway_id_or_pk),
+                None,
+            )
+        if not gw and gateways:
+            gw = gateways[0]
+
+        endpoint = ""
+        bundle_digest = None
+        if gw:
+            endpoint = (gw.get("endpoint_url") or "").rstrip("/")
+            for d in (gw.get("deployed_agents") or []):
+                if d.get("slug") == agent_slug:
+                    bundle_digest = d.get("digest")
+                    break
+        if not endpoint:
+            endpoint = os.environ.get(
+                "EDGE_RUNTIME_INTERNAL_URL",
+                "http://abenix-edge.abenix.svc.cluster.local:8080",
+            ).rstrip("/")
+
+        target = f"{endpoint}/agents/{agent_slug}/execute"
+        t0 = time.perf_counter()
+        try:
+            er = await client.post(target, json=payload)
+        except Exception as exc:
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "ok": False,
+                    "error": f"edge unreachable: {exc}",
+                    "endpoint": target,
+                    "bundle_digest": bundle_digest,
+                },
+            )
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+
+        try:
+            data = er.json()
+        except Exception:
+            data = {"raw": er.text}
+        return JSONResponse({
+            "ok": er.is_success,
+            "status": er.status_code,
+            "endpoint": target,
+            "edge_latency_ms": latency_ms,
+            "bundle_digest": bundle_digest,
+            "result": data,
+            "gateway": {"id": gw.get("id") if gw else None,
+                        "gateway_id": gw.get("gateway_id") if gw else None},
+        })
+
+
 @app.api_route("/api/code-assets", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def proxy_code_assets_root(request: Request) -> Response:
     return await _proxy(request, "/api/code-assets")

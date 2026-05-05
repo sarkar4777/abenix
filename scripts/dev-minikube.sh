@@ -147,6 +147,8 @@ kubectl -n "$NS" get svc abenix-grafana &>/dev/null 2>&1 && pf abenix-grafana 30
 kubectl -n "$NS" get svc abenix-mosquitto &>/dev/null 2>&1 && pf abenix-mosquitto 1883 1883
 kubectl -n "$NS" get svc abenix-timescaledb &>/dev/null 2>&1 && pf abenix-timescaledb 5433 5432
 kubectl -n "$NS" get svc abenix-edge &>/dev/null 2>&1 && pf abenix-edge 8088 8080
+kubectl -n "$NS" get svc abenix-edge-rust &>/dev/null 2>&1 && pf abenix-edge-rust 8089 8080
+kubectl -n "$NS" get svc abenix-edge-c &>/dev/null 2>&1 && pf abenix-edge-c 8090 8080
 
 sleep 2
 

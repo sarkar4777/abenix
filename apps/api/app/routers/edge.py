@@ -95,6 +95,92 @@ def _serialize_gateway(g: EdgeGateway) -> dict[str, Any]:
     }
 
 
+@router.get("/runtime/download")
+async def runtime_download() -> JSONResponse:
+    variants = [
+        {
+            "name": "python",
+            "label": "Python (reference)",
+            "image": "agentforge/edge-runtime:1.1.0",
+            "size_mb": 80,
+            "helm_chart": "infra/helm/edge-runtime",
+            "helm_install": (
+                "helm install abenix-edge ./infra/helm/edge-runtime "
+                "-n abenix-edge "
+                "--set platform.url=$PLATFORM_URL "
+                "--set platform.token=$EDGE_TOKEN "
+                "--set gateway.id=$GW"
+            ),
+            "docker_run": (
+                "docker run -d --name abenix-edge "
+                "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
+                "agentforge/edge-runtime:1.1.0"
+            ),
+            "targets": ["x86_64-linux", "arm64-linux"],
+            "deps": ["python3.12+"],
+            "use_when": "default — best LLM SDK ergonomics; ~80 MB pod",
+        },
+        {
+            "name": "rust",
+            "label": "Rust (single static binary)",
+            "image": "agentforge/edge-runtime-rust:1.1.0",
+            "size_mb": 25,
+            "helm_chart": "infra/helm/edge-runtime-rust",
+            "helm_install": (
+                "helm install abenix-edge-rust ./infra/helm/edge-runtime-rust "
+                "-n abenix-edge "
+                "--set platform.url=$PLATFORM_URL "
+                "--set platform.token=$EDGE_TOKEN "
+                "--set gateway.id=$GW"
+            ),
+            "docker_run": (
+                "docker run -d --name abenix-edge-rust "
+                "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
+                "agentforge/edge-runtime-rust:1.1.0"
+            ),
+            "targets": ["x86_64-linux", "arm64-linux", "armv7-linux"],
+            "deps": [],
+            "use_when": (
+                "rugged industrial PCs (Moxa UC-8580, Siemens RUGGEDCOM, "
+                "Beckhoff CX series) — no Python interpreter on the box"
+            ),
+        },
+        {
+            "name": "c",
+            "label": "C (musl static)",
+            "image": "agentforge/edge-runtime-c:1.1.0",
+            "size_mb": 12,
+            "helm_chart": "infra/helm/edge-runtime-c",
+            "helm_install": (
+                "helm install abenix-edge-c ./infra/helm/edge-runtime-c "
+                "-n abenix-edge "
+                "--set platform.url=$PLATFORM_URL "
+                "--set platform.token=$EDGE_TOKEN "
+                "--set gateway.id=$GW"
+            ),
+            "docker_run": (
+                "docker run -d --name abenix-edge-c "
+                "-e PLATFORM_URL=... -e PLATFORM_TOKEN=... "
+                "agentforge/edge-runtime-c:1.1.0"
+            ),
+            "targets": ["armv7-linux", "arm64-linux", "x86_64-linux"],
+            "deps": [
+                "libmosquitto",
+                "openssl",
+                "libcurl",
+                "libmicrohttpd",
+                "json-c",
+            ],
+            "use_when": (
+                "ultra-constrained gateways (Allen-Bradley CompactLogix, "
+                "Phoenix Contact PLCnext, OpenWRT routers, ARM Cortex-A7 "
+                "with 256-512MB RAM)"
+            ),
+        },
+    ]
+    return success({"variants": variants})
+
+
 @router.post("/gateways/register")
 async def register_gateway(
     body: dict = Body(...),

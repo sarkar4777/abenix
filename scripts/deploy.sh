@@ -698,6 +698,37 @@ install_observability_stack() {
 }
 
 
+deploy_edge_runtime_rust() {
+  step "Installing edge runtime (rust, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
+  helm upgrade --install abenix-edge-rust "${ROOT_DIR}/infra/helm/edge-runtime-rust" \
+    --namespace "${NAMESPACE}" \
+    --set image.tag="${IMAGE_TAG}" \
+    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-rust" \
+    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-rust" \
+    --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+    --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
+    --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+    --timeout 5m --wait=false 2>&1 | tail -3 \
+    || warn "edge-runtime-rust helm install failed (non-fatal)"
+  ok "edge-runtime-rust installed"
+}
+
+deploy_edge_runtime_c() {
+  step "Installing edge runtime (c, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
+  helm upgrade --install abenix-edge-c "${ROOT_DIR}/infra/helm/edge-runtime-c" \
+    --namespace "${NAMESPACE}" \
+    --set image.tag="${IMAGE_TAG}" \
+    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-c" \
+    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-c" \
+    --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+    --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
+    --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+    --timeout 5m --wait=false 2>&1 | tail -3 \
+    || warn "edge-runtime-c helm install failed (non-fatal)"
+  ok "edge-runtime-c installed"
+}
+
+
 deploy_local() {
   check_prereqs
   check_command minikube
@@ -755,19 +786,31 @@ deploy_local() {
   run_migrations || true
   seed_agents || true
 
+  # EDGE_RUNTIME_VARIANT={python|rust|c} picks which port runs in the cluster.
+  # EDGE_RUNTIME_ALL_VARIANTS=true installs all of them side-by-side (soak test).
+  EDGE_RUNTIME_VARIANT="${EDGE_RUNTIME_VARIANT:-python}"
+  EDGE_RUNTIME_ALL_VARIANTS="${EDGE_RUNTIME_ALL_VARIANTS:-false}"
   if [[ "${EDGE_RUNTIME_ENABLED:-true}" == "true" ]]; then
-    step "Installing edge runtime (gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
-    helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
-      --namespace "${NAMESPACE}" \
-      --set image.tag="${IMAGE_TAG}" \
-      --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
-      --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
-      --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
-      --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
-      --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
-      --timeout 5m --wait=false 2>&1 | tail -3 \
-      || warn "edge-runtime helm install failed (non-fatal)"
-    ok "edge-runtime installed"
+    if [[ "${EDGE_RUNTIME_VARIANT}" == "python" || "${EDGE_RUNTIME_ALL_VARIANTS}" == "true" ]]; then
+      step "Installing edge runtime (python, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
+      helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
+        --namespace "${NAMESPACE}" \
+        --set image.tag="${IMAGE_TAG}" \
+        --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
+        --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
+        --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+        --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
+        --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+        --timeout 5m --wait=false 2>&1 | tail -3 \
+        || warn "edge-runtime helm install failed (non-fatal)"
+      ok "edge-runtime installed"
+    fi
+    if [[ "${EDGE_RUNTIME_VARIANT}" == "rust" || "${EDGE_RUNTIME_ALL_VARIANTS}" == "true" ]]; then
+      deploy_edge_runtime_rust
+    fi
+    if [[ "${EDGE_RUNTIME_VARIANT}" == "c" || "${EDGE_RUNTIME_ALL_VARIANTS}" == "true" ]]; then
+      deploy_edge_runtime_c
+    fi
   fi
 
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"

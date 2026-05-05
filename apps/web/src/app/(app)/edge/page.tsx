@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Cpu, Loader2, RefreshCw, Send, X, AlertTriangle, CheckCircle2, Clock, Wifi,
+  Copy, ChevronDown, ChevronRight, Package, Terminal, Info,
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -36,6 +37,37 @@ type AgentRow = {
   edge_compatible: boolean;
 };
 
+type RuntimeVariant = {
+  name: 'python' | 'rust' | 'c';
+  label: string;
+  image: string;
+  size_mb: number;
+  helm_chart: string;
+  helm_install: string;
+  docker_run: string;
+  targets: string[];
+  deps: string[];
+  use_when: string;
+};
+
+const VARIANT_TONES: Record<string, { card: string; chip: string; head: string }> = {
+  python: {
+    card: 'bg-teal-500/5 border-teal-500/30',
+    chip: 'bg-teal-500/15 text-teal-300 border-teal-500/30',
+    head: 'text-teal-300',
+  },
+  rust: {
+    card: 'bg-orange-500/5 border-orange-500/30',
+    chip: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
+    head: 'text-orange-300',
+  },
+  c: {
+    card: 'bg-slate-500/5 border-slate-500/40',
+    chip: 'bg-slate-700/40 text-slate-200 border-slate-600/40',
+    head: 'text-slate-200',
+  },
+};
+
 function timeAgo(iso: string | null): string {
   if (!iso) return '—';
   const t = Date.parse(iso);
@@ -61,23 +93,36 @@ function StatusDot({ status, lastSeen }: { status: string; lastSeen: string | nu
 export default function EdgePage() {
   const [gateways, setGateways] = useState<Gateway[]>([]);
   const [agents, setAgents] = useState<AgentRow[]>([]);
+  const [variants, setVariants] = useState<RuntimeVariant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalGatewayId, setModalGatewayId] = useState<string | null>(null);
   const [deploying, setDeploying] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [howOpen, setHowOpen] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copyToClipboard = useCallback((text: string, key: string) => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied((k) => (k === key ? null : k)), 1200);
+    }).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     const token = getToken();
     if (!token) { setLoading(false); setError('Not signed in'); return; }
     setError(null);
     try {
-      const [gr, ar] = await Promise.all([
+      const [gr, ar, vr] = await Promise.all([
         fetch(`${API_URL}/api/edge/gateways`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_URL}/api/agents?limit=500`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/edge/runtime/download`),
       ]);
       const gj = await gr.json();
       const aj = await ar.json();
+      const vj = await vr.json();
       setGateways(gj?.data?.gateways || []);
       const rawAgents: any[] = aj?.data?.agents || aj?.data?.items || aj?.data || [];
       setAgents(
@@ -88,6 +133,7 @@ export default function EdgePage() {
           edge_compatible: !!(a.model_config?.edge_compatible),
         }))
       );
+      setVariants(vj?.data?.variants || []);
     } catch (e: any) {
       setError(e?.message || 'Failed to load');
     }
@@ -157,6 +203,143 @@ export default function EdgePage() {
             <AlertTriangle className="w-4 h-4" /> {error}
           </div>
         )}
+
+        <section data-testid="edge-runtime-variants">
+          <div className="mb-3">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <Package className="w-4 h-4 text-cyan-400" /> Edge runtime — pick your variant
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Drop this on the gateway box. It registers itself, pulls signed bundles, and
+              executes agents next to your sensors.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {variants.map((v) => {
+              const tone = VARIANT_TONES[v.name] || VARIANT_TONES.python;
+              const helmKey = `helm-${v.name}`;
+              const dockerKey = `docker-${v.name}`;
+              const dockerPull = `docker pull ${v.image}`;
+              return (
+                <div
+                  key={v.name}
+                  className={`rounded-lg border p-4 space-y-3 ${tone.card}`}
+                  data-testid={`runtime-card-${v.name}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className={`font-semibold text-sm ${tone.head}`}>{v.label}</h3>
+                      <p className="text-[11px] text-slate-400 font-mono mt-0.5 break-all">
+                        {v.image}
+                      </p>
+                    </div>
+                    <span className={`shrink-0 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${tone.chip}`}>
+                      {v.size_mb} MB
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Targets</p>
+                    <div className="flex flex-wrap gap-1">
+                      {v.targets.map((t) => (
+                        <span key={t} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/60 border border-slate-700/60 text-slate-300">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">
+                      Dependencies
+                    </p>
+                    {v.deps.length === 0 ? (
+                      <span className="text-[11px] text-slate-500 italic">none — single static binary</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {v.deps.map((d) => (
+                          <span key={d} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/60 border border-slate-700/60 text-slate-300">
+                            {d}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    <span className="text-slate-500 uppercase tracking-wider text-[10px]">Use when:&nbsp;</span>
+                    {v.use_when}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      onClick={() => copyToClipboard(v.helm_install, helmKey)}
+                      className={`text-[11px] px-2 py-1.5 rounded border flex items-center justify-center gap-1.5 hover:opacity-90 ${tone.chip}`}
+                      data-testid={`copy-helm-${v.name}`}
+                    >
+                      {copied === helmKey ? <CheckCircle2 className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      {copied === helmKey ? 'Copied' : 'Helm install'}
+                    </button>
+                    <button
+                      onClick={() => copyToClipboard(dockerPull, dockerKey)}
+                      className={`text-[11px] px-2 py-1.5 rounded border flex items-center justify-center gap-1.5 hover:opacity-90 ${tone.chip}`}
+                      data-testid={`copy-docker-${v.name}`}
+                    >
+                      {copied === dockerKey ? <CheckCircle2 className="w-3 h-3" /> : <Terminal className="w-3 h-3" />}
+                      {copied === dockerKey ? 'Copied' : 'Docker pull'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-700/50 bg-slate-800/30">
+          <button
+            onClick={() => setHowOpen((o) => !o)}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 hover:bg-slate-800/50 rounded-lg"
+            data-testid="how-it-works-toggle"
+          >
+            <span className="flex items-center gap-2">
+              <Info className="w-4 h-4 text-cyan-400" />
+              How interactions work
+            </span>
+            {howOpen ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+          </button>
+          {howOpen && (
+            <div className="px-4 pb-4 pt-1 text-xs text-slate-300 space-y-2 leading-relaxed border-t border-slate-700/50">
+              <ol className="list-decimal list-outside pl-5 space-y-2">
+                <li>
+                  Gateway registers with the platform via{' '}
+                  <code className="text-cyan-300">POST /api/edge/gateways/register</code>{' '}
+                  every 60s (auth: <code className="text-cyan-300">af_</code> key).
+                </li>
+                <li>
+                  UI pushes via{' '}
+                  <code className="text-cyan-300">POST /api/edge/gateways/{'{id}'}/deploy</code>{' '}
+                  → backend tries MQTT first (<code className="text-cyan-300">edge.{'{gateway_id}'}.deploy</code>),
+                  HTTP fallback.
+                </li>
+                <li>
+                  Runtime hot-loads the bundle into{' '}
+                  <code className="text-cyan-300">/var/edge/agents/{'{slug}'}/</code>.
+                </li>
+                <li>
+                  Caller hits{' '}
+                  <code className="text-cyan-300">POST {'{gateway_endpoint}'}/agents/{'{slug}'}/execute</code>{' '}
+                  for sync calls; or publishes to{' '}
+                  <code className="text-cyan-300">agents.{'{slug}'}.input</code> over MQTT for async.
+                </li>
+              </ol>
+            </div>
+          )}
+        </section>
+
+        <div className="pt-2">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Wifi className="w-4 h-4 text-cyan-400" /> Registered gateways ({gateways.length})
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">
+            Once a gateway boots with the runtime above, it self-registers and shows up here.
+          </p>
+        </div>
 
         {gateways.length === 0 ? (
           <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 p-8 text-center text-sm text-slate-400">

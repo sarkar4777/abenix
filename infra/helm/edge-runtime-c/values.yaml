@@ -1,0 +1,55 @@
+# Identity — one StatefulSet per gateway.
+gateway_id: edge-local
+gateway_name: edge-local
+
+# Where this pod calls home.
+platform_url: "http://api.abenix.svc.cluster.local:8000"
+platform_token: ""
+
+# Optional MQTT broker. Empty disables the subscriber and falls back to
+# HTTP push from the platform.
+mqtt_url: ""
+
+# RSA-PSS public key (PEM) the gateway uses to verify `.agent` signatures.
+signing_pubkey: ""
+
+# Inference fall-back — Anthropic API key used when the bundle has no
+# local model_weights/.
+anthropic_api_key: ""
+
+# Optional ingress endpoint exposed back to the platform.
+endpoint_url: ""
+
+image:
+  repository: agentforge/edge-runtime-c
+  tag: "1.1.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  hosts: []
+  tls: []
+
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 1Gi
+  accessMode: ReadWriteOnce
+
+# C binary footprint is ~10x smaller than the Python pod; tighten defaults.
+resources:
+  requests:
+    cpu: 25m
+    memory: 24Mi
+  limits:
+    cpu: 250m
+    memory: 96Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
