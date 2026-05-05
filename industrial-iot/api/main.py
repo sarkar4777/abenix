@@ -178,15 +178,19 @@ async def kb_status() -> dict[str, Any]:
     base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # /api/knowledge-engines has no root listing — use the
+            # collection-level endpoint that does (knowledge-bases).
             r = await client.get(
-                f"{base_url}/api/knowledge-engines",
+                f"{base_url}/api/knowledge-bases?limit=100",
                 headers={"X-API-Key": api_key},
             )
             if r.status_code != 200:
                 return {"data": {"available": False, "reason": f"http_{r.status_code}"}}
             payload = r.json()
-            engines = payload.get("data") or []
-            ready = [e for e in engines if (e.get("status") in (None, "ready", "active"))]
+            items = payload.get("data") or []
+            if isinstance(items, dict):
+                items = items.get("collections") or items.get("data") or []
+            ready = [c for c in items if (c.get("status") in (None, "ready", "active"))]
             return {"data": {"available": bool(ready), "count": len(ready)}}
     except Exception as exc:
         logger.warning("kb-status probe failed: %s", exc)
