@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/stores/sidebar';
+import CognifyIndicator from './CognifyIndicator';
 import {
   useNotificationStore,
   type Notification,
@@ -412,6 +413,7 @@ export default function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
+        <CognifyIndicator />
         <div className="relative" ref={panelRef}>
           <button
             onClick={togglePanel}

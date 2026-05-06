@@ -30,4 +30,4 @@ python-docx>=1.1.0
 # v1.1 production tooling — MQTT client (mqtt_publish tool + edge bundle delivery)
 paho-mqtt>=2.0.0
 # v1.1 production tooling — RSA-PSS .agent bundle signing
-cryptography>=42.0.0
+cryptography>=46.0.7

@@ -50,7 +50,7 @@ jobs:
       # (the AtlasQueryTool exercise tests touch it). httpx is needed
       # by moderation_client. Keep this list minimal and explicit so a
       # CI run never quietly skips a test that needs a missing dep.
-      - run: pip install pytest pytest-asyncio bcrypt python-jose[cryptography] httpx fastapi pydantic pydantic-settings sqlalchemy structlog redis asyncpg
+      - run: pip install pytest pytest-asyncio bcrypt python-jose[cryptography] httpx fastapi pydantic pydantic-settings sqlalchemy structlog redis asyncpg pyyaml
       - run: pytest tests/unit/ -v --tb=short
 
   build:

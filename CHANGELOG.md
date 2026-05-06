@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.3 — 2026-05-06
+
+### Added
+
+- Tenant-scoped Cognify status chip in the top bar — auto-hides when idle, lists running knowledge bases with progress, links to the engine page for each. Backed by a new `GET /api/knowledge-engines/cognify/active` endpoint that returns running jobs plus completions/failures from the last hour.
+
+### Fixed
+
+- Bumped `cryptography` to 46.0.7 in `apps/edge-runtime` and `apps/api` to clear three Dependabot CVEs (GHSA-r6ph-v2qm-q3c2 HIGH, GHSA-m959-cc7f-wv43 LOW, GHSA-79v4-65xg-pq4g LOW) plus GHSA-p423-j2cm-9vmq.
+- CI test job now installs `pyyaml` — without it, 11 connector-preset unit tests were failing with `ModuleNotFoundError: No module named 'yaml'`.
+- Removed 14 orphaned UAT/probe scripts and trimmed `scripts/publish-public.sh` of dead exclude paths.
+
 ## v1.1.2 — 2026-05-06
 
 ### Added

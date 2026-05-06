@@ -23,6 +23,77 @@ from models.user import User
 router = APIRouter(prefix="/api/knowledge-engines", tags=["knowledge-engine"])
 
 
+@router.get("/cognify/active")
+async def list_active_cognify_jobs(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Tenant-scoped list of cognify jobs running or completed in the last hour."""
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from models.knowledge_engine import CognifyJob, CognifyStatus
+        from models.knowledge_base import KnowledgeBase
+    except Exception as e:
+        return error(f"Failed to load cognify models: {e}", 500)
+
+    terminal = {CognifyStatus.COMPLETE.value, CognifyStatus.FAILED.value}
+    running_statuses = [s.value for s in CognifyStatus if s.value not in terminal]
+
+    running_q = (
+        select(CognifyJob, KnowledgeBase.name)
+        .join(KnowledgeBase, KnowledgeBase.id == CognifyJob.kb_id, isouter=True)
+        .where(
+            CognifyJob.tenant_id == user.tenant_id,
+            CognifyJob.status.in_(running_statuses),
+        )
+        .order_by(CognifyJob.created_at.desc())
+        .limit(20)
+    )
+    running_rows = (await db.execute(running_q)).all()
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    recent_q = (
+        select(CognifyJob, KnowledgeBase.name)
+        .join(KnowledgeBase, KnowledgeBase.id == CognifyJob.kb_id, isouter=True)
+        .where(
+            CognifyJob.tenant_id == user.tenant_id,
+            CognifyJob.status.in_(list(terminal)),
+            CognifyJob.completed_at >= cutoff,
+        )
+        .order_by(CognifyJob.completed_at.desc())
+        .limit(10)
+    )
+    recent_rows = (await db.execute(recent_q)).all()
+
+    def _serialize(job: "CognifyJob", kb_name: str | None) -> dict:
+        status = job.status if isinstance(job.status, str) else job.status.value
+        return {
+            "id": str(job.id),
+            "kb_id": str(job.kb_id),
+            "kb_name": kb_name or "Unknown KB",
+            "status": status,
+            "documents_processed": job.documents_processed or 0,
+            "entities_extracted": job.entities_extracted or 0,
+            "relationships_extracted": job.relationships_extracted or 0,
+            "tokens_used": job.tokens_used or 0,
+            "cost_usd": float(job.cost_usd) if job.cost_usd else 0.0,
+            "duration_seconds": (
+                float(job.duration_seconds) if job.duration_seconds else None
+            ),
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+            "error_message": job.error_message,
+        }
+
+    return success(
+        {
+            "running": [_serialize(j, name) for j, name in running_rows],
+            "recent": [_serialize(j, name) for j, name in recent_rows],
+        }
+    )
+
+
 @router.post("/{kb_id}/cognify")
 async def trigger_cognify(
     kb_id: uuid.UUID,
