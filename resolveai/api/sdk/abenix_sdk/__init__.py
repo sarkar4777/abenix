@@ -50,6 +50,17 @@ class StreamEvent:
 
 
 @dataclass
+class ApprovalRef:
+    """Reference to a HITL gate that paused an execution."""
+    approval_id: str
+    title: str = ""
+    payload: dict[str, Any] = field(default_factory=dict)
+    required_signoffs: int = 1
+    expires_at: str | None = None
+    gate_kind: str | None = None
+
+
+@dataclass
 class ExecutionResult:
     output: str
     input_tokens: int = 0
@@ -59,7 +70,10 @@ class ExecutionResult:
     model: str = ""
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     confidence_score: float | None = None
-    errors: list[dict[str, Any]] = field(default_factory=list)  # Per-agent/node errors
+    errors: list[dict[str, Any]] = field(default_factory=list)
+    execution_id: str | None = None
+    status: str = "completed"               # completed | failed | paused | running
+    paused_at: ApprovalRef | None = None    # set when status == "paused"
 
 
 @dataclass
@@ -119,6 +133,140 @@ class ExecutionsClient:
 
     async def pending_approvals(self) -> list[dict[str, Any]]:
         return await self._client._get("/api/executions/approvals") or []
+
+
+class ApprovalsClient:
+    """First-class HITL surface — list, get, sign off, and wait on approvals.
+
+    Replaces the older ``Abenix.approve(execution_id, gate_id)`` shape, which
+    pretended a gate_id existed alongside the approval primary key. The DB
+    only has approval ids, so this client takes that directly.
+    """
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def list(
+        self,
+        *,
+        status: str | None = None,
+        execution_id: str | None = None,
+        agent_id: str | None = None,
+        kind: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        if execution_id:
+            params["execution_id"] = execution_id
+        if agent_id:
+            params["agent_id"] = agent_id
+        if kind:
+            params["kind"] = kind
+        res = await self._client._http.get("/api/approvals", params=params)
+        res.raise_for_status()
+        return (res.json() or {}).get("data") or []
+
+    async def get(self, approval_id: str) -> dict[str, Any]:
+        return await self._client._get(f"/api/approvals/{approval_id}") or {}
+
+    async def signoff(
+        self,
+        approval_id: str,
+        decision: str,
+        *,
+        reason: str = "",
+        client_token: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"decision": decision, "reason": reason}
+        if client_token:
+            body["client_token"] = client_token
+        res = await self._client._http.post(
+            f"/api/approvals/{approval_id}/signoff", json=body
+        )
+        res.raise_for_status()
+        return (res.json() or {}).get("data") or {}
+
+    async def approve(
+        self, approval_id: str, *, reason: str = "", client_token: str | None = None
+    ) -> dict[str, Any]:
+        return await self.signoff(
+            approval_id, "approve", reason=reason, client_token=client_token
+        )
+
+    async def deny(
+        self, approval_id: str, *, reason: str = "", client_token: str | None = None
+    ) -> dict[str, Any]:
+        return await self.signoff(
+            approval_id, "deny", reason=reason, client_token=client_token
+        )
+
+    async def wait_for(
+        self, approval_id: str, *, timeout_seconds: int = 60, poll_seconds: float = 2.0
+    ) -> dict[str, Any]:
+        """Block until the approval leaves pending status or the timeout fires.
+
+        Uses the server's /wait long-poll under the hood so a single client
+        call covers up to 120s of real waiting per round-trip.
+        """
+        import asyncio as _asyncio
+        deadline = max(1, int(timeout_seconds))
+        elapsed = 0
+        last: dict[str, Any] = {}
+        while elapsed < deadline:
+            chunk = min(120, deadline - elapsed)
+            res = await self._client._http.get(
+                f"/api/approvals/{approval_id}/wait",
+                params={"timeout_seconds": chunk},
+            )
+            res.raise_for_status()
+            last = (res.json() or {}).get("data") or {}
+            if last.get("status") and last["status"] != "pending":
+                return last
+            elapsed += chunk
+            if poll_seconds and elapsed < deadline:
+                await _asyncio.sleep(poll_seconds)
+        return last
+
+    async def subscribe(self) -> AsyncIterator[dict[str, Any]]:
+        """Stream approval lifecycle events for the tenant via the notification WS.
+
+        Yields {event: 'approval_pending'|'approval_resolved', data: {...}}.
+        Cleaner than a polling loop when building a reviewer UI.
+        """
+        async with self._client._http.stream(
+            "GET",
+            "/api/notifications/stream?types=approval_pending,approval_resolved",
+            headers={"Accept": "text/event-stream"},
+        ) as response:
+            response.raise_for_status()
+            current_event: str | None = None
+            async for line in response.aiter_lines():
+                if not line:
+                    current_event = None
+                    continue
+                if line.startswith("event: "):
+                    current_event = line[7:].strip()
+                elif line.startswith("data: ") and current_event:
+                    try:
+                        payload = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+                    yield {"event": current_event, "data": payload}
+
+    async def configure_webhook(
+        self, *, url: str | None, secret: str | None = None
+    ) -> dict[str, Any]:
+        """Set or clear the tenant-level approval webhook URL (admin only)."""
+        body: dict[str, Any] = {}
+        if url is not None:
+            body["url"] = url
+        if secret is not None:
+            body["secret"] = secret
+        res = await self._client._http.put("/api/approvals/webhooks", json=body)
+        res.raise_for_status()
+        return (res.json() or {}).get("data") or {}
 
 
 class AgentsClient:
@@ -339,6 +487,7 @@ class Abenix:
         self.agents = AgentsClient(self)
         self.knowledge = KnowledgeClient(self)
         self.chat = ChatClient(self)
+        self.approvals = ApprovalsClient(self)
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
@@ -357,8 +506,13 @@ class Abenix:
         self.default_act_as = act_as
 
     async def execute(
-        self, agent_slug_or_id: str, message: str,
-        act_as: ActingSubject | None = None, **kwargs: Any,
+        self,
+        agent_slug_or_id: str,
+        message: str,
+        act_as: ActingSubject | None = None,
+        *,
+        wait: bool | str | None = None,
+        **kwargs: Any,
     ) -> ExecutionResult:
         """Execute an agent and return the final result.
 
@@ -392,7 +546,18 @@ class Abenix:
             "wait": True,
             "wait_timeout_seconds": wait_timeout,
         }
-        # Caller-supplied kwargs win (e.g. context, explicit wait=False).
+        # New-style wait modes: "submitted" | "until_gate" | "completed" (default).
+        # Translate to wait_mode + wait/stream booleans the server understands.
+        if isinstance(wait, str):
+            body["wait_mode"] = wait
+            body["stream"] = False
+            if wait == "submitted":
+                body["wait"] = False
+            else:
+                body["wait"] = True
+        elif wait is False:
+            body["wait"] = False
+        # else: keep wait=True default
         body.update(kwargs)
 
         res = await self._http.post(
@@ -402,6 +567,31 @@ class Abenix:
         )
         res.raise_for_status()
         data = res.json().get("data", {}) or {}
+
+        # Server signalled "paused at HITL gate" — surface immediately.
+        if data.get("status") == "paused" and data.get("paused_at"):
+            pa = data.get("paused_at") or {}
+            return ExecutionResult(
+                output="",
+                execution_id=data.get("execution_id"),
+                status="paused",
+                paused_at=ApprovalRef(
+                    approval_id=pa.get("approval_id") or "",
+                    title=pa.get("title") or "",
+                    payload=pa.get("payload") or {},
+                    required_signoffs=pa.get("required_signoffs") or 1,
+                    expires_at=pa.get("expires_at"),
+                    gate_kind=pa.get("gate_kind"),
+                ),
+            )
+
+        # "submitted" caller — return the execution_id without polling.
+        if isinstance(wait, str) and wait == "submitted":
+            return ExecutionResult(
+                output="",
+                execution_id=data.get("execution_id"),
+                status=(data.get("status") or "running"),
+            )
 
         # Async-mode fallback: server returned {execution_id, mode: "async"}
         # without the synchronous fields. Poll until terminal.
@@ -422,6 +612,8 @@ class Abenix:
             model=data.get("model", "") or "",
             tool_calls=data.get("tool_calls", []) or [],
             confidence_score=data.get("confidence_score"),
+            execution_id=data.get("execution_id"),
+            status=(data.get("status") or "completed"),
         )
 
     async def _poll_execution(

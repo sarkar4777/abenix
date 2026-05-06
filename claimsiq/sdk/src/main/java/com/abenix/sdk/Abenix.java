@@ -27,6 +27,7 @@ public final class Abenix implements AutoCloseable {
     private final Duration timeout;
     private final HttpClient http;
     private final ActingSubject defaultActingSubject;
+    private final ApprovalsClient approvals;
 
     private Abenix(Builder b) {
         this.baseUrl = stripTrailingSlash(Objects.requireNonNull(b.baseUrl, "baseUrl"));
@@ -37,9 +38,13 @@ public final class Abenix implements AutoCloseable {
             .connectTimeout(Duration.ofSeconds(15))
             .version(HttpClient.Version.HTTP_1_1)      // SSE is happier on 1.1
             .build();
+        this.approvals = new ApprovalsClient(this.baseUrl, this.apiKey, this.http, this.defaultActingSubject, this.timeout);
     }
 
     public static Builder builder() { return new Builder(); }
+
+    /** HITL approvals client — list, get, sign off, and wait on approvals. */
+    public ApprovalsClient approvals() { return approvals; }
 
     // ─────────────────────────── Public verbs ───────────────────────────
 
@@ -144,6 +149,11 @@ public final class Abenix implements AutoCloseable {
         body.put("stream", false);
         body.put("wait", true);
         body.put("wait_timeout_seconds", opts.waitTimeoutSeconds());
+        if (opts.waitMode() != null) {
+            body.put("wait_mode", opts.waitMode().wire());
+            body.put("wait", opts.waitMode() != WaitMode.SUBMITTED);
+            body.put("stream", false);
+        }
         if (opts.context() != null) body.put("context", opts.context());
         String json = toJson(body);
         HttpRequest req = authHeaders(HttpRequest.newBuilder()
@@ -295,22 +305,27 @@ public final class Abenix implements AutoCloseable {
     public record ExecuteOptions(
         int waitTimeoutSeconds,
         Map<String, Object> context,
-        ActingSubject actingSubject
+        ActingSubject actingSubject,
+        WaitMode waitMode
     ) {
         public static ExecuteOptions defaults() {
-            return new ExecuteOptions(600, null, null);
+            return new ExecuteOptions(600, null, null, null);
         }
 
         public static ExecuteOptions withContext(Map<String, Object> ctx) {
-            return new ExecuteOptions(600, ctx, null);
+            return new ExecuteOptions(600, ctx, null, null);
         }
 
         public ExecuteOptions actingAs(ActingSubject subj) {
-            return new ExecuteOptions(waitTimeoutSeconds, context, subj);
+            return new ExecuteOptions(waitTimeoutSeconds, context, subj, waitMode);
         }
 
         public ExecuteOptions waitTimeout(int seconds) {
-            return new ExecuteOptions(seconds, context, actingSubject);
+            return new ExecuteOptions(seconds, context, actingSubject, waitMode);
+        }
+
+        public ExecuteOptions waitMode(WaitMode mode) {
+            return new ExecuteOptions(waitTimeoutSeconds, context, actingSubject, mode);
         }
     }
 }

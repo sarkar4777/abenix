@@ -41,7 +41,7 @@ class AssetRef(BaseModel):
 
 class GenerateRequest(BaseModel):
     asset: AssetRef
-    sdk: Literal["typescript", "python"]
+    sdk: Literal["typescript", "python", "java"]
     use_case: Literal[
         "one_shot",
         "stream",
@@ -73,8 +73,39 @@ def _load_sdk_source(sdk: str) -> str:
     """Read the actual SDK source so the LLM can only reference real methods."""
     if sdk == "typescript":
         path = ROOT / "packages" / "sdk" / "js" / "src" / "index.ts"
-    else:
-        path = ROOT / "packages" / "sdk" / "python" / "abenix_sdk" / "__init__.py"
+        try:
+            return path.read_text(encoding="utf-8")
+        except Exception:
+            return ""
+    if sdk == "java":
+        bits: list[str] = []
+        java_dir = (
+            ROOT
+            / "claimsiq"
+            / "sdk"
+            / "src"
+            / "main"
+            / "java"
+            / "com"
+            / "abenix"
+            / "sdk"
+        )
+        for fname in (
+            "Abenix.java",
+            "ApprovalsClient.java",
+            "Approval.java",
+            "ApprovalRef.java",
+            "ExecutionResult.java",
+            "WaitMode.java",
+            "ActingSubject.java",
+        ):
+            p = java_dir / fname
+            try:
+                bits.append(f"// === {fname} ===\n" + p.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return "\n\n".join(bits)
+    path = ROOT / "packages" / "sdk" / "python" / "abenix_sdk" / "__init__.py"
     try:
         return path.read_text(encoding="utf-8")
     except Exception:
@@ -322,6 +353,34 @@ async def main():
 
 asyncio.run(main())
 """,
+    "hitl": """import asyncio
+import os
+from abenix_sdk import Abenix
+
+# HITL pattern — execute(wait="until_gate") returns early when an agent
+# opens an approval gate. The caller (a worker, a Slack bot, a UI)
+# decides, then resumes by calling forge.approvals.wait_for(...).
+async def main():
+    async with Abenix(
+        api_key=os.environ["ABENIX_API_KEY"],
+        base_url=os.environ.get("ABENIX_BASE_URL", "http://localhost:8000"),
+    ) as forge:
+        result = await forge.execute("{slug}", "{example_message}", wait="until_gate")
+
+        if result.status == "paused" and result.paused_at:
+            ref = result.paused_at
+            print(f"Agent paused on {{ref.gate_kind or 'untyped'}} gate: {{ref.title}}")
+            print(f"Payload: {{ref.payload}}")
+            # Decide. In a real app this is where the human (or a policy
+            # engine) clicks Approve/Deny. We auto-approve for the demo.
+            await forge.approvals.approve(ref.approval_id, reason="demo signoff")
+            resolved = await forge.approvals.wait_for(ref.approval_id, timeout_seconds=60)
+            print(f"Approval is now: {{resolved['status']}}")
+        else:
+            print("Output:", result.output)
+
+asyncio.run(main())
+""",
 }
 
 TYPESCRIPT_TEMPLATES = {
@@ -387,11 +446,120 @@ async function main() {{
 
 main().catch(console.error);
 """,
+    "hitl": """import {{ Abenix }} from '@abenix/sdk';
+
+const forge = new Abenix({{
+  apiKey: process.env.ABENIX_API_KEY!,
+  baseUrl: process.env.ABENIX_BASE_URL || 'http://localhost:8000',
+}});
+
+async function main() {{
+  const result = await forge.execute('{slug}', '{example_message}', {{
+    wait: 'until_gate',
+  }});
+
+  if (result.status === 'paused' && result.pausedAt) {{
+    const ref = result.pausedAt;
+    console.log(`Agent paused on ${{ref.gateKind || 'untyped'}} gate: ${{ref.title}}`);
+    console.log('Payload:', ref.payload);
+    await forge.approvals.approve(ref.approvalId, {{ reason: 'demo signoff' }});
+    const resolved = await forge.approvals.waitFor(ref.approvalId, {{ timeoutSeconds: 60 }});
+    console.log('Approval is now:', resolved.status);
+  }} else {{
+    console.log('Output:', result.output);
+  }}
+}}
+
+main().catch(console.error);
+""",
+}
+
+JAVA_TEMPLATES = {
+    "one_shot": """import com.abenix.sdk.Abenix;
+import com.abenix.sdk.ExecutionResult;
+
+public class App {{
+  public static void main(String[] args) throws Exception {{
+    Abenix forge = Abenix.builder()
+        .apiKey(System.getenv("ABENIX_API_KEY"))
+        .baseUrl(System.getenv().getOrDefault("ABENIX_BASE_URL", "http://localhost:8000"))
+        .build();
+
+    ExecutionResult result = forge.execute("{slug}", "{example_message}");
+    System.out.println("Output: " + result.output());
+    System.out.printf("Cost: $%.4f%n", result.cost());
+  }}
+}}
+""",
+    "hitl": """import com.abenix.sdk.Abenix;
+import com.abenix.sdk.Approval;
+import com.abenix.sdk.ExecutionResult;
+import com.abenix.sdk.WaitMode;
+
+public class App {{
+  public static void main(String[] args) throws Exception {{
+    Abenix forge = Abenix.builder()
+        .apiKey(System.getenv("ABENIX_API_KEY"))
+        .baseUrl(System.getenv().getOrDefault("ABENIX_BASE_URL", "http://localhost:8000"))
+        .build();
+
+    ExecutionResult result = forge.execute(
+        "{slug}",
+        "{example_message}",
+        Abenix.ExecuteOptions.defaults().waitMode(WaitMode.UNTIL_GATE)
+    );
+
+    if (result.isPaused()) {{
+      var ref = result.pausedAt();
+      System.out.println("Agent paused on gate: " + ref.title());
+      System.out.println("Kind: " + ref.gateKind());
+      System.out.println("Payload: " + ref.payload());
+      forge.approvals().approve(ref.approvalId(), "demo signoff");
+      Approval resolved = forge.approvals().waitFor(ref.approvalId(), 60);
+      System.out.println("Approval is now: " + resolved.status());
+    }} else {{
+      System.out.println("Output: " + result.output());
+    }}
+  }}
+}}
+""",
+    "stream": """import com.abenix.sdk.Abenix;
+import com.abenix.sdk.WatchStream;
+
+public class App {{
+  public static void main(String[] args) throws Exception {{
+    Abenix forge = Abenix.builder()
+        .apiKey(System.getenv("ABENIX_API_KEY"))
+        .baseUrl(System.getenv().getOrDefault("ABENIX_BASE_URL", "http://localhost:8000"))
+        .build();
+
+    var result = forge.submit("{slug}", "{example_message}", Abenix.ExecuteOptions.defaults());
+    String executionId = result.executionId();
+    System.out.println("Started execution: " + executionId);
+
+    try (WatchStream watch = forge.watch(executionId)) {{
+      watch.forEach(snapshot -> {{
+        System.out.printf("[%s] node=%s progress=%d/%d%n",
+            snapshot.status(),
+            snapshot.currentNodeId(),
+            snapshot.progress() != null ? snapshot.progress().getOrDefault("completed", 0) : 0,
+            snapshot.progress() != null ? snapshot.progress().getOrDefault("total", 0) : 0);
+        if (snapshot.isTerminal()) System.out.println("Final status: " + snapshot.status());
+      }});
+    }}
+  }}
+}}
+""",
 }
 
 
 def _build_template_code(sdk: str, use_case: str, asset: AssetRef) -> str:
-    templates = PYTHON_TEMPLATES if sdk == "python" else TYPESCRIPT_TEMPLATES
+    if sdk == "python":
+        templates = PYTHON_TEMPLATES
+    elif sdk == "java":
+        templates = JAVA_TEMPLATES
+    else:
+        templates = TYPESCRIPT_TEMPLATES
     template = templates.get(use_case, templates["one_shot"])
     return template.format(
         slug=asset.slug or asset.id,

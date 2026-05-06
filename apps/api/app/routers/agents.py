@@ -1315,6 +1315,13 @@ async def execute_agent(
     # if a future SDK ships with `wait` accidentally dropped from the
     # request body, the server still returns synchronously to API-key
     # callers, so standalone apps never see an empty-output regression.
+    if body.wait_mode == "submitted":
+        body.wait = False
+        body.stream = False
+    elif body.wait_mode in ("completed", "until_gate"):
+        body.wait = True
+        body.stream = False
+
     if body.wait is None:
         is_api_key_caller = getattr(user, "_api_key_scopes", None) is not None
         body.wait = bool(is_api_key_caller)
@@ -1467,6 +1474,7 @@ async def execute_agent(
                 output_text = ""
                 summary: dict[str, Any] = {}
                 errored: str | None = None
+                paused_at: dict | None = None
 
                 async def _collect():
                     nonlocal output_text, summary, errored
@@ -1485,12 +1493,71 @@ async def execute_agent(
                             summary = evt.get("summary") or {}
                             return
 
+                async def _watch_for_gate():
+                    nonlocal paused_at
+                    if body.wait_mode != "until_gate":
+                        return
+                    from models.approval import Approval as _Apv
+
+                    while True:
+                        await _asyncio.sleep(1.0)
+                        gres = await db.execute(
+                            select(_Apv)
+                            .where(
+                                _Apv.tenant_id == user.tenant_id,
+                                _Apv.agent_execution_id == execution.id,
+                                _Apv.status == "pending",
+                            )
+                            .order_by(_Apv.created_at.desc())
+                            .limit(1)
+                        )
+                        row = gres.scalar_one_or_none()
+                        if row is not None:
+                            paused_at = {
+                                "approval_id": str(row.id),
+                                "title": row.title,
+                                "payload": row.payload,
+                                "required_signoffs": row.required_signoffs,
+                                "expires_at": (
+                                    row.expires_at.isoformat()
+                                    if row.expires_at
+                                    else None
+                                ),
+                                "gate_kind": row.gate_kind,
+                            }
+                            return
+
                 try:
-                    await _asyncio.wait_for(
-                        _collect(), timeout=body.wait_timeout_seconds
-                    )
+                    if body.wait_mode == "until_gate":
+                        collect_task = _asyncio.create_task(_collect())
+                        gate_task = _asyncio.create_task(_watch_for_gate())
+                        done, pending = await _asyncio.wait(
+                            {collect_task, gate_task},
+                            timeout=body.wait_timeout_seconds,
+                            return_when=_asyncio.FIRST_COMPLETED,
+                        )
+                        for p in pending:
+                            p.cancel()
+                        if not done:
+                            errored = f"timed out after {body.wait_timeout_seconds}s"
+                    else:
+                        await _asyncio.wait_for(
+                            _collect(), timeout=body.wait_timeout_seconds
+                        )
                 except _asyncio.TimeoutError:
                     errored = f"timed out after {body.wait_timeout_seconds}s"
+
+                if paused_at is not None:
+                    return success(
+                        {
+                            "execution_id": str(execution.id),
+                            "task_id": task_id,
+                            "pool": agent_pool,
+                            "mode": "sync_via_queue",
+                            "status": "paused",
+                            "paused_at": paused_at,
+                        }
+                    )
 
                 if errored:
                     # Return 200 with status=failed so callers can drill into

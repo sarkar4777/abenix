@@ -46,12 +46,20 @@ export interface AbenixConfig {
   actAs?: ActingSubject;
 }
 
+export type WaitMode = 'completed' | 'submitted' | 'until_gate';
+
 export interface ExecuteOptions {
   stream?: boolean;
   maxTokens?: number;
   temperature?: number;
   context?: Record<string, unknown>;
   actAs?: ActingSubject;
+  /** HITL-aware wait mode (overrides `wait`):
+   *   - "completed" (default): block until terminal
+   *   - "submitted": kick off, return immediately with executionId
+   *   - "until_gate": block; if a HITL gate opens, return early with pausedAt
+   */
+  wait?: WaitMode | boolean;
 }
 
 export interface StreamEvent {
@@ -70,6 +78,15 @@ export interface StreamEvent {
   message?: string;
 }
 
+export interface ApprovalRef {
+  approvalId: string;
+  title: string;
+  payload: Record<string, unknown>;
+  requiredSignoffs: number;
+  expiresAt: string | null;
+  gateKind: string | null;
+}
+
 export interface ExecutionResult {
   output: string;
   inputTokens: number;
@@ -79,6 +96,27 @@ export interface ExecutionResult {
   model: string;
   toolCalls: Array<{ name: string; arguments: Record<string, unknown>; result: string }>;
   confidenceScore?: number;
+  executionId?: string;
+  /** completed | failed | paused | running */
+  status: string;
+  pausedAt?: ApprovalRef;
+}
+
+export interface Approval {
+  id: string;
+  agentId: string | null;
+  agentExecutionId: string | null;
+  title: string;
+  payload: Record<string, unknown>;
+  requiredSignoffs: number;
+  signoffs: Array<Record<string, unknown>>;
+  status: 'pending' | 'approved' | 'denied' | 'expired';
+  requestedBy: string | null;
+  expiresAt: string | null;
+  decidedAt: string | null;
+  createdAt: string | null;
+  gateKind: string | null;
+  clientToken: string | null;
 }
 
 export interface LiveExecution {
@@ -151,6 +189,7 @@ export class Abenix {
   public executions: ExecutionsClient;
   public agents: AgentsClient;
   public knowledge: KnowledgeClient;
+  public approvals: ApprovalsClient;
 
   constructor(config: AbenixConfig) {
     this.apiKey = config.apiKey;
@@ -160,6 +199,7 @@ export class Abenix {
     this.executions = new ExecutionsClient(this);
     this.agents = new AgentsClient(this);
     this.knowledge = new KnowledgeClient(this);
+    this.approvals = new ApprovalsClient(this);
   }
 
   private _subjectHeader(actAs?: ActingSubject): Record<string, string> {
@@ -182,28 +222,85 @@ export class Abenix {
 
   async execute(agentSlugOrId: string, message: string, options?: ExecuteOptions): Promise<ExecutionResult> {
     const agentId = await this._resolveAgentId(agentSlugOrId);
-    const { actAs, ...execOptions } = options || {};
+    const { actAs, wait, ...execOptions } = options || {};
+
+    const body: Record<string, unknown> = {
+      message,
+      stream: false,
+      wait: true,
+      wait_timeout_seconds: Math.max(5, Math.min(1800, Math.floor((this.timeout / 1000) - 5))),
+      ...execOptions,
+    };
+    if (typeof wait === 'string') {
+      body.wait_mode = wait;
+      body.wait = wait !== 'submitted';
+      body.stream = false;
+    } else if (wait === false) {
+      body.wait = false;
+    }
+
     const res = await this._fetch(`/api/agents/${agentId}/execute`, {
       method: 'POST',
-      body: JSON.stringify({ message, stream: false, ...execOptions }),
+      body: JSON.stringify(body),
       headers: this._subjectHeader(actAs),
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.error?.message || `HTTP ${res.status}`);
+      const errBody = await res.json().catch(() => null);
+      throw new Error(errBody?.error?.message || `HTTP ${res.status}`);
     }
 
     const data = await res.json();
+    const d = data.data || {};
+
+    if (d.status === 'paused' && d.paused_at) {
+      const pa = d.paused_at;
+      return {
+        output: '',
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0,
+        durationMs: 0,
+        model: '',
+        toolCalls: [],
+        executionId: d.execution_id,
+        status: 'paused',
+        pausedAt: {
+          approvalId: pa.approval_id || '',
+          title: pa.title || '',
+          payload: pa.payload || {},
+          requiredSignoffs: pa.required_signoffs || 1,
+          expiresAt: pa.expires_at || null,
+          gateKind: pa.gate_kind || null,
+        },
+      };
+    }
+
+    if (typeof wait === 'string' && wait === 'submitted') {
+      return {
+        output: '',
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0,
+        durationMs: 0,
+        model: '',
+        toolCalls: [],
+        executionId: d.execution_id,
+        status: d.status || 'running',
+      };
+    }
+
     return {
-      output: data.data?.output || data.data?.output_message || '',
-      inputTokens: data.data?.input_tokens || 0,
-      outputTokens: data.data?.output_tokens || 0,
-      cost: data.data?.cost || 0,
-      durationMs: data.data?.duration_ms || 0,
-      model: data.data?.model || '',
-      toolCalls: data.data?.tool_calls || [],
-      confidenceScore: data.data?.confidence_score,
+      output: d.output || d.output_message || '',
+      inputTokens: d.input_tokens || 0,
+      outputTokens: d.output_tokens || 0,
+      cost: d.cost || 0,
+      durationMs: d.duration_ms || 0,
+      model: d.model || '',
+      toolCalls: d.tool_calls || [],
+      confidenceScore: d.confidence_score,
+      executionId: d.execution_id,
+      status: d.status || 'completed',
     };
   }
 
@@ -442,6 +539,162 @@ class KnowledgeClient {
     if (!res.ok) throw new Error(`Failed to get cognify jobs: HTTP ${res.status}`);
     const data = await res.json();
     return data.data || [];
+  }
+}
+
+export class ApprovalsClient {
+  constructor(private client: Abenix) {}
+
+  private _normalize(raw: Record<string, unknown>): Approval {
+    return {
+      id: raw.id as string,
+      agentId: (raw.agent_id as string | null) ?? null,
+      agentExecutionId: (raw.agent_execution_id as string | null) ?? null,
+      title: (raw.title as string) || '',
+      payload: (raw.payload as Record<string, unknown>) || {},
+      requiredSignoffs: (raw.required_signoffs as number) || 1,
+      signoffs: (raw.signoffs as Array<Record<string, unknown>>) || [],
+      status: (raw.status as Approval['status']) || 'pending',
+      requestedBy: (raw.requested_by as string | null) ?? null,
+      expiresAt: (raw.expires_at as string | null) ?? null,
+      decidedAt: (raw.decided_at as string | null) ?? null,
+      createdAt: (raw.created_at as string | null) ?? null,
+      gateKind: (raw.gate_kind as string | null) ?? null,
+      clientToken: (raw.client_token as string | null) ?? null,
+    };
+  }
+
+  async list(opts?: {
+    status?: 'pending' | 'approved' | 'denied' | 'expired';
+    executionId?: string;
+    agentId?: string;
+    kind?: string;
+    limit?: number;
+  }): Promise<Approval[]> {
+    const params = new URLSearchParams();
+    if (opts?.status) params.set('status', opts.status);
+    if (opts?.executionId) params.set('execution_id', opts.executionId);
+    if (opts?.agentId) params.set('agent_id', opts.agentId);
+    if (opts?.kind) params.set('kind', opts.kind);
+    params.set('limit', String(opts?.limit ?? 200));
+    const res = await this.client._fetch(`/api/approvals?${params.toString()}`);
+    if (!res.ok) throw new Error(`Failed to list approvals: HTTP ${res.status}`);
+    const data = await res.json();
+    return (data.data || []).map((row: Record<string, unknown>) => this._normalize(row));
+  }
+
+  async get(approvalId: string): Promise<Approval> {
+    const res = await this.client._fetch(`/api/approvals/${approvalId}`);
+    if (!res.ok) throw new Error(`Approval not found: ${approvalId}`);
+    const data = await res.json();
+    return this._normalize(data.data || {});
+  }
+
+  async signoff(
+    approvalId: string,
+    decision: 'approve' | 'deny',
+    options?: { reason?: string; clientToken?: string },
+  ): Promise<Approval> {
+    const body: Record<string, unknown> = {
+      decision,
+      reason: options?.reason || '',
+    };
+    if (options?.clientToken) body.client_token = options.clientToken;
+    const res = await this.client._fetch(`/api/approvals/${approvalId}/signoff`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => null);
+      throw new Error(errBody?.error?.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return this._normalize(data.data || {});
+  }
+
+  approve(approvalId: string, options?: { reason?: string; clientToken?: string }): Promise<Approval> {
+    return this.signoff(approvalId, 'approve', options);
+  }
+
+  deny(approvalId: string, options?: { reason?: string; clientToken?: string }): Promise<Approval> {
+    return this.signoff(approvalId, 'deny', options);
+  }
+
+  /**
+   * Block until the approval leaves pending status or the timeout fires.
+   * Uses the server's /wait long-poll under the hood for efficiency.
+   */
+  async waitFor(
+    approvalId: string,
+    options?: { timeoutSeconds?: number; pollSeconds?: number },
+  ): Promise<Approval> {
+    const totalDeadline = Math.max(1, options?.timeoutSeconds ?? 60);
+    const pollMs = Math.max(0, (options?.pollSeconds ?? 2) * 1000);
+    let elapsed = 0;
+    let last: Approval | null = null;
+    while (elapsed < totalDeadline) {
+      const chunk = Math.min(120, totalDeadline - elapsed);
+      const res = await this.client._fetch(
+        `/api/approvals/${approvalId}/wait?timeout_seconds=${chunk}`,
+      );
+      if (!res.ok) throw new Error(`Wait failed: HTTP ${res.status}`);
+      const data = await res.json();
+      last = this._normalize(data.data || {});
+      if (last.status !== 'pending') return last;
+      elapsed += chunk;
+      if (pollMs > 0 && elapsed < totalDeadline) {
+        await new Promise((r) => setTimeout(r, pollMs));
+      }
+    }
+    return last as Approval;
+  }
+
+  /**
+   * Stream approval lifecycle events for the tenant.
+   * Yields {event, data} pairs as approvals appear and resolve.
+   */
+  async *subscribe(): AsyncGenerator<{ event: string; data: Record<string, unknown> }> {
+    const res = await this.client._fetch(
+      '/api/notifications/stream?types=approval_pending,approval_resolved',
+      { headers: { Accept: 'text/event-stream' } },
+    );
+    if (!res.ok || !res.body) throw new Error(`Subscribe failed: HTTP ${res.status}`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentEvent = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) currentEvent = line.slice(7).trim();
+        else if (line.startsWith('data: ') && currentEvent) {
+          try {
+            yield { event: currentEvent, data: JSON.parse(line.slice(6)) };
+          } catch {
+            /* ignore malformed line */
+          }
+          currentEvent = '';
+        }
+      }
+    }
+  }
+
+  /** Set or clear the tenant-level approval webhook URL (admin only). */
+  async configureWebhook(opts: { url?: string | null; secret?: string | null }): Promise<{ url: string | null; hasSecret: boolean }> {
+    const res = await this.client._fetch('/api/approvals/webhooks', {
+      method: 'PUT',
+      body: JSON.stringify({ url: opts.url ?? null, secret: opts.secret ?? null }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => null);
+      throw new Error(errBody?.error?.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return { url: data.data?.url ?? null, hasSecret: !!data.data?.has_secret };
   }
 }
 

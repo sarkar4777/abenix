@@ -47,3 +47,7 @@ class Approval(UUIDMixin, TenantMixin, TimestampMixin, Base):
     decided_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    client_token: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    gate_kind: Mapped[str | None] = mapped_column(
+        String(120), nullable=True, index=True
+    )

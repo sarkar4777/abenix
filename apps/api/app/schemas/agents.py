@@ -19,6 +19,13 @@ class ExecuteRequest(BaseModel):
     # An explicit True/False from the client always wins.
     wait: bool | None = None
     wait_timeout_seconds: int = Field(default=180, ge=5, le=1800)
+    # HITL-aware wait modes for SDK callers. Overrides `wait` when set.
+    #   - "completed" (default-ish): same as wait=True — block until terminal
+    #   - "submitted": kick off, return execution_id immediately
+    #   - "until_gate": block; if a HITL gate opens, return early with paused_at
+    wait_mode: str | None = Field(
+        default=None, pattern=r"^(completed|submitted|until_gate)$"
+    )
 
 
 class ModelConfigSchema(BaseModel):

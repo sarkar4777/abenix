@@ -56,6 +56,10 @@ class ApprovalGateTool(BaseTool):
                 "default": 1800,
                 "description": "Seconds until the approval auto-expires (max 7 days)",
             },
+            "kind": {
+                "type": "string",
+                "description": "Optional discriminator (e.g. device.remote_reset, claim.adjudicate) so reviewer UIs and SDK consumers can dispatch handlers per gate type",
+            },
             "agent_execution_id": {
                 "type": "string",
                 "description": "Execution UUID — wired automatically when the runtime supplies it",
@@ -93,7 +97,7 @@ class ApprovalGateTool(BaseTool):
             else:
                 headers["Authorization"] = f"Bearer {auth_token}"
 
-        body = {
+        body: dict[str, Any] = {
             "title": title,
             "payload": payload,
             "required_signoffs": required,
@@ -101,6 +105,9 @@ class ApprovalGateTool(BaseTool):
             "agent_execution_id": agent_execution_id,
             "agent_id": agent_id,
         }
+        gate_kind = arguments.get("kind") or arguments.get("gate_kind")
+        if gate_kind:
+            body["gate_kind"] = gate_kind
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 created = await client.post(
@@ -137,6 +144,7 @@ class ApprovalGateTool(BaseTool):
                                     "approval_id": approval_id,
                                     "signoffs": a.get("signoffs") or [],
                                     "decided_at": a.get("decided_at"),
+                                    "gate_kind": a.get("gate_kind"),
                                 }
                             )
                         )

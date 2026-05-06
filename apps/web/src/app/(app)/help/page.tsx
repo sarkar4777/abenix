@@ -745,6 +745,73 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         ),
       },
       {
+        id: 'sdk-hitl',
+        title: 'SDK — Human-in-the-loop',
+        icon: <ShieldCheck className="w-4 h-4" />,
+        badge: 'new',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p>The SDK turns approval gates into a first-class outcome of <code className="text-cyan-300">execute()</code>. You no longer have to scrape stream events or poll a queue to find out an agent paused — you ask for a wait mode and get an <code className="text-cyan-300">ApprovalRef</code> back. All three SDKs (Python, TypeScript, Java) ship the same surface.</p>
+
+            <p><strong className="text-white">Wait modes.</strong> The third value is the new one.</p>
+            <ul className="list-disc list-inside text-slate-300 ml-2 space-y-1 text-[12.5px]">
+              <li><code className="text-cyan-300">wait="completed"</code> (default) — block until the agent finishes or fails.</li>
+              <li><code className="text-cyan-300">wait="submitted"</code> — kick off and return an <code>execution_id</code>; you handle resumption from a worker or scheduler.</li>
+              <li><code className="text-cyan-300">wait="until_gate"</code> — block, but if the agent hits an approval gate, return immediately with <code>status="paused"</code> and a populated <code>paused_at</code> field.</li>
+            </ul>
+
+            <p><strong className="text-white">The approvals client.</strong> Same shape in every language: <code>list</code>, <code>get</code>, <code>signoff</code> (or <code>approve</code>/<code>deny</code>), <code>wait_for</code>, <code>subscribe</code>, <code>configure_webhook</code>. <code>signoff</code> takes an optional <code>client_token</code> so retries collapse to a single decision instead of a 409. <code>wait_for</code> uses a server-side long poll under the hood — one round trip covers up to 120 seconds of real waiting.</p>
+
+            <p className="pt-1"><strong className="text-white">Python.</strong></p>
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`from abenix_sdk import Abenix
+
+async with Abenix(api_key=KEY) as forge:
+    result = await forge.execute("alarm-triage", payload, wait="until_gate")
+
+    if result.status == "paused":
+        ref = result.paused_at
+        # Show ref.title / ref.payload to a human, take their decision...
+        await forge.approvals.approve(ref.approval_id, reason="confirmed by ops")
+        # ...and resume.
+        approval = await forge.approvals.wait_for(ref.approval_id, timeout_seconds=300)
+        print("resolved:", approval["status"])`}</pre>
+
+            <p className="pt-1"><strong className="text-white">TypeScript.</strong></p>
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`import { Abenix } from '@abenix/sdk';
+
+const forge = new Abenix({ apiKey: KEY });
+const result = await forge.execute('alarm-triage', payload, { wait: 'until_gate' });
+
+if (result.status === 'paused' && result.pausedAt) {
+  const ref = result.pausedAt;
+  await forge.approvals.approve(ref.approvalId, { reason: 'confirmed by ops' });
+  const approval = await forge.approvals.waitFor(ref.approvalId, { timeoutSeconds: 300 });
+  console.log('resolved:', approval.status);
+}`}</pre>
+
+            <p className="pt-1"><strong className="text-white">Java.</strong></p>
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`Abenix forge = Abenix.builder().apiKey(KEY).build();
+ExecutionResult result = forge.execute(
+    "alarm-triage", payload,
+    Abenix.ExecuteOptions.defaults().waitMode(WaitMode.UNTIL_GATE)
+);
+
+if (result.isPaused()) {
+    var ref = result.pausedAt();
+    forge.approvals().approve(ref.approvalId(), "confirmed by ops");
+    Approval approval = forge.approvals().waitFor(ref.approvalId(), 300);
+    System.out.println("resolved: " + approval.status());
+}`}</pre>
+
+            <p><strong className="text-white">Discriminating gate types.</strong> Pass <code className="text-cyan-300">kind: "device.remote_reset"</code> when the agent calls <code>approval_gate</code>; the value flows into the <code>gate_kind</code> column and lets reviewer UIs (or your own SDK code) dispatch handlers per gate kind without parsing the payload.</p>
+
+            <p><strong className="text-white">Webhooks.</strong> Tenant admins can register a webhook URL via <code className="text-cyan-300">forge.approvals.configure_webhook(url=..., secret=...)</code>. The platform fires <code>approval_pending</code> and <code>approval_resolved</code> events to that URL with an HMAC-SHA256 signature in <code>X-Abenix-Signature</code>. Replaces every bespoke poller wrapping a Slack or PagerDuty integration.</p>
+
+            <Callout tone="info">The SDK Playground&apos;s <strong>HITL</strong> use case generates this exact pattern in any of the three languages with the agent slug already wired in. Pick an agent, hit Generate, copy/paste.</Callout>
+          </div>
+        ),
+      },
+      {
         id: 'time-series-store',
         title: 'Time-series store — tsdb_query',
         icon: <BarChart3 className="w-4 h-4" />,
@@ -904,10 +971,10 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <Code2 className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>Generates production-ready Python or TypeScript code that uses the Abenix SDK to call any agent, pipeline, or knowledge base. The generator loads the actual SDK source as authoritative context, so the code uses real methods — no hallucination.</p>
+            <p>Generates production-ready Python, TypeScript, or Java code that uses the Abenix SDK to call any agent, pipeline, or knowledge base. The generator loads the actual SDK source as authoritative context, so the code uses real methods — no hallucination.</p>
             <Hero src={SS('16-sdk-playground.png')} alt="SDK Playground" />
-            <p><strong className="text-white">Use cases supported:</strong> one-shot, streaming, KB search, Cognify, batch, HITL.</p>
-            <p><strong className="text-white">Run it in-browser:</strong> Python code can be executed in a sandbox with an ephemeral 1-hour API key minted automatically. TypeScript is copy-only in v1.</p>
+            <p><strong className="text-white">Use cases supported:</strong> one-shot, streaming, KB search, Cognify, batch, and <strong>HITL</strong> (the new pattern — uses <code className="text-cyan-300">wait="until_gate"</code> + <code>approvals.wait_for</code>). For HITL the generated snippet is end-to-end: opens the gate, simulates the human decision, resumes, and prints the resolved status.</p>
+            <p><strong className="text-white">Run it in-browser:</strong> Python code can be executed in a sandbox with an ephemeral 1-hour API key minted automatically. TypeScript and Java are copy-only.</p>
             <p className="pt-2 border-t border-slate-800/40 text-slate-400 text-[12.5px]">
               <strong className="text-white">Three SDKs ship today.</strong> Python (<code className="text-cyan-300">packages/sdk/python</code>), TypeScript (<code className="text-cyan-300">packages/sdk/js</code>), and Java/JVM (<code className="text-cyan-300">claimsiq/sdk</code>). The Java SDK is stdlib-only on its public surface — JDK 21 <code>HttpClient</code> for HTTP+SSE, Jackson for JSON, SLF4J for logging — so Kotlin and Scala consumers get zero glue. Public types: <code className="text-cyan-300">Abenix</code> (entry point), <code className="text-cyan-300">ActingSubject</code>, <code className="text-cyan-300">ExecutionResult</code>, <code className="text-cyan-300">WatchStream</code> + <code className="text-cyan-300">SseWatchStream</code> for live DAG updates over SSE, <code className="text-cyan-300">DagSnapshot</code>, <code className="text-cyan-300">AbenixException</code>. ClaimsIQ's <code>ClaimsService</code> calls <code>forge.execute(...)</code> for every adjudication and the Live DAG view subscribes to <code>forge.watch(...)</code>.
             </p>

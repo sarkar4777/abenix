@@ -21,5 +21,11 @@ public record ExecutionResult(
     String model,
     @JsonProperty("tool_calls") List<Map<String, Object>> toolCalls,
     @JsonProperty("node_results") Map<String, Object> nodeResults,
-    @JsonProperty("confidence_score") Double confidenceScore
-) {}
+    @JsonProperty("confidence_score") Double confidenceScore,
+    String status,                                          // completed | failed | paused | running
+    @JsonProperty("paused_at") ApprovalRef pausedAt
+) {
+    public boolean isPaused() {
+        return "paused".equals(status) && pausedAt != null;
+    }
+}

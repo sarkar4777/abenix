@@ -5,6 +5,7 @@ returns the estimated hours remaining before the asset crosses a
 failure threshold. Uses an exponential fit first, falls back to
 linear if exponential is worse or numerically unstable.
 """
+
 from __future__ import annotations
 
 import json
@@ -83,14 +84,18 @@ def main() -> int:
 
     # Already below threshold? RUL is 0.
     if last_y <= threshold:
-        print(json.dumps({
-            "rul_hours": 0.0,
-            "confidence": 1.0,
-            "model": "observed",
-            "trend_slope": 0.0,
-            "last_health": last_y,
-            "horizon_samples": len(readings),
-        }))
+        print(
+            json.dumps(
+                {
+                    "rul_hours": 0.0,
+                    "confidence": 1.0,
+                    "model": "observed",
+                    "trend_slope": 0.0,
+                    "last_health": last_y,
+                    "horizon_samples": len(readings),
+                }
+            )
+        )
         return 0
 
     slope_lin, intercept_lin, r2_lin = linear_regression(xs, ys)
@@ -104,40 +109,52 @@ def main() -> int:
         t_fail = -math.log(max(threshold, 1e-9) / max(a_exp, 1e-9)) / k_exp
         rul = max(0.0, t_fail - last_x)
         trend_at_now = -k_exp * a_exp * math.exp(-k_exp * last_x)
-        print(json.dumps({
-            "rul_hours": round(rul, 2),
-            "confidence": round(max(0.0, min(1.0, r2_exp)), 3),
-            "model": "exponential",
-            "trend_slope": round(trend_at_now, 6),
-            "last_health": last_y,
-            "horizon_samples": len(readings),
-        }))
+        print(
+            json.dumps(
+                {
+                    "rul_hours": round(rul, 2),
+                    "confidence": round(max(0.0, min(1.0, r2_exp)), 3),
+                    "model": "exponential",
+                    "trend_slope": round(trend_at_now, 6),
+                    "last_health": last_y,
+                    "horizon_samples": len(readings),
+                }
+            )
+        )
         return 0
 
     # Linear fallback: y = slope*x + intercept; solve for x_fail
     if slope_lin >= 0:
         # Not degrading on linear trend — RUL is effectively infinite.
-        print(json.dumps({
-            "rul_hours": 1e6,
-            "confidence": round(max(0.0, min(1.0, r2_lin)), 3),
-            "model": "linear",
-            "trend_slope": round(slope_lin, 6),
-            "last_health": last_y,
-            "horizon_samples": len(readings),
-            "note": "health not degrading — RUL unbounded",
-        }))
+        print(
+            json.dumps(
+                {
+                    "rul_hours": 1e6,
+                    "confidence": round(max(0.0, min(1.0, r2_lin)), 3),
+                    "model": "linear",
+                    "trend_slope": round(slope_lin, 6),
+                    "last_health": last_y,
+                    "horizon_samples": len(readings),
+                    "note": "health not degrading — RUL unbounded",
+                }
+            )
+        )
         return 0
 
     x_fail = (threshold - intercept_lin) / slope_lin
     rul = max(0.0, x_fail - last_x)
-    print(json.dumps({
-        "rul_hours": round(rul, 2),
-        "confidence": round(max(0.0, min(1.0, r2_lin)), 3),
-        "model": "linear",
-        "trend_slope": round(slope_lin, 6),
-        "last_health": last_y,
-        "horizon_samples": len(readings),
-    }))
+    print(
+        json.dumps(
+            {
+                "rul_hours": round(rul, 2),
+                "confidence": round(max(0.0, min(1.0, r2_lin)), 3),
+                "model": "linear",
+                "trend_slope": round(slope_lin, 6),
+                "last_health": last_y,
+                "horizon_samples": len(readings),
+            }
+        )
+    )
     return 0
 
 

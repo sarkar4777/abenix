@@ -72,6 +72,7 @@ run_spec() {
 run_spec "Sanity"     "e2e/uat_abenix_browser.spec.ts"
 run_spec "Deep"       "e2e/uat_abenix_deep.spec.ts"
 run_spec "Industrial" "e2e/uat_abenix_industrial.spec.ts"
+run_spec "HITL"       "e2e/uat_abenix_hitl.spec.ts"
 
 echo
 echo "════════════════════════════════════════════════════════════════"

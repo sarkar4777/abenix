@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.1.5 — 2026-05-06
+
+### Added
+
+- **HITL becomes a first-class SDK outcome.** `execute()` learns three wait modes — `completed` (default), `submitted` (kick off and return an execution_id), and `until_gate` (block, but if a HITL gate opens, return immediately with `status="paused"` and a populated `paused_at` reference). Same surface in Python, TypeScript, and Java.
+- **New `forge.approvals` namespace** in all three SDKs with `list` (filterable by status/execution_id/agent_id/kind), `get`, `signoff`/`approve`/`deny`, `wait_for` (long-poll wrapper), `subscribe` (SSE stream of approval lifecycle events), and `configure_webhook`. **Java SDK ships HITL methods for the first time** — Java consumers previously had to hand-roll HTTP calls.
+- **`gate_kind` discriminator** on `approval_gate` flows through to the DB and the SDK so reviewer UIs can dispatch handlers per gate type without parsing the payload.
+- **Tenant-scoped approval webhooks.** Configure a URL via `forge.approvals.configure_webhook(...)`; the platform fires `approval_pending` and `approval_resolved` events with an HMAC-SHA256 signature in `X-Abenix-Signature`. Replaces every bespoke poller wrapping a Slack or PagerDuty integration.
+- **SDK Playground gains a Java toggle** alongside Python and TypeScript, plus an end-to-end HITL template in every language that drives the full pause/decide/resume cycle.
+- **Help docs gain an "SDK — Human-in-the-loop" section** with copy-pasteable snippets in all three languages.
+
+### Changed
+
+- `POST /api/approvals` and `POST /api/approvals/{id}/signoff` accept an optional `client_token` for idempotency. Retried gate-creations and retried sign-offs collapse to the original row instead of producing a 409.
+- `GET /api/approvals` accepts `execution_id`, `agent_id`, and `kind` filters plus a `limit`.
+- New `GET /api/approvals/{id}/wait?timeout_seconds=...` long-poll endpoint short-circuits when the row leaves pending, so SDK consumers stop burning 2s loops in user-land.
+- `approval_gate` runtime tool accepts a new `kind` argument that flows into the `approvals.gate_kind` column.
+
+### Fixed
+
+- Unit-test job no longer pollutes the canonical UAT log with an alarm-triage gate spec — the new HITL UAT lives in its own block (`e2e/uat_abenix_hitl.spec.ts`) and is wired into `scripts/uat.sh` as the fourth canonical step.
+
 ## v1.1.4 — 2026-05-06
 
 ### Added

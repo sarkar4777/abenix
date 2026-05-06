@@ -68,8 +68,16 @@ class ApprovalCreate(BaseModel):
     expires_seconds: int | None = Field(default=86400, ge=10, le=604800)
     agent_id: uuid.UUID | None = None
     agent_execution_id: uuid.UUID | None = None
+    gate_kind: str | None = Field(default=None, max_length=120)
+    client_token: str | None = Field(default=None, max_length=120)
 
 
 class ApprovalSignoffRequest(BaseModel):
     decision: str = Field(..., description="approve | deny")
     reason: str | None = Field(default=None, max_length=1000)
+    client_token: str | None = Field(default=None, max_length=120)
+
+
+class ApprovalWebhookConfig(BaseModel):
+    url: str | None = Field(default=None, max_length=500)
+    secret: str | None = Field(default=None, max_length=200)

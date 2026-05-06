@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -155,3 +155,66 @@ async def mark_all_read(
     )
     await db.commit()
     return success({"marked_all_read": True})
+
+
+@router.get("/api/notifications/stream")
+async def stream_notifications(
+    types: str | None = Query(
+        default=None,
+        description="Comma-separated notification types to filter to (e.g. approval_pending,approval_resolved). Omit for all types.",
+    ),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """SSE stream of new notifications for the calling user.
+
+    Polls the DB at 2s cadence for new rows since the connection opened.
+    SDK consumers use this for HITL `subscribe()` instead of opening a raw
+    WebSocket.
+    """
+    from datetime import datetime, timezone
+
+    wanted: set[str] | None = (
+        {t.strip() for t in types.split(",") if t.strip()} if types else None
+    )
+
+    async def _gen():
+        last_seen = datetime.now(timezone.utc)
+        keepalive_at = 0.0
+        from time import monotonic
+
+        # Hello frame so connecting clients see a connection-open immediately.
+        yield "event: ready\ndata: {}\n\n"
+        while True:
+            stmt = (
+                select(Notification)
+                .where(
+                    Notification.user_id == user.id,
+                    Notification.created_at > last_seen,
+                )
+                .order_by(Notification.created_at.asc())
+                .limit(50)
+            )
+            result = await db.execute(stmt)
+            rows = result.scalars().all()
+            for n in rows:
+                if wanted and n.type not in wanted:
+                    continue
+                payload = _serialize_notification(n)
+                yield f"event: {n.type}\ndata: {json.dumps(payload)}\n\n"
+                last_seen = n.created_at or last_seen
+            now = monotonic()
+            if now - keepalive_at > 25:
+                yield ": keep-alive\n\n"
+                keepalive_at = now
+            await asyncio.sleep(2.0)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

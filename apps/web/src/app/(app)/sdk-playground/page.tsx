@@ -43,7 +43,7 @@ const USE_CASES: UseCase[] = [
 export default function SDKPlaygroundPage() {
   const { data: agents } = useApi<Asset[]>('/api/agents?limit=100');
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [sdk, setSdk] = useState<'python' | 'typescript'>('python');
+  const [sdk, setSdk] = useState<'python' | 'typescript' | 'java'>('python');
   const [useCase, setUseCase] = useState<string>('one_shot');
   const [userPrompt, setUserPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -199,8 +199,8 @@ export default function SDKPlaygroundPage() {
             {/* SDK Picker */}
             <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
               <label className="text-xs font-semibold text-white uppercase tracking-wider mb-3 block">SDK</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(['python', 'typescript'] as const).map(s => (
+              <div className="grid grid-cols-3 gap-2">
+                {(['python', 'typescript', 'java'] as const).map(s => (
                   <button
                     key={s}
                     onClick={() => setSdk(s)}
@@ -210,10 +210,15 @@ export default function SDKPlaygroundPage() {
                         : 'bg-slate-900/30 border border-slate-700 text-slate-400 hover:text-white'
                     }`}
                   >
-                    {s === 'python' ? 'Python' : 'TypeScript'}
+                    {s === 'python' ? 'Python' : s === 'typescript' ? 'TypeScript' : 'Java'}
                   </button>
                 ))}
               </div>
+              {sdk === 'java' && (
+                <p className="text-[10px] text-amber-300/80 mt-2">
+                  Java code is generated for copy/paste. In-browser run is supported for Python only.
+                </p>
+              )}
             </div>
 
             {/* Use Case Picker */}
