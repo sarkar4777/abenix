@@ -403,9 +403,14 @@ def parse_markdown(md: str):
                 # Render line-by-line as a multi-row Table so reportlab can
                 # split the block across pages. Single-cell Tables can't.
                 code_lines = code_buf if code_buf else [""]
-                # One Preformatted flowable per line - they split cleanly
-                # across pages when wrapped in a multi-row Table.
-                rows = [[Preformatted(ln if ln else " ", s["code"])] for ln in code_lines]
+                # One Preformatted flowable per line. Estimated height-per-line
+                # used to decide whether to keep the block together on one page
+                # (we want diagrams to never split). Rough fit-budget on A4
+                # with 2cm margins is ~58 lines of 11pt-leading code.
+                rows = [
+                    [Preformatted(ln if ln else " ", s["code"])]
+                    for ln in code_lines
+                ]
                 tbl = Table(rows, colWidths=[17 * cm], repeatRows=0)
                 tbl.setStyle(
                     TableStyle(
@@ -421,7 +426,12 @@ def parse_markdown(md: str):
                         ]
                     )
                 )
-                flows.append(tbl)
+                # Keep blocks under 56 lines on a single page; longer blocks
+                # are allowed to split (they are rare and always plain code).
+                if len(code_lines) <= 56:
+                    flows.append(KeepTogether(tbl))
+                else:
+                    flows.append(tbl)
                 flows.append(Spacer(1, 8))
                 code_buf = []
                 in_code = False
