@@ -21,6 +21,7 @@ import {
   Menu,
   Moon,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   User,
@@ -61,6 +62,8 @@ const NOTIFICATION_ICONS: Record<string, typeof Bell> = {
   new_subscriber: UserPlus,
   usage_warning: AlertTriangle,
   system_alert: Zap,
+  approval_pending: ShieldAlert,
+  approval_resolved: ShieldCheck,
 };
 
 const NOTIFICATION_COLORS: Record<string, string> = {
@@ -69,6 +72,8 @@ const NOTIFICATION_COLORS: Record<string, string> = {
   new_subscriber: 'text-cyan-400 bg-cyan-500/10',
   usage_warning: 'text-amber-400 bg-amber-500/10',
   system_alert: 'text-purple-400 bg-purple-500/10',
+  approval_pending: 'text-blue-400 bg-blue-500/10',
+  approval_resolved: 'text-emerald-400 bg-emerald-500/10',
 };
 
 function timeAgo(dateStr: string | null): string {

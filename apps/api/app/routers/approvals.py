@@ -20,6 +20,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.notifications import create_notification
 from app.core.responses import error, success
 from app.schemas.connectors import ApprovalCreate, ApprovalSignoffRequest
 
@@ -106,6 +107,7 @@ async def create_approval(
     db.add(a)
     await db.commit()
     await db.refresh(a)
+    await _notify_pending(db, a, requester=user)
     return success(_serialize(a), status_code=201)
 
 
@@ -195,10 +197,101 @@ async def sign_off(
         }
     )
     a.signoffs = signoffs
+    prev_status = a.status
     new_status = _evaluate_status(a)
     a.status = new_status
     if new_status != ApprovalStatus.pending:
         a.decided_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(a)
+    if prev_status == ApprovalStatus.pending and new_status != ApprovalStatus.pending:
+        await _notify_resolved(db, a, decider=user)
     return success(_serialize(a))
+
+
+async def _notify_pending(
+    db: AsyncSession, approval: Approval, *, requester: User
+) -> None:
+    """Tell every other user in the tenant a new approval needs their attention."""
+    res = await db.execute(
+        select(User).where(
+            User.tenant_id == approval.tenant_id,
+            User.is_active.is_(True),
+            User.id != requester.id,
+        )
+    )
+    targets = res.scalars().all()
+    if not targets:
+        return
+    title = approval.title or "Approval requested"
+    truncated_title = title if len(title) <= 80 else title[:77] + "..."
+    requester_name = requester.full_name or requester.email or "An agent"
+    message = f"{requester_name} requested approval — open the queue to review."
+    metadata = {
+        "approval_id": str(approval.id),
+        "agent_id": str(approval.agent_id) if approval.agent_id else None,
+        "agent_execution_id": (
+            str(approval.agent_execution_id) if approval.agent_execution_id else None
+        ),
+        "required_signoffs": approval.required_signoffs,
+        "expires_at": (
+            approval.expires_at.isoformat() if approval.expires_at else None
+        ),
+    }
+    for target in targets:
+        await create_notification(
+            db,
+            tenant_id=approval.tenant_id,
+            user_id=target.id,
+            type="approval_pending",
+            title=truncated_title,
+            message=message,
+            link="/approvals",
+            metadata=metadata,
+        )
+    await db.commit()
+
+
+async def _notify_resolved(
+    db: AsyncSession, approval: Approval, *, decider: User
+) -> None:
+    """Tell the requester (and any prior signers) that the approval landed."""
+    if not approval.requested_by:
+        return
+    status_value = (
+        approval.status.value
+        if hasattr(approval.status, "value")
+        else str(approval.status)
+    )
+    title = approval.title or "Approval resolved"
+    truncated_title = title if len(title) <= 80 else title[:77] + "..."
+    decider_name = decider.full_name or decider.email or "A reviewer"
+    message = f"{decider_name} {status_value} this request."
+    targets: set[uuid.UUID] = {approval.requested_by}
+    for s in approval.signoffs or []:
+        sid = s.get("user_id")
+        if sid:
+            try:
+                targets.add(uuid.UUID(sid))
+            except (ValueError, TypeError):
+                continue
+    targets.discard(decider.id)
+    if not targets:
+        return
+    metadata = {
+        "approval_id": str(approval.id),
+        "status": status_value,
+        "agent_id": str(approval.agent_id) if approval.agent_id else None,
+    }
+    for target_id in targets:
+        await create_notification(
+            db,
+            tenant_id=approval.tenant_id,
+            user_id=target_id,
+            type="approval_resolved",
+            title=truncated_title,
+            message=message,
+            link="/approvals",
+            metadata=metadata,
+        )
+    await db.commit()

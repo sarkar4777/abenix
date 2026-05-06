@@ -16,6 +16,8 @@ class NotificationType(str, enum.Enum):
     NEW_SUBSCRIBER = "new_subscriber"
     USAGE_WARNING = "usage_warning"
     SYSTEM_ALERT = "system_alert"
+    APPROVAL_PENDING = "approval_pending"
+    APPROVAL_RESOLVED = "approval_resolved"
 
 
 class Notification(UUIDMixin, TenantMixin, TimestampMixin, Base):

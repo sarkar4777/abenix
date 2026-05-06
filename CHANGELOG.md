@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.4 — 2026-05-06
+
+### Added
+
+- Top-bar bell now rings when an agent opens an approval gate. `POST /api/approvals` fans out an `approval_pending` notification to every active user in the tenant except the requester; `POST /api/approvals/{id}/signoff` fans out an `approval_resolved` notification to the requester (and prior signers) when the row leaves pending. Clicking the notification deep-links to `/approvals`.
+
 ## v1.1.3 — 2026-05-06
 
 ### Added
