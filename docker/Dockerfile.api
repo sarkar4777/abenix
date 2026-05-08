@@ -20,6 +20,19 @@ COPY packages/db/ ./packages/db/
 COPY packages/sdk/python/ ./packages/sdk/python/
 COPY apps/agent-runtime/ ./apps/agent-runtime/
 COPY apps/api/ ./apps/api/
+# Sample ML models + code assets so seed_ml_models.py / seed_code_assets.py
+# can backfill the registry on first deploy. Without these the in-cluster
+# seed scripts find nothing and /api/ml-models + /api/code-assets stay empty.
+COPY aimodels/ ./aimodels/
+# Use-case-scoped samples live alongside the standalone app source. The
+# seed scripts walk these roots looking for `*.meta.json` (ML) and
+# `agentforge.yaml` (code asset).
+COPY industrial-iot/aimodels/ ./industrial-iot/aimodels/
+COPY industrial-iot/code-assets/ ./industrial-iot/code-assets/
+COPY wingman/code-assets/ ./wingman/code-assets/
+# Wingman keeps its sample ML pickles under wingman/ml-models/ rather
+# than wingman/aimodels/ — both dirs are scanned by seed_ml_models.py.
+COPY wingman/ml-models/ ./wingman/ml-models/
 WORKDIR /app/apps/api
 
 ENV PYTHONPATH="/app/packages/db:/app/packages/sdk/python:/app/apps/agent-runtime"

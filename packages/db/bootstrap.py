@@ -1,0 +1,192 @@
+"""Schema bootstrap — single source of truth for fresh-install schema.
+
+Run this BEFORE `alembic upgrade heads`. It detects whether the database
+is a fresh install (no `alembic_version` table yet) and, if so:
+    1. Calls ``Base.metadata.create_all()`` once — every table the ORM
+       knows about lands in one shot, no replay of 40+ historical
+       migrations.
+    2. Runs ``alembic stamp heads`` so alembic considers the database
+       to be at every current head, and future ``alembic upgrade heads``
+       calls just advance from that point.
+
+If the database already has an ``alembic_version`` table, this is a
+no-op — existing installs keep their incremental upgrade path. There
+is no scenario where this script destroys data.
+
+The script supports BOTH driver shapes the platform might be using:
+asyncpg-only (apps/api image — production AKS pods) and
+psycopg2-only (dev-local containers and the legacy sync paths). It
+detects which is available at runtime and uses it natively — no
+silent fallbacks, no swallowed import errors.
+
+Usage (any environment):
+    cd packages/db && python -m bootstrap
+
+Wired into:
+    - scripts/dev-local.sh         (local Postgres in Docker)
+    - scripts/deploy-azure.sh      (AKS — runs inside the api pod)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+def _have_module(name: str) -> bool:
+    return importlib.util.find_spec(name) is not None
+
+
+def _resolve_database_url() -> tuple[str, str]:
+    """Return (url, mode) where mode is 'sync' or 'async'.
+
+    We prefer asyncpg when the apps/api image only ships asyncpg (the
+    AKS pod case); we prefer psycopg2/psycopg when only those are
+    installed (dev-local and the legacy sync paths). If both are
+    available we choose sync because Base.metadata.create_all is
+    naturally synchronous and the rest of the script gets simpler.
+    """
+    url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_URL_SYNC")
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL not set. Bootstrap needs a Postgres connection string."
+        )
+
+    have_psycopg2 = _have_module("psycopg2")
+    have_psycopg = _have_module("psycopg")
+    have_asyncpg = _have_module("asyncpg")
+
+    if have_psycopg2:
+        if url.startswith("postgresql+asyncpg://"):
+            url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+        elif url.startswith("postgresql://") and "+psycopg2" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        return url, "sync"
+
+    if have_psycopg:
+        if url.startswith("postgresql+asyncpg://"):
+            url = url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+        elif url.startswith("postgresql://") and "+psycopg" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return url, "sync"
+
+    if have_asyncpg:
+        if url.startswith("postgresql+psycopg2://"):
+            url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql+psycopg://"):
+            url = url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://") and "+asyncpg" not in url:
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url, "async"
+
+    raise RuntimeError(
+        "No usable Postgres driver found in this environment. Install one of: "
+        "asyncpg, psycopg, psycopg2-binary."
+    )
+
+
+def _alembic_version_exists_sync(conn) -> bool:
+    from sqlalchemy import text
+
+    row = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = current_schema() AND table_name = 'alembic_version'"
+        )
+    ).first()
+    return row is not None
+
+
+def _run_alembic_stamp_heads() -> None:
+    """Mark every alembic head as applied, without running migrations.
+
+    Alembic's own ``stamp`` command opens its own engine via the
+    sqlalchemy.url config in ``alembic.ini`` — that config wins
+    regardless of which driver bootstrap chose, so this works in both
+    sync and async deployments.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "alembic"))
+    command.stamp(cfg, "heads")
+
+
+def _bootstrap_sync(url: str) -> int:
+    from sqlalchemy import create_engine
+
+    import models  # noqa: F401  — registers every table on Base.metadata
+    from models.base import Base
+
+    engine = create_engine(url, future=True)
+    with engine.begin() as conn:
+        if _alembic_version_exists_sync(conn):
+            print(
+                "[bootstrap] alembic_version table present — "
+                "skipping fresh-install bootstrap."
+            )
+            return 0
+        print("[bootstrap] Fresh DB detected — creating schema from ORM (sync driver).")
+        Base.metadata.create_all(bind=conn)
+    _run_alembic_stamp_heads()
+    print("[bootstrap] Schema created and alembic stamped at heads.")
+    return 0
+
+
+async def _bootstrap_async(url: str) -> int:
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    import models  # noqa: F401
+    from models.base import Base
+
+    engine = create_async_engine(url, future=True)
+    try:
+        async with engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.tables "
+                        "WHERE table_schema = current_schema() "
+                        "AND table_name = 'alembic_version'"
+                    )
+                )
+            ).first()
+            if row is not None:
+                print(
+                    "[bootstrap] alembic_version table present — "
+                    "skipping fresh-install bootstrap."
+                )
+                return 0
+            print(
+                "[bootstrap] Fresh DB detected — creating schema from ORM (async driver)."
+            )
+            # run_sync hands a sync Connection to create_all so SQLAlchemy
+            # can issue DDL statements one by one, without us writing a
+            # bespoke async DDL emitter.
+            await conn.run_sync(Base.metadata.create_all)
+    finally:
+        await engine.dispose()
+
+    _run_alembic_stamp_heads()
+    print("[bootstrap] Schema created and alembic stamped at heads.")
+    return 0
+
+
+def main() -> int:
+    url, mode = _resolve_database_url()
+    if mode == "sync":
+        return _bootstrap_sync(url)
+    return asyncio.run(_bootstrap_async(url))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

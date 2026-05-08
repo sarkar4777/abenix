@@ -86,15 +86,38 @@ alembic/versions/*.pyc
 # Generated presentation — build via: python scripts/build_presentation.py
 presentation.pptx
 scripts/build_presentation.py
-aimodels/*.pkl
+
+# Demo-only rebrand recipe — never commit (see file for context)
+BODHI_REBRAND_RECIPE.md
+scripts/apply-bodhi-and-deploy.sh
+# Block .pkl globally, then allow the canonical seed locations:
+#   aimodels/                  → tenant-wide samples
+#   <use-case>/aimodels/       → use-case specific samples (industrial-iot, wingman, …)
+# Anything else (training caches, pickled debug state) stays ignored.
 *.pkl
+!aimodels/*.pkl
+!aimodels/*.joblib
+!aimodels/*.onnx
+!*/aimodels/*.pkl
+!*/aimodels/*.joblib
+!*/aimodels/*.onnx
+!wingman/ml-models/*.pkl
 
 # Playwright test artifacts
 e2e/test-results/
 test-results/
 playwright-report/
 
+# Local deploy logs
+.deploy-logs/
+
 # Big demo fixtures — 125 MB of public PDFs (NIST / Stanford AI Index / etc.).
 # Re-downloaded on demand by test_big_kb_ontology_demo.spec.ts; not worth
 # committing to the repo.
 e2e/fixtures/ai_gov_corpus/
+
+# Wingman demo recording — local-only. Recorder regenerates video on demand.
+/Wingman_Demo.mp4
+/Wingman_Demo.webm
+e2e/_record_demo.spec.ts
+e2e/test-results/_demo_video/

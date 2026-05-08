@@ -57,6 +57,13 @@ web:
 # ── API (FastAPI) ──────────────────────────────────────────────────────────
 api:
   replicaCount: 1
+  # Multi-node AKS: every pod gets its own pod-local /data overlay, so
+  # without an azurefile-backed PVC the ml_model tool on the runtime
+  # pool can't read pickles the api just wrote. Toggling this on +
+  # mlModels.storageClass=azurefile-csi closes the split-brain.
+  mlModelsPVC:
+    enabled: true
+    claimName: ml-models-storage
   image:
     repository: abenixacr71a48.azurecr.io/api
     tag: wave2
@@ -169,7 +176,14 @@ backup:
   enabled: false
 mlModels:
   enabled: true
-  storageClass: ""
+  # azurefile-csi (Azure Files) is required because the PVC declares
+  # ReadWriteMany so abenix-api (writer) and agent-runtime (reader)
+  # share one volume. The default storageClass on AKS resolves to
+  # disk.csi.azure.com which is RWO-only and leaves the PVC Pending
+  # forever — that's what produced the silent split-brain where the
+  # seeder wrote pickles into abenix-api's pod-local /data while the
+  # ml_model tool from agent-runtime saw an empty /data/ml-models.
+  storageClass: "azurefile-csi"
   storageSize: 10Gi
   # Image each deployed model's Pod pulls. AKS points at the ACR copy;
   # minikube uses the localhost:5000 registry the default in the chart.
@@ -193,7 +207,9 @@ scaling:
   enabled: true
   execRemote: true              # Agent executions enqueue onto NATS
   queueBackend: nats            # celery | nats
-  # Reuses the main agent-runtime image unless overridden
+  # Reuses the main agent-runtime image (set via --set flags in
+  # deploy-azure.sh deploy_abenix_helm). Override here only when
+  # invoking `helm upgrade` directly without the deploy script.
   agentRuntimeImage: {}         # { repository: "...", tag: "...", pullPolicy: Always }
   keda:
     enabled: true               # Set false if KEDA operator isn't on the cluster

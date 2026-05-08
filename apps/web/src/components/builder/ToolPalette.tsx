@@ -268,10 +268,59 @@ function ToolSection({
   );
 }
 
+// Pick an appropriate Lucide icon for a tool by id/category. Used when we
+// hydrate the palette from /api/tools — the API only ships id+name+desc,
+// the icon is a UI concern.
+function _iconFor(id: string, category?: string): LucideIcon {
+  if (id.includes('search') || id === 'web_search' || id === 'tavily_search') return Search;
+  if (id.includes('news') || id === 'news_feed') return Newspaper;
+  if (id.includes('academic')) return GraduationCap;
+  if (id.includes('finance') || id === 'yahoo_finance' || id === 'ecb_rates' || id === 'eia_open_data' || id === 'bunker_fuel' || id === 'ember_climate' || id === 'entso_e') return TrendingUp;
+  if (id.includes('time') || id.includes('date') || id === 'current_time') return Clock;
+  if (id === 'calculator' || id.includes('financial') || id.includes('risk')) return Calculator;
+  if (id === 'web_search' || id === 'http_client' || id.includes('storage') || id.includes('database') || id === 'ais_stream') return Globe;
+  if (id.includes('approval') || id.includes('moderation')) return Shield;
+  if (id.includes('audio') || id.includes('speech') || id.includes('voice')) return Mic;
+  if (id.includes('document') || id.includes('file') || id.includes('csv') || id.includes('analyzer')) return FileText;
+  if (id.includes('memory') || id.includes('llm') || id === 'agent_step') return Brain;
+  if (category === 'integration') return Plug;
+  return Wrench;
+}
+
 export default function ToolPalette({ selectedTools, onToggleTool }: ToolPaletteProps) {
   const [search, setSearch] = useState('');
   const [mcpTools, setMcpTools] = useState<ToolItem[]>([]);
   const [mcpLoading, setMcpLoading] = useState(true);
+  // Live tool catalog fetched from /api/tools — every tool the platform
+  // knows about lands here, so the palette never falls behind the runtime
+  // tool registry. Falls back to the static BUILT_IN_TOOLS list while
+  // loading or if the fetch fails (offline editor, etc).
+  const [liveTools, setLiveTools] = useState<ToolItem[] | null>(null);
+
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (!token) return;
+    fetch(`${API_URL}/api/tools`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (r) => {
+        if (!r.ok) return;
+        const json = await r.json();
+        const rows: Array<{ id: string; name?: string; description?: string; category?: string }> = json?.data || [];
+        if (!rows.length) return;
+        // Preserve any icon overrides from BUILT_IN_TOOLS for the ids we
+        // already hand-picked (so we don't downgrade existing UX).
+        const overrides: Record<string, LucideIcon> = {};
+        for (const t of BUILT_IN_TOOLS) overrides[t.id] = t.icon;
+        const mapped: ToolItem[] = rows.map((t) => ({
+          id: t.id,
+          name: t.name || t.id,
+          description: t.description || '',
+          icon: overrides[t.id] || _iconFor(t.id, t.category),
+          source: 'builtin',
+        }));
+        setLiveTools(mapped);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchMCPTools = useCallback(async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -348,7 +397,10 @@ export default function ToolPalette({ selectedTools, onToggleTool }: ToolPalette
     return groups;
   };
 
-  const filteredBuiltIn = filterTools(BUILT_IN_TOOLS);
+  // Prefer the live catalog (every tool the platform actually supports)
+  // and fall back to the static list while it's loading.
+  const sourceTools: ToolItem[] = liveTools && liveTools.length > 0 ? liveTools : BUILT_IN_TOOLS;
+  const filteredBuiltIn = filterTools(sourceTools);
   const builtInGroups = search ? {} : groupToolsByCategory(filteredBuiltIn);
   const showGrouped = !search && Object.keys(builtInGroups).length > 1;
 
@@ -358,7 +410,7 @@ export default function ToolPalette({ selectedTools, onToggleTool }: ToolPalette
         <div className="flex items-center gap-2 mb-3">
           <Wrench className="w-4 h-4 text-cyan-400" />
           <h3 className="text-sm font-semibold text-white">Tool Palette</h3>
-          <span className="text-[10px] text-slate-500 ml-auto">{BUILT_IN_TOOLS.length} tools</span>
+          <span className="text-[10px] text-slate-500 ml-auto">{sourceTools.length} tools</span>
         </div>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />

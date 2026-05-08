@@ -82,11 +82,14 @@ def _tgz_to_zip(tgz_path: Path) -> Path:
     import tarfile as _tf
 
     zip_path = tgz_path.with_suffix(".zip")
-    with _tf.open(tgz_path, "r:gz") as tar, zipfile.ZipFile(
-        zip_path,
-        "w",
-        zipfile.ZIP_DEFLATED,
-    ) as zf:
+    with (
+        _tf.open(tgz_path, "r:gz") as tar,
+        zipfile.ZipFile(
+            zip_path,
+            "w",
+            zipfile.ZIP_DEFLATED,
+        ) as zf,
+    ):
         for member in tar.getmembers():
             if not member.isfile():
                 continue

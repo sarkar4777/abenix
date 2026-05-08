@@ -33,3 +33,11 @@ envFrom: []
 
 nodeSelector: {}
 tolerations: []
+
+# When enabled, mounts the umbrella ml-models PVC at /data/ml-models so
+# the abenix-api pod and the agent-runtime pool pods see the same pickle
+# files. Required on multi-node clusters; off on single-node dev where
+# the hostPath at /data already covers it.
+mlModelsPVC:
+  enabled: false
+  claimName: ml-models-storage

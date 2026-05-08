@@ -76,6 +76,10 @@ spec:
           volumeMounts:
             - name: shared-data
               mountPath: /data
+            {{- if $.Values.mlModels.enabled }}
+            - name: ml-models
+              mountPath: /data/ml-models
+            {{- end }}
       containers:
         - name: agent-runtime
           image: "{{ $img.repository }}:{{ $img.tag }}"
@@ -126,6 +130,13 @@ spec:
           volumeMounts:
             - name: shared-data
               mountPath: /data
+            {{- if $.Values.mlModels.enabled }}
+            # Pool reads model pickles seeded by abenix-api. On multi-
+            # node AKS this overlay PVC (Azure Files RWX) is what makes
+            # /data/ml-models actually shared between pods.
+            - name: ml-models
+              mountPath: /data/ml-models
+            {{- end }}
           ports:
             - containerPort: 8001
               name: http
@@ -152,6 +163,11 @@ spec:
             path: /tmp/{{ $release }}-shared-data
             type: DirectoryOrCreate
           {{- end }}
+        {{- if $.Values.mlModels.enabled }}
+        - name: ml-models
+          persistentVolumeClaim:
+            claimName: ml-models-storage
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

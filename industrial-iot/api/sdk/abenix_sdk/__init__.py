@@ -134,6 +134,43 @@ class ExecutionsClient:
     async def pending_approvals(self) -> list[dict[str, Any]]:
         return await self._client._get("/api/executions/approvals") or []
 
+    async def watch_raw_sse(self, execution_id: str) -> AsyncIterator[bytes]:
+        """Yield the raw SSE byte-stream for an execution.
+
+        Use this when a downstream surface (e.g. a standalone app's web pod)
+        needs to forward the live DAG stream to a browser unchanged. Unlike
+        ``forge.watch()`` which parses ``event: snapshot`` payloads into
+        ``DagSnapshot`` dataclasses and drops everything else, this preserves
+        every event line — ``tool_call``, ``tool_result``, ``node_start``,
+        ``node_complete``, ``done``, ``error`` — so the trader's terminal
+        sees the same picture the platform emitted.
+        """
+        async with self._client._http.stream(
+            "GET",
+            f"/api/executions/{execution_id}/watch",
+            headers={"Accept": "text/event-stream"},
+        ) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes():
+                yield chunk
+
+
+class ToolsClient:
+    """Read-only catalog of tools registered on the platform — used by
+    standalone apps to populate AI-Builder palettes without each app
+    duplicating the /api/tools call."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def list(self) -> list[dict[str, Any]]:
+        data = await self._client._get("/api/tools")
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("data") or data.get("tools") or []
+        return []
+
 
 class ApprovalsClient:
     """First-class HITL surface — list, get, sign off, and wait on approvals.
@@ -170,6 +207,36 @@ class ApprovalsClient:
 
     async def get(self, approval_id: str) -> dict[str, Any]:
         return await self._client._get(f"/api/approvals/{approval_id}") or {}
+
+    async def create(
+        self,
+        title: str,
+        payload: dict[str, Any],
+        *,
+        required_signoffs: int = 1,
+        expires_seconds: int = 86400,
+        gate_kind: str | None = None,
+        agent_id: str | None = None,
+        agent_execution_id: str | None = None,
+        client_token: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "title": title,
+            "payload": payload,
+            "required_signoffs": required_signoffs,
+            "expires_seconds": expires_seconds,
+        }
+        if gate_kind:
+            body["gate_kind"] = gate_kind
+        if agent_id:
+            body["agent_id"] = agent_id
+        if agent_execution_id:
+            body["agent_execution_id"] = agent_execution_id
+        if client_token:
+            body["client_token"] = client_token
+        res = await self._client._http.post("/api/approvals", json=body)
+        res.raise_for_status()
+        return (res.json() or {}).get("data") or {}
 
     async def signoff(
         self,
@@ -488,11 +555,18 @@ class Abenix:
         self.knowledge = KnowledgeClient(self)
         self.chat = ChatClient(self)
         self.approvals = ApprovalsClient(self)
+        self.tools = ToolsClient(self)
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
             timeout=self.timeout,
         )
+        # Public, authenticated http client. Standalone apps that need to hit
+        # platform endpoints not yet covered by a typed namespace should use
+        # ``forge.http.get(path)`` / ``forge.http.post(path, json=...)`` rather
+        # than constructing their own httpx.AsyncClient — the auth header,
+        # base URL and timeout policy stay centralised in the SDK.
+        self.http = self._http
 
     def _subject_headers(self, act_as: ActingSubject | None = None) -> dict[str, str]:
         """Build the X-Abenix-Subject header from an acting subject."""

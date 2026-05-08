@@ -69,10 +69,13 @@ run_spec() {
   npx playwright test "${spec}" --reporter=list --workers=1 --timeout=300000
 }
 
-run_spec "Sanity"     "e2e/uat_abenix_browser.spec.ts"
-run_spec "Deep"       "e2e/uat_abenix_deep.spec.ts"
-run_spec "Industrial" "e2e/uat_abenix_industrial.spec.ts"
-run_spec "HITL"       "e2e/uat_abenix_hitl.spec.ts"
+run_spec "Sanity"          "e2e/uat_abenix_browser.spec.ts"
+run_spec "Deep"            "e2e/uat_abenix_deep.spec.ts"
+run_spec "Industrial"      "e2e/uat_abenix_industrial.spec.ts"
+run_spec "HITL"            "e2e/uat_abenix_hitl.spec.ts"
+run_spec "SDK Playground"  "e2e/uat_abenix_sdk_playground.spec.ts"
+run_spec "Apps Full"       "e2e/uat_apps_full.spec.ts"
+run_spec "Wingman"         "e2e/uat_wingman.spec.ts"
 
 echo
 echo "════════════════════════════════════════════════════════════════"

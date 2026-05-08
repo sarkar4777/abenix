@@ -219,6 +219,14 @@ class MLModelTool(BaseTool):
         """Load model from disk and run inference."""
         import numpy as np
 
+        # Some LLM clients pass tool arguments JSON-stringified rather
+        # than as objects. Accept both shapes.
+        if isinstance(input_data, str):
+            try:
+                input_data = json.loads(input_data)
+            except (TypeError, ValueError):
+                pass
+
         # Parse input
         if isinstance(input_data, dict):
             features = input_data.get("features") or list(input_data.values())
@@ -227,11 +235,15 @@ class MLModelTool(BaseTool):
         else:
             raise ValueError(f"input_data must be dict or list, got {type(input_data)}")
 
-        X = (
-            np.array([features])
-            if not isinstance(features[0], (list, np.ndarray))
-            else np.array(features)
-        )
+        first = features[0] if features else None
+        if isinstance(first, str):
+            X = features
+        else:
+            X = (
+                np.array([features])
+                if not isinstance(first, (list, np.ndarray))
+                else np.array(features)
+            )
 
         # Load model (with simple cache)
         cache_key = f"{file_uri}:{framework}"
@@ -267,9 +279,12 @@ class MLModelTool(BaseTool):
                 result["probabilities"] = model.predict_proba(X).tolist()
             if hasattr(model, "classes_"):
                 result["classes"] = [str(c) for c in model.classes_]
-                result["predicted_class"] = (
-                    str(model.classes_[preds[0]]) if preds.size > 0 else None
-                )
+                # sklearn classifiers return class labels from predict(),
+                # not class indices — `model.classes_[label]` errors when
+                # the label is a string (which it is for any non-binary
+                # classifier and for label-string binary too). Just take
+                # the first prediction directly.
+                result["predicted_class"] = str(preds[0]) if preds.size > 0 else None
             return result
         elif framework == "onnx":
             input_name = model.get_inputs()[0].name

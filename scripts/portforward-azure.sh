@@ -28,6 +28,8 @@ SERVICES=(
   # ClaimsIQ — single Spring Boot + Vaadin container (no api/web split).
   # Health is on Spring Boot Actuator's liveness probe.
   "claimsiq:3005:3005:/actuator/health/liveness:ClaimsIQ"
+  "wingman-web:3006:3006:/:Wingman Web"
+  "wingman-api:8006:8006:/health:Wingman API"
 )
 
 PID_DIR="/tmp/abenix-az-portforward"

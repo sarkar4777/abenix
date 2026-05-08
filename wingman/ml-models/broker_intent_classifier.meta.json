@@ -1,0 +1,39 @@
+{
+  "name": "wingman-broker-intent-classifier",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Classifies a broker email body into one of {offer, bid, counter, quarterly, spot}. Trained on a curated synthetic corpus that matches the linguistic shape of real broker comms (FOB/CFR jargon, validity clauses, counterparty cues). Re-train on real anonymised samples in production for higher accuracy.",
+  "input_schema": {
+    "features": [
+      "text"
+    ],
+    "types": [
+      "str"
+    ],
+    "example": [
+      "25kt propane FOB Houston for Aug-15 indication 610 vs USGC mean - 2 firm by EOD"
+    ]
+  },
+  "output_schema": {
+    "type": "classification",
+    "classes": [
+      "bid",
+      "counter",
+      "offer",
+      "quarterly",
+      "spot"
+    ],
+    "returns": "predicted intent + per-class probability"
+  },
+  "tags": [
+    "wingman",
+    "trading",
+    "broker-comms",
+    "intent"
+  ],
+  "training": {
+    "samples": 40,
+    "algorithm": "TF-IDF + Logistic Regression",
+    "ngram": "1-2"
+  }
+}

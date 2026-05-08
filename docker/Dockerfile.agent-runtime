@@ -17,9 +17,14 @@ COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.
 COPY --from=deps /usr/local/bin /usr/local/bin
 COPY packages/db/ ./packages/db/
 COPY apps/agent-runtime/ ./apps/agent-runtime/
+# consumer.py imports app.core.execution_state to share Redis primitives with the API.
+RUN mkdir -p ./apps/api/app/core
+COPY apps/api/app/__init__.py ./apps/api/app/__init__.py
+COPY apps/api/app/core/__init__.py ./apps/api/app/core/__init__.py
+COPY apps/api/app/core/execution_state.py ./apps/api/app/core/execution_state.py
 WORKDIR /app/apps/agent-runtime
 
-ENV PYTHONPATH="/app/packages/db:/app/apps/agent-runtime"
+ENV PYTHONPATH="/app/packages/db:/app/apps/agent-runtime:/app/apps/api"
 
 RUN adduser --system --uid 1001 appuser
 USER appuser

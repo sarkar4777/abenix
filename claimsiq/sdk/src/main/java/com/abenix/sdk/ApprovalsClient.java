@@ -67,6 +67,31 @@ public final class ApprovalsClient {
         return treeToValue(sendForData(HttpRequest.newBuilder(uri).GET()), Approval.class);
     }
 
+    /** Create an approval row directly from app code (e.g. a UI button click). */
+    public Approval create(
+        String title,
+        Map<String, Object> payload,
+        int requiredSignoffs,
+        int expiresSeconds,
+        String gateKind,
+        String clientToken
+    ) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("title", title);
+        body.put("payload", payload == null ? Map.of() : payload);
+        body.put("required_signoffs", requiredSignoffs > 0 ? requiredSignoffs : 1);
+        body.put("expires_seconds", expiresSeconds > 0 ? expiresSeconds : 86400);
+        if (gateKind != null) body.put("gate_kind", gateKind);
+        if (clientToken != null) body.put("client_token", clientToken);
+        URI uri = URI.create(baseUrl + "/api/approvals");
+        return treeToValue(
+            sendForData(HttpRequest.newBuilder(uri)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(toJson(body)))),
+            Approval.class
+        );
+    }
+
     public Approval signoff(String approvalId, String decision, String reason, String clientToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("decision", decision);

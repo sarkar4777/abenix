@@ -1,0 +1,41 @@
+{
+  "name": "wind-turbine-failure-classifier",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Classifies wind-turbine fault root cause (bearing / blade / gearbox / generator / control) from a vector of vibration, oil-debris, generator-winding, and yaw-error features. RandomForest, 98.3% test accuracy on the synthetic FieldEdge dataset.",
+  "input_schema": {
+    "features": [
+      "vibration_rms_mm_s",
+      "vibration_hf_band_g",
+      "gearbox_oil_iron_ppm",
+      "generator_winding_temp_c",
+      "generator_insulation_mohm",
+      "yaw_position_error_deg",
+      "fault_code_rate_per_hour",
+      "ambient_wind_mps"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [5.1, 1.4, 49.0, 71.6, 19.3, 1.4, 7.4, 8.3]
+  },
+  "output_schema": {
+    "type": "classification",
+    "classes": ["bearing", "blade", "gearbox", "generator", "control"],
+    "output_fields": ["predicted_class", "probabilities"]
+  },
+  "training_metrics": {
+    "accuracy": 0.9833,
+    "samples": 1500,
+    "features": 8,
+    "classes": 5
+  },
+  "tags": ["classification", "industrial-iot", "wind-turbine", "predictive-maintenance", "sklearn"]
+}

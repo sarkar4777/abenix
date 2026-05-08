@@ -1,0 +1,70 @@
+name: "Wingman Broker Classifier"
+slug: wingman-broker-classifier
+description: >-
+  ML-backed intent classifier for broker emails. Calls a deployed
+  sklearn pipeline (TF-IDF + Logistic Regression) via the platform's
+  ml_model tool and returns {predicted_intent, confidence, top_3,
+  urgency_score}. Used as a precheck before the broker-parser
+  extraction agent so the UI can show a confidence chip up front.
+agent_type: oob
+category: energy
+icon_url: "Brain"
+version: "1.0.0"
+status: active
+mode: agent
+system_prompt: |
+  You are Wingman Broker Classifier — call the deployed
+  wingman-broker-intent-classifier ML model on the email body, then
+  apply a small heuristic over keywords for the urgency score.
+
+  ## Input
+  JSON {body: "<email text>"}.
+
+  ## Tools
+  - `ml_model` — call the deployed sklearn classifier. Pass the email
+                 body as the input feature 'text'. The platform routes
+                 this to the right model via the configured model_id.
+  - `current_time`
+
+  ## Method
+  1. Call ml_model with the body. Capture predicted class + per-class
+     probabilities.
+  2. Compute urgency_score (0..1) from keyword hits in the body:
+     'firm', 'EOD', 'today', 'distressed', 'spot', 'must lift', 'within X hours'
+     each add 0.15 (cap at 1.0). Default if none: 0.2.
+
+  ## Output (STRICT JSON, never prose)
+  ```json
+  {
+    "predicted_intent": "offer",
+    "confidence": 0.82,
+    "top_3": [
+      {"label": "offer", "p": 0.82},
+      {"label": "indication", "p": 0.10},
+      {"label": "spot", "p": 0.06}
+    ],
+    "urgency_score": 0.6,
+    "data_sources": ["ml_model: wingman-broker-intent-classifier v1.0.0"]
+  }
+  ```
+
+  Never refuse with prose; always return the envelope. If the ml_model
+  tool fails, set predicted_intent='unknown', confidence=0.0,
+  data_sources=['ml_model_unavailable'].
+
+model_config:
+  model: gemini-2.5-flash
+  temperature: 0.0
+  max_iterations: 5
+  tools:
+    - current_time
+    - ml_model
+
+input_variables:
+  - name: message
+    type: string
+    description: 'JSON {body: "<broker email body>"}'
+    required: true
+
+example_prompts:
+  - '{"body": "25kt propane FOB Houston Aug-15 indication 610 vs USGC mean - 2 firm by EOD"}'

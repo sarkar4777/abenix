@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
@@ -10,7 +13,82 @@ from app.core.responses import success
 
 from models.user import User
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/tools", tags=["tools"])
+
+
+# ── Schema discovery from the runtime ─────────────────────────────────────
+# Every BaseTool subclass declares `input_schema` as a class attribute. The
+# catalogue below carries the human-friendly metadata (category, blurb), but
+# the JSON Schema lives with the implementation. We pull schemas from the
+# runtime registry on first request and memoise — keeps the catalogue and
+# the executor in lockstep without duplicating definitions.
+_RUNTIME_SCHEMAS: dict[str, dict[str, Any]] | None = None
+
+
+def _load_runtime_schemas() -> dict[str, dict[str, Any]]:
+    """Return {tool_name: input_schema} pulled from the runtime registry."""
+    global _RUNTIME_SCHEMAS
+    if _RUNTIME_SCHEMAS is not None:
+        return _RUNTIME_SCHEMAS
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        from engine.agent_executor import (  # type: ignore
+            _CONTEXT_TOOL_FACTORIES,
+            _TOOL_CLASSES,
+            _ensure_tool_classes,
+        )
+
+        _ensure_tool_classes()
+        for name, cls in _TOOL_CLASSES.items():
+            schema = getattr(cls, "input_schema", None)
+            if isinstance(schema, dict):
+                out[name] = schema
+        for name, cls in _CONTEXT_TOOL_FACTORIES.items():
+            schema = getattr(cls, "input_schema", None)
+            if isinstance(schema, dict):
+                out[name] = schema
+    except Exception as e:  # pragma: no cover — surfaces in logs at startup
+        logger.warning("could not load runtime tool schemas: %s", e)
+
+    # Tools that the executor instantiates lazily (Atlas + KB + portfolio
+    # need execution context — they're not in _TOOL_CLASSES). Pull their
+    # schemas straight off the class so the catalogue still publishes a
+    # contract.
+    _LAZY_MODULES = [
+        ("engine.tools.knowledge_search", ["KnowledgeSearchTool"]),
+        ("engine.tools.graph_explorer_tool", ["GraphExplorerTool"]),
+        (
+            "engine.tools.atlas_tools",
+            [
+                "AtlasDescribeTool",
+                "AtlasQueryTool",
+                "AtlasTraverseTool",
+                "AtlasSearchGroundedTool",
+            ],
+        ),
+        ("engine.tools.schema_portfolio_tool", ["SchemaPortfolioTool"]),
+    ]
+    import importlib
+
+    for mod_path, class_names in _LAZY_MODULES:
+        try:
+            mod = importlib.import_module(mod_path)
+        except Exception as e:
+            logger.debug("lazy schema lookup: cannot import %s: %s", mod_path, e)
+            continue
+        for cn in class_names:
+            cls = getattr(mod, cn, None)
+            if cls is None:
+                continue
+            name = getattr(cls, "name", None)
+            schema = getattr(cls, "input_schema", None)
+            if name and isinstance(schema, dict):
+                out.setdefault(name, schema)
+    _RUNTIME_SCHEMAS = out
+    return out
+
 
 # Complete tool catalog with descriptions and categories
 TOOL_CATALOG = [
@@ -498,6 +576,114 @@ TOOL_CATALOG = [
         "category": "finance",
     },
     {
+        "id": "eia_open_data",
+        "name": "EIA Open Data",
+        "description": "US Energy Information Administration time series — Mont Belvieu propane, WTI/Brent spot, Henry Hub gas, US LPG exports. Real, regulator-published, every value cites a series id.",
+        "category": "finance",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "series_id": {
+                    "type": "string",
+                    "description": "Shortcut id (PROPANE_USGC_MB, WTI_SPOT, BRENT_SPOT, HH_NATGAS, US_LPG_EXPORTS, PROPANE_USA) or raw EIA v2 path.",
+                },
+                "start": {
+                    "type": "string",
+                    "description": "Optional ISO date (YYYY-MM-DD)",
+                },
+                "end": {
+                    "type": "string",
+                    "description": "Optional ISO date (YYYY-MM-DD)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 52,
+                    "description": "Max data points to return",
+                },
+            },
+            "required": ["series_id"],
+        },
+    },
+    {
+        "id": "open_meteo",
+        "name": "Open-Meteo Weather",
+        "description": "Free weather + marine forecasts (no API key) for any lat/lon or pre-mapped energy hubs (Houston, Rotterdam, Singapore, Chiba, Ras Tanura, etc.). Mode='atmosphere' for wind/temp/precip; mode='marine' for wave height + swell + SST.",
+        "category": "core",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "Hub shortcut id or empty if lat/lon set",
+                },
+                "lat": {"type": "number"},
+                "lon": {"type": "number"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["atmosphere", "marine"],
+                    "default": "atmosphere",
+                },
+                "horizon_days": {
+                    "type": "integer",
+                    "default": 7,
+                    "minimum": 1,
+                    "maximum": 16,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "id": "ais_stream",
+        "name": "AIS Live Vessels",
+        "description": "Sample real-time global vessel positions from AISStream.io. Every MMSI in the response is a real ship that can be looked up on VesselFinder. Filter by bounding box and ship-type code (84 = LPG tanker). Requires AISSTREAM_API_KEY env var (free registration at aisstream.io).",
+        "category": "core",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bounding_boxes": {
+                    "type": "array",
+                    "description": "[[sw_lat, sw_lon], [ne_lat, ne_lon]] pairs",
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "number"}},
+                    },
+                },
+                "ship_types": {"type": "array", "items": {"type": "integer"}},
+                "max_messages": {
+                    "type": "integer",
+                    "default": 30,
+                    "minimum": 1,
+                    "maximum": 200,
+                },
+                "duration_seconds": {
+                    "type": "number",
+                    "default": 8.0,
+                    "minimum": 1.0,
+                    "maximum": 30.0,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "id": "bunker_fuel",
+        "name": "Bunker Fuel + Freight Estimate",
+        "description": "Public bunker-fuel reference (VLSFO at Houston/Rotterdam/Singapore/Fujairah/Tokyo/New York) plus a corridor freight-rate ESTIMATE (bunker-derived, not Baltic-assessed). Pass origin+destination to get a $/MT freight quote for a typical VLGC voyage. Production deployments swap to a Baltic Exchange feed for assessed rates.",
+        "category": "finance",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "origin": {
+                    "type": "string",
+                    "description": "Houston / Rotterdam / Singapore / Fujairah / Tokyo / New York",
+                },
+                "destination": {"type": "string", "description": "Same set"},
+            },
+            "required": [],
+        },
+    },
+    {
         "id": "tavily_search",
         "name": "Tavily Search",
         "description": "Real-time web search tuned for research agents — recency bias, source ranking, structured snippets",
@@ -574,6 +760,21 @@ TOOL_CATALOG = [
         "name": "Portfolio — Schema-Driven",
         "description": "Schema-driven portfolio tool for PPA / gas / tolling contracts. Reads its schema from portfolio_schemas at runtime so the same tool powers the example app, custom energy desks, and new verticals.",
         "category": "finance",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "list_records | get_record | search | get_summary | get_related | compare_field | discover_fields | query_fields",
+                },
+                "record_id": {"type": "string"},
+                "query": {"type": "string"},
+                "table_name": {"type": "string"},
+                "section": {"type": "string"},
+                "limit": {"type": "integer", "default": 20},
+            },
+            "required": ["operation"],
+        },
     },
     {
         "id": "llm_route",
@@ -619,4 +820,17 @@ async def list_tools(
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
     """Return metadata for all available built-in tools."""
-    return success(TOOL_CATALOG, meta={"count": len(TOOL_CATALOG)})
+    runtime_schemas = _load_runtime_schemas()
+    out: list[dict[str, Any]] = []
+    for entry in TOOL_CATALOG:
+        merged = dict(entry)
+        # Catalogue-declared schemas (e.g. open_meteo, ais_stream) take
+        # precedence so we can publish a richer LLM-facing description than
+        # the runtime ships. Otherwise fall back to the schema declared on
+        # the tool class itself — the source of truth.
+        if not merged.get("input_schema"):
+            schema = runtime_schemas.get(merged["id"])
+            if schema:
+                merged["input_schema"] = schema
+        out.append(merged)
+    return success(out, meta={"count": len(out)})

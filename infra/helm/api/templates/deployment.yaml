@@ -45,6 +45,9 @@ spec:
               memory: 32Mi
         - name: init-data-dirs
           image: busybox:1.36
+          # The PVC mount at /data/ml-models lands under hostPath /data,
+          # so the init container must mount it too — chmod must touch
+          # the share itself, not the hostPath subdirectory it hides.
           command: ['sh', '-c', 'mkdir -p /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache && chmod 777 /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache']
           securityContext:
             runAsUser: 0
@@ -52,6 +55,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if .Values.mlModelsPVC.enabled }}
+            - name: ml-models
+              mountPath: /data/ml-models
+            {{- end }}
           resources:
             requests:
               cpu: 10m
@@ -110,6 +117,15 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if .Values.mlModelsPVC.enabled }}
+            # Overlay the umbrella ml-models-storage PVC on top of /data
+            # so /data/ml-models is the only path that crosses pods.
+            # Without this every pod has its own pod-local /data/ml-models
+            # subdirectory and the agent-runtime can't read pickles the
+            # api just wrote (split-brain we hit on AKS multi-node).
+            - name: ml-models
+              mountPath: /data/ml-models
+            {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -122,5 +138,10 @@ spec:
           hostPath:
             path: {{ .Values.sharedDataHostPath | default "/var/lib/abenix/data" }}
             type: DirectoryOrCreate
+        {{- if .Values.mlModelsPVC.enabled }}
+        - name: ml-models
+          persistentVolumeClaim:
+            claimName: {{ .Values.mlModelsPVC.claimName | default "ml-models-storage" }}
+        {{- end }}
         - name: tmp
           emptyDir: {}

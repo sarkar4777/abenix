@@ -48,8 +48,9 @@ async def _noop_rate_limit(*args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def _disable_rate_limiting():
-    with patch("app.core.rate_limit.rate_limit_auth", _noop_rate_limit), patch(
-        "app.core.rate_limit.rate_limit_user", _noop_rate_limit
+    with (
+        patch("app.core.rate_limit.rate_limit_auth", _noop_rate_limit),
+        patch("app.core.rate_limit.rate_limit_user", _noop_rate_limit),
     ):
         yield
 

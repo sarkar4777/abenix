@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import {
   Code2, Sparkles, Play, Copy, Check, Loader2, Terminal,
   FileCode2, Boxes, Zap, AlertCircle, Database, BookOpen,
+  ShieldAlert, ChevronDown,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
@@ -16,6 +17,28 @@ interface Asset {
   description?: string;
   agent_type?: string;
   category?: string;
+}
+
+interface InputVar {
+  name: string;
+  type?: string;
+  description?: string;
+  required?: boolean;
+  default?: unknown;
+  enum?: string[];
+}
+
+interface AssetContext {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  mode: string;
+  is_pipeline: boolean;
+  tools: string[];
+  model: string;
+  input_variables: InputVar[];
+  example_prompts: string[];
 }
 
 interface UseCase {
@@ -60,6 +83,90 @@ export default function SDKPlaygroundPage() {
     a.name.toLowerCase().includes(search.toLowerCase()) ||
     a.slug?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const [assetContext, setAssetContext] = useState<AssetContext | null>(null);
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
+  const [contextLoading, setContextLoading] = useState(false);
+  const [liveRunning, setLiveRunning] = useState(false);
+  const [liveResult, setLiveResult] = useState<any>(null);
+
+  useEffect(() => {
+    if (!selectedAsset) {
+      setAssetContext(null);
+      setInputValues({});
+      return;
+    }
+    setContextLoading(true);
+    setLiveResult(null);
+    apiFetch<{ data: AssetContext }>(`/api/sdk-playground/asset-context/agent/${selectedAsset.id}`)
+      .then(res => {
+        const ctx = (res as any).data || res;
+        setAssetContext(ctx as AssetContext);
+        const seed: Record<string, string> = {};
+        for (const v of (ctx.input_variables || []) as InputVar[]) {
+          seed[v.name] =
+            v.default != null ? String(v.default) : v.name === 'message' ? '' : '';
+        }
+        setInputValues(seed);
+      })
+      .catch(() => {
+        setAssetContext(null);
+        setInputValues({});
+      })
+      .finally(() => setContextLoading(false));
+  }, [selectedAsset?.id]);
+
+  const fillFromExample = (example: string) => {
+    if (!assetContext) return;
+    const vars = assetContext.input_variables || [];
+    const messageVar = vars.find(v => v.name === 'message') || vars[0];
+    if (messageVar) {
+      setInputValues(prev => ({ ...prev, [messageVar.name]: example }));
+    }
+  };
+
+  const runLive = async () => {
+    if (!selectedAsset) return;
+    setLiveRunning(true);
+    setLiveResult(null);
+    try {
+      const messageVar =
+        (assetContext?.input_variables || []).find(v => v.name === 'message')
+        || (assetContext?.input_variables || [])[0];
+      const message = messageVar ? (inputValues[messageVar.name] || '') : 'run';
+      const context: Record<string, unknown> = {};
+      for (const v of assetContext?.input_variables || []) {
+        if (messageVar && v.name === messageVar.name) continue;
+        const raw = inputValues[v.name];
+        if (raw !== undefined && raw !== '') {
+          if (v.type === 'integer' || v.type === 'number') {
+            const n = Number(raw);
+            context[v.name] = Number.isFinite(n) ? n : raw;
+          } else if (v.type === 'boolean') {
+            context[v.name] = raw === 'true' || raw === '1';
+          } else if (v.type === 'object' || v.type === 'array' || raw.trim().startsWith('{') || raw.trim().startsWith('[')) {
+            try { context[v.name] = JSON.parse(raw); } catch { context[v.name] = raw; }
+          } else {
+            context[v.name] = raw;
+          }
+        }
+      }
+      const body: Record<string, unknown> = {
+        message,
+        wait_mode: 'until_gate',
+        wait_timeout_seconds: 180,
+      };
+      if (Object.keys(context).length > 0) body.context = context;
+      const res = await apiFetch<any>(`/api/agents/${selectedAsset.id}/execute`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      setLiveResult(res?.data || res);
+    } catch (e: any) {
+      setLiveResult({ error: e?.message || String(e) });
+    }
+    setLiveRunning(false);
+  };
 
   const generate = async () => {
     if (!selectedAsset) return;
@@ -262,6 +369,107 @@ export default function SDKPlaygroundPage() {
                 {generating ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Sparkles className="w-3.5 h-3.5" /> Generate Code</>}
               </button>
             </div>
+
+            {/* Inputs panel — driven by the agent/pipeline's declared
+                input_variables. Lets the playground actually execute. */}
+            {selectedAsset && (
+              <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4" data-testid="live-inputs-panel">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                    <Zap className="w-3.5 h-3.5 text-emerald-400" /> Live inputs
+                  </label>
+                  {assetContext?.is_pipeline ? (
+                    <span className="text-[10px] uppercase tracking-wider text-purple-300">pipeline</span>
+                  ) : (
+                    <span className="text-[10px] uppercase tracking-wider text-cyan-300">agent</span>
+                  )}
+                </div>
+                {contextLoading ? (
+                  <div className="flex items-center gap-2 text-[11px] text-slate-400 py-3">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Loading input schema...
+                  </div>
+                ) : !assetContext || (assetContext.input_variables || []).length === 0 ? (
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    This agent doesn&apos;t declare any input variables. The Run-live button still works — just leave the message blank.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {(assetContext.example_prompts || []).length > 0 && (
+                      <details className="rounded-lg bg-slate-900/40 border border-slate-700/50">
+                        <summary className="cursor-pointer flex items-center justify-between px-3 py-2 text-[11px] text-slate-300">
+                          <span><BookOpen className="w-3 h-3 inline mr-1.5 text-slate-400" /> Example prompts ({assetContext.example_prompts.length})</span>
+                          <ChevronDown className="w-3 h-3" />
+                        </summary>
+                        <div className="px-3 py-2 space-y-1 border-t border-slate-700/40">
+                          {assetContext.example_prompts.map((ex, i) => (
+                            <button
+                              key={i}
+                              onClick={() => fillFromExample(ex)}
+                              className="block w-full text-left text-[11px] font-mono text-slate-400 hover:text-cyan-300 hover:bg-slate-800/40 px-2 py-1 rounded truncate"
+                              title={ex}
+                            >
+                              {ex.slice(0, 80)}{ex.length > 80 ? '...' : ''}
+                            </button>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                    {(assetContext.input_variables || []).map(v => {
+                      const isLong = v.name === 'message' || (v.type || '').toLowerCase().includes('object');
+                      const required = v.required;
+                      return (
+                        <div key={v.name}>
+                          <label className="text-[10px] font-mono text-slate-300 flex items-center gap-2 mb-1">
+                            <span>{v.name}</span>
+                            <span className="text-[9px] uppercase tracking-wider text-slate-500">{v.type || 'string'}</span>
+                            {required && <span className="text-[9px] text-rose-300">required</span>}
+                          </label>
+                          {v.enum && Array.isArray(v.enum) && v.enum.length > 0 ? (
+                            <select
+                              value={inputValues[v.name] || ''}
+                              onChange={e => setInputValues(prev => ({ ...prev, [v.name]: e.target.value }))}
+                              className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white focus:border-cyan-500 focus:outline-none"
+                            >
+                              <option value="">— pick —</option>
+                              {v.enum.map(opt => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ))}
+                            </select>
+                          ) : isLong ? (
+                            <textarea
+                              value={inputValues[v.name] || ''}
+                              onChange={e => setInputValues(prev => ({ ...prev, [v.name]: e.target.value }))}
+                              placeholder={v.description?.slice(0, 200) || ''}
+                              rows={4}
+                              className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none font-mono resize-y"
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={inputValues[v.name] || ''}
+                              onChange={e => setInputValues(prev => ({ ...prev, [v.name]: e.target.value }))}
+                              placeholder={v.description?.slice(0, 60) || ''}
+                              className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none font-mono"
+                            />
+                          )}
+                          {v.description && (
+                            <p className="text-[10px] text-slate-500 mt-1 leading-snug">{v.description}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <button
+                  onClick={runLive}
+                  disabled={!selectedAsset || liveRunning}
+                  className="w-full mt-3 bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-40 text-xs font-semibold py-2 rounded-lg transition-all flex items-center justify-center gap-2"
+                  data-testid="run-live-button"
+                >
+                  {liveRunning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Running...</> : <><Play className="w-3.5 h-3.5" /> Run live</>}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Right: Code & Output */}
@@ -341,6 +549,83 @@ export default function SDKPlaygroundPage() {
                   TypeScript execution is coming soon. Copy the code and run it in your own Node.js environment.
                 </p>
               </div>
+            )}
+
+            {liveResult && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden"
+                data-testid="live-result-panel"
+              >
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-semibold text-white">Live execution</span>
+                    {liveResult.status && (
+                      <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                        liveResult.status === 'completed' ? 'bg-emerald-500/10 text-emerald-300' :
+                        liveResult.status === 'paused' ? 'bg-blue-500/10 text-blue-300' :
+                        liveResult.status === 'failed' ? 'bg-rose-500/10 text-rose-300' :
+                        'bg-slate-700/50 text-slate-300'
+                      }`}>
+                        {liveResult.status}
+                      </span>
+                    )}
+                    {liveResult.execution_id && (
+                      <span className="text-[10px] font-mono text-slate-500">
+                        #{liveResult.execution_id.slice(0, 8)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="p-4 space-y-3 max-h-[400px] overflow-y-auto">
+                  {liveResult.error && (
+                    <div className="border-l-2 border-rose-500 pl-3">
+                      <p className="text-xs text-rose-300 font-mono whitespace-pre-wrap">{liveResult.error}</p>
+                    </div>
+                  )}
+                  {liveResult.status === 'paused' && liveResult.paused_at && (
+                    <div className="bg-blue-500/5 border border-blue-500/30 rounded-lg p-3">
+                      <div className="flex items-start gap-2 mb-2">
+                        <ShieldAlert className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-xs text-white font-semibold">Paused on approval gate</p>
+                          <p className="text-[11px] text-slate-400">{liveResult.paused_at.title}</p>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mb-2">
+                        Approval id: <span className="font-mono text-slate-400">{liveResult.paused_at.approval_id}</span>
+                        {liveResult.paused_at.gate_kind && (
+                          <span className="ml-2">Kind: <span className="font-mono text-slate-400">{liveResult.paused_at.gate_kind}</span></span>
+                        )}
+                      </p>
+                      <pre className="text-[10px] text-slate-400 font-mono bg-slate-950/40 rounded p-2 overflow-x-auto">
+                        {JSON.stringify(liveResult.paused_at.payload || {}, null, 2)}
+                      </pre>
+                      <a href="/approvals" className="text-[10px] text-blue-300 hover:text-blue-200 inline-flex items-center gap-1 mt-2">
+                        Open approvals queue →
+                      </a>
+                    </div>
+                  )}
+                  {liveResult.output && (
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Output</p>
+                      <pre className="text-xs text-slate-200 font-mono whitespace-pre-wrap bg-slate-950/40 rounded p-3">{
+                        typeof liveResult.output === 'string' ? liveResult.output : JSON.stringify(liveResult.output, null, 2)
+                      }</pre>
+                    </div>
+                  )}
+                  {liveResult.summary?.node_results && (
+                    <details>
+                      <summary className="text-[10px] text-slate-400 cursor-pointer hover:text-slate-300">Node results ({Object.keys(liveResult.summary.node_results).length})</summary>
+                      <pre className="text-[10px] text-slate-400 font-mono bg-slate-950/40 rounded p-2 mt-1 overflow-x-auto">
+                        {JSON.stringify(liveResult.summary.node_results, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              </motion.div>
             )}
           </div>
         </div>

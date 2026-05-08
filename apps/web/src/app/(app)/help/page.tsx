@@ -760,7 +760,40 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><code className="text-cyan-300">wait="until_gate"</code> — block, but if the agent hits an approval gate, return immediately with <code>status="paused"</code> and a populated <code>paused_at</code> field.</li>
             </ul>
 
-            <p><strong className="text-white">The approvals client.</strong> Same shape in every language: <code>list</code>, <code>get</code>, <code>signoff</code> (or <code>approve</code>/<code>deny</code>), <code>wait_for</code>, <code>subscribe</code>, <code>configure_webhook</code>. <code>signoff</code> takes an optional <code>client_token</code> so retries collapse to a single decision instead of a 409. <code>wait_for</code> uses a server-side long poll under the hood — one round trip covers up to 120 seconds of real waiting.</p>
+            <p><strong className="text-white">The approvals client.</strong> Same shape in every language: <code>create</code>, <code>list</code>, <code>get</code>, <code>signoff</code> (or <code>approve</code>/<code>deny</code>), <code>wait_for</code>, <code>subscribe</code>, <code>configure_webhook</code>. <code>signoff</code> and <code>create</code> both take an optional <code>client_token</code> so retries collapse to a single decision instead of a 409. <code>wait_for</code> uses a server-side long poll under the hood — one round trip covers up to 120 seconds of real waiting.</p>
+
+            <p><strong className="text-white"><code>create</code> — human-initiated approvals.</strong> Two ways an approval gate lands in the queue:</p>
+            <ul className="list-disc list-inside text-slate-300 ml-2 space-y-1 text-[12.5px]">
+              <li><strong>Agent-initiated</strong>: an agent calls the <code className="text-cyan-300">approval_gate</code> tool inside its execution; the execution pauses until a human decides. Use this when the agent is the one needing permission.</li>
+              <li><strong>Human-initiated</strong> (new): your app code calls <code className="text-cyan-300">forge.approvals.create(...)</code> directly — typically on a user button click (e.g. &quot;Acknowledge to broker&quot;, &quot;Activate strategy&quot;, &quot;Approve PO&quot;). Use this when a UI action needs governance signoff before it proceeds.</li>
+            </ul>
+            <p>Wingman uses both. Broker Inbox &quot;Acknowledge&quot; and Strategy Lab &quot;Activate&quot; call <code>create()</code> to open a senior-trader signoff before the action fires; pipeline-internal gates (e.g. before MQTT-publishing a remote command) use <code>approval_gate</code>. Both surface in the same <code>/approvals</code> queue and the same top-bar bell.</p>
+
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`# Python — open a gate from a user button click
+approval = await forge.approvals.create(
+    title="Acknowledge to broker — 25kt USGC propane Aug-15",
+    payload={"offer_id": "offer-abc", "broker": "Acme Energy"},
+    required_signoffs=1,
+    expires_seconds=7200,
+    gate_kind="broker.acknowledge",
+    client_token=f"ack-{offer_id}",   # idempotent retries
+)
+print(approval["id"])  # surfaces in /approvals; bell rings`}</pre>
+
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`// TypeScript
+const approval = await forge.approvals.create(
+  'Activate strategy: lock-in USGC->FE Q1 above $30/MT',
+  { intent: 'strategy_activate', rule_id: ruleId },
+  { gateKind: 'strategy.activate', expiresSeconds: 86400 },
+);`}</pre>
+
+            <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`// Java
+Approval approval = forge.approvals().create(
+    "Activate strategy: ...",
+    Map.of("intent", "strategy_activate", "rule_id", ruleId),
+    1, 86400, "strategy.activate", null
+);`}</pre>
+
 
             <p className="pt-1"><strong className="text-white">Python.</strong></p>
             <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`from abenix_sdk import Abenix

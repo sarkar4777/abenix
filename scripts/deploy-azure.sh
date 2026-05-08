@@ -166,6 +166,7 @@ _expand_only() {
     sauditourism)   echo "sauditourism-api sauditourism-web" ;;
     industrial-iot) echo "industrial-iot-api industrial-iot-web" ;;
     resolveai)      echo "resolveai-api resolveai-web" ;;
+    wingman)        echo "wingman-api wingman-web" ;;
     claimsiq)       echo "claimsiq" ;;
     observability)  echo "observability" ;;
     livekit)        echo "livekit" ;;
@@ -360,6 +361,8 @@ declare -A DOCKERFILES=(
   [industrial-iot-web]="industrial-iot/web/Dockerfile"
   [resolveai-api]="resolveai/api/Dockerfile"
   [resolveai-web]="resolveai/web/Dockerfile"
+  [wingman-api]="wingman/api/Dockerfile"
+  [wingman-web]="wingman/web/Dockerfile"
   # ClaimsIQ is a single-container Spring Boot + Vaadin app — one image,
   # no api/web split. Dockerfile is inside app/ but the build context
   # MUST be the claimsiq root so the multi-stage build can reach both
@@ -383,6 +386,8 @@ declare -A BUILD_CONTEXTS=(
   [industrial-iot-web]="${ROOT_DIR}/industrial-iot/web"
   [resolveai-api]="${ROOT_DIR}/resolveai/api"
   [resolveai-web]="${ROOT_DIR}/resolveai/web"
+  [wingman-api]="${ROOT_DIR}/wingman/api"
+  [wingman-web]="${ROOT_DIR}/wingman/web"
   [claimsiq]="${ROOT_DIR}/claimsiq"
 )
 
@@ -440,6 +445,7 @@ build_and_push() {
     sauditourism-api sauditourism-web
     industrial-iot-api industrial-iot-web
     resolveai-api resolveai-web
+    wingman-api wingman-web
     claimsiq
   )
   local built=0 skipped=0
@@ -673,25 +679,42 @@ run_migrations() {
   done
 
   if [ -n "${api_pod}" ]; then
-    log "Running alembic upgrade head via ${api_pod}..."
+    # Bootstrap fast-path — Base.metadata.create_all + alembic stamp
+    # heads if the DB is brand-new. No-op on an existing install. This
+    # gives fresh deploys (PoCs, customer evals, dev sandboxes) a
+    # one-shot schema instead of replaying 40+ historical migrations.
+    log "Bootstrapping fresh schema (no-op if alembic_version exists)..."
     kubectl exec -n "${NAMESPACE}" "${api_pod}" -- bash -c \
-      'cd /app/packages/db && python -m alembic upgrade head' 2>&1 | tail -10 || true
+      'cd /app/packages/db && python -m bootstrap' 2>&1 | tail -5 || true
+
+    log "Running alembic upgrade heads via ${api_pod}..."
+    # `heads` (plural) advances every independent migration chain in the
+    # repo. We had a silent regression in v1.1.5 where a new branch
+    # head (z6a7b8c9d0e1, approvals.client_token + gate_kind) was added
+    # while 1100_d_dead_letter was already a separate head — `upgrade
+    # head` (singular) errors with "Multiple head revisions are
+    # present" and the `|| true` below swallowed it. The plural form
+    # plus the new sentinel columns at the bottom of this block close
+    # the loophole. NOTE: removing `|| true` would be ideal, but
+    # alembic's exit code on noop is also non-zero in older versions,
+    # so we keep the swallow and rely on the sentinel check instead.
+    kubectl exec -n "${NAMESPACE}" "${api_pod}" -- bash -c \
+      'cd /app/packages/db && python -m alembic upgrade heads' 2>&1 | tail -10 || true
 
     # Schema-drift sentinel: a small set of canonical columns that
-    # MUST exist after alembic upgrade head. If any is missing the
-    # catchup migration didn't fully apply — fail loud so prod
-    # rollouts don't proceed against a half-migrated database.
+    # MUST exist after alembic upgrade heads. The list lives in
+    # scripts/_schema-sentinels.sh — single source of truth shared
+    # with dev-local.sh and verify-schema.sh. When you add a
+    # schema-changing migration, append the load-bearing columns to
+    # that file (one place, three consumers).
     log "Verifying schema sentinels in live database..."
+    # shellcheck source=_schema-sentinels.sh
+    source "${ROOT_DIR}/scripts/_schema-sentinels.sh"
     local missing=""
-    for col in \
-      "executions:node_results" \
-      "executions:execution_trace" \
-      "executions:failure_code" \
-      "agent_shares:shared_with_user_id" \
-      "moderation_policies:default_action"; do
-      local table="${col%:*}"
-      local column="${col#*:}"
-      local exists
+    local entry table column exists
+    for entry in "${SCHEMA_CANONICAL_COLUMNS[@]}"; do
+      table="${entry%.*}"
+      column="${entry#*.}"
       exists=$(kubectl exec -n "${NAMESPACE}" "${pg}" -- bash -c \
         "PGPASSWORD=\$POSTGRES_PASSWORD psql -U postgres -d abenix -tAc \"SELECT 1 FROM information_schema.columns WHERE table_name='${table}' AND column_name='${column}'\"" \
         2>/dev/null | tr -d '[:space:]')
@@ -751,7 +774,7 @@ seed_agents() {
   log "Seeding via ${api_pod}..."
   # seed_kb runs AFTER seed_agents because it grants collections to agents by slug.
   local seed_failed=0
-  for script in seed_agents.py seed_users.py seed_portfolio_schemas.py seed_ml_models.py seed_kb.py; do
+  for script in seed_agents.py seed_users.py seed_portfolio_schemas.py seed_ml_models.py seed_code_assets.py seed_kb.py; do
     # Capture exit code via a temp file because we still want to show
     # the last 10 lines of output. The seed_agents.py loader now exits
     # non-zero on schema validation failure (the ClaimsIQ fix); this
@@ -856,6 +879,51 @@ _wire_abenix_platform_key() {
   ok "  ABENIX_PLATFORM_API_KEY wired (prefix ${pk:0:10}…)"
 }
 
+# Verify a standalone Deployment landed with the env wiring its pods
+# need to talk to abenix-api. After v1.1.5 we hit a silent regression
+# where industrial-iot-api ran for weeks with `env: []` and `envFrom:
+# []` — the Secret existed, the seed script populated it, but the
+# Deployment never asked for it (stale image tag from before the
+# manifest grew envFrom). The pod looked healthy, the API key probe
+# returned no_api_key, and the UI showed "KB Not Available" with no
+# obvious cause. This guard catches that class of bug at deploy time
+# instead of in user-visible behaviour. Call after every kubectl apply
+# of a standalone Deployment.
+_verify_standalone_envfrom() {
+  local deploy="$1" expected_secret="$2" expected_config="$3"
+  local got_secret got_config inline_count
+  got_secret=$(kubectl -n "${NAMESPACE}" get deployment "${deploy}" \
+    -o jsonpath='{.spec.template.spec.containers[0].envFrom[*].secretRef.name}' 2>/dev/null || echo "")
+  got_config=$(kubectl -n "${NAMESPACE}" get deployment "${deploy}" \
+    -o jsonpath='{.spec.template.spec.containers[0].envFrom[*].configMapRef.name}' 2>/dev/null || echo "")
+  # `grep -c` exits 1 when there are zero matches, which then trips the
+  # `|| echo 0` fallback AND prints the previous "0" line, producing
+  # multi-line "0\n0" that breaks the `[ ${inline_count} -eq 0 ]` check
+  # below. Use awk so we always emit exactly one integer.
+  inline_count=$(kubectl -n "${NAMESPACE}" get deployment "${deploy}" \
+    -o jsonpath='{.spec.template.spec.containers[0].env[*].name}' 2>/dev/null \
+    | awk 'BEGIN{n=0} { for (i=1;i<=NF;i++) if (length($i)) n++ } END{print n+0}')
+  if [[ " ${got_secret} " != *" ${expected_secret} "* ]]; then
+    err "Deployment ${deploy} is missing envFrom secretRef '${expected_secret}' (got: '${got_secret}')."
+    err "  This usually means the Deployment object in-cluster is older than the manifest in-repo."
+    err "  Re-apply with: bash scripts/deploy-azure.sh deploy --only=${deploy}"
+    return 7
+  fi
+  if [[ " ${got_config} " != *" ${expected_config} "* ]]; then
+    err "Deployment ${deploy} is missing envFrom configMapRef '${expected_config}' (got: '${got_config}')."
+    return 7
+  fi
+  # We're not strict about inline env (claimsiq has 1, others have 0
+  # because they get everything from envFrom). What we do require is
+  # that *something* feeds the container — either inline env, or
+  # envFrom — never both empty.
+  if [ "${inline_count:-0}" -eq 0 ] && [ -z "${got_secret// /}" ] && [ -z "${got_config// /}" ]; then
+    err "Deployment ${deploy} has zero env vars (no env, no envFrom). Pod cannot reach the platform."
+    return 7
+  fi
+  ok "  ${deploy}: envFrom secretRef=${expected_secret} configMapRef=${expected_config}"
+}
+
 deploy_example_app() {
   if [ -n "${ONLY_CSV}" ] && ! _should_do "example_app-api" && ! _should_do "example_app-web"; then return 0; fi
   local manifest="${ROOT_DIR}/example_app/k8s/example_app.yaml"
@@ -908,6 +976,9 @@ print(yaml.safe_dump_all(out))
 
   kubectl -n "${NAMESPACE}" rollout status deploy/example_app-api --timeout=180s 2>&1 | tail -1 || true
   kubectl -n "${NAMESPACE}" rollout status deploy/example_app-web --timeout=180s 2>&1 | tail -1 || true
+  _verify_standalone_envfrom example_app-api example_app-secrets example_app-config || exit 7
+  # -web is a Next.js frontend with only inline env (INTERNAL_URL +
+  # NODE_ENV). It doesn't need envFrom — the api container does. Skip.
   ok "the example app deployed"
 }
 
@@ -936,20 +1007,20 @@ deploy_sauditourism() {
     -e "s|imagePullPolicy: IfNotPresent|imagePullPolicy: Always|g" \
     "${manifest}" | kubectl apply -f - 2>&1 | tail -5
 
-  if _should_do "sauditourism-api" && ! _should_do "sauditourism-web"; then
-    kubectl -n "${NAMESPACE}" rollout restart deploy/sauditourism-api 2>&1 | tail -1 || true
-  elif _should_do "sauditourism-web" && ! _should_do "sauditourism-api"; then
-    kubectl -n "${NAMESPACE}" rollout restart deploy/sauditourism-web 2>&1 | tail -1 || true
-  fi
-
   kubectl create secret generic sauditourism-secrets \
     --namespace="${NAMESPACE}" \
     --from-literal=SAUDITOURISM_ABENIX_API_KEY="${st_key}" \
     --from-literal=SAUDITOURISM_JWT_SECRET="${st_jwt}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -2
 
+  # Always restart both after the secret patch — see deploy_wingman comment.
+  kubectl -n "${NAMESPACE}" rollout restart deploy/sauditourism-api 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/sauditourism-web 2>&1 | tail -1 || true
+
   kubectl -n "${NAMESPACE}" rollout status deploy/sauditourism-api --timeout=180s 2>&1 | tail -1 || true
   kubectl -n "${NAMESPACE}" rollout status deploy/sauditourism-web --timeout=180s 2>&1 | tail -1 || true
+  _verify_standalone_envfrom sauditourism-api sauditourism-secrets sauditourism-config || exit 7
+  # -web is a Next.js frontend; api carries the platform credentials.
   ok "Saudi Tourism deployed"
 }
 
@@ -981,15 +1052,84 @@ deploy_industrial_iot() {
     --from-literal=INDUSTRIALIOT_ABENIX_API_KEY="${iot_key}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -2
 
-  if _should_do "industrial-iot-api" && ! _should_do "industrial-iot-web"; then
-    kubectl -n "${NAMESPACE}" rollout restart deploy/industrial-iot-api 2>&1 | tail -1 || true
-  elif _should_do "industrial-iot-web" && ! _should_do "industrial-iot-api"; then
-    kubectl -n "${NAMESPACE}" rollout restart deploy/industrial-iot-web 2>&1 | tail -1 || true
-  fi
+  # Always restart both — see deploy_wingman comment about envFrom +
+  # secret-patch ordering.
+  kubectl -n "${NAMESPACE}" rollout restart deploy/industrial-iot-api 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/industrial-iot-web 2>&1 | tail -1 || true
 
   kubectl -n "${NAMESPACE}" rollout status deploy/industrial-iot-api --timeout=180s 2>&1 | tail -1 || true
   kubectl -n "${NAMESPACE}" rollout status deploy/industrial-iot-web --timeout=180s 2>&1 | tail -1 || true
+  _verify_standalone_envfrom industrial-iot-api industrial-iot-secrets industrial-iot-config || exit 7
+  # industrial-iot-web is a Next.js frontend that proxies through
+  # industrial-iot-api; it intentionally has no envFrom (only inline
+  # INTERNAL_URL + NODE_ENV in the manifest). Skip the envFrom verifier
+  # — same shape as example_app-web / resolveai-web / sauditourism-web.
   ok "Industrial-IoT deployed"
+}
+
+deploy_wingman() {
+  if [ -n "${ONLY_CSV}" ] && ! _should_do "wingman-api" && ! _should_do "wingman-web"; then return 0; fi
+  local manifest="${ROOT_DIR}/wingman/k8s/wingman.yaml"
+  if [ ! -f "${manifest}" ]; then warn "Wingman manifest missing — skip"; return; fi
+
+  step "Deploying Wingman"
+  local wm_key="${WINGMAN_ABENIX_API_KEY:-}"
+  if [ -z "${wm_key}" ]; then
+    # Reuse an existing tenant key if minted (any of the standalone secrets);
+    # else mint fresh.
+    wm_key=$(kubectl get secret example_app-secrets -n "${NAMESPACE}" \
+      -o jsonpath='{.data.EXAMPLE_APP_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
+    if [ -z "${wm_key}" ] || [ "${wm_key}" = "PLACEHOLDER_CHANGE_ME" ]; then
+      log "  Minting Abenix API key for Wingman..."
+      wm_key=$(_generate_abenix_api_key || echo "PLACEHOLDER_CHANGE_ME")
+    fi
+  fi
+
+  # AISStream.io key — env var on the deploy host. Required for the live
+  # AIS feature; the rest of Wingman runs without it.
+  local ais_key="${AISSTREAM_API_KEY:-}"
+  if [ -z "${ais_key}" ]; then
+    warn "AISSTREAM_API_KEY not set — Operations Watch live-AIS will be disabled."
+    ais_key="PLACEHOLDER_NEEDS_AISSTREAM_KEY"
+  fi
+
+  sed \
+    -e "s|localhost:5000/abenix/wingman-api:latest|${ACR_LOGIN_SERVER}/wingman-api:${IMAGE_TAG}|g" \
+    -e "s|localhost:5000/abenix/wingman-web:latest|${ACR_LOGIN_SERVER}/wingman-web:${IMAGE_TAG}|g" \
+    -e "s|imagePullPolicy: IfNotPresent|imagePullPolicy: Always|g" \
+    "${manifest}" | kubectl apply -f - 2>&1 | tail -5
+
+  kubectl create secret generic wingman-secrets \
+    --namespace="${NAMESPACE}" \
+    --from-literal=WINGMAN_ABENIX_API_KEY="${wm_key}" \
+    --from-literal=AISSTREAM_API_KEY="${ais_key}" \
+    --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -2
+
+  # Mirror AISSTREAM_API_KEY into the agent-runtime + worker secrets so the
+  # ais_stream tool can read it — those pods are what actually open the
+  # WebSocket when an agent calls the tool.
+  if [ "${ais_key}" != "PLACEHOLDER_NEEDS_AISSTREAM_KEY" ]; then
+    log "  Mirroring AISSTREAM_API_KEY into abenix-secrets for the runtime tool..."
+    kubectl patch secret -n "${NAMESPACE}" abenix-secrets --type=json \
+      -p="[{\"op\":\"add\",\"path\":\"/data/AISSTREAM_API_KEY\",\"value\":\"$(echo -n "${ais_key}" | base64 -w0)\"}]" 2>&1 | tail -1 || true
+    kubectl -n "${NAMESPACE}" rollout restart deploy/abenix-agent-runtime-default 2>&1 | tail -1 || true
+  fi
+
+  # Always rollout-restart after the secret patch above. kubectl apply
+  # on the manifest creates the Secret with REPLACE_AT_DEPLOY_TIME, then
+  # the dry-run-apply patches in the real value — but envFrom secrets
+  # only re-read at pod start, so without a restart the pod runs with
+  # the placeholder forever. The earlier conditional-restart pattern
+  # only fired when --only targeted exactly ONE side, which is exactly
+  # the case where pods would silently retain the placeholder.
+  kubectl -n "${NAMESPACE}" rollout restart deploy/wingman-api 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/wingman-web 2>&1 | tail -1 || true
+
+  kubectl -n "${NAMESPACE}" rollout status deploy/wingman-api --timeout=180s 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout status deploy/wingman-web --timeout=180s 2>&1 | tail -1 || true
+  _verify_standalone_envfrom wingman-api wingman-secrets wingman-config || exit 7
+  _verify_standalone_envfrom wingman-web wingman-secrets wingman-config || exit 7
+  ok "Wingman deployed"
 }
 
 deploy_resolveai() {
@@ -1019,14 +1159,14 @@ deploy_resolveai() {
     --from-literal=RESOLVEAI_ABENIX_API_KEY="${ra_key}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -2
 
-  if _should_do "resolveai-api" && ! _should_do "resolveai-web"; then
-    kubectl -n "${NAMESPACE}" rollout restart deploy/resolveai-api 2>&1 | tail -1 || true
-  elif _should_do "resolveai-web" && ! _should_do "resolveai-api"; then
-    kubectl -n "${NAMESPACE}" rollout restart deploy/resolveai-web 2>&1 | tail -1 || true
-  fi
+  # Always restart both after the secret patch — see deploy_wingman comment.
+  kubectl -n "${NAMESPACE}" rollout restart deploy/resolveai-api 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/resolveai-web 2>&1 | tail -1 || true
 
   kubectl -n "${NAMESPACE}" rollout status deploy/resolveai-api --timeout=180s 2>&1 | tail -1 || true
   kubectl -n "${NAMESPACE}" rollout status deploy/resolveai-web --timeout=180s 2>&1 | tail -1 || true
+  _verify_standalone_envfrom resolveai-api resolveai-secrets resolveai-config || exit 7
+  # -web is a Next.js frontend; api carries the platform credentials.
   ok "ResolveAI deployed"
 }
 
@@ -1065,6 +1205,7 @@ deploy_claimsiq() {
   # a false-positive rollout failure when the Vaadin frontend bundle is
   # still being exploded.
   kubectl -n "${NAMESPACE}" rollout status deploy/claimsiq --timeout=240s 2>&1 | tail -1 || true
+  _verify_standalone_envfrom claimsiq claimsiq-secrets claimsiq-config || exit 7
   ok "ClaimsIQ deployed"
 }
 
@@ -1220,6 +1361,7 @@ deploy_all() {
   deploy_sauditourism || warn "Saudi Tourism deploy failed (non-fatal)"
   deploy_industrial_iot || warn "Industrial-IoT deploy failed (non-fatal)"
   deploy_resolveai || warn "ResolveAI deploy failed (non-fatal)"
+  deploy_wingman || warn "Wingman deploy failed (non-fatal)"
   deploy_claimsiq || warn "ClaimsIQ deploy failed (non-fatal)"
   # Phase 4 — idempotent ABENIX_API_KEY reconciliation. Every standalone
   # secret is validated against the platform api_keys table; orphaned keys

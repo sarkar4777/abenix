@@ -23,6 +23,15 @@ COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.
 COPY --from=deps /usr/local/bin /usr/local/bin
 COPY apps/agent-runtime/ ./apps/agent-runtime/
 COPY packages/db/ ./packages/db/
+# consumer.py imports app.core.execution_state to share the canonical
+# Redis primitives (pub/sub log + per-execution tool_calls list +
+# live state hash) with the platform API. Without this, the pool
+# couldn't update the live snapshot the SSE producer reads — and the
+# DAG drawer would never tick during pool-mode runs. We only ship the
+# `core/` and `__init__.py` shim, NOT the full app, to keep the image
+# small.
+COPY apps/api/app/__init__.py ./apps/api/app/__init__.py
+COPY apps/api/app/core/ ./apps/api/app/core/
 USER appuser
 EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

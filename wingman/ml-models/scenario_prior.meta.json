@@ -1,0 +1,76 @@
+{
+  "name": "wingman-scenario-prior",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Bayesian (Gaussian Naive Bayes) prior over LPG propane forward-curve scenarios. Given 8 normalised market signals (spot momentum, 3-month futures premium, four news-sentiment z-scores by category, weather z-score, freight stress), the model returns calibrated probabilities over five named scenario classes. The Wingman scenario forecaster uses these as priors and the LLM refines posteriors using current news. Trained on a synthetic but realistic regime-conditional distribution; production deployments should re-train on desk-labelled outcomes.",
+  "input_schema": {
+    "features": [
+      "spot_momentum_4w",
+      "futures_premium_3m",
+      "news_sentiment_supply",
+      "news_sentiment_demand",
+      "news_sentiment_geo",
+      "news_sentiment_reg",
+      "weather_z",
+      "freight_stress"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [
+      0.2,
+      -0.1,
+      0.4,
+      0.3,
+      1.2,
+      0.0,
+      0.5,
+      0.7
+    ]
+  },
+  "output_schema": {
+    "type": "classification",
+    "classes": [
+      "base",
+      "bear_demand_shock",
+      "bear_supply_glut",
+      "bull_geopolitical",
+      "tail_event"
+    ],
+    "returns": "scenario class probabilities (Bayesian prior)"
+  },
+  "tags": [
+    "wingman",
+    "trading",
+    "scenario",
+    "bayesian",
+    "prior"
+  ],
+  "training": {
+    "samples": 610,
+    "algorithm": "Gaussian Naive Bayes",
+    "synthetic": true,
+    "regimes": [
+      "base",
+      "bull_geopolitical",
+      "bear_supply_glut",
+      "bear_demand_shock",
+      "tail_event"
+    ],
+    "holdout_accuracy": 0.9082,
+    "class_priors": {
+      "base": 0.39344262295081966,
+      "bear_demand_shock": 0.14754098360655737,
+      "bear_supply_glut": 0.18032786885245902,
+      "bull_geopolitical": 0.18032786885245902,
+      "tail_event": 0.09836065573770492
+    }
+  }
+}

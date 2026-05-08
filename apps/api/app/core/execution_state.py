@@ -7,10 +7,23 @@ from datetime import datetime, timezone
 from typing import Any
 
 import logging
+import os
 
 import redis.asyncio as aioredis
 
-from app.core.config import settings
+try:
+    from app.core.config import settings as _settings  # type: ignore
+
+    _SETTINGS_REDIS_URL = getattr(_settings, "redis_url", None)
+except Exception:
+    _SETTINGS_REDIS_URL = None
+
+
+def _redis_url() -> str:
+    return (
+        _SETTINGS_REDIS_URL or os.environ.get("REDIS_URL") or "redis://localhost:6379/0"
+    )
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +41,7 @@ async def _get_redis() -> aioredis.Redis | None:
     try:
         if _pool is None:
             _pool = aioredis.from_url(
-                settings.redis_url,
+                _redis_url(),
                 decode_responses=True,
                 socket_connect_timeout=3,
                 socket_timeout=3,
@@ -161,6 +174,39 @@ async def fail_state(execution_id: str, tenant_id: str, error_message: str) -> N
     pipe.expire(key, STATE_TTL)
     pipe.srem(_tenant_key(tenant_id), execution_id)
     await pipe.execute()
+
+
+def _tool_calls_key(execution_id: str) -> str:
+    return f"exec:tool_calls:{execution_id}"
+
+
+async def append_tool_call(execution_id: str, tool_call: dict[str, Any]) -> None:
+    r = await _get_redis()
+    if r is None:
+        return
+    key = _tool_calls_key(execution_id)
+    try:
+        pipe = r.pipeline()
+        pipe.rpush(key, json.dumps(tool_call, default=str))
+        pipe.ltrim(key, -200, -1)
+        pipe.expire(key, STATE_TTL)
+        await pipe.execute()
+    except Exception:
+        pass
+
+
+async def get_tool_calls(execution_id: str) -> list[dict[str, Any]]:
+    r = await _get_redis()
+    if r is None:
+        return []
+    raw = await r.lrange(_tool_calls_key(execution_id), 0, -1)
+    out: list[dict[str, Any]] = []
+    for s in raw:
+        try:
+            out.append(json.loads(s))
+        except Exception:
+            continue
+    return out
 
 
 async def get_live_state(execution_id: str) -> dict[str, Any] | None:

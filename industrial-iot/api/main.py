@@ -190,18 +190,13 @@ async def live_status() -> dict[str, Any]:
     mqtt_ok = _reachable(mqtt_host, mqtt_port)
     tsdb_ok = _reachable(tsdb_host, tsdb_port)
 
-    # Connector count — fall back to 0 if the connectors API is not
-    # wired up on this AgentForge yet.
+    # Connector count — via SDK so auth + base URL are centralised. Fall
+    # back to 0 if the connectors API is not wired up on this AgentForge yet.
     connectors = 0
-    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
-    if api_key:
-        base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
+    if os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY"):
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                r = await client.get(
-                    f"{base_url}/api/connectors?limit=200",
-                    headers={"X-API-Key": api_key},
-                )
+            async with _sdk() as forge:
+                r = await forge.http.get("/api/connectors?limit=200", timeout=3.0)
                 if r.status_code == 200:
                     items = r.json().get("data") or []
                     connectors = len(items) if isinstance(items, list) else 0
@@ -231,17 +226,15 @@ async def live_trigger(request: Request) -> dict[str, Any]:
     if not slug:
         raise HTTPException(status_code=400, detail="agent_slug is required")
 
-    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
-    if not api_key:
+    if not os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY"):
         return {"ok": True, "accepted": False, "reason": "no_api_key"}
 
-    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.post(
-                f"{base_url}/api/agents/{slug}/triggers",
-                headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+        async with _sdk() as forge:
+            r = await forge.http.post(
+                f"/api/agents/{slug}/triggers",
                 json={"enabled": enabled},
+                timeout=5.0,
             )
         return {"ok": r.is_success, "accepted": r.is_success, "status": r.status_code}
     except Exception as exc:
@@ -322,16 +315,11 @@ async def live_sse(topic: str) -> Response:
 async def get_subscribed_feed(feed_key: str) -> dict[str, Any]:
     """Forward a subscribed_feed lookup so the ValueEdge tab can show
     when the BNEF coefficients were last refreshed."""
-    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
-    if not api_key:
+    if not os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY"):
         return {"data": None}
-    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(
-                f"{base_url}/api/subscribed-feeds/{feed_key}",
-                headers={"X-API-Key": api_key},
-            )
+        async with _sdk() as forge:
+            r = await forge.http.get(f"/api/subscribed-feeds/{feed_key}", timeout=3.0)
             if r.status_code != 200:
                 return {"data": None}
             return r.json()
@@ -347,18 +335,13 @@ async def kb_status() -> dict[str, Any]:
     this returns `available: false`, so users know adjudication will fall
     back to model defaults instead of citing tenant docs.
     """
-    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
-    if not api_key:
+    if not os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY"):
         return {"data": {"available": False, "reason": "no_api_key"}}
-    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with _sdk() as forge:
             # /api/knowledge-engines has no root listing — use the
             # collection-level endpoint that does (knowledge-bases).
-            r = await client.get(
-                f"{base_url}/api/knowledge-bases?limit=100",
-                headers={"X-API-Key": api_key},
-            )
+            r = await forge.http.get("/api/knowledge-bases?limit=100", timeout=10.0)
             if r.status_code != 200:
                 return {"data": {"available": False, "reason": f"http_{r.status_code}"}}
             payload = r.json()
@@ -454,39 +437,28 @@ async def _proxy(request: Request, path: str) -> Response:
                for p in _PASSTHROUGH_PREFIXES):
         raise HTTPException(status_code=404, detail=f"no proxy route for {full}")
 
-    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="INDUSTRIALIOT_ABENIX_API_KEY is not set on the industrial-iot-api pod.",
-        )
-    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
-
-    # Build forward headers: drop hop-by-hop + the inbound Host, inject
-    # the API key. Forward acting-subject if present.
+    # Build forward headers: drop hop-by-hop + auth (the SDK injects its own
+    # X-API-Key). Forward acting-subject if present.
     fwd_headers: dict[str, str] = {}
     for k, v in request.headers.items():
-        if k.lower() in _HOP_BY_HOP_HEADERS:
-            continue
-        # Don't carry the browser's X-API-Key (there is none, but be safe)
-        if k.lower() == "x-api-key":
+        kl = k.lower()
+        if kl in _HOP_BY_HOP_HEADERS or kl == "x-api-key":
             continue
         fwd_headers[k] = v
-    fwd_headers["X-API-Key"] = api_key
     subject = _acting_subject(request)
     if subject:
         fwd_headers["X-Abenix-Subject"] = subject.to_header()
 
     body = await request.body()
-    target = f"{base_url}{full}"
+    relative_path = full
     if request.url.query:
-        target = f"{target}?{request.url.query}"
+        relative_path = f"{relative_path}?{request.url.query}"
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            up = await client.request(
-                request.method, target, content=body or None,
-                headers=fwd_headers,
+        async with _sdk() as forge:
+            up = await forge.http.request(
+                request.method, relative_path, content=body or None,
+                headers=fwd_headers, timeout=120.0,
             )
     except httpx.HTTPError as exc:
         logger.exception("proxy forward failed: %s", target)
@@ -520,16 +492,11 @@ async def edge_compile_and_deploy(request: Request) -> JSONResponse:
     if not agent_slug:
         raise HTTPException(status_code=400, detail="agent_slug is required")
 
-    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
-    if not api_key:
+    if not os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY"):
         raise HTTPException(status_code=503, detail="no api key on industrial-iot pod")
-    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
-    headers = {"X-API-Key": api_key}
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        ar = await client.get(
-            f"{base_url}/api/agents?limit=500", headers=headers,
-        )
+    async with _sdk() as forge:
+        ar = await forge.http.get("/api/agents?limit=500", timeout=60.0)
         if ar.status_code != 200:
             raise HTTPException(status_code=502, detail=f"agents lookup http {ar.status_code}")
         raw = ar.json().get("data") or {}
@@ -546,7 +513,7 @@ async def edge_compile_and_deploy(request: Request) -> JSONResponse:
                 },
             )
 
-        gr = await client.get(f"{base_url}/api/edge/gateways", headers=headers)
+        gr = await forge.http.get("/api/edge/gateways", timeout=60.0)
         if gr.status_code != 200:
             raise HTTPException(status_code=502, detail=f"gateways lookup http {gr.status_code}")
         gateways = (gr.json().get("data") or {}).get("gateways") or []
@@ -569,10 +536,10 @@ async def edge_compile_and_deploy(request: Request) -> JSONResponse:
                 },
             )
 
-        dr = await client.post(
-            f"{base_url}/api/edge/gateways/{gw['id']}/deploy",
-            headers={**headers, "Content-Type": "application/json"},
+        dr = await forge.http.post(
+            f"/api/edge/gateways/{gw['id']}/deploy",
             json={"agent_id": agent["id"]},
+            timeout=60.0,
         )
         deploy_body = {}
         try:
@@ -608,15 +575,11 @@ async def edge_execute(request: Request) -> JSONResponse:
     if not agent_slug or payload is None:
         raise HTTPException(status_code=400, detail="agent_slug + payload required")
 
-    api_key = os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY", "")
-    if not api_key:
+    if not os.environ.get("INDUSTRIALIOT_ABENIX_API_KEY"):
         raise HTTPException(status_code=503, detail="no api key on industrial-iot pod")
-    base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000").rstrip("/")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        gr = await client.get(
-            f"{base_url}/api/edge/gateways", headers={"X-API-Key": api_key},
-        )
+    async with _sdk() as forge:
+        gr = await forge.http.get("/api/edge/gateways", timeout=30.0)
         gateways = (gr.json().get("data") or {}).get("gateways") or []
         gw = None
         if gateway_id_or_pk:

@@ -36,6 +36,7 @@ DESTINATIONS=(
   "${ROOT_DIR}/industrial-iot/api/sdk/abenix_sdk"
   "${ROOT_DIR}/resolveai/api/sdk/abenix_sdk"
   "${ROOT_DIR}/sauditourism/api/sdk/abenix_sdk"
+  "${ROOT_DIR}/wingman/api/sdk/abenix_sdk"
 )
 
 # ── colors ────────────────────────────────────────────────────────────────

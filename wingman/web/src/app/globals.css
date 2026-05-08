@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background:
+    radial-gradient(ellipse 80% 60% at 0% 0%, rgba(16,185,129,0.06), transparent 60%),
+    radial-gradient(ellipse 70% 50% at 100% 0%, rgba(34,211,238,0.05), transparent 60%),
+    radial-gradient(ellipse 90% 70% at 50% 100%, rgba(15,23,42,0) 50%, rgba(2,6,23,0.6) 100%),
+    #070A12;
+  color: white;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Subtle grid for the workbench background — feels like a trading terminal */
+.workbench-grid {
+  background-image:
+    linear-gradient(rgba(16,185,129,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16,185,129,0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Slow, ambient gradient drift behind every page */
+@keyframes ambient-shift {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-20px, 12px); }
+}
+.ambient-bg::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(16,185,129,0.08), transparent 35%),
+    radial-gradient(circle at 80% 70%, rgba(34,211,238,0.06), transparent 40%);
+  animation: ambient-shift 18s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* DAG drawer slide */
+.dag-drawer-enter { transform: translateX(100%); }
+.dag-drawer-enter-active { transform: translateX(0); transition: transform 200ms ease-out; }
+
+/* HIGH/MEDIUM/LOW conviction chips */
+.chip-high { background: rgba(16,185,129,0.15); color: #34d399; border-color: rgba(16,185,129,0.4); }
+.chip-medium { background: rgba(251,191,36,0.12); color: #fbbf24; border-color: rgba(251,191,36,0.4); }
+.chip-low { background: rgba(244,63,94,0.12); color: #fb7185; border-color: rgba(244,63,94,0.4); }
+
+/* Pulse for live AIS dots */
+@keyframes ais-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7); }
+  50%      { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+}
+.ais-pulse { animation: ais-pulse 1.8s infinite; }

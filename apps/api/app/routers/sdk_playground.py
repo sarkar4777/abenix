@@ -647,17 +647,28 @@ async def get_asset_context(
         if not agent:
             return error("Agent not found", 404)
 
-        cfg = agent.model_config or {}
+        cfg = agent.model_config_ or {}
+        agent_type_val = (
+            agent.agent_type.value
+            if hasattr(agent.agent_type, "value")
+            else str(agent.agent_type or "agent")
+        )
+        is_pipeline = bool(cfg.get("pipeline_config")) or "pipeline" in (
+            cfg.get("mode") or ""
+        )
         return success(
             {
                 "id": str(agent.id),
                 "name": agent.name,
                 "slug": agent.slug,
                 "description": agent.description or "",
-                "mode": getattr(agent, "agent_type", "agent"),
+                "mode": "pipeline" if is_pipeline else (cfg.get("mode") or "agent"),
+                "agent_type": agent_type_val,
                 "tools": cfg.get("tools", []),
                 "model": cfg.get("model", ""),
-                "input_variables": getattr(agent, "input_variables", []) or [],
+                "input_variables": cfg.get("input_variables") or [],
+                "example_prompts": cfg.get("example_prompts") or [],
+                "is_pipeline": is_pipeline,
             }
         )
     elif asset_type == "knowledge_base":

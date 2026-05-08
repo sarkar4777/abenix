@@ -36,6 +36,7 @@ APPS=(
   "sauditourism|sauditourism-secrets|SAUDITOURISM_ABENIX_API_KEY|standalone-sauditourism|sauditourism-api,sauditourism-web"
   "industrial-iot|industrial-iot-secrets|INDUSTRIALIOT_ABENIX_API_KEY|standalone-industrial-iot|industrial-iot-api,industrial-iot-web"
   "resolveai|resolveai-secrets|RESOLVEAI_ABENIX_API_KEY|standalone-resolveai|resolveai-api,resolveai-web"
+  "wingman|wingman-secrets|WINGMAN_ABENIX_API_KEY|standalone-wingman|wingman-api,wingman-web"
   "claimsiq|claimsiq-secrets|CLAIMSIQ_ABENIX_API_KEY|standalone-claimsiq|claimsiq"
 )
 

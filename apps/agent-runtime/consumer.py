@@ -368,11 +368,45 @@ async def _run_one(payload: dict) -> None:
                 tool_config=_tool_cfg,
                 asset_schemas=_asset_schemas,
             )
-            result = await executor.invoke(message)
-            # AgentExecutor returns ExecutionResult(output, tool_calls, input_tokens,
-            # output_tokens, cost, ...). Pass these through so /executions and
-            # /analytics show real numbers instead of nulls.
-            output = getattr(result, "output", None) or str(result)
+            # Stream so per-iteration events reach Redis pub/sub live; invoke() only emits start+done.
+            from types import SimpleNamespace
+
+            _full_text_parts: list[str] = []
+            _agg_tool_calls: list[dict[str, Any]] = []
+            _last_done: dict[str, Any] = {}
+            async for _ev in executor.stream(message):
+                # Publish each event with its full data payload. The
+                # platform's executions/{id}/watch SSE re-emits a
+                # snapshot for every event it receives, so the drawer
+                # ticks tokens / tool chips live.
+                _evt: dict[str, Any] = {"event": _ev.event}
+                if isinstance(_ev.data, dict):
+                    _evt.update(_ev.data)
+                else:
+                    _evt["data"] = _ev.data
+                await _publish(execution_id, _evt)
+                if _ev.event == "token" and isinstance(_ev.data, str):
+                    _full_text_parts.append(_ev.data)
+                elif _ev.event == "tool_call" and isinstance(_ev.data, dict):
+                    _agg_tool_calls.append(_ev.data)
+                    try:
+                        from app.core.execution_state import append_tool_call as _append_tc  # type: ignore
+
+                        await _append_tc(execution_id, _ev.data)
+                    except Exception as _ape:
+                        logger.debug("append_tool_call failed: %s", _ape)
+                elif _ev.event == "done" and isinstance(_ev.data, dict):
+                    _last_done = _ev.data
+            result = SimpleNamespace(
+                output="".join(_full_text_parts),
+                tool_calls=_agg_tool_calls,
+                input_tokens=int(_last_done.get("input_tokens", 0)),
+                output_tokens=int(_last_done.get("output_tokens", 0)),
+                cost=float(_last_done.get("cost", 0.0)),
+                duration_ms=int(_last_done.get("duration_ms", 0)),
+                model=_last_done.get("model", loaded["model_cfg"].get("model", "")),
+            )
+            output = result.output or str(result)
 
             # Generic post-process: if the agent's model_config declares an
             # output_schema, validate + normalize obvious enum drift before

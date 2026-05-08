@@ -927,6 +927,10 @@ def _ensure_tool_classes() -> None:
     from engine.tools.entso_e_tool import EntsoETool
     from engine.tools.ember_tool import EmberClimateTool
     from engine.tools.ecb_rates_tool import ECBRatesTool
+    from engine.tools.eia_open_data import EiaOpenDataTool
+    from engine.tools.open_meteo import OpenMeteoTool
+    from engine.tools.ais_stream import AisStreamTool
+    from engine.tools.bunker_fuel import BunkerFuelTool
 
     # New tools (Tier 1/2/3 ecosystem expansion)
     from engine.tools.weather import WeatherTool
@@ -1005,6 +1009,10 @@ def _ensure_tool_classes() -> None:
             "entso_e": EntsoETool,
             "ember_climate": EmberClimateTool,
             "ecb_rates": ECBRatesTool,
+            "eia_open_data": EiaOpenDataTool,
+            "open_meteo": OpenMeteoTool,
+            "ais_stream": AisStreamTool,
+            "bunker_fuel": BunkerFuelTool,
             "weather": WeatherTool,
             "geocoding": GeocodingTool,
             "world_bank": WorldBankTool,

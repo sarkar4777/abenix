@@ -590,6 +590,40 @@ export class ApprovalsClient {
     return this._normalize(data.data || {});
   }
 
+  async create(
+    title: string,
+    payload: Record<string, unknown>,
+    options?: {
+      requiredSignoffs?: number;
+      expiresSeconds?: number;
+      gateKind?: string;
+      agentId?: string;
+      agentExecutionId?: string;
+      clientToken?: string;
+    },
+  ): Promise<Approval> {
+    const body: Record<string, unknown> = {
+      title,
+      payload,
+      required_signoffs: options?.requiredSignoffs ?? 1,
+      expires_seconds: options?.expiresSeconds ?? 86400,
+    };
+    if (options?.gateKind) body.gate_kind = options.gateKind;
+    if (options?.agentId) body.agent_id = options.agentId;
+    if (options?.agentExecutionId) body.agent_execution_id = options.agentExecutionId;
+    if (options?.clientToken) body.client_token = options.clientToken;
+    const res = await this.client._fetch('/api/approvals', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => null);
+      throw new Error(errBody?.error?.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return this._normalize(data.data || {});
+  }
+
   async signoff(
     approvalId: string,
     decision: 'approve' | 'deny',

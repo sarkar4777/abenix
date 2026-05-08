@@ -33,7 +33,20 @@ DATABASE_URL = os.environ.get(
 UPLOAD_DIR = Path(os.environ.get("ML_MODELS_DIR", "/tmp/ml-models"))
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-AIMODELS_DIR = REPO_ROOT / "aimodels"
+# Tenant-wide samples live at the root; use-case-specific models live
+# under <use-case>/aimodels/ so the catalogue lines up with the vertical.
+AIMODELS_DIRS = [
+    REPO_ROOT / "aimodels",
+    REPO_ROOT / "industrial-iot" / "aimodels",
+    REPO_ROOT / "wingman" / "aimodels",
+    REPO_ROOT / "wingman" / "ml-models",
+    REPO_ROOT / "example_app" / "aimodels",
+    REPO_ROOT / "sauditourism" / "aimodels",
+    REPO_ROOT / "resolveai" / "aimodels",
+    REPO_ROOT / "claimsiq" / "aimodels",
+]
+# Kept for backwards compat with anything that imported it.
+AIMODELS_DIR = AIMODELS_DIRS[0]
 
 
 def _framework_from_ext(ext: str) -> MLModelFramework:
@@ -52,21 +65,31 @@ def _framework_from_ext(ext: str) -> MLModelFramework:
 def _discover_samples() -> list[tuple[Path, dict]]:
     """Return (pkl_path, meta) pairs for every sample with a matching .meta.json."""
     out: list[tuple[Path, dict]] = []
-    if not AIMODELS_DIR.is_dir():
-        return out
-    for meta_path in sorted(AIMODELS_DIR.glob("*.meta.json")):
-        stem = meta_path.name.removesuffix(".meta.json")
-        # Accept .pkl / .joblib / .pt / .onnx etc — pick the first one that exists.
-        for ext in (".pkl", ".joblib", ".pt", ".pth", ".onnx", ".h5", ".keras", ".xgb"):
-            candidate = AIMODELS_DIR / f"{stem}{ext}"
-            if candidate.exists():
-                try:
-                    meta = json.loads(meta_path.read_text())
-                except Exception as e:  # pragma: no cover — malformed meta
-                    print(f"  ! Skipping {meta_path.name} — invalid JSON: {e}")
+    for root in AIMODELS_DIRS:
+        if not root.is_dir():
+            continue
+        for meta_path in sorted(root.glob("*.meta.json")):
+            stem = meta_path.name.removesuffix(".meta.json")
+            # Accept .pkl / .joblib / .pt / .onnx etc — pick the first one that exists.
+            for ext in (
+                ".pkl",
+                ".joblib",
+                ".pt",
+                ".pth",
+                ".onnx",
+                ".h5",
+                ".keras",
+                ".xgb",
+            ):
+                candidate = root / f"{stem}{ext}"
+                if candidate.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text())
+                    except Exception as e:  # pragma: no cover — malformed meta
+                        print(f"  ! Skipping {meta_path.name} — invalid JSON: {e}")
+                        break
+                    out.append((candidate, meta))
                     break
-                out.append((candidate, meta))
-                break
     return out
 
 
@@ -95,7 +118,12 @@ async def _ensure_for_tenant(
 
         file_id = uuid.uuid4().hex[:12]
         dest = tenant_upload_dir / f"{file_id}_{pkl_path.name}"
-        shutil.copy2(pkl_path, dest)
+        # shutil.copyfile (bytes only, no chmod, no utime) — Azure
+        # Files's SMB mount rejects BOTH `chmod` and `utime` with
+        # `Operation not permitted`. copy2 calls both via copystat,
+        # copy calls chmod via copymode. Only copyfile skips both.
+        # Default share permissions are fine for the runtime to read.
+        shutil.copyfile(pkl_path, dest)
 
         m = MLModel(
             tenant_id=tenant.id,

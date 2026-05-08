@@ -1,0 +1,137 @@
+# Wingman — Kubernetes manifests (standalone application).
+#
+# Deploys Wingman API (port 8006) and Web (port 3006) into the same
+# namespace as Abenix so the API can reach abenix-api via cluster DNS.
+# The platform's deploy-time _verify_standalone_envfrom() guard checks
+# both Deployments below have envFrom secretRef + configMapRef wiring
+# (regression guard from the industrial-iot envFrom incident).
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wingman-secrets
+  namespace: abenix
+type: Opaque
+stringData:
+  WINGMAN_ABENIX_API_KEY: "REPLACE_AT_DEPLOY_TIME"
+  AISSTREAM_API_KEY: "REPLACE_AT_DEPLOY_TIME"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wingman-config
+  namespace: abenix
+data:
+  ABENIX_API_URL: "http://abenix-api:8000"
+  WINGMAN_ACTING_SUBJECT_TYPE: "wingman"
+  PORT: "8006"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wingman-api
+  namespace: abenix
+  labels: { app: wingman-api }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: wingman-api }
+  template:
+    metadata:
+      labels: { app: wingman-api }
+    spec:
+      containers:
+        - name: api
+          image: localhost:5000/abenix/wingman-api:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8006, name: http }]
+          envFrom:
+            - secretRef:   { name: wingman-secrets }
+            - configMapRef: { name: wingman-config }
+          livenessProbe:
+            httpGet: { path: /health, port: 8006 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /health, port: 8006 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1000m, memory: 1Gi }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wingman-api
+  namespace: abenix
+spec:
+  type: ClusterIP
+  selector: { app: wingman-api }
+  ports: [{ port: 8006, targetPort: 8006 }]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wingman-web
+  namespace: abenix
+  labels: { app: wingman-web }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: wingman-web }
+  template:
+    metadata:
+      labels: { app: wingman-web }
+    spec:
+      containers:
+        - name: web
+          image: localhost:5000/abenix/wingman-web:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 3006, name: http }]
+          # Web uses inline env (no secrets needed); API URL is the
+          # internal cluster hostname for the wingman-api Service.
+          env:
+            - name: WINGMAN_API_INTERNAL_URL
+              value: "http://wingman-api:8006"
+            - name: NODE_ENV
+              value: "production"
+          # _verify_standalone_envfrom() also requires envFrom; we still
+          # mount the config so the guard passes, even though the web
+          # pod doesn't strictly need the API key.
+          envFrom:
+            - secretRef:   { name: wingman-secrets }
+            - configMapRef: { name: wingman-config }
+          livenessProbe:
+            httpGet: { path: /, port: 3006 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /, port: 3006 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1000m, memory: 1Gi }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wingman-web
+  namespace: abenix
+spec:
+  type: ClusterIP
+  selector: { app: wingman-web }
+  ports: [{ port: 3006, targetPort: 3006 }]

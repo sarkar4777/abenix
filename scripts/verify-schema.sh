@@ -33,14 +33,9 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-CANONICAL_COLUMNS=(
-  "executions.node_results"
-  "executions.execution_trace"
-  "executions.failure_code"
-  "agent_shares.shared_with_user_id"
-  "moderation_policies.default_action"
-  "agent_memories.importance"
-)
+# shellcheck source=_schema-sentinels.sh
+source "${ROOT_DIR}/scripts/_schema-sentinels.sh"
+CANONICAL_COLUMNS=("${SCHEMA_CANONICAL_COLUMNS[@]}")
 
 _psql() {
   if [ -n "$POD_NAME" ]; then

@@ -306,7 +306,10 @@ async def _assemble_dag_snapshot(
         # Iterative-agent mode: one synthetic node representing the
         # whole run, tool_calls populate the chain. The UI renders it
         # as a linear trace.
-        tool_calls = execution.tool_calls or []
+        # Pool-mode writes execution.tool_calls only at done; read live list so chips flip during the run.
+        from app.core.execution_state import get_tool_calls as _live_calls
+
+        tool_calls = execution.tool_calls or await _live_calls(str(execution_id)) or []
         nodes.append(
             {
                 "id": "agent",

@@ -1,0 +1,82 @@
+name: wingman-var-simulator
+description: >-
+  Monte Carlo Value-at-Risk simulator for Wingman strategy rules. Takes
+  a corridor + side + size + recent EIA weekly spot history, runs N GBM
+  walks of P&L over the horizon, and emits p50/p95/p99 VaR, expected
+  shortfall at p99, mean/std, and a 30-bucket histogram. Compute-heavy
+  (10k sims × 30 days × 5 RNG draws / step) — ~5–10× faster than the
+  same maths in NumPy at this scale.
+
+input_schema:
+  type: object
+  required: [rule, spot_history, horizon_days, n_simulations]
+  properties:
+    rule:
+      type: object
+      required: [corridor_id, side, size_mt, trigger]
+      properties:
+        corridor_id: { type: string, description: "e.g. 'USGC-NWE'" }
+        side:        { type: string, enum: [buy_forward, sell_forward, swap] }
+        size_mt:     { type: number, description: "Strategy notional in metric tons" }
+        trigger:
+          type: object
+          properties:
+            metric:   { type: string }
+            operator: { type: string, enum: [">", ">=", "<", "<=", "=="] }
+            value:    { type: number }
+    spot_history:
+      type: array
+      minItems: 8
+      items: { type: number }
+      description: "Recent weekly EIA spot ($/gal). Used to fit GBM drift+vol."
+    horizon_days:
+      type: integer
+      minimum: 1
+      description: "Days forward to simulate. Typical: 14–60."
+    n_simulations:
+      type: integer
+      minimum: 1000
+      description: "Number of Monte Carlo paths. Typical: 10000."
+    freight_usd_mt:
+      type: number
+      description: "Bunker-derived freight cost USD/MT. Used in P&L attribution."
+
+output_schema:
+  type: object
+  required: [p50_usd, p95_usd, p99_usd, expected_shortfall_p99_usd, mean_usd, std_usd]
+  properties:
+    p50_usd:                   { type: number }
+    p95_usd:                   { type: number }
+    p99_usd:                   { type: number }
+    expected_shortfall_p99_usd: { type: number, description: "Avg loss in worst 1% of paths" }
+    mean_usd:                  { type: number }
+    std_usd:                   { type: number }
+    histogram:
+      type: array
+      description: "30-bucket equal-width histogram of terminal P&L across paths."
+      items:
+        type: object
+        properties:
+          bin_low:  { type: number }
+          bin_high: { type: number }
+          count:    { type: integer }
+    n_simulations: { type: integer }
+    horizon_days:  { type: integer }
+    narrative:     { type: string, description: "1–2 sentence trader-facing summary" }
+    data_sources:
+      type: array
+      items: { type: string }
+
+example_input:
+  rule:
+    corridor_id: "USGC-NWE"
+    side: "sell_forward"
+    size_mt: 10000
+    trigger:
+      metric: "spread_usd_mt"
+      operator: ">"
+      value: 30
+  spot_history: [0.92, 0.94, 0.91, 0.93, 0.95, 0.96, 0.94, 0.93, 0.95, 0.97, 0.98, 0.96]
+  horizon_days: 30
+  n_simulations: 10000
+  freight_usd_mt: 63

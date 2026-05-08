@@ -416,21 +416,26 @@ cd "$ROOT_DIR/packages/db"
 # Clean Python cache to avoid stale bytecode
 find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Run alembic to head — applies the catchup migration if needed.
-MIGRATION_OUT=$(PYTHONPATH="." $PYTHON -m alembic upgrade head 2>&1) || true
+# Bootstrap fast-path for a brand-new database — Base.metadata.create_all
+# in one shot, then alembic stamp heads. No-ops if alembic_version
+# already exists. See packages/db/bootstrap.py.
+PYTHONPATH="." $PYTHON -m bootstrap 2>&1 | sed 's/^/      /' || true
+
+# Run alembic to heads — applies every independent migration chain (we
+# have multiple heads in the repo, e.g. the dead_letter branch + the
+# approvals additions branch). The singular `head` form errors with
+# "Multiple head revisions are present" and the swallow below would
+# hide it; the sentinel check at the bottom is what catches drift.
+MIGRATION_OUT=$(PYTHONPATH="." $PYTHON -m alembic upgrade heads 2>&1) || true
 echo "$MIGRATION_OUT" | grep "Running upgrade" | sed 's/^/      /' || true
 
-# Sentinel column list — small, load-bearing, updated whenever a
-# schema-changing migration lands. If ALL of these are present,
-# the schema is considered current.
-_CANONICAL_COLUMNS=(
-  "executions.node_results"
-  "executions.execution_trace"
-  "executions.failure_code"
-  "agent_shares.shared_with_user_id"
-  "moderation_policies.default_action"
-  "agent_memories.importance"
-)
+# Sentinel column list lives in scripts/_schema-sentinels.sh — single
+# source of truth shared with verify-schema.sh and deploy-azure.sh.
+# When you add a schema-changing migration, append the load-bearing
+# columns to that file (one place, three consumers).
+# shellcheck source=_schema-sentinels.sh
+source "$ROOT_DIR/scripts/_schema-sentinels.sh"
+_CANONICAL_COLUMNS=("${SCHEMA_CANONICAL_COLUMNS[@]}")
 
 _missing=""
 for entry in "${_CANONICAL_COLUMNS[@]}"; do
