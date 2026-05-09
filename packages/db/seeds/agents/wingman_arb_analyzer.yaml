@@ -128,7 +128,7 @@ system_prompt: |
   Never refuse with prose — always JSON.
 
 model_config:
-  model: gemini-2.5-flash
+  model: claude-haiku-4-5-20251001
   temperature: 0.2
   max_iterations: 30
   tools:

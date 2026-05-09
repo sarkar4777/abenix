@@ -14,7 +14,6 @@ Idempotent: if a (tenant, name, version) row already exists we skip.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 import uuid

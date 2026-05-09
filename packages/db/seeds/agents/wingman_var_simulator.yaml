@@ -66,7 +66,7 @@ system_prompt: |
   the gap.
 
 model_config:
-  model: gemini-2.5-flash
+  model: claude-haiku-4-5-20251001
   temperature: 0.0
   max_iterations: 10
   tools:

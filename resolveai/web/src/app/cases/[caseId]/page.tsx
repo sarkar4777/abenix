@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { use, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle2, Loader2, UserRound, RefreshCw, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { useResolveAIFetch, resolveAIPost } from '@/lib/api';
@@ -40,15 +40,16 @@ type CaseDetail = {
   events: Array<{ ts: string; type: string; summary: string }>;
 };
 
-export default function CaseDetail({ params }: { params: { caseId: string } }) {
+export default function CaseDetail({ params }: { params: Promise<{ caseId: string }> }) {
+  const { caseId } = use(params);
   const { data, error, isLoading, refetch } = useResolveAIFetch<CaseDetail>(
-    params.caseId ? `/api/resolveai/cases/${params.caseId}` : null,
+    caseId ? `/api/resolveai/cases/${caseId}` : null,
   );
   const [taking, setTaking] = useState(false);
 
   const takeOver = async () => {
     setTaking(true);
-    await resolveAIPost(`/api/resolveai/cases/${params.caseId}/take-over`, {
+    await resolveAIPost(`/api/resolveai/cases/${caseId}/take-over`, {
       reason: 'manual takeover from case detail',
     });
     setTaking(false);
