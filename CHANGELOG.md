@@ -4,17 +4,27 @@
 
 ### Added
 
-### Changed
-
-### Fixed
-
-## v1.2.0 — 2026-05-09
-
-### Added
+- **Wingman Forward Scenarios** — a new sidebar surface that produces probability-weighted forward-curve forecasts for an LPG corridor. A deployed GaussianNB Bayesian prior (`wingman-scenario-prior`, 8 normalised market signals → 5 named regimes, 90.8% holdout on synthetic regime-conditional data) gives the calibrated baseline; the LLM refines the posterior using four parallel Tavily news searches (supply / demand / geopolitics / regulatory). The page shows the prior strip, a fan chart with overlapping scenario curves + P10/P90 band + a thick probability-weighted expected line, and scenario cards where every $/MT delta is attributed to a cited headline.
+- **Wingman /approvals queue** — list, filter (pending / approved / denied / expired), approve, deny. All four operations proxy through `forge.approvals.*` so the wingman pod holds no platform credentials of its own and the platform's RBAC is the source of truth. Fixes the 404 the broker-inbox "queue" link used to hit.
+- **Live DAG events for pool-mode runs.** `consumer.py` now drives the agent through `executor.stream()` instead of `executor.invoke()`, so per-iteration `token` / `tool_call` / `tool_result` events reach Redis pub/sub. A new `exec:tool_calls:<id>` Redis list is populated as tool_calls fire and read by `_assemble_dag_snapshot` for agent-mode runs, so the DAG drawer chips flip pending → completed in real time during pool-mode execution. Embedded mode already had this; pool mode previously emitted only `start` and `done`.
+- **`wingman-scenario-prior`** ML model, visible in Abenix → ML Models alongside the existing six samples. Trained synthetic-but-realistic and re-trainable on real desk-labelled outcomes via `wingman/ml-models/build_scenario_prior.py`.
+- **Comprehensive Playwright e2e** — `e2e/uat_wingman_full.spec.ts` (every wingman page incl. DAG drawer + SDK-shape checks) and `e2e/uat_wingman_screenshots.spec.ts` (focused 12-shot demo runner that drops PNGs into `~/wingman-screenshots/`).
 
 ### Changed
 
+- **Cross-pod ML storage on AKS.** `mlModels.storageClass: azurefile-csi` in `values-azure.yaml` so the `ReadWriteMany` PVC actually binds (the default `disk.csi.azure.com` only does RWO). The `ml-models-storage` claim is now mounted at `/data/ml-models` on both `api` and the four `agent-runtime` pools; abenix-api uploads land in the same Azure Files share the runtime reads.
+- **Dockerfile.api** copies `wingman/ml-models/` alongside `aimodels/` and `industrial-iot/aimodels/` so the seeder finds the wingman pickles.
+- **Dockerfile.agent-runtime** ships a minimal `apps/api/app/__init__.py` + `app/core/__init__.py` + `app/core/execution_state.py` shim so `consumer.py` can import the canonical Redis primitives without pulling api-only deps (pydantic-settings, fastapi-users, etc.).
+
 ### Fixed
+
+- **Arbitrage Workbench**: the forward-curve chart now renders an explicit "Curve unavailable" state when every `forward_curve.value` comes back null instead of drawing empty axes that read as a UI bug; the vessel scatter has clickable dots that pin to the side panel, the halo widens on focus, and the panel lists the top named vessels by default rather than being empty until hover. Corridor cards surface the platform's `error_message` and `failure_code` when status = failed instead of silently falling back to the empty state.
+- **Forward Scenarios** distinguishes "never run" from "completed with empty envelope" via a clear "Partial forecast" banner — separates an LLM truncation from an unfired agent.
+- **Inbox classify + parse + scenarios forecast** all use submit + poll instead of `wait_timeout_seconds` blocking, so the DAG drawer subscribes to the SSE while the agent is still running and gets a live event stream instead of an after-the-fact snapshot.
+- **`ml_model` tool**: text classifiers (sklearn TF-IDF) get a 1-D iterable of strings; numeric classifiers (GaussianNB) get the 2-D matrix; `predicted_class` is taken from `preds[0]` directly (sklearn `predict()` returns labels, not indices); JSON-stringified `input_data` arguments from LLMs that double-encode tool args are now parsed back into a dict.
+- **`seed_ml_models.py`** uses `shutil.copyfile` instead of `copy2`/`copy` — Azure Files SMB share rejects both `chmod` and `utime` with `Operation not permitted`, only the bytes-only path survives.
+- **`resolveai/web/src/app/cases/[caseId]/page.tsx`** — Next.js 15 PageProps now requires `params: Promise<...>`; switched to `use(params)` so the production build no longer trips on the stricter constraint and the resolveai-web image actually builds.
+- **`packages/db/seeds/seed_code_assets.py`** — dropped unused `json` import that was failing CI's ruff F401 gate.
 
 ## v1.1.5 — 2026-05-06
 
