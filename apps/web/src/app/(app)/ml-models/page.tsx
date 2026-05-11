@@ -53,6 +53,16 @@ function fmtBytes(bytes: number | null): string {
   return `${bytes} B`;
 }
 
+function defaultInputFor(m: MLModel | null): string {
+  if (!m) return '{"features": [5.1, 3.5, 1.4, 0.2]}';
+  const ex = m.input_schema?.example;
+  if (Array.isArray(ex)) return JSON.stringify({ features: ex });
+  if (ex && typeof ex === 'object') return JSON.stringify(ex);
+  const featList: string[] = Array.isArray(m.input_schema?.features) ? m.input_schema.features : [];
+  if (featList.length > 0) return JSON.stringify({ features: featList.map(() => 0.0) });
+  return '{"features": [5.1, 3.5, 1.4, 0.2]}';
+}
+
 export default function MLModelsPage() {
   const { data: models, mutate } = useApi<MLModel[]>('/api/ml-models');
   const [selected, setSelected] = useState<MLModel | null>(null);
@@ -234,7 +244,7 @@ export default function MLModelsPage() {
                   const st = STATUS_STYLES[m.status] || STATUS_STYLES.uploaded;
                   const isSelected = selected?.id === m.id;
                   return (
-                    <button key={m.id} onClick={() => setSelected(m)}
+                    <button key={m.id} onClick={() => { setSelected(m); setPredInput(defaultInputFor(m)); setPredResult(''); }}
                       className={`w-full text-left px-3 py-2.5 rounded-lg text-xs transition-colors ${
                         isSelected ? 'bg-purple-500/10 border border-purple-500/30 text-white' : 'border border-transparent text-slate-400 hover:bg-slate-800/50 hover:text-white'
                       }`}>
@@ -372,8 +382,16 @@ export default function MLModelsPage() {
                     <Play className="w-3.5 h-3.5 text-emerald-400" /> Test Inference
                   </h3>
                   <textarea value={predInput} onChange={e => setPredInput(e.target.value)} rows={3}
-                    placeholder='{"features": [5.1, 3.5, 1.4, 0.2]}'
+                    placeholder={defaultInputFor(selected)}
                     className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-slate-500 focus:border-emerald-500 focus:outline-none resize-none mb-2" />
+                  {selected.input_schema?.features && Array.isArray(selected.input_schema.features) && (
+                    <div className="mb-2 flex flex-wrap gap-1">
+                      <span className="text-[10px] text-slate-500 mr-1">expected ({selected.input_schema.features.length}):</span>
+                      {selected.input_schema.features.map((f: string) => (
+                        <span key={f} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-300 border border-slate-700/50">{f}</span>
+                      ))}
+                    </div>
+                  )}
                   <button onClick={() => handlePredict(selected.id)} disabled={predicting || selected.status !== 'ready'}
                     className="px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold disabled:opacity-30 flex items-center gap-2 hover:bg-emerald-500/20 transition-colors">
                     {predicting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Predicting...</> : <><Play className="w-3.5 h-3.5" /> Run Prediction</>}
