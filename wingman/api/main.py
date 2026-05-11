@@ -767,6 +767,134 @@ async def scenarios_cached(corridor_id: str) -> dict[str, Any]:
     }
 
 
+# ─── Mispricing Lens ─────────────────────────────────────────────────────
+
+_MISPRICING_INDEX: dict[str, str] = {}
+_MISPRICING_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_MISPRICING_TTL_SECONDS = 900
+
+
+@app.post("/api/wingman/mispricing/{corridor_id}/scan")
+async def mispricing_scan(
+    corridor_id: str, body: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    corridor = next((c for c in CORRIDORS if c["id"] == corridor_id), None)
+    if not corridor:
+        raise HTTPException(status_code=404, detail=f"Corridor not found: {corridor_id}")
+    payload = {"corridor": corridor}
+    async with _abenix_client() as forge:
+        submitted = await forge.execute(
+            "wingman-mispricing-extractor",
+            json.dumps(payload),
+            wait="submitted",
+        )
+    if submitted.execution_id:
+        _MISPRICING_INDEX[submitted.execution_id] = corridor_id
+    return {
+        "data": {
+            "corridor_id": corridor_id,
+            "execution_id": submitted.execution_id,
+            "status": submitted.status or "running",
+        }
+    }
+
+
+@app.get("/api/wingman/mispricing-result/{execution_id}")
+async def mispricing_result(execution_id: str) -> dict[str, Any]:
+    async with _abenix_client() as forge:
+        try:
+            row = await forge.executions.get(execution_id) or {}
+        except Exception as e:
+            logger.warning("execution fetch failed for %s: %s", execution_id, e)
+            raise HTTPException(status_code=502, detail=f"Execution fetch failed: {e}")
+    status = (row.get("status") or "running").lower()
+    terminal = status in {"completed", "succeeded", "failed", "error", "cancelled"}
+    parsed: dict[str, Any] = {}
+    raw = row.get("output") or row.get("output_message") or ""
+    if terminal and raw:
+        parsed = _parse_agent_json(raw)
+    corridor_id = _MISPRICING_INDEX.get(execution_id)
+    if status == "completed" and parsed and corridor_id:
+        import time as _time
+
+        _MISPRICING_CACHE[corridor_id] = (_time.time(), parsed)
+    return {
+        "data": {
+            "corridor_id": corridor_id,
+            "execution_id": execution_id,
+            "status": status,
+            "scan": parsed if parsed else None,
+            "error_message": row.get("error_message"),
+            "failure_code": row.get("failure_code"),
+            "cost_usd": row.get("cost"),
+            "duration_ms": row.get("duration_ms"),
+        }
+    }
+
+
+@app.get("/api/wingman/mispricing/{corridor_id}/cached")
+async def mispricing_cached(corridor_id: str) -> dict[str, Any]:
+    import time as _time
+
+    cached = _MISPRICING_CACHE.get(corridor_id)
+    if not cached:
+        return {"data": None}
+    ts, payload = cached
+    if _time.time() - ts > _MISPRICING_TTL_SECONDS:
+        return {"data": None}
+    return {
+        "data": {
+            "corridor_id": corridor_id,
+            "generated_at": ts,
+            "scan": payload,
+        }
+    }
+
+
+@app.post("/api/wingman/mispricing/{corridor_id}/trade-card")
+async def mispricing_trade_card(
+    corridor_id: str, body: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    body = body or {}
+    scan = body.get("scan") or {}
+    if not scan:
+        raise HTTPException(status_code=400, detail="scan payload required")
+    trade = scan.get("trade_card") or {}
+    title = (
+        f"Mispricing trade: {corridor_id} "
+        f"{scan.get('direction', '?')} sigma={scan.get('residual_sigma'):.2f}"
+        if isinstance(scan.get("residual_sigma"), (int, float))
+        else f"Mispricing trade: {corridor_id}"
+    )
+    async with _abenix_client() as forge:
+        approval = await forge.approvals.create(
+            title=title,
+            payload={
+                "intent": "mispricing.trade",
+                "corridor_id": corridor_id,
+                "scan_summary": {
+                    "observed_spread_usd_mt": scan.get("observed_spread_usd_mt"),
+                    "fair_value_spread_usd_mt": scan.get("fair_value_spread_usd_mt"),
+                    "residual_sigma": scan.get("residual_sigma"),
+                    "verdict": scan.get("verdict"),
+                    "direction": scan.get("direction"),
+                },
+                "trade": trade,
+                "thesis": scan.get("thesis"),
+            },
+            required_signoffs=1,
+            expires_seconds=14400,
+            gate_kind="trade.execute",
+        )
+    return {
+        "data": {
+            "approval_id": approval.get("id"),
+            "approval": approval,
+            "corridor_id": corridor_id,
+        }
+    }
+
+
 # ─── Knowledge Graph (Atlas) ─────────────────────────────────────────────
 
 

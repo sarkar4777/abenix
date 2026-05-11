@@ -30,8 +30,6 @@ COPY aimodels/ ./aimodels/
 COPY industrial-iot/aimodels/ ./industrial-iot/aimodels/
 COPY industrial-iot/code-assets/ ./industrial-iot/code-assets/
 COPY wingman/code-assets/ ./wingman/code-assets/
-# Wingman keeps its sample ML pickles under wingman/ml-models/ rather
-# than wingman/aimodels/ — both dirs are scanned by seed_ml_models.py.
 COPY wingman/ml-models/ ./wingman/ml-models/
 WORKDIR /app/apps/api
 

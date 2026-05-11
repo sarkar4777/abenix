@@ -1,0 +1,73 @@
+{
+  "name": "wingman-mispricing-fairvalue",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Bayesian Ridge regression of LPG propane corridor fair-value spread ($/MT) on an 8-feature market vector (z-scored spots, freight, inventory, exports, FX, weather, seasonality). Returns posterior mean + std, so the mispricing engine can compute a residual z-score and a credible interval band. Trained on a synthetic regime-conditional sample; replace with desk-labelled history in production.",
+  "input_schema": {
+    "features": [
+      "origin_spot_z",
+      "dest_spot_z",
+      "freight_per_mt_z",
+      "inventory_z",
+      "exports_4w_pct",
+      "fx_eur_usd_z",
+      "weather_dest_gust_z",
+      "season_q"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [
+      0.2,
+      0.4,
+      -0.1,
+      -0.3,
+      0.12,
+      0.15,
+      0.2,
+      2
+    ]
+  },
+  "output_schema": {
+    "type": "regression",
+    "returns": "posterior mean spread ($/MT) + posterior std"
+  },
+  "tags": [
+    "wingman",
+    "trading",
+    "mispricing",
+    "bayesian",
+    "regression"
+  ],
+  "training": {
+    "samples": 620,
+    "algorithm": "Bayesian Ridge Regression",
+    "synthetic": true,
+    "regimes": [
+      "calm_balance",
+      "usgc_export_surge",
+      "nwe_demand_soft"
+    ],
+    "holdout_r2": 0.7518,
+    "holdout_rmse_usd_mt": 8.4582,
+    "average_posterior_std": 9.2562,
+    "coef_": [
+      -5.0559,
+      5.9936,
+      -0.7948,
+      -3.8497,
+      4.5516,
+      0.9988,
+      1.2057,
+      -0.2813
+    ],
+    "intercept_": 24.6167
+  }
+}

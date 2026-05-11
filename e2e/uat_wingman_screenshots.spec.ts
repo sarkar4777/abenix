@@ -100,15 +100,20 @@ test.describe.serial('Wingman — 12 demo screenshots', () => {
     await shot(page, 'ops-live-ais');
   });
 
-  test('11 strategy lab', async ({ page }) => {
-    await gotoOk(page, '/strategy');
-    await page.waitForTimeout(3000);
-    await shot(page, 'strategy-lab');
+  test('11 mispricing lens landing', async ({ page }) => {
+    await gotoOk(page, '/mispricing');
+    await page.waitForTimeout(3500);
+    await shot(page, 'mispricing-landing');
   });
 
-  test('12 knowledge graph', async ({ page }) => {
-    await gotoOk(page, '/graph');
-    await page.waitForTimeout(3000);
-    await shot(page, 'knowledge-graph');
+  test('12 mispricing lens scored', async ({ page }) => {
+    await gotoOk(page, '/mispricing');
+    await page.waitForTimeout(2500);
+    const run = page.getByTestId('run-mispricing-scan');
+    if (await run.isVisible().catch(() => false)) {
+      await run.click();
+      await page.waitForTimeout(45000);
+    }
+    await shot(page, 'mispricing-scored');
   });
 });

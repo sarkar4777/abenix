@@ -53,7 +53,7 @@ export default function HeroBar({
   const tickers = (brief?.indicators || []).slice(0, 4);
 
   return (
-    <header className="mb-6 relative">
+    <header className="mb-6 pt-3 relative">
       <div className="flex items-end justify-between gap-4">
         <div className="min-w-0">
           {eyebrow && (
@@ -61,7 +61,7 @@ export default function HeroBar({
               {eyebrow}
             </div>
           )}
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight bg-gradient-to-r from-white via-emerald-50 to-cyan-100 bg-clip-text text-transparent">
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight bg-gradient-to-r from-white via-emerald-50 to-cyan-100 bg-clip-text text-transparent leading-[1.15] pb-1">
             {title}
           </h1>
           {subtitle && (

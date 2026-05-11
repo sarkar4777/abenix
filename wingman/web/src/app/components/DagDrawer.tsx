@@ -37,6 +37,20 @@ export default function DagDrawer({
   const [snapshot, setSnapshot] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const eventsEnd = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<boolean>(false);
+
+  const TERMINAL_STATUS = new Set(['completed', 'succeeded', 'failed', 'error', 'cancelled']);
+  const mergeSnapshot = (incoming: any) => {
+    setSnapshot((prev: any) => {
+      const next: any = { ...(prev || {}), ...(incoming || {}) };
+      if (terminalRef.current && prev?.status) {
+        next.status = prev.status;
+      }
+      const s = String(next.status || '').toLowerCase();
+      if (TERMINAL_STATUS.has(s)) terminalRef.current = true;
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (executionId) setOpen(true);
@@ -46,6 +60,7 @@ export default function DagDrawer({
     if (!executionId) return;
     setEvents([]);
     setSnapshot(null);
+    terminalRef.current = false;
     // EventSource doesn't pipe non-default 'event:' lines to onmessage. Use
     // a manual fetch+ReadableStream for SSE so we can dispatch by event name.
     let cancelled = false;
@@ -74,9 +89,16 @@ export default function DagDrawer({
               try {
                 const data = JSON.parse(line.slice(6));
                 if (currentEvent === 'snapshot') {
-                  setSnapshot(data);
+                  mergeSnapshot(data);
                 } else {
                   setEvents((prev) => [...prev.slice(-200), { event: currentEvent, data, ts: Date.now() }]);
+                  if (currentEvent === 'done' || currentEvent === 'node_complete' || currentEvent === 'error') {
+                    const s = String(data?.status || '').toLowerCase();
+                    if (TERMINAL_STATUS.has(s) || currentEvent === 'done' || currentEvent === 'error') {
+                      terminalRef.current = true;
+                      mergeSnapshot({ status: data?.status || (currentEvent === 'error' ? 'failed' : 'completed') });
+                    }
+                  }
                 }
               } catch { /* ignore malformed line */ }
               currentEvent = '';
@@ -110,8 +132,9 @@ export default function DagDrawer({
             ? [{ id: 'agent', tool_name: 'agent', label: row.agent_name || 'Agent', status, tool_calls: row.tool_calls }]
             : (row.node_results || []),
         };
-        setSnapshot((prev: any) => ({ ...(prev || {}), ...synthetic }));
+        mergeSnapshot(synthetic);
         if (status === 'completed' || status === 'failed' || status === 'error' || status === 'cancelled') {
+          terminalRef.current = true;
           clearInterval(t);
         }
       } catch { /* keep polling */ }
@@ -228,23 +251,29 @@ export default function DagDrawer({
             type Row = { id: string; label: string; status: string; sub?: string };
             const rows: Row[] = [];
             const agentNode = snapNodes.find((n) => n.tool_name === 'agent' || n.id === 'agent');
+            const overallStatus = String(snapshot?.status || '').toLowerCase();
+            const isTerminal = TERMINAL_STATUS.has(overallStatus);
             if (agentNode) {
+              const nodeStatus = (agentNode.status || '').toLowerCase() || 'pending';
               rows.push({
                 id: 'agent',
                 label: agentNode.label || snapshot?.agent_name || 'Agent',
-                status: (agentNode.status || '').toLowerCase() || 'pending',
+                status: isTerminal ? overallStatus : nodeStatus,
                 sub: 'orchestrator',
               });
             }
             const seenInExpected = new Set<string>();
             if (Array.isArray(expectedTools)) {
               for (const t of expectedTools) {
-                if (t.id === 'agent' || /^wingman-/.test(t.id)) continue;  // skip the agent slug, only chain tool steps
+                if (t.id === 'agent' || /^wingman-/.test(t.id)) continue;
                 seenInExpected.add(t.id);
+                let st = callStatus.get(t.id) || 'pending';
+                if (isTerminal && st === 'running') st = overallStatus;
+                if (isTerminal && st === 'pending' && overallStatus !== 'completed') st = overallStatus;
                 rows.push({
                   id: t.id,
                   label: t.label,
-                  status: callStatus.get(t.id) || 'pending',
+                  status: st,
                   sub: t.hint,
                 });
               }

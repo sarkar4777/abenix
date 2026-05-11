@@ -4,14 +4,18 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Activity, Inbox, Ship, Beaker, Network, Sparkles,
+  LineChart, Crosshair, ShieldCheck,
 } from 'lucide-react';
 
 const NAV = [
   { href: '/workbench', label: 'Arbitrage Workbench', icon: Activity },
+  { href: '/mispricing', label: 'Mispricing Lens', icon: Crosshair },
+  { href: '/scenarios', label: 'Forward Scenarios', icon: LineChart },
   { href: '/inbox', label: 'Broker Inbox', icon: Inbox },
   { href: '/ops', label: 'Operations Watch', icon: Ship },
   { href: '/strategy', label: 'Strategy Lab', icon: Beaker },
   { href: '/graph', label: 'Knowledge Graph', icon: Network },
+  { href: '/approvals', label: 'Approvals', icon: ShieldCheck },
 ];
 
 export default function Sidebar() {

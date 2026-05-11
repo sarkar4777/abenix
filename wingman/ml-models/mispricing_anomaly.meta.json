@@ -1,0 +1,70 @@
+{
+  "name": "wingman-mispricing-anomaly",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Isolation Forest over the 9-feature corridor-market vector (z-scored spots, freight, inventory, exports, FX, weather, season, trailing-4w-mean spread). Trained on a clean regime; flags regime breaks that the Bayesian fair-value regression would slowly drift to absorb. Returns +1 inlier, -1 anomaly, plus a continuous score_samples in [-1, 0].",
+  "input_schema": {
+    "features": [
+      "origin_spot_z",
+      "dest_spot_z",
+      "freight_per_mt_z",
+      "inventory_z",
+      "exports_4w_pct",
+      "fx_eur_usd_z",
+      "weather_dest_gust_z",
+      "season_q",
+      "spread_4w_mean_z"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [
+      0.2,
+      0.4,
+      -0.1,
+      -0.3,
+      0.12,
+      0.15,
+      0.2,
+      2,
+      0.1
+    ]
+  },
+  "output_schema": {
+    "type": "anomaly_detection",
+    "classes": [
+      "inlier",
+      "anomaly"
+    ],
+    "returns": "predicted label (+1 / -1) and decision_function score"
+  },
+  "tags": [
+    "wingman",
+    "trading",
+    "mispricing",
+    "anomaly",
+    "isolation-forest"
+  ],
+  "training": {
+    "samples": 900,
+    "algorithm": "Isolation Forest (n_estimators=200)",
+    "synthetic": true,
+    "holdout": {
+      "false_positive_rate_on_clean": 0.055,
+      "true_positive_rate_on_shocks": 0.9375
+    },
+    "shock_scenarios": [
+      "usgc_export_shutdown",
+      "nwe_cold_snap",
+      "saudi_cp_shock"
+    ]
+  }
+}
