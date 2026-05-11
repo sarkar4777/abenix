@@ -6,6 +6,8 @@ import { Inbox, ShieldAlert, Loader2, CheckCircle2, Brain } from 'lucide-react';
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
+import ExplainerPanel from '../components/ExplainerPanel';
+import { INBOX_EXPLAINER } from '../components/explainer-specs';
 
 const INBOX_PIPELINE = [
   { id: 'wingman-broker-classifier', label: 'Classifier', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'sklearn TF-IDF + LR via ml_model tool' },
@@ -141,6 +143,8 @@ export default function InboxPage() {
           </div>
         }
       />
+
+      <ExplainerPanel spec={INBOX_EXPLAINER} />
 
       <PipelineStrip
         title="Pipeline · 2 agents · ML model · HITL gate"

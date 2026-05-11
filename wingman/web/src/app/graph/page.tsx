@@ -6,6 +6,8 @@ import { Network, Loader2, Search, History, Pin, PinOff, Trash2, Copy } from 'lu
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
+import ExplainerPanel from '../components/ExplainerPanel';
+import { GRAPH_EXPLAINER } from '../components/explainer-specs';
 
 const GRAPH_PIPELINE = [
   { id: 'wingman-graph-query', label: 'Graph Query', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'plain English → typed graph traversal' },
@@ -158,6 +160,8 @@ export default function GraphPage() {
           </div>
         }
       />
+
+      <ExplainerPanel spec={GRAPH_EXPLAINER} />
 
       <PipelineStrip
         title="Pipeline · 1 agent · typed Atlas search · Neo4j backing"

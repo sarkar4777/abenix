@@ -11,6 +11,8 @@ import {
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
+import ExplainerPanel from '../components/ExplainerPanel';
+import { STRATEGY_EXPLAINER } from '../components/explainer-specs';
 
 const STRATEGY_PIPELINE = [
   { id: 'wingman-strategy-encoder', label: 'Encoder', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'plain-English → typed rule' },
@@ -171,6 +173,8 @@ export default function StrategyPage() {
           </div>
         }
       />
+
+      <ExplainerPanel spec={STRATEGY_EXPLAINER} />
 
       <PipelineStrip
         title="Pipeline · 3 agents · Go code asset · HITL gate"

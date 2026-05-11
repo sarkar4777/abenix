@@ -11,6 +11,8 @@ import {
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
+import ExplainerPanel from '../components/ExplainerPanel';
+import { SCENARIOS_EXPLAINER } from '../components/explainer-specs';
 
 const SCENARIO_PIPELINE = [
   { id: 'wingman-scenario-forecaster', label: 'Forecaster', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'Sonnet 4.5 + Bayesian prior' },
@@ -206,6 +208,8 @@ export default function ScenariosPage() {
           </div>
         }
       />
+
+      <ExplainerPanel spec={SCENARIOS_EXPLAINER} />
 
       <PipelineStrip
         title="Pipeline · 1 agent · Bayesian prior · 5 real tools"

@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ShieldAlert, CheckCircle2, XCircle, Loader2, Clock } from 'lucide-react';
 import HeroBar from '../components/HeroBar';
+import ExplainerPanel from '../components/ExplainerPanel';
+import { APPROVALS_EXPLAINER } from '../components/explainer-specs';
 
 interface Approval {
   id: string;
@@ -69,6 +71,8 @@ export default function ApprovalsPage() {
           </div>
         }
       />
+
+      <ExplainerPanel spec={APPROVALS_EXPLAINER} />
 
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {STATUS_FILTERS.map((f) => (

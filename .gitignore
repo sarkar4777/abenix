@@ -118,6 +118,10 @@ infra/helm/*/tmpcharts-*/
 # TypeScript incremental build cache (regenerated on every build)
 *.tsbuildinfo
 
+# Out-of-repo client explainer artefacts (lives under ~/Documents/wingman-explainer/)
+Wingman_Mispricing_Lens_For_Everyone.pdf
+build_mispricing_explainer_pdf.py
+
 # Big demo fixtures — 125 MB of public PDFs (NIST / Stanford AI Index / etc.).
 # Re-downloaded on demand by test_big_kb_ontology_demo.spec.ts; not worth
 # committing to the repo.

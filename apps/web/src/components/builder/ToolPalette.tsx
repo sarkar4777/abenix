@@ -58,6 +58,7 @@ const BUILT_IN_TOOLS: ToolItem[] = [
   { id: 'news_feed', name: 'News Feed', description: 'Search recent news articles (NewsAPI/MediaStack)', icon: Newspaper, source: 'builtin' },
   { id: 'academic_search', name: 'Academic Search', description: 'Search academic papers (Semantic Scholar/arXiv)', icon: GraduationCap, source: 'builtin' },
   { id: 'yahoo_finance', name: 'Yahoo Finance', description: 'Stock prices, company financials, economic indicators', icon: TrendingUp, source: 'builtin' },
+  { id: 'options_data', name: 'Options Market Data', description: 'Implied volatility, 25-delta risk reversal (skew), put/call OI ratio, term structure, regime label', icon: TrendingUp, source: 'builtin' },
   { id: 'entso_e', name: 'ENTSO-E Power', description: 'European electricity prices and generation data', icon: TrendingUp, source: 'builtin' },
   { id: 'ember_climate', name: 'Ember Climate', description: 'UK power prices, EU carbon prices', icon: TrendingUp, source: 'builtin' },
   { id: 'ecb_rates', name: 'ECB Rates', description: 'FX rates, inflation, interest rates', icon: TrendingUp, source: 'builtin' },

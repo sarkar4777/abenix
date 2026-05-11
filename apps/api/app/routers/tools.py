@@ -576,6 +576,32 @@ TOOL_CATALOG = [
         "category": "finance",
     },
     {
+        "id": "options_data",
+        "name": "Options Market Data",
+        "description": "Listed options-market signals: at-the-money implied volatility, 25-delta risk reversal (call IV minus put IV — captures skew), put/call open-interest ratio, term-structure slope, and a four-bucket regime label (calm / nervous / skewed-up / skewed-down). Works on any ticker with a Yahoo option chain — futures (CL=F, NG=F, GC=F), indices (^SPX, ^VIX), equities (AAPL, MSFT), FX (EURUSD=X). Three actions: snapshot, term_structure, regime.",
+        "category": "finance",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["snapshot", "term_structure", "regime"],
+                    "description": "snapshot: ATM IV + skew + OI for one expiry. term_structure: front three expiries' IV + slope. regime: calm/nervous/skewed-up/skewed-down label.",
+                },
+                "symbol": {
+                    "type": "string",
+                    "description": "Yahoo ticker. Futures with =F (CL=F crude, NG=F natural gas), indices with ^ (^SPX, ^VIX), equities plain (AAPL), FX with =X (EURUSD=X).",
+                },
+                "expiry_index": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "For action=snapshot only. 0 = front month.",
+                },
+            },
+            "required": ["action", "symbol"],
+        },
+    },
+    {
         "id": "eia_open_data",
         "name": "EIA Open Data",
         "description": "US Energy Information Administration time series — Mont Belvieu propane, WTI/Brent spot, Henry Hub gas, US LPG exports. Real, regulator-published, every value cites a series id.",

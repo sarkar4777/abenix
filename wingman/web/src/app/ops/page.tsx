@@ -6,6 +6,8 @@ import { Ship, AlertTriangle, Wifi, Loader2, RefreshCw, Cloud } from 'lucide-rea
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
+import ExplainerPanel from '../components/ExplainerPanel';
+import { OPS_EXPLAINER } from '../components/explainer-specs';
 
 const OPS_PIPELINE = [
   { id: 'wingman-ops-monitor', label: 'Ops Monitor', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'wingman-ops-monitor agent' },
@@ -72,6 +74,8 @@ export default function OpsPage() {
           </div>
         }
       />
+
+      <ExplainerPanel spec={OPS_EXPLAINER} />
 
       <PipelineStrip
         title="Pipeline · 1 agent · live AIS · port weather"

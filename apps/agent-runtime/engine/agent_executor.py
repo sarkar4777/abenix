@@ -924,6 +924,7 @@ def _ensure_tool_classes() -> None:
     from engine.tools.news_feed import NewsFeedTool
     from engine.tools.academic_search import AcademicSearchTool
     from engine.tools.yahoo_finance import YahooFinanceTool
+    from engine.tools.options_data import OptionsDataTool
     from engine.tools.entso_e_tool import EntsoETool
     from engine.tools.ember_tool import EmberClimateTool
     from engine.tools.ecb_rates_tool import ECBRatesTool
@@ -1006,6 +1007,7 @@ def _ensure_tool_classes() -> None:
             "news_feed": NewsFeedTool,
             "academic_search": AcademicSearchTool,
             "yahoo_finance": YahooFinanceTool,
+            "options_data": OptionsDataTool,
             "entso_e": EntsoETool,
             "ember_climate": EmberClimateTool,
             "ecb_rates": ECBRatesTool,

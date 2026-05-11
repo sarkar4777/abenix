@@ -13,6 +13,8 @@ import {
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
+import ExplainerPanel from '../components/ExplainerPanel';
+import { MISPRICING_EXPLAINER } from '../components/explainer-specs';
 
 const MISPRICING_PIPELINE = [
   { id: 'wingman-mispricing-extractor', label: 'Mispricing Lens', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'Haiku 4.5 + 2 ML models' },
@@ -20,7 +22,8 @@ const MISPRICING_PIPELINE = [
   { id: 'yahoo_finance', label: 'FX', icon: 'db' as const, hint: 'EUR/USD' },
   { id: 'bunker_fuel', label: 'Freight', icon: 'tool' as const, hint: 'bunker-derived $/MT' },
   { id: 'open_meteo', label: 'Weather', icon: 'tool' as const, hint: 'destination-hub gust' },
-  { id: 'ml_model', label: 'Bayesian + IsoForest', icon: 'cpu' as const, hint: 'fair-value + anomaly' },
+  { id: 'options_data', label: 'Options IV+skew', icon: 'tool' as const, hint: 'Brent + HH option chains' },
+  { id: 'ml_model', label: 'Bayesian + IsoForest', icon: 'cpu' as const, hint: '12-feat fair-value + 9-feat anomaly' },
   { id: 'tavily_search', label: 'News × 3', icon: 'tool' as const, hint: 'supply / demand / geo' },
   { id: 'financial_calculator', label: 'Residual math', icon: 'cpu' as const, hint: 'sigma + trade math' },
 ];
@@ -77,6 +80,15 @@ interface Scan {
   data_quality?: string;
   sources?: string[];
   method?: string;
+  market_regime?: string;
+  market_regime_note?: string;
+  options_signals?: {
+    crude_atm_iv?: number;
+    crude_risk_reversal_25d?: number;
+    nat_gas_atm_iv?: number;
+    crude_put_call_oi_ratio?: number;
+    regime_label?: string;
+  };
 }
 
 interface ScanResponse {
@@ -102,6 +114,18 @@ const FEATURE_LABELS: Record<string, string> = {
   weather_dest_gust_z: 'Dest gust z',
   season_q: 'Season Q',
   spread_4w_mean_z: 'Spread 4w z',
+  crude_iv_atm_z: 'Crude ATM IV z',
+  crude_risk_reversal: 'Crude 25Δ skew',
+  nat_gas_iv_atm_z: 'NatGas ATM IV z',
+  oil_put_call_ratio: 'Crude P/C OI',
+};
+
+const REGIME_LABELS: Record<string, { label: string; tone: string; dot: string }> = {
+  calm:         { label: 'CALM',         tone: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200', dot: '#34d399' },
+  nervous:      { label: 'NERVOUS',      tone: 'border-amber-500/40 bg-amber-500/10 text-amber-200',     dot: '#fbbf24' },
+  skewed_up:    { label: 'SKEWED-UP',    tone: 'border-rose-500/40 bg-rose-500/10 text-rose-200',         dot: '#f87171' },
+  skewed_down:  { label: 'SKEWED-DOWN',  tone: 'border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200', dot: '#e879f9' },
+  unknown:      { label: 'UNKNOWN',      tone: 'border-slate-700/40 bg-slate-800/20 text-slate-300',      dot: '#94a3b8' },
 };
 
 export default function MispricingPage() {
@@ -213,18 +237,20 @@ export default function MispricingPage() {
       <HeroBar
         eyebrow="MISPRICING LENS"
         title="The propane mispricing holy grail"
-        subtitle="A Bayesian Ridge fair-value model + Isolation Forest regime detector score every active LPG corridor. Residuals beyond 1σ are stretched, beyond 2σ are dislocated and route through the desk's HITL gate before any execution."
+        subtitle="A Bayesian Ridge fair-value model (now options-aware, 12 features) + Isolation Forest regime detector score every active LPG corridor. Residuals beyond 1σ are stretched, beyond 2σ are dislocated and route through the desk's HITL gate before any execution."
         rightSlot={
           <div className="flex flex-col items-end gap-1 text-[10px]">
             <span className="text-slate-500 uppercase tracking-wider">method</span>
-            <span className="text-slate-300 font-mono">BayesianRidge · IsolationForest · LLM</span>
+            <span className="text-slate-300 font-mono">BayesianRidge(12) · IsoForest · Options · LLM</span>
           </div>
         }
       />
 
+      <ExplainerPanel spec={MISPRICING_EXPLAINER} />
+
       <PipelineStrip
-        title="Pipeline · 1 agent · 2 ML models · 6 real tools"
-        subtitle="Bayesian Ridge fair-value + Isolation Forest anomaly fire in parallel with 3 news searches; LLM drafts a residual thesis and trade card."
+        title="Pipeline · 1 agent · 2 ML models · 7 real tools (incl. options_data)"
+        subtitle="Bayesian Ridge fair-value (12 features, options-aware) + Isolation Forest anomaly fire in parallel with 3 news searches and the options-market regime classifier; LLM drafts a residual thesis and trade card."
         nodes={MISPRICING_PIPELINE}
         executionId={activeExecution}
       />
@@ -288,6 +314,7 @@ export default function MispricingPage() {
             <ResidualGauge scan={scan} />
           </div>
           <FeatureGrid scan={scan} />
+          <OptionsSignalsPanel scan={scan} />
           {scan.thesis && (
             <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4">
               <div className="flex items-center gap-2 mb-2 text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">
@@ -366,6 +393,7 @@ function VerdictStrip({ scan }: { scan: Scan }) {
         sub={`score ${scan.anomaly_score != null ? scan.anomaly_score.toFixed(2) : '—'}`}
         valueClass={scan.anomaly_flag ? 'text-rose-200' : 'text-emerald-200'}
       />
+      <RegimeChip regime={scan.market_regime} />
     </div>
   );
 }
@@ -492,6 +520,63 @@ function ResidualGauge({ scan }: { scan: Scan }) {
         </div>
         size_kt capped at 25 unless |σ| ≥ 3.
       </div>
+    </div>
+  );
+}
+
+function RegimeChip({ regime }: { regime?: string }) {
+  const key = (regime || 'unknown').toLowerCase();
+  const tone = REGIME_LABELS[key] || REGIME_LABELS.unknown;
+  return (
+    <div data-testid="market-regime-chip" className="flex flex-col items-start gap-1">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">market regime</div>
+      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${tone.tone} text-[11px] font-mono font-bold`}>
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: tone.dot }} />
+        {tone.label}
+      </div>
+      <div className="text-[9px] text-slate-500 font-mono">options-implied</div>
+    </div>
+  );
+}
+
+function OptionsSignalsPanel({ scan }: { scan: Scan }) {
+  const o = scan.options_signals;
+  if (!o) return null;
+  const tone = REGIME_LABELS[(scan.market_regime || 'unknown').toLowerCase()] || REGIME_LABELS.unknown;
+  return (
+    <div data-testid="options-signals-panel" className={`mb-4 rounded-xl border ${tone.tone.split(' ').slice(0, 2).join(' ')} p-4`}>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <Activity className="w-4 h-4 text-cyan-300" />
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-cyan-300 font-semibold">Options market lens</div>
+            <div className="text-[11px] text-slate-400 font-mono">Brent + Henry Hub option chains · 25Δ skew + ATM IV + put/call OI</div>
+          </div>
+        </div>
+        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${tone.tone} text-[10px] font-mono font-bold`}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: tone.dot }} />
+          regime: {tone.label}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] mb-3">
+        <KVOption label="Crude ATM IV" value={o.crude_atm_iv != null ? `${(o.crude_atm_iv * 100).toFixed(1)}%` : '—'} hint="Brent 1m at-the-money implied vol — market nervousness" />
+        <KVOption label="Crude 25Δ skew" value={o.crude_risk_reversal_25d != null ? `${o.crude_risk_reversal_25d >= 0 ? '+' : ''}${(o.crude_risk_reversal_25d * 100).toFixed(2)}pp` : '—'} hint="Call IV minus put IV — positive = supply fear, negative = demand fear" />
+        <KVOption label="HH ATM IV" value={o.nat_gas_atm_iv != null ? `${(o.nat_gas_atm_iv * 100).toFixed(1)}%` : '—'} hint="Henry Hub 1m ATM IV — propane is an NGL by-product" />
+        <KVOption label="Crude P/C OI" value={o.crude_put_call_oi_ratio != null ? o.crude_put_call_oi_ratio.toFixed(2) : '—'} hint="Front-month crude put/call open-interest ratio — extreme readings predict reversion" />
+      </div>
+      {scan.market_regime_note && (
+        <p className="text-[11px] text-slate-300 leading-relaxed italic">{scan.market_regime_note}</p>
+      )}
+    </div>
+  );
+}
+
+function KVOption({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="px-3 py-2 rounded bg-slate-950/40 border border-slate-800" title={hint}>
+      <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="font-mono font-semibold text-white">{value}</div>
+      <div className="text-[9px] text-slate-500 mt-0.5 leading-tight line-clamp-2">{hint}</div>
     </div>
   );
 }

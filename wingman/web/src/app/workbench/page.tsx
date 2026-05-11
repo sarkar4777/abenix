@@ -9,6 +9,8 @@ import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'rec
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
+import ExplainerPanel from '../components/ExplainerPanel';
+import { WORKBENCH_EXPLAINER } from '../components/explainer-specs';
 
 const ARB_PIPELINE = [
   { id: 'wingman-arb-analyzer', label: 'Arb Analyzer', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'wingman-arb-analyzer agent' },
@@ -175,6 +177,8 @@ export default function WorkbenchPage() {
         subtitle="A trader's seat: live propane, freight, weather and news composed into a 12-month forward net-arb curve with conviction and risk band."
         rightSlot={<DataHonestyBadge />}
       />
+
+      <ExplainerPanel spec={WORKBENCH_EXPLAINER} />
 
       <PipelineStrip
         title="Pipeline · 1 agent · 6 real tools"
