@@ -161,6 +161,9 @@ async def warm(
         async with sem:
             try:
                 payload = await run(k)
+                if not _payload_is_load_bearing(payload):
+                    logger.info("cache.warm %s/%s skipped (empty/junk payload)", page, k)
+                    return
                 write(page, k, payload)
                 refreshed += 1
                 logger.info("cache.warm %s/%s refreshed", page, k)
@@ -169,3 +172,24 @@ async def warm(
 
     await asyncio.gather(*(_one(k) for k in stale))
     return refreshed
+
+
+_LOAD_BEARING_KEYS = {
+    "verdict", "observed_spread_usd_mt", "fair_value_spread_usd_mt", "residual_usd_mt",
+    "base_curve", "expected_curve", "scenarios", "bayesian_prior",
+    "spread_per_mt", "narrative", "drivers", "forward_curve",
+    "vessels", "alerts", "weather",
+    "indicators",
+}
+
+
+def _payload_is_load_bearing(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    meta_only = {"execution_id", "cost_usd", "duration_ms", "agent_slug", "agent_id", "status"}
+    real_keys = [k for k in payload.keys() if k not in meta_only]
+    if not real_keys:
+        return False
+    if _LOAD_BEARING_KEYS.intersection(payload.keys()):
+        return True
+    return len(real_keys) >= 3

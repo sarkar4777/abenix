@@ -392,15 +392,17 @@ async def analyze_result(execution_id: str) -> dict[str, Any]:
 
     corridor_id = _ANALYZE_INDEX.get(execution_id)
     if status == "completed" and parsed and corridor_id:
-        try:
-            result_cache.write("analyze", corridor_id, {
-                **parsed,
-                "execution_id": execution_id,
-                "cost_usd": row.get("cost"),
-                "duration_ms": row.get("duration_ms"),
-            })
-        except Exception as e:
-            logger.warning("cache write analyze/%s failed: %s", corridor_id, e)
+        candidate = {
+            **parsed,
+            "execution_id": execution_id,
+            "cost_usd": row.get("cost"),
+            "duration_ms": row.get("duration_ms"),
+        }
+        if result_cache._payload_is_load_bearing(candidate):
+            try:
+                result_cache.write("analyze", corridor_id, candidate)
+            except Exception as e:
+                logger.warning("cache write analyze/%s failed: %s", corridor_id, e)
 
     return {
         "data": {
@@ -774,15 +776,17 @@ async def ops_snapshot() -> dict[str, Any]:
             except Exception:
                 parsed = {"narrative": raw[:1500]}
     if parsed:
-        try:
-            result_cache.write("ops", "snapshot", {
-                **parsed,
-                "execution_id": result.execution_id,
-                "cost_usd": result.cost,
-                "duration_ms": result.duration_ms,
-            })
-        except Exception as e:
-            logger.warning("cache write ops/snapshot failed: %s", e)
+        candidate = {
+            **parsed,
+            "execution_id": result.execution_id,
+            "cost_usd": result.cost,
+            "duration_ms": result.duration_ms,
+        }
+        if result_cache._payload_is_load_bearing(candidate):
+            try:
+                result_cache.write("ops", "snapshot", candidate)
+            except Exception as e:
+                logger.warning("cache write ops/snapshot failed: %s", e)
     return {
         "data": {
             "execution_id": result.execution_id,
@@ -968,15 +972,17 @@ async def scenario_result(execution_id: str) -> dict[str, Any]:
         parsed = _parse_agent_json(raw)
     corridor_id = _SCENARIO_INDEX.get(execution_id)
     if status == "completed" and parsed and corridor_id:
-        try:
-            result_cache.write("scenarios", corridor_id, {
-                **parsed,
-                "execution_id": execution_id,
-                "cost_usd": row.get("cost"),
-                "duration_ms": row.get("duration_ms"),
-            })
-        except Exception as e:
-            logger.warning("cache write scenarios/%s failed: %s", corridor_id, e)
+        candidate = {
+            **parsed,
+            "execution_id": execution_id,
+            "cost_usd": row.get("cost"),
+            "duration_ms": row.get("duration_ms"),
+        }
+        if result_cache._payload_is_load_bearing(candidate):
+            try:
+                result_cache.write("scenarios", corridor_id, candidate)
+            except Exception as e:
+                logger.warning("cache write scenarios/%s failed: %s", corridor_id, e)
     return {
         "data": {
             "corridor_id": corridor_id,
@@ -1044,15 +1050,17 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
         parsed = _parse_agent_json(raw)
     corridor_id = _MISPRICING_INDEX.get(execution_id)
     if status == "completed" and parsed and corridor_id:
-        try:
-            result_cache.write("mispricing", corridor_id, {
-                **parsed,
-                "execution_id": execution_id,
-                "cost_usd": row.get("cost"),
-                "duration_ms": row.get("duration_ms"),
-            })
-        except Exception as e:
-            logger.warning("cache write mispricing/%s failed: %s", corridor_id, e)
+        candidate = {
+            **parsed,
+            "execution_id": execution_id,
+            "cost_usd": row.get("cost"),
+            "duration_ms": row.get("duration_ms"),
+        }
+        if result_cache._payload_is_load_bearing(candidate):
+            try:
+                result_cache.write("mispricing", corridor_id, candidate)
+            except Exception as e:
+                logger.warning("cache write mispricing/%s failed: %s", corridor_id, e)
     return {
         "data": {
             "corridor_id": corridor_id,
