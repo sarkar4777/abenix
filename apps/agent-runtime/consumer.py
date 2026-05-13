@@ -80,6 +80,7 @@ async def _mark_done(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     cost: float | None = None,
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import update
@@ -109,6 +110,8 @@ async def _mark_done(
         values["output_tokens"] = output_tokens
     if cost is not None and cost > 0:
         values["cost"] = round(float(cost), 6)
+    if tool_calls is not None:
+        values["tool_calls"] = tool_calls
     # On failure, classify the error_message into a stable failure_code so
     # /alerts can group it and the Surgeon has something to act on.
     if target_status == ExecutionStatus.FAILED and error:
@@ -448,6 +451,7 @@ async def _run_one(payload: dict) -> None:
                 input_tokens=getattr(result, "input_tokens", None),
                 output_tokens=getattr(result, "output_tokens", None),
                 cost=getattr(result, "cost", None),
+                tool_calls=_agg_tool_calls or None,
             )
             _done_evt: dict[str, Any] = {
                 "event": "done",

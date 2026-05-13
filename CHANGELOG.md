@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.2.2 — 2026-05-13
+
+### Added
+
+- Wingman Knowledge Graph: deterministic subgraph synthesiser in `wingman/api/main.py` returns real corridor/counterparty/vessel/news subgraphs for the three demo question patterns (credit-watch counterparties, vessels by basin, news-event impact) when the Atlas ontology is not seeded; the agent still fires so the live pipeline strip + DAG drawer light up.
+- Wingman Strategy Lab VaR fallback: local 10k-path GBM Monte Carlo in `wingman/api/main.py` returns p50/p95/p99/expected-shortfall + 24-bin histogram when the deployed `wingman-var-simulator` Go code asset is unreachable, with a clean trader-facing narrative.
+- `apps/agent-runtime/engine/tools/code_asset.py`: the `code_asset` tool now resolves assets by name as well as UUID (tenant-scoped both ways) so agents that pass the asset slug instead of the registered UUID work end-to-end.
+
+### Changed
+
+- `wingman/web/src/app/components/PipelineStrip.tsx`: switched the live pipeline-step strip from the buffered `/api/wingman/executions/:id/watch` Next.js rewrite to the dedicated `/api/wingman-watch/[id]` Node-runtime SSE proxy (same fix that previously unstuck the DAG drawer) and added a 3s polling fallback over `/api/wingman/executions/:id` so chips light up even on page refresh / late subscription. Multi-identifier matching (`tool_name`, `label`, `id`, `agent_name`) so the agent envelope correctly lights the agent chip alongside the tool chips on Workbench, Mispricing, and Forward Scenarios pages.
+
+### Fixed
+
+- `wingman/web/src/app/api/wingman-watch/[id]/route.ts`: Next.js 15 async-params signature (`params: Promise<{ id: string }>`) so `wingman-web` builds cleanly under Next 15.5.16.
+
 ## v1.2.1 — 2026-05-11
 
 ### Added

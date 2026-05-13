@@ -4,7 +4,7 @@ import Sidebar from './components/Sidebar';
 
 export const metadata = {
   title: 'Wingman — Trading Workbench',
-  description: 'Energy commodities trading workspace powered by Abenix.',
+  description: 'Energy commodities trading workspace powered by Bodhi.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

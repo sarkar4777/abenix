@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Activity, Inbox, Ship, Beaker, Network, Sparkles,
-  LineChart, Crosshair, ShieldCheck,
+  LineChart, Crosshair, ShieldCheck, Home, Anchor,
 } from 'lucide-react';
 
 const NAV = [
+  { href: '/home', label: 'Home', icon: Home },
   { href: '/workbench', label: 'Arbitrage Workbench', icon: Activity },
   { href: '/mispricing', label: 'Mispricing Lens', icon: Crosshair },
+  { href: '/lab', label: 'Market & Freight Lab', icon: Anchor },
   { href: '/scenarios', label: 'Forward Scenarios', icon: LineChart },
   { href: '/inbox', label: 'Broker Inbox', icon: Inbox },
   { href: '/ops', label: 'Operations Watch', icon: Ship },
@@ -55,7 +57,7 @@ export default function Sidebar() {
       <div className="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500">
         <div className="text-slate-300">Demo Trader</div>
         <div className="text-slate-500 truncate">demo-trader@wingman.local</div>
-        <div className="mt-2 text-[10px] text-slate-600">Powered by Abenix · v0.1</div>
+        <div className="mt-2 text-[10px] text-slate-600">Powered by Bodhi · v0.1</div>
       </div>
     </aside>
   );

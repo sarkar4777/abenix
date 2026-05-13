@@ -46,16 +46,16 @@ export const MISPRICING_EXPLAINER: ExplainerSpec = {
     'with cited news, and route the trade card through the /approvals HITL gate.',
   tools: [
     'current_time', 'eia_open_data', 'yahoo_finance', 'bunker_fuel',
-    'open_meteo', 'options_data', 'tavily_search', 'ml_model',
-    'financial_calculator',
+    'open_meteo', 'options_data', 'freight_baltic_blpg', 'freight_worldscale',
+    'vessel_specs', 'tavily_search', 'ml_model', 'financial_calculator',
   ],
   models: [
     {
-      name: 'wingman-mispricing-fairvalue v1.1.0',
-      role: 'BayesianRidge regression on 12 features (8 base + 4 options). Returns posterior mean + std.',
+      name: 'wingman-mispricing-fairvalue',
+      role: 'BayesianRidge regression on 15 features (8 base + 4 options + 3 freight-quality). Returns posterior mean + std.',
     },
     {
-      name: 'wingman-mispricing-anomaly v1.0.0',
+      name: 'wingman-mispricing-anomaly',
       role: 'IsolationForest over 9 features. Flags regime breaks the regression can’t absorb.',
     },
     {
@@ -116,7 +116,7 @@ export const SCENARIOS_EXPLAINER: ExplainerSpec = {
   ],
   models: [
     {
-      name: 'wingman-scenario-prior v1.0.0',
+      name: 'wingman-scenario-prior',
       role: 'GaussianNB classifier — prior probabilities over five regimes. 90.8% holdout.',
     },
     {
@@ -146,7 +146,7 @@ export const INBOX_EXPLAINER: ExplainerSpec = {
     'structured fields (counterparty, product, size, price, delivery window).',
   tools: ['ml_model', 'text_analyzer', 'date_calculator'],
   models: [
-    { name: 'wingman-broker-classifier v1.0.0', role: 'sklearn TF-IDF text classifier' },
+    { name: 'wingman-broker-classifier', role: 'sklearn TF-IDF text classifier' },
     { name: 'Haiku 4.5', role: 'agent LLM — structured-offer extractor' },
   ],
   inputs: ['Raw broker email text'],

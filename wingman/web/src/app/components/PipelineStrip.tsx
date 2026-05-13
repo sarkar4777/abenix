@@ -3,17 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, ChevronRight, Sparkles, Cpu, Database, Wrench, ShieldCheck, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
-/**
- * Always-visible pipeline strip — every Wingman page renders this at the top so
- * the trader can see the agents/tools that power the surface, with live state
- * pulsing through them while an execution runs.
- *
- * When `executionId` is set the component subscribes to the platform's
- * /api/wingman/executions/{id}/watch SSE stream and lights nodes up as
- * tool_call / tool_result / node_complete / done events arrive. Otherwise
- * it shows the static topology with a quiet ambient pulse.
- */
-
 export interface PipelineNode {
   id: string;            // matches a tool_name or agent slug from the runtime
   label: string;
@@ -54,10 +43,85 @@ export default function PipelineStrip({
     setMeta(null);
     if (!executionId) return;
     let cancelled = false;
+    let terminal = false;
     const ctrl = new AbortController();
+
+    function applyNodeStatus(id: string, s: NodeStatus) {
+      if (!id) return;
+      setStatus((p) => {
+        const prev = p[id];
+        if ((prev === 'done' || prev === 'failed') && s === 'running') return p;
+        return { ...p, [id]: s };
+      });
+    }
+
+    function handleEvent(t: string, d: any) {
+      if (t === 'snapshot') {
+        const totalIn = d?.tokens?.in ?? 0;
+        const totalOut = d?.tokens?.out ?? 0;
+        setMeta((prev) => ({
+          ...(prev || {}),
+          status: d?.status ?? prev?.status,
+          cost: d?.cost_so_far ?? prev?.cost,
+          tokens: (totalIn + totalOut) || prev?.tokens,
+          agentName: d?.agent_name ?? prev?.agentName,
+        }));
+        const overall = String(d?.status || '').toLowerCase();
+        if (overall === 'completed' || overall === 'failed' || overall === 'error' || overall === 'cancelled') {
+          terminal = true;
+        }
+        const ids = (n: any) => [n.tool_name, n.label, n.id, n.name]
+          .filter((x) => typeof x === 'string' && x.length > 0)
+          .map((x: string) => x.toLowerCase());
+        const visit = (n: any) => {
+          const s = (n.status || '').toLowerCase();
+          const next: NodeStatus | null =
+            s === 'completed' || s === 'success' ? 'done' :
+            s === 'running' ? 'running' :
+            s === 'failed' || s === 'error' ? 'failed' : null;
+          if (next) ids(n).forEach((id) => applyNodeStatus(id, next));
+          if (Array.isArray(n.tool_calls)) {
+            for (const c of n.tool_calls) {
+              const cs = (c.status || (c.completed_at ? 'completed' : c.error ? 'failed' : 'running')).toLowerCase();
+              const cn: NodeStatus = (cs === 'completed' || cs === 'success') ? 'done'
+                : (cs === 'failed' || cs === 'error') ? 'failed' : 'running';
+              ids(c).forEach((id) => applyNodeStatus(id, cn));
+            }
+          }
+        };
+        if (Array.isArray(d?.nodes)) d.nodes.forEach(visit);
+        if (d?.agent_name && typeof d.agent_name === 'string') {
+          const aid = d.agent_name.toLowerCase();
+          const aStatus = String(d.status || '').toLowerCase();
+          const aNext: NodeStatus | null =
+            aStatus === 'completed' || aStatus === 'success' ? 'done' :
+            aStatus === 'failed' || aStatus === 'error' || aStatus === 'cancelled' ? 'failed' :
+            aStatus === 'running' ? 'running' : null;
+          if (aNext) applyNodeStatus(aid, aNext);
+        }
+        return;
+      }
+      const id = (d?.tool_name || d?.name || '').toLowerCase();
+      if (t === 'tool_call') applyNodeStatus(id, 'running');
+      if (t === 'tool_result' || t === 'node_complete') {
+        applyNodeStatus(id, d?.error ? 'failed' : 'done');
+      }
+      if (t === 'error') applyNodeStatus(id, 'failed');
+      if (t === 'done') {
+        terminal = true;
+        setMeta((m) => ({
+          ...(m || {}),
+          status: 'completed',
+          durationMs: d?.duration_ms,
+          cost: d?.cost ?? m?.cost,
+          tokens: ((d?.input_tokens ?? 0) + (d?.output_tokens ?? 0)) || m?.tokens,
+        }));
+      }
+    }
+
     (async () => {
       try {
-        const res = await fetch(`/api/wingman/executions/${executionId}/watch`, {
+        const res = await fetch(`/api/wingman-watch/${executionId}`, {
           headers: { Accept: 'text/event-stream' },
           signal: ctrl.signal,
         });
@@ -87,45 +151,38 @@ export default function PipelineStrip({
       } catch { /* user closed or stream ended */ }
     })();
 
-    function handleEvent(t: string, d: any) {
-      if (t === 'snapshot') {
-        const totalIn = d?.tokens?.in ?? 0;
-        const totalOut = d?.tokens?.out ?? 0;
-        setMeta({
-          status: d?.status,
-          cost: d?.cost_so_far,
-          tokens: totalIn + totalOut,
-          agentName: d?.agent_name,
+    const refresh = async () => {
+      if (cancelled || terminal) return;
+      try {
+        const r = await fetch(`/api/wingman/executions/${executionId}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        const row = j?.data;
+        if (!row) return;
+        const status = String(row.status || '').toLowerCase();
+        const tokensIn = Number(row.input_tokens || 0);
+        const tokensOut = Number(row.output_tokens || 0);
+        const rowToolCalls = Array.isArray(row.tool_calls) ? row.tool_calls : [];
+        const rowNodeResults = Array.isArray(row.node_results) ? row.node_results : [];
+        handleEvent('snapshot', {
+          status,
+          cost_so_far: row.cost,
+          tokens: { in: tokensIn, out: tokensOut },
+          agent_name: row.agent_name || row.agent_id,
+          nodes: rowToolCalls.length > 0
+            ? [{ id: 'agent', tool_name: 'agent', label: row.agent_name || 'Agent', status, tool_calls: rowToolCalls }]
+            : rowNodeResults,
         });
-        if (Array.isArray(d?.nodes)) {
-          const next: Record<string, NodeStatus> = {};
-          d.nodes.forEach((n: any) => {
-            const id = (n.tool_name || n.label || n.id || '').toLowerCase();
-            const s = (n.status || '').toLowerCase();
-            if (s === 'completed' || s === 'success') next[id] = 'done';
-            else if (s === 'running') next[id] = 'running';
-            else if (s === 'failed' || s === 'error') next[id] = 'failed';
-          });
-          setStatus((prev) => ({ ...prev, ...next }));
+        if (status === 'completed' || status === 'failed' || status === 'error' || status === 'cancelled') {
+          terminal = true;
+          clearInterval(t);
         }
-        return;
-      }
-      const id = (d?.tool_name || d?.name || '').toLowerCase();
-      if (t === 'tool_call') {
-        if (id) setStatus((p) => ({ ...p, [id]: 'running' }));
-      }
-      if (t === 'tool_result' || t === 'node_complete') {
-        if (id) setStatus((p) => ({ ...p, [id]: 'done' }));
-      }
-      if (t === 'error') {
-        if (id) setStatus((p) => ({ ...p, [id]: 'failed' }));
-      }
-      if (t === 'done') {
-        setMeta((m) => ({ ...(m || {}), status: 'completed', durationMs: d?.duration_ms, cost: d?.cost, tokens: (d?.input_tokens ?? 0) + (d?.output_tokens ?? 0) }));
-      }
-    }
+      } catch { /* keep polling */ }
+    };
+    refresh();
+    const t = setInterval(refresh, 3000);
 
-    return () => { cancelled = true; ctrl.abort(); };
+    return () => { cancelled = true; ctrl.abort(); clearInterval(t); };
   }, [executionId]);
 
   const live = useMemo(() => Object.values(status).some((s) => s === 'running'), [status]);

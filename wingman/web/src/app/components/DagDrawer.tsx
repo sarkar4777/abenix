@@ -67,7 +67,7 @@ export default function DagDrawer({
     const ctrl = new AbortController();
     (async () => {
       try {
-        const res = await fetch(`/api/wingman/executions/${executionId}/watch`, {
+        const res = await fetch(`/api/wingman-watch/${executionId}`, {
           headers: { Accept: 'text/event-stream' },
           signal: ctrl.signal,
         });
@@ -119,19 +119,25 @@ export default function DagDrawer({
         const status = String(row.status || '').toLowerCase();
         const tokensIn = Number(row.input_tokens || 0);
         const tokensOut = Number(row.output_tokens || 0);
+        const rowToolCalls = Array.isArray(row.tool_calls) ? row.tool_calls : [];
+        const rowNodeResults = Array.isArray(row.node_results) ? row.node_results : [];
         const synthetic: any = {
           execution_id: executionId,
           agent_name: row.agent_name || row.agent_id,
           status,
           progress: row.node_results
-            ? { completed: (row.node_results || []).filter((n: any) => n?.status === 'completed').length, total: (row.node_results || []).length || 1 }
+            ? { completed: rowNodeResults.filter((n: any) => n?.status === 'completed').length, total: rowNodeResults.length || 1 }
             : undefined,
           cost_so_far: row.cost,
           tokens: { in: tokensIn, out: tokensOut },
-          nodes: Array.isArray(row.tool_calls) && row.tool_calls.length > 0
-            ? [{ id: 'agent', tool_name: 'agent', label: row.agent_name || 'Agent', status, tool_calls: row.tool_calls }]
-            : (row.node_results || []),
         };
+        // Only push nodes when the row has something — otherwise the
+        // SSE snapshot's nodes would get clobbered with [].
+        if (rowToolCalls.length > 0) {
+          synthetic.nodes = [{ id: 'agent', tool_name: 'agent', label: row.agent_name || 'Agent', status, tool_calls: rowToolCalls }];
+        } else if (rowNodeResults.length > 0) {
+          synthetic.nodes = rowNodeResults;
+        }
         mergeSnapshot(synthetic);
         if (status === 'completed' || status === 'failed' || status === 'error' || status === 'cancelled') {
           terminalRef.current = true;

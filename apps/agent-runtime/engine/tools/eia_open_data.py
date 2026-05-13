@@ -96,6 +96,56 @@ _SHORTCUTS: dict[str, dict[str, Any]] = {
         "unit": "kbbl/d",
         "label": "US LPG exports weekly",
     },
+    "GASOLINE_USGC": {
+        "path": "petroleum/pri/spt/data/",
+        "params": {
+            "frequency": "weekly",
+            "data[0]": "value",
+            "facets[series][]": "EER_EPMRR_PF4_Y44MB_DPG",
+        },
+        "unit": "$/gal",
+        "label": "USGC gasoline (RBOB) weekly spot",
+    },
+    "ULSD_USGC": {
+        "path": "petroleum/pri/spt/data/",
+        "params": {
+            "frequency": "weekly",
+            "data[0]": "value",
+            "facets[series][]": "EER_EPD2DXL0_PF4_Y44MB_DPG",
+        },
+        "unit": "$/gal",
+        "label": "USGC ultra-low-sulphur diesel weekly spot",
+    },
+    "JET_USGC": {
+        "path": "petroleum/pri/spt/data/",
+        "params": {
+            "frequency": "weekly",
+            "data[0]": "value",
+            "facets[series][]": "EER_EPJK_PF4_Y44MB_DPG",
+        },
+        "unit": "$/gal",
+        "label": "USGC kerosene-type jet fuel weekly spot",
+    },
+    "HEATING_OIL_NYH": {
+        "path": "petroleum/pri/spt/data/",
+        "params": {
+            "frequency": "weekly",
+            "data[0]": "value",
+            "facets[series][]": "EER_EPD2F_PF4_Y35NY_DPG",
+        },
+        "unit": "$/gal",
+        "label": "NY Harbor No.2 heating oil weekly spot",
+    },
+    "GASOLINE_NYH": {
+        "path": "petroleum/pri/spt/data/",
+        "params": {
+            "frequency": "weekly",
+            "data[0]": "value",
+            "facets[series][]": "EER_EPMRR_PF4_Y35NY_DPG",
+        },
+        "unit": "$/gal",
+        "label": "NY Harbor conventional gasoline weekly spot",
+    },
 }
 
 

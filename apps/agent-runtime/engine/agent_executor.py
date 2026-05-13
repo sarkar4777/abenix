@@ -932,6 +932,11 @@ def _ensure_tool_classes() -> None:
     from engine.tools.open_meteo import OpenMeteoTool
     from engine.tools.ais_stream import AisStreamTool
     from engine.tools.bunker_fuel import BunkerFuelTool
+    from engine.tools.vessel_specs import VesselSpecsTool
+    from engine.tools.refined_products_forwards import RefinedProductsForwardsTool
+    from engine.tools.freight_worldscale import FreightWorldscaleTool
+    from engine.tools.freight_baltic_blpg import FreightBalticBlpgTool
+    from engine.tools.port_constraints import PortConstraintsTool
 
     # New tools (Tier 1/2/3 ecosystem expansion)
     from engine.tools.weather import WeatherTool
@@ -1015,6 +1020,11 @@ def _ensure_tool_classes() -> None:
             "open_meteo": OpenMeteoTool,
             "ais_stream": AisStreamTool,
             "bunker_fuel": BunkerFuelTool,
+            "vessel_specs": VesselSpecsTool,
+            "refined_products_forwards": RefinedProductsForwardsTool,
+            "freight_worldscale": FreightWorldscaleTool,
+            "freight_baltic_blpg": FreightBalticBlpgTool,
+            "port_constraints": PortConstraintsTool,
             "weather": WeatherTool,
             "geocoding": GeocodingTool,
             "world_bank": WorldBankTool,

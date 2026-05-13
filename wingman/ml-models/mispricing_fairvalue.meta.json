@@ -1,8 +1,8 @@
 {
   "name": "wingman-mispricing-fairvalue",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "framework": "sklearn",
-  "description": "Bayesian Ridge regression of LPG propane corridor fair-value spread ($/MT) on a 12-feature vector (8 base market signals plus 4 options-market signals: Brent ATM IV, Brent 25-delta risk reversal, HH natgas ATM IV, crude put/call OI ratio). Returns posterior mean + std so the mispricing engine can compute a residual z-score and credible interval. Options features added in v1.1 to capture forward-looking market nervousness and skew. Trained synthetic regime-conditional; re-train on real desk-labelled history in production.",
+  "description": "Bayesian Ridge regression of LPG/CPP corridor fair-value spread ($/MT) on a 15-feature vector. v1.2 adds three freight-quality features (Baltic BLPG z-score, Worldscale-anchored CPP freight z-score, normalised vessel size) on top of the v1.1 options-aware 12. Returns posterior mean + std so the mispricing engine can compute a residual z-score and credible interval. Trained synthetic regime-conditional; re-train on real desk-labelled history in production.",
   "input_schema": {
     "features": [
       "origin_spot_z",
@@ -16,9 +16,15 @@
       "crude_iv_atm_z",
       "crude_risk_reversal",
       "nat_gas_iv_atm_z",
-      "oil_put_call_ratio"
+      "oil_put_call_ratio",
+      "freight_baltic_z",
+      "freight_ws_per_mt_z",
+      "route_vessel_size_norm"
     ],
     "types": [
+      "float",
+      "float",
+      "float",
       "float",
       "float",
       "float",
@@ -44,7 +50,10 @@
       0.3,
       0.02,
       0.1,
-      0.85
+      0.85,
+      0.1,
+      0.05,
+      0.88
     ]
   },
   "output_schema": {
@@ -57,42 +66,47 @@
     "mispricing",
     "bayesian",
     "regression",
-    "options-aware"
+    "options-aware",
+    "freight-quality"
   ],
   "training": {
     "samples": 620,
-    "algorithm": "Bayesian Ridge Regression (12 features, options-aware)",
+    "algorithm": "Bayesian Ridge Regression (15 features, options + freight-quality aware)",
     "synthetic": true,
     "regimes": [
       "calm_balance",
       "usgc_export_surge",
       "nwe_demand_soft"
     ],
-    "holdout_r2": 0.7356,
-    "holdout_rmse_usd_mt": 7.9379,
-    "average_posterior_std": 7.4665,
+    "holdout_r2": 0.665,
+    "holdout_rmse_usd_mt": 7.488,
+    "average_posterior_std": 8.4685,
     "coef_": [
-      -4.4564,
-      4.9932,
-      -1.2686,
-      -3.3595,
-      4.5162,
-      0.7171,
-      0.9156,
-      -0.0162,
-      1.515,
-      46.0792,
-      1.2695,
-      -2.057
+      -4.5267,
+      4.9646,
+      -1.8485,
+      -2.6926,
+      3.7322,
+      0.6071,
+      0.6419,
+      -1.1179,
+      2.4256,
+      10.7651,
+      0.3074,
+      -3.402,
+      -1.0425,
+      -0.9134,
+      3.703
     ],
-    "intercept_": 26.1334,
-    "ablation_8_feature_only_r2": 0.6949,
-    "ablation_8_feature_only_rmse_usd_mt": 8.5271,
-    "options_features_added": [
-      "crude_iv_atm_z",
-      "crude_risk_reversal",
-      "nat_gas_iv_atm_z",
-      "oil_put_call_ratio"
+    "intercept_": 26.4486,
+    "ablation_12_feature_only_r2": 0.6534,
+    "ablation_12_feature_only_rmse_usd_mt": 7.6167,
+    "ablation_8_feature_only_r2": 0.6088,
+    "ablation_8_feature_only_rmse_usd_mt": 8.0918,
+    "freight_features_added": [
+      "freight_baltic_z",
+      "freight_ws_per_mt_z",
+      "route_vessel_size_norm"
     ]
   }
 }

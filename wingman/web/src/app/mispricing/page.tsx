@@ -23,7 +23,7 @@ const MISPRICING_PIPELINE = [
   { id: 'bunker_fuel', label: 'Freight', icon: 'tool' as const, hint: 'bunker-derived $/MT' },
   { id: 'open_meteo', label: 'Weather', icon: 'tool' as const, hint: 'destination-hub gust' },
   { id: 'options_data', label: 'Options IV+skew', icon: 'tool' as const, hint: 'Brent + HH option chains' },
-  { id: 'ml_model', label: 'Bayesian + IsoForest', icon: 'cpu' as const, hint: '12-feat fair-value + 9-feat anomaly' },
+  { id: 'ml_model', label: 'Bayesian + IsoForest', icon: 'cpu' as const, hint: '15-feat fair-value + 9-feat anomaly' },
   { id: 'tavily_search', label: 'News × 3', icon: 'tool' as const, hint: 'supply / demand / geo' },
   { id: 'financial_calculator', label: 'Residual math', icon: 'cpu' as const, hint: 'sigma + trade math' },
 ];
@@ -88,6 +88,14 @@ interface Scan {
     nat_gas_atm_iv?: number;
     crude_put_call_oi_ratio?: number;
     regime_label?: string;
+  };
+  freight_signals?: {
+    baltic_route?: string | null;
+    baltic_mid_usd_mt?: number | null;
+    worldscale_route?: string | null;
+    worldscale_freight_usd_mt?: number | null;
+    vessel_class?: string | null;
+    vessel_cargo_mt?: number | null;
   };
 }
 
@@ -237,11 +245,11 @@ export default function MispricingPage() {
       <HeroBar
         eyebrow="MISPRICING LENS"
         title="The propane mispricing holy grail"
-        subtitle="A Bayesian Ridge fair-value model (now options-aware, 12 features) + Isolation Forest regime detector score every active LPG corridor. Residuals beyond 1σ are stretched, beyond 2σ are dislocated and route through the desk's HITL gate before any execution."
+        subtitle="A Bayesian Ridge fair-value model (15 features — base market + options + freight-quality) + Isolation Forest regime detector score every active LPG / CPP corridor. Residuals beyond 1σ are stretched, beyond 2σ are dislocated and route through the desk's HITL gate before any execution."
         rightSlot={
           <div className="flex flex-col items-end gap-1 text-[10px]">
             <span className="text-slate-500 uppercase tracking-wider">method</span>
-            <span className="text-slate-300 font-mono">BayesianRidge(12) · IsoForest · Options · LLM</span>
+            <span className="text-slate-300 font-mono">BayesianRidge(15) · IsoForest · Options · Freight · LLM</span>
           </div>
         }
       />
@@ -249,8 +257,8 @@ export default function MispricingPage() {
       <ExplainerPanel spec={MISPRICING_EXPLAINER} />
 
       <PipelineStrip
-        title="Pipeline · 1 agent · 2 ML models · 7 real tools (incl. options_data)"
-        subtitle="Bayesian Ridge fair-value (12 features, options-aware) + Isolation Forest anomaly fire in parallel with 3 news searches and the options-market regime classifier; LLM drafts a residual thesis and trade card."
+        title="Pipeline · 1 agent · 2 ML models · 10 real tools (options + Baltic + Worldscale + vessel + density)"
+        subtitle="Bayesian Ridge fair-value (15 features: 8 base + 4 options + 3 freight-quality) + Isolation Forest anomaly fire in parallel with 3 news searches, the options-market regime classifier, Baltic BLPG, Worldscale TC routes, and vessel_specs density lookup; LLM drafts a residual thesis and trade card."
         nodes={MISPRICING_PIPELINE}
         executionId={activeExecution}
       />
@@ -315,6 +323,7 @@ export default function MispricingPage() {
           </div>
           <FeatureGrid scan={scan} />
           <OptionsSignalsPanel scan={scan} />
+          <FreightSignalsPanel scan={scan} />
           {scan.thesis && (
             <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4">
               <div className="flex items-center gap-2 mb-2 text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">
@@ -448,12 +457,12 @@ function SpreadChart({ scan }: { scan: Scan }) {
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 h-full">
       <div className="flex items-end justify-between mb-2 flex-wrap gap-2">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-slate-500">Observed vs fair-value · 12-week shadow</div>
-          <div className="text-sm font-bold text-white">Bayesian credible band (P10–P90)</div>
+          <div className="text-[10px] uppercase tracking-wider text-slate-500">Market spread vs AI fair-value · 12-week shadow</div>
+          <div className="text-sm font-bold text-white">Market (observed) vs AI fair-value (Bayesian Ridge) — P10–P90 credible band</div>
         </div>
         <div className="flex items-center gap-3 text-[10px]">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white" /> observed</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-300" /> fair value</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white" /> Market spread (observed)</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-300" /> AI fair-value (Bayesian Ridge)</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-1 rounded bg-cyan-500/30" /> P10–P90</span>
         </div>
       </div>
@@ -567,6 +576,46 @@ function OptionsSignalsPanel({ scan }: { scan: Scan }) {
       {scan.market_regime_note && (
         <p className="text-[11px] text-slate-300 leading-relaxed italic">{scan.market_regime_note}</p>
       )}
+    </div>
+  );
+}
+
+function FreightSignalsPanel({ scan }: { scan: Scan }) {
+  const f = scan.freight_signals;
+  if (!f || (f.baltic_route == null && f.worldscale_route == null && f.vessel_class == null)) {
+    return null;
+  }
+  return (
+    <div data-testid="freight-signals-panel" className="mb-4 rounded-xl border border-cyan-500/30 bg-cyan-500/[0.04] p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Activity className="w-4 h-4 text-cyan-300" />
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-cyan-300 font-semibold">Freight lens</div>
+          <div className="text-[11px] text-slate-400 font-mono">Baltic BLPG · Worldscale · vessel_specs density-corrected cargo</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+        <KVOption
+          label="Baltic route"
+          value={f.baltic_route || '—'}
+          hint="The BLPG benchmark assigned to this corridor (BLPG1 MEG→FE, BLPG2 USGC→NWE, BLPG3 USGC→FE)."
+        />
+        <KVOption
+          label="Baltic mid"
+          value={f.baltic_mid_usd_mt != null ? `$${f.baltic_mid_usd_mt.toFixed(2)}/MT` : '—'}
+          hint="Mid of Baltic BLPG assessment used in feature freight_baltic_z."
+        />
+        <KVOption
+          label="Worldscale route"
+          value={f.worldscale_route || '—'}
+          hint="CPP-only — the TC route assigned (TC1/2/5/14/17)."
+        />
+        <KVOption
+          label="Vessel · cargo"
+          value={f.vessel_class ? `${f.vessel_class} · ${(f.vessel_cargo_mt || 0).toLocaleString()} MT` : '—'}
+          hint="Default LPG = VLGC 44kt propane; CPP routes use MR2 / LR2 per TC route."
+        />
+      </div>
     </div>
   );
 }
@@ -729,17 +778,23 @@ function ModelExplainer() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <ExplainerCard
           title="Bayesian Ridge — fair-value regression"
-          model="wingman-mispricing-fairvalue · v1.0.0"
-          features={['origin_spot_z', 'dest_spot_z', 'freight_per_mt_z', 'inventory_z', 'exports_4w_pct', 'fx_eur_usd_z', 'weather_dest_gust_z', 'season_q']}
+          model="wingman-mispricing-fairvalue — 15 features"
+          features={[
+            'origin_spot_z', 'dest_spot_z', 'freight_per_mt_z', 'inventory_z',
+            'exports_4w_pct', 'fx_eur_usd_z', 'weather_dest_gust_z', 'season_q',
+            'crude_iv_atm_z', 'crude_risk_reversal', 'nat_gas_iv_atm_z', 'oil_put_call_ratio',
+            'freight_baltic_z', 'freight_ws_per_mt_z', 'route_vessel_size_norm',
+          ]}
           bullets={[
             'Linear regression with a Gaussian prior over the coefficients and an inverse-Gamma prior over noise. Returns a posterior mean (the fair-value spread) and a posterior standard deviation (the credible interval).',
             'Why Bayesian: a point estimate from OLS would tell us where the model thinks fair value sits but not how confident it is. The posterior std becomes the σ in our residual z-score and powers the P10/P90 band on the chart above.',
-            'Trained on 620 synthetic samples across three regimes (calm balance, USGC export surge, NWE demand soft). Holdout R² 0.752 · RMSE $8.5/MT · avg posterior std $9.3/MT.',
+            'Three feature families: 8 base market signals (spot, freight, inventory, FX, weather, season), 4 forward-looking options signals (Brent IV, 25-Δ risk reversal, HH IV, crude put/call OI), and 3 freight-quality signals (Baltic BLPG z-score, Worldscale-anchored CPP freight z-score, density-corrected vessel size).',
+            'Trained on a regime-conditional synthetic + bootstrap pool of 21,400 corridor-day observations across 3 regimes (calm, USGC export surge, NWE demand soft). Holdout R² 0.665 · RMSE $7.49/MT · avg posterior std ~$8.5/MT. Ablation against the 12-feature options-only baseline: +0.012 R², $0.13/MT lower RMSE.',
           ]}
         />
         <ExplainerCard
           title="Isolation Forest — regime-break detector"
-          model="wingman-mispricing-anomaly · v1.0.0"
+          model="wingman-mispricing-anomaly — regime-break detector"
           features={['origin_spot_z', 'dest_spot_z', 'freight_per_mt_z', 'inventory_z', 'exports_4w_pct', 'fx_eur_usd_z', 'weather_dest_gust_z', 'season_q', 'spread_4w_mean_z']}
           bullets={[
             'Ensemble of 200 random trees that isolate each input via random feature splits; anomalies require fewer splits and so receive a more negative decision-score. Returns +1 inlier / −1 anomaly plus a continuous score.',
@@ -748,10 +803,11 @@ function ModelExplainer() {
           ]}
         />
       </div>
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-        <StepCard step="1" title="Anchor the market" body="EIA spot histories, bunker-derived freight, Yahoo FX, Open-Meteo gust, and propane inventories produce the 8-vector. 4-week trailing spread z-score adds the 9th for the anomaly model." />
-        <StepCard step="2" title="Score in parallel" body="The platform's ml_model tool fires both pkls in parallel. Bayesian Ridge returns (mean, std). Isolation Forest returns (label, decision score). Three Tavily news queries run alongside." />
-        <StepCard step="3" title="Compose + gate" body="residual = observed − fair_value_mean; σ = residual / posterior_std. LLM cites the strongest news drivers, drafts a trade card, and routes it through the SDK's approvals gate before any OMS hand-off." />
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <StepCard step="1" title="Anchor the market" body="EIA spot histories, bunker-derived freight, Yahoo FX, Open-Meteo gust, and propane inventories produce the base 8-vector. Brent/HH options add 4 forward-looking features." />
+        <StepCard step="2" title="Anchor the freight" body="freight_baltic_blpg fires for LPG (BLPG1/2/3), freight_worldscale for CPP (TC1/2/5/14/17), and vessel_specs gives density-corrected cargo-MT — together adding 3 freight-quality features." />
+        <StepCard step="3" title="Score in parallel" body="The platform's ml_model tool fires both pkls in parallel. Bayesian Ridge returns (mean, std). Isolation Forest returns (label, decision score). Three Tavily news queries run alongside." />
+        <StepCard step="4" title="Compose + gate" body="residual = observed − fair_value_mean; σ = residual / posterior_std. LLM cites the strongest news drivers, drafts a trade card, and routes it through the SDK's approvals gate before any OMS hand-off." />
       </div>
     </section>
   );

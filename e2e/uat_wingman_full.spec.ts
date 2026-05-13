@@ -91,9 +91,9 @@ test.describe('Wingman — full browser UAT', () => {
 
   test('shell: sidebar lists every workbench surface', async ({ page }) => {
     await gotoOk(page, '/');
-    expect(page.url()).toContain('/workbench');
+    expect(page.url()).toMatch(/\/(home|workbench)$/);
     for (const label of [
-      'Arbitrage Workbench', 'Forward Scenarios', 'Broker Inbox',
+      'Home', 'Arbitrage Workbench', 'Mispricing Lens', 'Forward Scenarios', 'Broker Inbox',
       'Approvals', 'Operations Watch', 'Strategy Lab', 'Knowledge Graph',
     ]) {
       await expect(page.getByText(label).first()).toBeVisible({ timeout: 10_000 });
@@ -142,8 +142,9 @@ test.describe('Wingman — full browser UAT', () => {
     ).toBeVisible({ timeout: 30_000 });
     await shot(page, 'scenarios-dag-running');
     await expect(page.getByText(/Bayesian prior/i).first()).toBeVisible({ timeout: 240_000 });
+    // Sonnet 4.5 takes 30-90s end-to-end; allow up to 180s after prior arrives.
     await expect(page.locator('[data-testid="scenario-card-base"]').first())
-      .toBeVisible({ timeout: 60_000 });
+      .toBeVisible({ timeout: 180_000 });
     await page.waitForTimeout(1500);
     await shot(page, 'scenarios-result');
   });
@@ -217,7 +218,8 @@ test.describe('Wingman — full browser UAT', () => {
     } else {
       await page.locator('textarea').first().fill('Lock in 10kt USGC->FE for Q1 if spread holds above $30/MT for 5 days.');
     }
-    await page.getByRole('button', { name: /Encode strategy/i }).click();
+    // Button text reads "Encode + save" in the current UI; keep regex loose.
+    await page.getByRole('button', { name: /Encode(\s|\+)/i }).first().click();
     await expect(page.getByText(/Encoded rule/i).first()).toBeVisible({ timeout: 240_000 });
     await page.waitForTimeout(1500);
     await shot(page, 'strategy-encoded-rule');

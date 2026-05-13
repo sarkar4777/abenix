@@ -475,11 +475,14 @@ async def _load_asset(
         from sqlalchemy import text as sql_text
     except ImportError:
         return None
+    import re as _re
+
+    looks_like_uuid = bool(_re.fullmatch(r"[0-9a-fA-F-]{32,36}", asset_id or ""))
     try:
         engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=1)
         async with engine.begin() as conn:
             params: dict[str, Any] = {"aid": asset_id}
-            where = "id = CAST(:aid AS uuid)"
+            where = "id = CAST(:aid AS uuid)" if looks_like_uuid else "name = :aid"
             if tenant_id:
                 where += " AND tenant_id = CAST(:tid AS uuid)"
                 params["tid"] = tenant_id
@@ -488,7 +491,8 @@ async def _load_asset(
                     f"SELECT id, status, storage_uri, suggested_image, "
                     f"suggested_build_command, suggested_run_command, "
                     f"input_schema, output_schema "
-                    f"FROM code_assets WHERE {where}"
+                    f"FROM code_assets WHERE {where} "
+                    f"ORDER BY updated_at DESC LIMIT 1"
                 ),
                 params,
             )

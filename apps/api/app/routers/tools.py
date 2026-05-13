@@ -710,6 +710,36 @@ TOOL_CATALOG = [
         },
     },
     {
+        "id": "vessel_specs",
+        "name": "Vessel Specs + Density",
+        "description": "Vessel-class registry (VLGC/MGC/LGC/SGC for LPG, VLCC/Suezmax/Aframax/LR2/LR1/MR2/MR1/Handysize for CPP) plus product density table (propane/butane/ammonia/naphtha/gasoline/jet/ULSD/gasoil/fuel-oil/crude/methanol). Five actions: vessel (spec card), density (kg/L for product), convert (m^3<->MT or $/MT<->$/bbl), capacity (MT a class lifts for a named product), list (every vessel or product). Single source of truth for freight math; every freight-touching agent should pull from here.",
+        "category": "finance",
+    },
+    {
+        "id": "refined_products_forwards",
+        "name": "Refined Products Forwards + Cracks",
+        "description": "Refined-products forward curves + crack spreads from Yahoo continuous futures. Pulls RB=F gasoline, HO=F ULSD/heating oil, CL=F WTI, BZ=F Brent, NG=F Henry Hub. Three actions: curve (front-month settle), crack_spread (3-2-1 or product-vs-crude in $/bbl), history (N days of daily settles). No API key required.",
+        "category": "finance",
+    },
+    {
+        "id": "freight_worldscale",
+        "name": "Worldscale Freight (CPP)",
+        "description": "Worldscale freight calculator for clean-products tankers. Knows the 2025 flat-rate schedule for the main TC routes (TC1 MEG->Japan naphtha, TC2 Cont->USAC gasoline, TC5/6/7/14/17). Computes freight in $/MT as ws_points/100 * flat_rate. Three actions: route (look up flat rate + freight), voyage_cost (full $ given cargo size), list.",
+        "category": "finance",
+    },
+    {
+        "id": "freight_baltic_blpg",
+        "name": "Baltic BLPG (LPG)",
+        "description": "Baltic Exchange BLPG indices for LPG freight: BLPG1 (Ras Tanura->Chiba), BLPG2 (Houston->Flushing), BLPG3 (Houston->Chiba via Panama) in $/MT propane VLGC. Curated Q1-2026 OPEC-MOMR levels; production sets BALTIC_API_KEY+BALTIC_API_URL env to swap to the live subscription feed. Two actions: route (single BLPG mid/low/high), all (all three side-by-side).",
+        "category": "finance",
+    },
+    {
+        "id": "port_constraints",
+        "name": "Port Constraints (UN/LOCODE)",
+        "description": "UN/LOCODE port database with vessel berth-compatibility checks. Knows ~25 liquid-bulk ports (US Gulf, USAC, NW Europe, MED, MEG, Far East, India, Africa, Brazil) plus Suez/Panama canal constraints. Three actions: port (full spec card), list (enumerate all), check (vessel_class + locode -> compatible/borderline/incompatible with breakdown of draught, LOA, beam, air-draught, product handling).",
+        "category": "finance",
+    },
+    {
         "id": "tavily_search",
         "name": "Tavily Search",
         "description": "Real-time web search tuned for research agents — recency bias, source ranking, structured snippets",
