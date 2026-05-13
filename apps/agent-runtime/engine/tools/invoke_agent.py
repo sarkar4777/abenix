@@ -50,6 +50,8 @@ class InvokeAgentTool(BaseTool):
         self._tenant_id = tenant_id
         self._api_key = (
             api_key
+            or os.environ.get("ABENIX_PLATFORM_API_KEY", "")
+            or os.environ.get("INTERNAL_API_TOKEN", "")
             or os.environ.get("ABENIX_INTERNAL_API_KEY", "")
             or os.environ.get("PLATFORM_API_KEY", "")
         )
@@ -67,14 +69,15 @@ class InvokeAgentTool(BaseTool):
             return ToolResult(content="agent_slug is required", is_error=True)
         if not self._api_key:
             return ToolResult(
-                content="ABENIX_INTERNAL_API_KEY not configured for invoke_agent on the runtime pod.",
+                content="No platform API key on the runtime pod (looked for ABENIX_PLATFORM_API_KEY / INTERNAL_API_TOKEN).",
                 is_error=True,
             )
 
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key.startswith("af_"):
+            headers["X-API-Key"] = self._api_key
+        else:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         t0 = time.time()
         try:
             async with httpx.AsyncClient(
@@ -102,7 +105,11 @@ class InvokeAgentTool(BaseTool):
                 agent_id = match.get("id")
 
                 body = {
-                    "input": json.dumps(payload),
+                    "message": (
+                        json.dumps(payload) if not isinstance(payload, str) else payload
+                    ),
+                    "stream": False,
+                    "wait": True,
                     "wait_timeout_seconds": timeout,
                 }
                 exec_r = await client.post(

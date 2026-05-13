@@ -4,6 +4,14 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## v1.3.0 — 2026-05-13
+
+### Added
+
 - **Desk Copilot** — a meta agent at `/desk` in Wingman that takes a single trader-style question, plans which Wingman specialists to fire (`wingman-arb-analyzer`, `wingman-mispricing-extractor`, `wingman-scenario-forecaster`, `wingman-ops-monitor`, `wingman-graph-query`, …), fans them out in parallel through a new `invoke_agent` runtime tool, and stitches every output into a single brief with headline, drivers, recommended action, and conviction. Sonnet 4.5 driven, agent yaml in `packages/db/seeds/agents/wingman_desk_copilot.yaml`. New API endpoints `POST /api/wingman/desk/ask`, `GET /api/wingman/desk/result/{execution_id}`, `GET /api/wingman/desk/trajectories`.
 - **Trajectory memory** — every Desk Copilot run is saved as a JSON record on `/data/wingman-trajectories/{tenant}/{trajectory_id}.json`. A new `recall_trajectory` runtime tool retrieves past runs whose intent overlaps the new query so the copilot can adapt a known-good plan instead of re-planning from scratch. The Desk page renders a sidebar of past runs that replays into the main panel on click. Docs: `docs/TRAJECTORY_MEMORY.md`. Opt-in for any agent in AI Builder by adding `recall_trajectory` to its tool list.
 - **Outcome grading hook** — `POST /api/wingman/desk/trajectories/{trajectory_id}/outcome` attaches an approval id + success score to a past trajectory so `recall_trajectory` can rank by realised outcome over time. The nightly grading job that produces the score automatically is documented as a follow-up.
