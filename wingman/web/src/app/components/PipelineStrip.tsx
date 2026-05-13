@@ -55,6 +55,20 @@ export default function PipelineStrip({
       });
     }
 
+    function sweepRunningToTerminal(overall: string) {
+      const next: NodeStatus = (overall === 'completed' || overall === 'succeeded') ? 'done'
+        : (overall === 'failed' || overall === 'error' || overall === 'cancelled') ? 'failed'
+        : 'done';
+      setStatus((p) => {
+        const out: Record<string, NodeStatus> = { ...p };
+        let changed = false;
+        for (const k of Object.keys(out)) {
+          if (out[k] === 'running') { out[k] = next; changed = true; }
+        }
+        return changed ? out : p;
+      });
+    }
+
     function handleEvent(t: string, d: any) {
       if (t === 'snapshot') {
         const totalIn = d?.tokens?.in ?? 0;
@@ -69,6 +83,7 @@ export default function PipelineStrip({
         const overall = String(d?.status || '').toLowerCase();
         if (overall === 'completed' || overall === 'failed' || overall === 'error' || overall === 'cancelled') {
           terminal = true;
+          sweepRunningToTerminal(overall);
         }
         const ids = (n: any) => [n.tool_name, n.label, n.id, n.name]
           .filter((x) => typeof x === 'string' && x.length > 0)
@@ -116,6 +131,7 @@ export default function PipelineStrip({
           cost: d?.cost ?? m?.cost,
           tokens: ((d?.input_tokens ?? 0) + (d?.output_tokens ?? 0)) || m?.tokens,
         }));
+        sweepRunningToTerminal('completed');
       }
     }
 

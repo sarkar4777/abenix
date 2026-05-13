@@ -22,11 +22,14 @@ Real, citable data sources used (no Argus/Platts subscription required):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import sys
+import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +43,8 @@ if SDK_PATH not in sys.path:
     sys.path.insert(0, SDK_PATH)
 
 from abenix_sdk import Abenix, ActingSubject  # type: ignore  # noqa: E402
+import cache as result_cache  # type: ignore  # noqa: E402
+import trajectories as trajectory_store  # type: ignore  # noqa: E402
 
 logger = logging.getLogger("wingman.api")
 logging.basicConfig(level=logging.INFO)
@@ -61,10 +66,6 @@ BROKER_EMAILS: list[dict[str, Any]] = _load_json("broker_emails.json")
 # yet need its own DB; everything load-bearing lives on the platform.
 _offers_state: dict[str, dict[str, Any]] = {}
 _strategies_state: dict[str, dict[str, Any]] = {}
-# 5-minute TTL cache for the market-brief panel — five upstream API
-# calls in parallel is fine occasionally but burns rate limits if every
-# tab refresh hits them.
-_MARKET_BRIEF_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def _build_subject(trader_id: str = "demo-trader") -> ActingSubject:
@@ -87,13 +88,129 @@ def _abenix_client(trader_id: str = "demo-trader") -> Abenix:
     return Abenix(api_key=api_key, base_url=base_url, act_as=_build_subject(trader_id))
 
 
-app = FastAPI(title="Wingman API", version="0.1.0")
+_WARMER_INTERVAL_SECONDS = int(os.environ.get("WINGMAN_WARMER_INTERVAL_SECONDS", "1800"))
+_WARMER_TASK: asyncio.Task[Any] | None = None
+
+
+async def _warmer_loop() -> None:
+    while True:
+        try:
+            await asyncio.sleep(_WARMER_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            return
+        try:
+            active_corridor_ids = [c["id"] for c in CORRIDORS if c.get("active")]
+            logger.info(
+                "warmer tick: %d active corridors, ttl_default=%ss",
+                len(active_corridor_ids),
+                result_cache.DEFAULT_TTL_SECONDS,
+            )
+            await result_cache.warm("mispricing", active_corridor_ids, _warm_mispricing)
+            await result_cache.warm("scenarios", active_corridor_ids, _warm_scenarios)
+            await result_cache.warm("analyze", active_corridor_ids, _warm_analyze)
+            await result_cache.warm("ops", ["snapshot"], _warm_ops)
+            await result_cache.warm("market-brief", ["snapshot"], _warm_market_brief)
+        except Exception as e:
+            logger.exception("warmer tick failed: %s", e)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    global _WARMER_TASK
+    _WARMER_TASK = asyncio.create_task(_warmer_loop())
+    logger.info("warmer started (interval=%ss)", _WARMER_INTERVAL_SECONDS)
+    try:
+        yield
+    finally:
+        if _WARMER_TASK is not None:
+            _WARMER_TASK.cancel()
+            try:
+                await _WARMER_TASK
+            except Exception:
+                pass
+
+
+app = FastAPI(title="Wingman API", version="0.1.0", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ─── Cache write helpers (called from agent-result endpoints + warmer) ───
+
+
+def _wrap_cached(page: str, key: str) -> dict[str, Any]:
+    entry = result_cache.read(page, key)
+    if entry is None:
+        return {"data": None}
+    return {
+        "data": {
+            "key": key,
+            "payload": entry["payload"],
+            "cached_at": entry["written_at"],
+            "age_seconds": entry["age_seconds"],
+            "ttl_seconds": entry["ttl_seconds"],
+            "fresh": entry["fresh"],
+        }
+    }
+
+
+async def _run_agent_sync(agent_slug: str, payload: dict[str, Any], *, timeout: int = 300) -> dict[str, Any]:
+    try:
+        async with _abenix_client() as forge:
+            result = await forge.execute(agent_slug, json.dumps(payload), wait_timeout_seconds=timeout)
+    except Exception as e:
+        logger.warning("agent run %s failed: %s", agent_slug, e)
+        return {}
+    raw = result.output or ""
+    parsed = _parse_agent_json(raw) or {}
+    if parsed:
+        parsed.setdefault("execution_id", result.execution_id)
+        parsed.setdefault("cost_usd", result.cost)
+        parsed.setdefault("duration_ms", result.duration_ms)
+    return parsed
+
+
+async def _warm_mispricing(corridor_id: str) -> dict[str, Any]:
+    corridor = next((c for c in CORRIDORS if c["id"] == corridor_id), None)
+    if not corridor:
+        return {}
+    return await _run_agent_sync("wingman-mispricing-extractor", {"corridor": corridor}, timeout=300)
+
+
+async def _warm_scenarios(corridor_id: str) -> dict[str, Any]:
+    corridor = next((c for c in CORRIDORS if c["id"] == corridor_id), None)
+    if not corridor:
+        return {}
+    return await _run_agent_sync(
+        "wingman-scenario-forecaster", {"corridor": corridor, "tenor_months": 12}, timeout=300
+    )
+
+
+async def _warm_analyze(corridor_id: str) -> dict[str, Any]:
+    corridor = next((c for c in CORRIDORS if c["id"] == corridor_id), None)
+    if not corridor:
+        return {}
+    return await _run_agent_sync(
+        "wingman-arb-analyzer",
+        {"corridor": corridor, "tenor_months": 12, "methodology": "deep"},
+        timeout=300,
+    )
+
+
+async def _warm_ops(_key: str = "snapshot") -> dict[str, Any]:
+    active = [c["id"] for c in CORRIDORS if c.get("active")]
+    return await _run_agent_sync("wingman-ops-monitor", {"corridors": active}, timeout=300)
+
+
+async def _warm_market_brief(_key: str = "snapshot") -> dict[str, Any]:
+    parsed = await _run_agent_sync("wingman-market-brief", {}, timeout=180)
+    if parsed.get("indicators"):
+        parsed["generated_at"] = time.time()
+    return parsed
 
 
 # ─── Health ─────────────────────────────────────────────────────────────
@@ -119,21 +236,10 @@ async def list_corridors() -> dict[str, Any]:
 
 @app.get("/api/wingman/market-brief")
 async def market_brief() -> dict[str, Any]:
-    """Live market snapshot for the trader's morning brief.
-
-    Thin endpoint — fires the wingman-market-brief agent on the platform.
-    The agent uses the existing eia_open_data + ecb_rates + ais_stream
-    tools; all data-fetching logic lives on the platform side.
-    Cached in-process for 5 minutes so a busy floor doesn't burn LLM
-    cost on every tab refresh.
-    """
-    import time
-
-    cache_key = "market_brief"
-    now = time.time()
-    cached = _MARKET_BRIEF_CACHE.get(cache_key)
-    if cached and now - cached[0] < 300:
-        return {"data": cached[1]}
+    result_cache.mark_visit("market-brief")
+    entry = result_cache.read("market-brief", "snapshot")
+    if entry and entry["fresh"] and (entry["payload"].get("indicators") or []):
+        return {"data": entry["payload"]}
 
     async with _abenix_client() as forge:
         try:
@@ -144,6 +250,8 @@ async def market_brief() -> dict[str, Any]:
             )
         except Exception as e:
             logger.exception("market-brief agent failed")
+            if entry:
+                return {"data": entry["payload"]}
             raise HTTPException(status_code=502, detail=f"Market brief failed: {e}")
 
     parsed: dict[str, Any] = {}
@@ -159,10 +267,6 @@ async def market_brief() -> dict[str, Any]:
             except Exception:
                 parsed = {}
 
-    # Pull the platform's error fields directly so a failed market-brief
-    # doesn't render as silent empty cards. Without this the previous
-    # behaviour cached an empty payload for 5 minutes and the next 30s
-    # poll just refreshed the same blank state.
     errors = getattr(result, "errors", []) or []
     err_msg = ""
     if errors:
@@ -173,14 +277,24 @@ async def market_brief() -> dict[str, Any]:
     payload = {
         **(parsed or {}),
         "execution_id": result.execution_id,
-        "generated_at": now,
+        "generated_at": time.time(),
         "error_message": err_msg or None,
     }
-    indicators = payload.get("indicators") or []
-    # Only cache successful runs so the next refresh re-tries on failure.
-    if indicators and not err_msg:
-        _MARKET_BRIEF_CACHE[cache_key] = (now, payload)
+    if (payload.get("indicators") or []) and not err_msg:
+        try:
+            result_cache.write("market-brief", "snapshot", payload)
+        except Exception as e:
+            logger.warning("cache write market-brief failed: %s", e)
+    elif entry:
+        return {"data": entry["payload"]}
     return {"data": payload}
+
+
+@app.get("/api/wingman/market-brief/cached")
+async def market_brief_cached() -> dict[str, Any]:
+    """Last successful market brief — refreshed by the warmer every 5 min."""
+    result_cache.mark_visit("market-brief")
+    return _wrap_cached("market-brief", "snapshot")
 
 
 def _parse_agent_json(raw: str) -> dict[str, Any]:
@@ -276,9 +390,21 @@ async def analyze_result(execution_id: str) -> dict[str, Any]:
     if terminal and raw:
         parsed = _parse_agent_json(raw)
 
+    corridor_id = _ANALYZE_INDEX.get(execution_id)
+    if status == "completed" and parsed and corridor_id:
+        try:
+            result_cache.write("analyze", corridor_id, {
+                **parsed,
+                "execution_id": execution_id,
+                "cost_usd": row.get("cost"),
+                "duration_ms": row.get("duration_ms"),
+            })
+        except Exception as e:
+            logger.warning("cache write analyze/%s failed: %s", corridor_id, e)
+
     return {
         "data": {
-            "corridor_id": _ANALYZE_INDEX.get(execution_id),
+            "corridor_id": corridor_id,
             "execution_id": execution_id,
             "status": status,
             "result": (
@@ -296,6 +422,13 @@ async def analyze_result(execution_id: str) -> dict[str, Any]:
             "duration_ms": row.get("duration_ms"),
         }
     }
+
+
+@app.get("/api/wingman/corridors/{corridor_id}/cached")
+async def analyze_cached(corridor_id: str) -> dict[str, Any]:
+    """Last successful workbench scan for this corridor."""
+    result_cache.mark_visit("analyze")
+    return _wrap_cached("analyze", corridor_id)
 
 
 # ─── Broker Inbox ────────────────────────────────────────────────────────
@@ -640,6 +773,16 @@ async def ops_snapshot() -> dict[str, Any]:
                 parsed = json.loads(s[first : last + 1])
             except Exception:
                 parsed = {"narrative": raw[:1500]}
+    if parsed:
+        try:
+            result_cache.write("ops", "snapshot", {
+                **parsed,
+                "execution_id": result.execution_id,
+                "cost_usd": result.cost,
+                "duration_ms": result.duration_ms,
+            })
+        except Exception as e:
+            logger.warning("cache write ops/snapshot failed: %s", e)
     return {
         "data": {
             "execution_id": result.execution_id,
@@ -648,6 +791,13 @@ async def ops_snapshot() -> dict[str, Any]:
             "duration_ms": result.duration_ms,
         }
     }
+
+
+@app.get("/api/wingman/ops/cached")
+async def ops_cached() -> dict[str, Any]:
+    """Last AIS snapshot — refreshed hourly by the warmer."""
+    result_cache.mark_visit("ops")
+    return _wrap_cached("ops", "snapshot")
 
 
 # ─── Strategy Lab ────────────────────────────────────────────────────────
@@ -764,14 +914,6 @@ async def activate_strategy(rule_id: str) -> dict[str, Any]:
 # execution_id → corridor_id, mirroring _ANALYZE_INDEX. Lets the result
 # endpoint echo the corridor without the frontend round-tripping it.
 _SCENARIO_INDEX: dict[str, str] = {}
-# Per-corridor cache of the last successful forecast. Forecasts are
-# expensive (5+ tool calls including 4 Tavily searches + a Sonnet 4.5
-# loop), so a 15-minute hold makes a busy desk re-render the same view
-# without re-burning the agent.
-_SCENARIO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_SCENARIO_TTL_SECONDS = 900
-
-
 @app.post("/api/wingman/scenarios/{corridor_id}/forecast")
 async def forecast_scenarios(
     corridor_id: str, body: dict[str, Any] | None = None
@@ -826,9 +968,15 @@ async def scenario_result(execution_id: str) -> dict[str, Any]:
         parsed = _parse_agent_json(raw)
     corridor_id = _SCENARIO_INDEX.get(execution_id)
     if status == "completed" and parsed and corridor_id:
-        import time as _time
-
-        _SCENARIO_CACHE[corridor_id] = (_time.time(), parsed)
+        try:
+            result_cache.write("scenarios", corridor_id, {
+                **parsed,
+                "execution_id": execution_id,
+                "cost_usd": row.get("cost"),
+                "duration_ms": row.get("duration_ms"),
+            })
+        except Exception as e:
+            logger.warning("cache write scenarios/%s failed: %s", corridor_id, e)
     return {
         "data": {
             "corridor_id": corridor_id,
@@ -845,29 +993,14 @@ async def scenario_result(execution_id: str) -> dict[str, Any]:
 
 @app.get("/api/wingman/scenarios/{corridor_id}/cached")
 async def scenarios_cached(corridor_id: str) -> dict[str, Any]:
-    """Return the most recent successful forecast for a corridor, if fresh."""
-    import time as _time
-
-    cached = _SCENARIO_CACHE.get(corridor_id)
-    if not cached:
-        return {"data": None}
-    ts, payload = cached
-    if _time.time() - ts > _SCENARIO_TTL_SECONDS:
-        return {"data": None}
-    return {
-        "data": {
-            "corridor_id": corridor_id,
-            "generated_at": ts,
-            "forecast": payload,
-        }
-    }
+    """Return the most recent successful forecast for a corridor."""
+    result_cache.mark_visit("scenarios")
+    return _wrap_cached("scenarios", corridor_id)
 
 
 # ─── Mispricing Lens ─────────────────────────────────────────────────────
 
 _MISPRICING_INDEX: dict[str, str] = {}
-_MISPRICING_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_MISPRICING_TTL_SECONDS = 900
 
 
 @app.post("/api/wingman/mispricing/{corridor_id}/scan")
@@ -911,9 +1044,15 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
         parsed = _parse_agent_json(raw)
     corridor_id = _MISPRICING_INDEX.get(execution_id)
     if status == "completed" and parsed and corridor_id:
-        import time as _time
-
-        _MISPRICING_CACHE[corridor_id] = (_time.time(), parsed)
+        try:
+            result_cache.write("mispricing", corridor_id, {
+                **parsed,
+                "execution_id": execution_id,
+                "cost_usd": row.get("cost"),
+                "duration_ms": row.get("duration_ms"),
+            })
+        except Exception as e:
+            logger.warning("cache write mispricing/%s failed: %s", corridor_id, e)
     return {
         "data": {
             "corridor_id": corridor_id,
@@ -930,21 +1069,8 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
 
 @app.get("/api/wingman/mispricing/{corridor_id}/cached")
 async def mispricing_cached(corridor_id: str) -> dict[str, Any]:
-    import time as _time
-
-    cached = _MISPRICING_CACHE.get(corridor_id)
-    if not cached:
-        return {"data": None}
-    ts, payload = cached
-    if _time.time() - ts > _MISPRICING_TTL_SECONDS:
-        return {"data": None}
-    return {
-        "data": {
-            "corridor_id": corridor_id,
-            "generated_at": ts,
-            "scan": payload,
-        }
-    }
+    result_cache.mark_visit("mispricing")
+    return _wrap_cached("mispricing", corridor_id)
 
 
 @app.post("/api/wingman/mispricing/{corridor_id}/trade-card")
@@ -989,6 +1115,115 @@ async def mispricing_trade_card(
             "corridor_id": corridor_id,
         }
     }
+
+
+# ─── Desk Copilot (meta agent) ──────────────────────────────────────────
+
+_DESK_INDEX: dict[str, str] = {}
+
+
+@app.post("/api/wingman/desk/ask")
+async def desk_ask(body: dict[str, Any]) -> dict[str, Any]:
+    question = (body or {}).get("question") or ""
+    if not question or len(question.strip()) < 4:
+        raise HTTPException(status_code=400, detail="question must be at least 4 characters")
+    result_cache.mark_visit("desk")
+    payload = {"question": question}
+    async with _abenix_client() as forge:
+        submitted = await forge.execute(
+            "wingman-desk-copilot",
+            json.dumps(payload),
+            wait="submitted",
+        )
+    if submitted.execution_id:
+        _DESK_INDEX[submitted.execution_id] = question
+    return {
+        "data": {
+            "execution_id": submitted.execution_id,
+            "status": submitted.status or "running",
+            "question": question,
+        }
+    }
+
+
+@app.get("/api/wingman/desk/result/{execution_id}")
+async def desk_result(execution_id: str) -> dict[str, Any]:
+    async with _abenix_client() as forge:
+        try:
+            row = await forge.executions.get(execution_id) or {}
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Execution fetch failed: {e}")
+    status = (row.get("status") or "running").lower()
+    terminal = status in {"completed", "succeeded", "failed", "error", "cancelled"}
+    parsed: dict[str, Any] = {}
+    raw = row.get("output") or row.get("output_message") or ""
+    if terminal and raw:
+        parsed = _parse_agent_json(raw)
+
+    if status == "completed" and parsed:
+        question = _DESK_INDEX.get(execution_id) or parsed.get("intent") or ""
+        agents = [p.get("agent") for p in (parsed.get("plan") or []) if isinstance(p, dict)]
+        try:
+            trajectory_store.write_trajectory({
+                "intent": question or parsed.get("intent") or "",
+                "plan": parsed.get("plan") or [],
+                "agents_invoked": [a for a in agents if a],
+                "specialist_outputs": parsed.get("specialist_outputs") or {},
+                "brief": parsed.get("brief") or parsed.get("headline") or "",
+                "headline": parsed.get("headline"),
+                "drivers": parsed.get("drivers") or [],
+                "recommended_action": parsed.get("recommended_action"),
+                "confidence": parsed.get("confidence"),
+                "execution_id": execution_id,
+                "cost_usd": row.get("cost"),
+                "duration_ms": row.get("duration_ms"),
+            })
+        except Exception as e:
+            logger.warning("trajectory write failed for %s: %s", execution_id, e)
+
+    return {
+        "data": {
+            "execution_id": execution_id,
+            "status": status,
+            "question": _DESK_INDEX.get(execution_id),
+            "answer": parsed if parsed else None,
+            "error_message": row.get("error_message"),
+            "failure_code": row.get("failure_code"),
+            "cost_usd": row.get("cost"),
+            "duration_ms": row.get("duration_ms"),
+        }
+    }
+
+
+@app.get("/api/wingman/desk/trajectories")
+async def desk_trajectories(q: str | None = None, limit: int = 25) -> dict[str, Any]:
+    result_cache.mark_visit("desk")
+    items = (
+        trajectory_store.search_trajectories(q, top_k=limit)
+        if q else trajectory_store.list_trajectories(limit=limit)
+    )
+    return {"data": items}
+
+
+@app.get("/api/wingman/desk/trajectories/{trajectory_id}")
+async def desk_trajectory_detail(trajectory_id: str) -> dict[str, Any]:
+    obj = trajectory_store.get_trajectory(trajectory_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="trajectory not found")
+    return {"data": obj}
+
+
+@app.post("/api/wingman/desk/trajectories/{trajectory_id}/outcome")
+async def desk_trajectory_outcome(trajectory_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    ok = trajectory_store.attach_outcome(
+        trajectory_id,
+        approval_id=body.get("approval_id"),
+        success_signal=body.get("success_signal"),
+        note=body.get("note"),
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="trajectory not found")
+    return {"data": trajectory_store.get_trajectory(trajectory_id)}
 
 
 # ─── Knowledge Graph (Atlas) ─────────────────────────────────────────────

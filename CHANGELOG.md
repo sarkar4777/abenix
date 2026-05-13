@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.3.0 — 2026-05-13
+
+### Added
+
+- **Desk Copilot** — a meta agent at `/desk` in Wingman that takes a single trader-style question, plans which Wingman specialists to fire (`wingman-arb-analyzer`, `wingman-mispricing-extractor`, `wingman-scenario-forecaster`, `wingman-ops-monitor`, `wingman-graph-query`, …), fans them out in parallel through a new `invoke_agent` runtime tool, and stitches every output into a single brief with headline, drivers, recommended action, and conviction. Sonnet 4.5 driven, agent yaml in `packages/db/seeds/agents/wingman_desk_copilot.yaml`. New API endpoints `POST /api/wingman/desk/ask`, `GET /api/wingman/desk/result/{execution_id}`, `GET /api/wingman/desk/trajectories`.
+- **Trajectory memory** — every Desk Copilot run is saved as a JSON record on `/data/wingman-trajectories/{tenant}/{trajectory_id}.json`. A new `recall_trajectory` runtime tool retrieves past runs whose intent overlaps the new query so the copilot can adapt a known-good plan instead of re-planning from scratch. The Desk page renders a sidebar of past runs that replays into the main panel on click. Docs: `docs/TRAJECTORY_MEMORY.md`. Opt-in for any agent in AI Builder by adding `recall_trajectory` to its tool list.
+- **Outcome grading hook** — `POST /api/wingman/desk/trajectories/{trajectory_id}/outcome` attaches an approval id + success score to a past trajectory so `recall_trajectory` can rank by realised outcome over time. The nightly grading job that produces the score automatically is documented as a follow-up.
+- **`invoke_agent` runtime tool** — invokes any registered platform agent by slug, fans the parent's input out as a regular sub-execution (full DAG, cost log, observability). The companion `agent_step` tool stays as the "ad-hoc / inline embedding" path. Both visible automatically in the AI Builder palette.
+- **File-backed result cache + 30-min warmer for the four trader pages** — Arbitrage Workbench, Mispricing Lens, Forward Scenarios, Operations Watch (plus the morning market brief) now serve from `/data/wingman-cache/` first and never render empty. A background warmer in the wingman-api lifespan refreshes stale entries every 30 minutes — but only for pages that were visited in the last hour, so the LLM bill stops growing the moment the desk goes home. Each page shows a live/stale chip with "X minutes ago" and a Refresh button. New endpoints `GET /api/wingman/{corridors|mispricing|scenarios}/{id}/cached`, `GET /api/wingman/ops/cached`, `GET /api/wingman/market-brief/cached`.
+
+### Changed
+
+- **PipelineStrip + DagDrawer terminal-sweep** — when an execution reaches `completed`/`failed`/`cancelled`, every chip still showing `running` or `pending` is now swept to the overall terminal status. Fixes the "drawer subscribed after the agent finished, three tool chips stuck spinning forever" experience on every page that renders a DAG (Workbench, Mispricing Lens, Forward Scenarios, Strategy Lab, Knowledge Graph, Desk Copilot).
+- **`code_asset` tool resolves by name OR uuid** — agents that pass the asset slug (e.g. `wingman-var-simulator`) now match the registered asset alongside agents that pass the UUID. Tenant scoping is preserved on both paths.
+- **Sidebar order** — Desk Copilot now sits at the top, just under Home.
+
+### Fixed
+
+- **Mispricing Lens / Forward Scenarios "completed but empty result"** — when the agent reports `completed` but produced no parseable envelope, the page was rendering nothing. The cache wrappers + cached endpoints now keep the last known good run visible until a fresh one lands, so the screen is never empty during a re-run.
+
 ## v1.2.2 — 2026-05-13
 
 ### Added

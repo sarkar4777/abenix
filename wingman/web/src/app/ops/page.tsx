@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Ship, AlertTriangle, Wifi, Loader2, RefreshCw, Cloud } from 'lucide-react';
+import { Ship, AlertTriangle, Wifi, Loader2, RefreshCw, Cloud, Activity } from 'lucide-react';
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
 import ExplainerPanel from '../components/ExplainerPanel';
 import { OPS_EXPLAINER } from '../components/explainer-specs';
+import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-helpers';
 
 const OPS_PIPELINE = [
   { id: 'wingman-ops-monitor', label: 'Ops Monitor', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'wingman-ops-monitor agent' },
@@ -27,8 +28,20 @@ interface Snapshot {
 
 export default function OpsPage() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [cacheMeta, setCacheMeta] = useState<CacheMeta | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeExecution, setActiveExecution] = useState<string | null>(null);
+
+  const loadCached = () => fetch('/api/wingman/ops/cached')
+    .then((r) => r.json())
+    .then((j) => {
+      const env = readCacheEnvelope(j);
+      if (env) {
+        setSnap(env.payload as Snapshot);
+        setCacheMeta(env.meta);
+      }
+    })
+    .catch(() => {});
 
   const refresh = async () => {
     setLoading(true);
@@ -38,11 +51,16 @@ export default function OpsPage() {
       const data = j.data;
       setSnap(data?.snapshot || {});
       if (data?.execution_id) setActiveExecution(data.execution_id);
+      await loadCached();
     } catch { /* ignore */ }
     setLoading(false);
   };
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    loadCached();
+    const t = setInterval(() => { if (!loading) loadCached(); }, 30_000);
+    return () => clearInterval(t);
+  }, [loading]);
 
   const vessels = snap?.vessels || [];
   const alerts = snap?.alerts || [];

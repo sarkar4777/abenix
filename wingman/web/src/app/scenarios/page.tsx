@@ -13,6 +13,7 @@ import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
 import ExplainerPanel from '../components/ExplainerPanel';
 import { SCENARIOS_EXPLAINER } from '../components/explainer-specs';
+import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-helpers';
 
 const SCENARIO_PIPELINE = [
   { id: 'wingman-scenario-forecaster', label: 'Forecaster', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'Sonnet 4.5 + Bayesian prior' },
@@ -105,6 +106,7 @@ export default function ScenariosPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [meta, setMeta] = useState<ForecastResponse | null>(null);
+  const [cacheMeta, setCacheMeta] = useState<CacheMeta | null>(null);
   const [running, setRunning] = useState(false);
   const [activeExecution, setActiveExecution] = useState<string | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -126,27 +128,34 @@ export default function ScenariosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Pull a cached forecast for the selected corridor (if fresh) so the
-  // chart isn't blank when a trader switches corridors.
-  useEffect(() => {
-    if (!selectedId) return;
-    let cancelled = false;
-    fetch(`/api/wingman/scenarios/${selectedId}/cached`)
+  const loadCached = (id: string, opts: { resetIfMissing: boolean }) => {
+    return fetch(`/api/wingman/scenarios/${id}/cached`)
       .then((r) => r.json())
       .then((j) => {
-        if (cancelled) return;
-        if (j.data?.forecast) {
-          setForecast(j.data.forecast);
-          setMeta(null);
-          setHighlightId(null);
-        } else {
+        const env = readCacheEnvelope(j);
+        if (env) {
+          setForecast(env.payload as Forecast);
+          setCacheMeta(env.meta);
+        } else if (opts.resetIfMissing) {
           setForecast(null);
-          setMeta(null);
+          setCacheMeta(null);
         }
       })
       .catch(() => {});
-    return () => { cancelled = true; };
-  }, [selectedId]);
+  };
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    setMeta(null);
+    setHighlightId(null);
+    loadCached(selectedId, { resetIfMissing: true }).then(() => { if (cancelled) return; });
+    const poll = setInterval(() => {
+      if (running) return;
+      loadCached(selectedId, { resetIfMissing: false });
+    }, 30_000);
+    return () => { cancelled = true; clearInterval(poll); };
+  }, [selectedId, running]);
 
   const TERMINAL = new Set(['completed', 'succeeded', 'failed', 'error', 'cancelled']);
 

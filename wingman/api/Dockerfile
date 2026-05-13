@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY sdk/ ./sdk/
 COPY main.py .
+COPY cache.py .
+COPY trajectories.py .
 COPY data/ ./data/
 
 ENV PYTHONPATH=/app:/app/sdk

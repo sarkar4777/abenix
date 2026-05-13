@@ -1107,6 +1107,8 @@ def _ensure_tool_classes() -> None:
     from engine.tools.defer_to_human import DeferToHumanTool
     from engine.tools.scope_gate import ScopeGateTool
     from engine.tools.code_asset import CodeAssetTool
+    from engine.tools.invoke_agent import InvokeAgentTool
+    from engine.tools.recall_trajectory import RecallTrajectoryTool
 
     _CONTEXT_TOOL_FACTORIES.update(
         {
@@ -1125,6 +1127,8 @@ def _ensure_tool_classes() -> None:
             "persona_rag": PersonaRagTool,
             "defer_to_human": DeferToHumanTool,
             "scope_gate": ScopeGateTool,
+            "invoke_agent": InvokeAgentTool,
+            "recall_trajectory": RecallTrajectoryTool,
         }
     )
     _TOOL_CLASSES_LOADED = True
@@ -1301,6 +1305,16 @@ def build_tool_registry(
     ScopeGateCls = _CONTEXT_TOOL_FACTORIES.get("scope_gate")
     if ScopeGateCls:
         context_tools["scope_gate"] = lambda: ScopeGateCls(execution_id=execution_id)
+
+    InvokeAgentCls = _CONTEXT_TOOL_FACTORIES.get("invoke_agent")
+    if InvokeAgentCls:
+        context_tools["invoke_agent"] = lambda: InvokeAgentCls(tenant_id=tenant_id)
+
+    RecallCls = _CONTEXT_TOOL_FACTORIES.get("recall_trajectory")
+    if RecallCls:
+        context_tools["recall_trajectory"] = lambda: RecallCls(
+            db_url=db_url, tenant_id=tenant_id
+        )
 
     registry = ToolRegistry()
     for name in tool_names:

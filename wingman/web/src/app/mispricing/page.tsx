@@ -15,6 +15,7 @@ import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
 import ExplainerPanel from '../components/ExplainerPanel';
 import { MISPRICING_EXPLAINER } from '../components/explainer-specs';
+import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-helpers';
 
 const MISPRICING_PIPELINE = [
   { id: 'wingman-mispricing-extractor', label: 'Mispricing Lens', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'Haiku 4.5 + 2 ML models' },
@@ -141,6 +142,7 @@ export default function MispricingPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scan, setScan] = useState<Scan | null>(null);
   const [meta, setMeta] = useState<ScanResponse | null>(null);
+  const [cacheMeta, setCacheMeta] = useState<CacheMeta | null>(null);
   const [running, setRunning] = useState(false);
   const [activeExecution, setActiveExecution] = useState<string | null>(null);
   const [gateOpened, setGateOpened] = useState<string | null>(null);
@@ -160,25 +162,34 @@ export default function MispricingPage() {
     return () => { Object.values(pmap).forEach((t) => clearInterval(t)); };
   }, []);
 
-  useEffect(() => {
-    if (!selectedId) return;
-    let cancelled = false;
-    fetch(`/api/wingman/mispricing/${selectedId}/cached`)
+  const loadCached = (id: string, opts: { resetIfMissing: boolean }) => {
+    return fetch(`/api/wingman/mispricing/${id}/cached`)
       .then((r) => r.json())
       .then((j) => {
-        if (cancelled) return;
-        if (j.data?.scan) {
-          setScan(j.data.scan);
-          setMeta(null);
-          setGateOpened(null);
-        } else {
+        const env = readCacheEnvelope(j);
+        if (env) {
+          setScan(env.payload as Scan);
+          setCacheMeta(env.meta);
+        } else if (opts.resetIfMissing) {
           setScan(null);
-          setMeta(null);
+          setCacheMeta(null);
         }
       })
       .catch(() => {});
-    return () => { cancelled = true; };
-  }, [selectedId]);
+  };
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    setMeta(null);
+    setGateOpened(null);
+    loadCached(selectedId, { resetIfMissing: true }).then(() => { if (cancelled) return; });
+    const poll = setInterval(() => {
+      if (running) return;
+      loadCached(selectedId, { resetIfMissing: false });
+    }, 30_000);
+    return () => { cancelled = true; clearInterval(poll); };
+  }, [selectedId, running]);
 
   const runScan = async () => {
     if (!selectedId) return;
@@ -280,6 +291,19 @@ export default function MispricingPage() {
             </button>
           ))}
           <div className="flex-1" />
+          {cacheMeta && cacheMeta.cachedAt && (
+            <span
+              className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-lg border ${
+                cacheMeta.fresh
+                  ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300'
+                  : 'border-amber-500/30 bg-amber-500/5 text-amber-300'
+              }`}
+              title={`Last refreshed ${cacheMeta.cachedAt}`}
+            >
+              <Activity className="w-3 h-3" />
+              {cacheMeta.fresh ? 'live data' : 'stale'} · {formatAge(cacheMeta.ageSeconds)}
+            </span>
+          )}
           <button
             onClick={runScan}
             disabled={!selectedId || running}
@@ -288,6 +312,8 @@ export default function MispricingPage() {
           >
             {running ? (
               <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scoring mispricing...</>
+            ) : scan ? (
+              <><Crosshair className="w-3.5 h-3.5" /> Refresh {selected ? selected.label : 'corridor'} <ArrowRight className="w-3 h-3" /></>
             ) : (
               <><Crosshair className="w-3.5 h-3.5" /> Score {selected ? selected.label : 'corridor'} <ArrowRight className="w-3 h-3" /></>
             )}

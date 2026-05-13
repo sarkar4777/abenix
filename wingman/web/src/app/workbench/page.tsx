@@ -11,6 +11,7 @@ import HeroBar from '../components/HeroBar';
 import PipelineStrip from '../components/PipelineStrip';
 import ExplainerPanel from '../components/ExplainerPanel';
 import { WORKBENCH_EXPLAINER } from '../components/explainer-specs';
+import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-helpers';
 
 const ARB_PIPELINE = [
   { id: 'wingman-arb-analyzer', label: 'Arb Analyzer', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'wingman-arb-analyzer agent' },
@@ -95,33 +96,76 @@ export default function WorkbenchPage() {
   const [activeExecution, setActiveExecution] = useState<string | null>(null);
   const [brief, setBrief] = useState<MarketBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
+  const [cacheMeta, setCacheMeta] = useState<Record<string, CacheMeta>>({});
   const pollers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+  const loadCachedForCorridor = (id: string) => {
+    return fetch(`/api/wingman/corridors/${id}/cached`)
+      .then((r) => r.json())
+      .then((j) => {
+        const env = readCacheEnvelope(j);
+        if (env) {
+          setResults((prev) => ({
+            ...prev,
+            [id]: {
+              corridor_id: id,
+              execution_id: env.payload.execution_id || '',
+              status: 'completed',
+              result: env.payload,
+              cost_usd: env.payload.cost_usd,
+              duration_ms: env.payload.duration_ms,
+            } as AnalyzeResult,
+          }));
+          setCacheMeta((prev) => ({ ...prev, [id]: env.meta }));
+        }
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     fetch('/api/wingman/corridors')
       .then((r) => r.json())
-      .then((j) => setCorridors(j.data || []))
+      .then((j) => {
+        const list = (j.data || []) as Corridor[];
+        setCorridors(list);
+        list.filter((c) => c.active).forEach((c) => loadCachedForCorridor(c.id));
+      })
       .catch(() => {});
 
     let cancelled = false;
     const loadBrief = (showSpinner: boolean) => {
       if (showSpinner) setBriefLoading(true);
-      fetch('/api/wingman/market-brief')
+      fetch('/api/wingman/market-brief/cached')
         .then((r) => r.json())
-        .then((j) => { if (!cancelled) setBrief(j.data || null); })
+        .then((j) => {
+          if (cancelled) return;
+          const env = readCacheEnvelope(j);
+          if (env) setBrief(env.payload as MarketBrief);
+          else {
+            return fetch('/api/wingman/market-brief')
+              .then((r2) => r2.json())
+              .then((j2) => { if (!cancelled) setBrief(j2.data || null); });
+          }
+        })
         .catch(() => {})
         .finally(() => { if (!cancelled && showSpinner) setBriefLoading(false); });
     };
     loadBrief(true);
     const briefTimer = setInterval(() => loadBrief(false), 30000);
 
+    const cachedTimer = setInterval(() => {
+      if (cancelled) return;
+      corridors.filter((c) => c.active && running !== c.id).forEach((c) => loadCachedForCorridor(c.id));
+    }, 30000);
+
     const live = pollers.current;
     return () => {
       cancelled = true;
       clearInterval(briefTimer);
+      clearInterval(cachedTimer);
       Object.values(live).forEach((t) => clearInterval(t));
     };
-  }, []);
+  }, [corridors.length, running]);
 
   const startPolling = (corridorId: string, executionId: string) => {
     if (pollers.current[executionId]) return;

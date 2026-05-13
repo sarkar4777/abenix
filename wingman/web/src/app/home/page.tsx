@@ -221,8 +221,16 @@ export default function HomePage() {
 
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
-              href="/workbench"
+              href="/desk"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm transition-colors"
+              data-testid="home-cta-desk"
+            >
+              Ask the Desk Copilot
+              <Sparkles className="w-4 h-4" />
+            </Link>
+            <Link
+              href="/workbench"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10 font-semibold text-sm transition-colors"
             >
               Open Arb Workbench
               <ArrowRight className="w-4 h-4" />

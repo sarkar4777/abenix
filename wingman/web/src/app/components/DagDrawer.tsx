@@ -246,19 +246,25 @@ export default function DagDrawer({
               const ok = c.status || (c.completed_at ? 'completed' : c.error ? 'failed' : 'running');
               callStatus.set(tn, ok);
             }
-            // Live event stream: tool_call (start) → tool_result (end)
             for (const e of events) {
               const tn = e.data?.tool_name || e.data?.name;
               if (!tn) continue;
               if (e.event === 'tool_call') callStatus.set(tn, callStatus.get(tn) === 'completed' ? 'completed' : 'running');
               if (e.event === 'tool_result') callStatus.set(tn, e.data?.error ? 'failed' : 'completed');
             }
-            // Compose: agent envelope first (from snapshot), then expected tools.
             type Row = { id: string; label: string; status: string; sub?: string };
             const rows: Row[] = [];
             const agentNode = snapNodes.find((n) => n.tool_name === 'agent' || n.id === 'agent');
             const overallStatus = String(snapshot?.status || '').toLowerCase();
             const isTerminal = TERMINAL_STATUS.has(overallStatus);
+            const sweep = (s: string): string => {
+              if (!isTerminal) return s;
+              if (s === 'running' || s === 'pending') {
+                if (overallStatus === 'completed' || overallStatus === 'succeeded') return 'completed';
+                return overallStatus;
+              }
+              return s;
+            };
             if (agentNode) {
               const nodeStatus = (agentNode.status || '').toLowerCase() || 'pending';
               rows.push({
@@ -273,21 +279,18 @@ export default function DagDrawer({
               for (const t of expectedTools) {
                 if (t.id === 'agent' || /^wingman-/.test(t.id)) continue;
                 seenInExpected.add(t.id);
-                let st = callStatus.get(t.id) || 'pending';
-                if (isTerminal && st === 'running') st = overallStatus;
-                if (isTerminal && st === 'pending' && overallStatus !== 'completed') st = overallStatus;
+                const raw = callStatus.get(t.id) || 'pending';
                 rows.push({
                   id: t.id,
                   label: t.label,
-                  status: st,
+                  status: sweep(raw),
                   sub: t.hint,
                 });
               }
             }
-            // Catch any tool the agent invoked that wasn't in the expected list
             for (const [tn, s] of callStatus.entries()) {
               if (seenInExpected.has(tn)) continue;
-              rows.push({ id: tn, label: tn, status: s });
+              rows.push({ id: tn, label: tn, status: sweep(s) });
             }
             if (rows.length === 0) return null;
             const dotFor = (s: string) =>

@@ -9,6 +9,7 @@ import {
 
 const NAV = [
   { href: '/home', label: 'Home', icon: Home },
+  { href: '/desk', label: 'Desk Copilot', icon: Sparkles },
   { href: '/workbench', label: 'Arbitrage Workbench', icon: Activity },
   { href: '/mispricing', label: 'Mispricing Lens', icon: Crosshair },
   { href: '/lab', label: 'Market & Freight Lab', icon: Anchor },
