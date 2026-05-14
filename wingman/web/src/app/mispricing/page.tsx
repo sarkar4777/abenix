@@ -194,9 +194,7 @@ export default function MispricingPage() {
   const runScan = async () => {
     if (!selectedId) return;
     setRunning(true);
-    setScan(null);
     setMeta(null);
-    setGateOpened(null);
     setGateError(null);
     try {
       const r = await fetch(`/api/wingman/mispricing/${selectedId}/scan`, {
@@ -501,7 +499,17 @@ function SpreadChart({ scan }: { scan: Scan }) {
             <Tooltip
               contentStyle={{ background: '#0F172A', border: '1px solid #1e293b', fontSize: 11, borderRadius: 6 }}
               labelStyle={{ color: '#94a3b8' }}
-              formatter={(v: any, name: any) => [`$${Number(v ?? 0).toFixed(2)}/MT`, String(name)]}
+              formatter={(v: any, name: any) => {
+                if (Array.isArray(v)) {
+                  const lo = v[0] != null ? Number(v[0]).toFixed(2) : '—';
+                  const hi = v[1] != null ? Number(v[1]).toFixed(2) : '—';
+                  return [`$${lo} – $${hi}/MT`, String(name)];
+                }
+                if (v == null || (typeof v === 'number' && Number.isNaN(v))) {
+                  return ['—', String(name)];
+                }
+                return [`$${Number(v).toFixed(2)}/MT`, String(name)];
+              }}
             />
             <Area
               type="monotone"

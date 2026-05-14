@@ -162,9 +162,7 @@ export default function ScenariosPage() {
   const runForecast = async () => {
     if (!selectedId) return;
     setRunning(true);
-    setForecast(null);
     setMeta(null);
-    setHighlightId(null);
     try {
       const r = await fetch(`/api/wingman/scenarios/${selectedId}/forecast`, {
         method: 'POST',

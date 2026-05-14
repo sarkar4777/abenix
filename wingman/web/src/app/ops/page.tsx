@@ -49,7 +49,10 @@ export default function OpsPage() {
       const r = await fetch('/api/wingman/ops/snapshot');
       const j = await r.json();
       const data = j.data;
-      setSnap(data?.snapshot || {});
+      const fresh = data?.snapshot;
+      if (fresh && (fresh.vessels?.length || fresh.alerts?.length || fresh.weather?.length || fresh.narrative)) {
+        setSnap(fresh);
+      }
       if (data?.execution_id) setActiveExecution(data.execution_id);
       await loadCached();
     } catch { /* ignore */ }

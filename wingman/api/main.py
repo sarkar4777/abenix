@@ -92,26 +92,52 @@ _WARMER_INTERVAL_SECONDS = int(os.environ.get("WINGMAN_WARMER_INTERVAL_SECONDS",
 _WARMER_TASK: asyncio.Task[Any] | None = None
 
 
+def _warmer_pairs():
+    active = [c["id"] for c in CORRIDORS if c.get("active")]
+    return [
+        ("mispricing", active, _warm_mispricing),
+        ("scenarios", active, _warm_scenarios),
+        ("analyze", active, _warm_analyze),
+        ("ops", ["snapshot"], _warm_ops),
+        ("market-brief", ["snapshot"], _warm_market_brief),
+    ]
+
+
+async def _initial_warm() -> None:
+    fired = 0
+    for page, keys, run in _warmer_pairs():
+        missing = [k for k in keys if result_cache.read(page, k) is None]
+        if not missing:
+            continue
+        n = await result_cache.warm(page, missing, run, require_recent_visit=False)
+        fired += n
+        if n:
+            logger.info("bootstrap warm: %s populated %d/%d", page, n, len(missing))
+    logger.info("bootstrap warm complete: %d (page,key) pairs filled", fired)
+
+
+async def _periodic_warm() -> None:
+    for page, keys, run in _warmer_pairs():
+        await result_cache.warm(page, keys, run, require_recent_visit=True)
+
+
 async def _warmer_loop() -> None:
+    try:
+        await asyncio.sleep(15)
+        await _initial_warm()
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        logger.exception("initial warm failed: %s", e)
     while True:
         try:
             await asyncio.sleep(_WARMER_INTERVAL_SECONDS)
         except asyncio.CancelledError:
             return
         try:
-            active_corridor_ids = [c["id"] for c in CORRIDORS if c.get("active")]
-            logger.info(
-                "warmer tick: %d active corridors, ttl_default=%ss",
-                len(active_corridor_ids),
-                result_cache.DEFAULT_TTL_SECONDS,
-            )
-            await result_cache.warm("mispricing", active_corridor_ids, _warm_mispricing)
-            await result_cache.warm("scenarios", active_corridor_ids, _warm_scenarios)
-            await result_cache.warm("analyze", active_corridor_ids, _warm_analyze)
-            await result_cache.warm("ops", ["snapshot"], _warm_ops)
-            await result_cache.warm("market-brief", ["snapshot"], _warm_market_brief)
+            await _periodic_warm()
         except Exception as e:
-            logger.exception("warmer tick failed: %s", e)
+            logger.exception("periodic warm failed: %s", e)
 
 
 @asynccontextmanager
