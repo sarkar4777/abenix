@@ -26,7 +26,6 @@ mispricing model can consume the numbers without reparsing.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult

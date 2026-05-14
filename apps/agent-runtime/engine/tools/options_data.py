@@ -35,7 +35,6 @@ the existing ``yahoo_finance`` tool uses, so no new dependency.
 from __future__ import annotations
 
 from datetime import datetime
-from statistics import median
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
