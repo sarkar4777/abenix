@@ -149,15 +149,18 @@ def apply_resource_scope(
             return query.where(*base, model.id.in_([uuid.UUID(int=0)]))  # empty set
         return query.where(*base, model.id.in_(ids))
 
-    # Default `scope == "all"` for non-admin: mine OR shared
+    # Default `scope == "all"` for non-admin: mine OR shared OR oob.
+    # Resources with creator_id IS NULL are platform-seeded (OOB) and
+    # visible to anyone in the tenant — same rule as agents.agent_type=oob.
     ids = list(accessible_ids or [])
     if creator_col is None:
-        # Resource has no ownership concept — treat as tenant-wide.
-        # (Knowledge bases historically; can add `created_by` later.)
         return query.where(*base)
     if not ids:
-        return query.where(*base, creator_col == user.id)
-    return query.where(*base, or_(creator_col == user.id, model.id.in_(ids)))
+        return query.where(*base, or_(creator_col == user.id, creator_col.is_(None)))
+    return query.where(
+        *base,
+        or_(creator_col == user.id, creator_col.is_(None), model.id.in_(ids)),
+    )
 
 
 def assert_can_access(

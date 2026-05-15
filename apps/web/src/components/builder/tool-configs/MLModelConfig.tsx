@@ -148,7 +148,14 @@ export default function MLModelConfig({ values, onChange }: MLModelConfigProps) 
         </select>
         {modelNames.length === 0 && !loading && (
           <p className="text-[10px] text-amber-300 mt-1">
-            No models registered. Upload one via the ML Models page (/ml-models).
+            No models visible to your account. If you expect models here, check the
+            ML Models page (/ml-models) — your user may not have access yet.
+          </p>
+        )}
+        {modelNames.length > 0 && activeModels.length === 0 && !loading && (
+          <p className="text-[10px] text-amber-300 mt-1">
+            {modelNames.length} model(s) registered but none are READY + active.
+            Visit /ml-models to deploy or activate.
           </p>
         )}
       </div>

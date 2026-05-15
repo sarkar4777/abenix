@@ -39,7 +39,10 @@ export default function CodeAssetConfig({ values, onChange }: Props) {
   const [err, setErr] = useState<string | null>(null);
 
   const assetId = (values.code_asset_id as string) || '';
-  const selected = assets.find((a) => a.id === assetId) || null;
+  const selected =
+    assets.find((a) => a.id === assetId) ||
+    assets.find((a) => a.name === assetId) ||
+    null;
 
   const load = async () => {
     setLoading(true); setErr(null);
@@ -66,19 +69,28 @@ export default function CodeAssetConfig({ values, onChange }: Props) {
     onChange(next);
   };
 
-  // Empty state — no assets at all, or none ready
   if (!loading && ready.length === 0) {
+    const inProgress = assets.length > 0;
     return (
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
         <div className="flex items-center gap-2 text-amber-300">
           <AlertCircle className="w-4 h-4" />
-          <p className="text-sm font-semibold">You haven't uploaded any code yet</p>
+          <p className="text-sm font-semibold">
+            {inProgress
+              ? `${assets.length} asset(s) found, but none are READY yet`
+              : "No code assets available to bind"}
+          </p>
         </div>
         <p className="text-xs text-slate-300 leading-relaxed">
-          The <code>code_asset</code> tool runs a previously-uploaded zip in an
-          isolated Kubernetes Pod. Upload your code (Python, Node, Go, Rust, Ruby,
-          Java, Perl) on the Code Runner page first, then come back — the asset
-          will show up in the dropdown with its detected schema.
+          {inProgress ? (
+            <>The <code>code_asset</code> tool can only run a READY asset.
+            Check the Code Runner page — assets may be analyzing or failed.</>
+          ) : (
+            <>The <code>code_asset</code> tool runs a previously-uploaded zip in an
+            isolated Kubernetes Pod. Upload your code (Python, Node, Go, Rust, Ruby,
+            Java, Perl) on the Code Runner page first, then come back — the asset
+            will show up in the dropdown with its detected schema.</>
+          )}
         </p>
         <Link
           href="/code-runner"
@@ -87,10 +99,9 @@ export default function CodeAssetConfig({ values, onChange }: Props) {
           <ExternalLink className="w-3.5 h-3.5" />
           Go to Code Runner
         </Link>
-        {assets.length > 0 && (
-          <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-700/40">
-            You have {assets.length} asset(s) in non-ready states — check the
-            Code Runner page for analysis errors.
+        {err && (
+          <p className="text-[11px] text-rose-300 pt-2 border-t border-slate-700/40">
+            Load error: {err}
           </p>
         )}
       </div>

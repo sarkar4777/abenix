@@ -1575,11 +1575,6 @@ def _synthesize_graph_answer(question: str) -> dict[str, Any]:
     def add_edge(src: str, dst: str, rel: str) -> None:
         edges.append({"from": src, "to": dst, "relation": rel})
 
-    corridor_nodes = [
-        {"id": f"corridor:{c['id']}", "type": "Corridor", "name": c["label"],
-         "origin_port": c["origin_port"], "destination_port": c["destination_port"], "product": c["product"]}
-        for c in CORRIDORS if c.get("active") or "corridor" in q or c["id"].lower() in q
-    ]
     citations: list[str] = []
 
     if "credit-watch" in q or "credit watch" in q or "creditwatch" in q:

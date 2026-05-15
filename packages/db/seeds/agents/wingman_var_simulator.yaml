@@ -75,6 +75,12 @@ model_config:
     - bunker_fuel
     - code_asset
 
+tool_config:
+  code_asset:
+    parameter_defaults:
+      code_asset_id: wingman-var-simulator
+      timeout_seconds: 180
+
 input_variables:
   - name: message
     type: string

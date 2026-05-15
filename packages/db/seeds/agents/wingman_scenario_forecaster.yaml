@@ -175,6 +175,12 @@ model_config:
     - ml_model
     - financial_calculator
 
+tool_config:
+  ml_model:
+    parameter_defaults:
+      model_name: wingman-scenario-prior
+      operation: predict
+
 input_variables:
   - name: message
     type: string

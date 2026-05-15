@@ -60,6 +60,12 @@ model_config:
     - current_time
     - ml_model
 
+tool_config:
+  ml_model:
+    parameter_defaults:
+      model_name: wingman-broker-intent-classifier
+      operation: predict
+
 input_variables:
   - name: message
     type: string
