@@ -39,9 +39,11 @@ export interface ToolConfig {
   require_approval: boolean;
 }
 
-export function isToolConfigured(tc?: ToolConfig): boolean {
+export function isToolConfigured(tc?: Partial<ToolConfig>): boolean {
   if (!tc) return false;
-  return !!(tc.usage_instructions.trim() || Object.keys(tc.parameter_defaults).length > 0 || tc.max_calls > 0 || tc.require_approval);
+  const ui = (tc.usage_instructions || '').trim();
+  const pd = tc.parameter_defaults || {};
+  return !!(ui || Object.keys(pd).length > 0 || (tc.max_calls || 0) > 0 || tc.require_approval);
 }
 
 interface AgentConfig {
@@ -143,6 +145,15 @@ function formatRegistryId(registryId: string): string {
     .replace(/-mcp$/, '')
     .replace(/[-_]/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export function normalizeToolConfig(tc?: Partial<ToolConfig>): ToolConfig {
+  return {
+    usage_instructions: tc?.usage_instructions ?? '',
+    parameter_defaults: tc?.parameter_defaults ?? {},
+    max_calls: tc?.max_calls ?? 0,
+    require_approval: tc?.require_approval ?? false,
+  };
 }
 
 const DEFAULT_TOOL_CONFIG: ToolConfig = {

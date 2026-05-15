@@ -45,7 +45,7 @@ const DynamicMiniMap = dynamic(
 
 import { nodeTypes } from '@/components/builder/nodes';
 import ToolPalette from '@/components/builder/ToolPalette';
-import AgentConfigPanel from '@/components/builder/AgentConfigPanel';
+import AgentConfigPanel, { normalizeToolConfig } from '@/components/builder/AgentConfigPanel';
 import BuilderTopBar, { type BuilderMode } from '@/components/builder/BuilderTopBar';
 import PipelineCanvas from '@/components/builder/pipeline/PipelineCanvas';
 import PipelineToolbar from '@/components/builder/pipeline/PipelineToolbar';
@@ -351,7 +351,9 @@ export default function BuilderPage() {
           timeout: mc.timeout ?? 120,
           mcp_extensions: loadedMcpExtensions,
           input_variables: mc.input_variables || [],
-          tool_config: mc.tool_config || {},
+          tool_config: Object.fromEntries(
+            Object.entries(mc.tool_config || {}).map(([k, v]) => [k, normalizeToolConfig(v as any)])
+          ),
           icon: a.icon_url || mc.icon || '',
           example_prompts: mc.example_prompts || [],
           // Runtime + scaling that used to be hidden — now editable.

@@ -7,7 +7,7 @@ import {
   Boxes, CheckCircle2, AlertCircle, RefreshCw, ExternalLink,
   FileCode, Copy, ChevronDown,
 } from 'lucide-react';
-import { apiFetch, API_URL } from '@/lib/api-client';
+import { apiFetch } from '@/lib/api-client';
 
 
 interface CodeAsset {
@@ -47,7 +47,7 @@ export default function CodeAssetConfig({ values, onChange }: Props) {
   const load = async () => {
     setLoading(true); setErr(null);
     try {
-      const r = await apiFetch<CodeAsset[]>(`${API_URL}/api/code-assets`);
+      const r = await apiFetch<CodeAsset[]>('/api/code-assets');
       const list = Array.isArray(r.data) ? r.data : [];
       // Filter to ready assets only — user can see un-ready ones in the dashboard
       setAssets(list);

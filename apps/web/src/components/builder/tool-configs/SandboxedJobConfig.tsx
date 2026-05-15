@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { ShieldAlert, Terminal, Clock, ChevronDown, AlertCircle, Info } from 'lucide-react';
-import { apiFetch, API_URL } from '@/lib/api-client';
+import { apiFetch } from '@/lib/api-client';
 
 interface Props {
   values: Record<string, unknown>;
@@ -39,7 +39,7 @@ export default function SandboxedJobConfig({ values, onChange }: Props) {
   useEffect(() => {
     // Best-effort: try to fetch the real allow-list from the cluster so we don't
     // drift from the operator's SANDBOXED_JOB_ALLOWED_IMAGES.
-    apiFetch<{ images: string[] }>(`${API_URL}/api/admin/sandbox/images`).then((r) => {
+    apiFetch<{ images: string[] }>('/api/admin/sandbox/images').then((r) => {
       if (r?.data?.images?.length) setImages(r.data.images);
     }).catch(() => {/* silent — fallback stays */});
   }, []);

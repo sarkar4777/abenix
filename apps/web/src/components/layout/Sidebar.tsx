@@ -441,9 +441,9 @@ export default function Sidebar() {
             >
               <div className="flex items-center justify-between h-14 px-3 border-b border-slate-800/50 shrink-0">
                 <div className="flex items-center gap-2 overflow-hidden">
-                  <img src="/logo.svg" alt="Abenix" className="w-9 h-9 shrink-0" />
+                  <img src="/logo.svg" alt="Bodhi" className="w-9 h-9 shrink-0" />
                   <span className="text-base font-bold text-white whitespace-nowrap">
-                    Abenix
+                    Bodhi
                   </span>
                 </div>
                 <button
@@ -505,9 +505,9 @@ export default function Sidebar() {
             animate={{ opacity: 1 }}
             className="flex items-center gap-2 overflow-hidden"
           >
-            <img src="/logo.svg" alt="Abenix" className="w-9 h-9 shrink-0" />
+            <img src="/logo.svg" alt="Bodhi" className="w-9 h-9 shrink-0" />
             <span className="text-base font-bold text-white whitespace-nowrap">
-              Abenix
+              Bodhi
             </span>
           </motion.div>
         )}

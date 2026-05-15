@@ -66,6 +66,38 @@
 
 ## v1.3.0 — 2026-05-15
 
+
+### Added
+
+- **Desk Copilot live network canvas + narration feed** — when a trader hits Ask, the right pane now shows a force-directed SVG of the agent topology lighting up in real time. The Desk Copilot sits at the centre; each specialist invoked via `invoke_agent` blooms out as its own node; each tool the specialist fires spawns a child node; edges animate with particle pulses that trace the data flow. Beneath the canvas, a time-coded scrollable feed prints every tool call, every result preview, and every explicit `narrate(...)` line from the agent — colour-coded by phase (cyan for tool start, emerald for return, violet for sub-agent spawn, amber for narration). The trader watches an agentic brain at work instead of staring at "Thinking…".
+- **`narrate` runtime tool** — any agent can opt in by adding `narrate` to its tool list and calling `narrate("...", tone="step|finding|alert|done")` at decision points. The Desk Copilot does this five times per run by default (plan summary, pre-call, post-call findings, stitching). Adds zero cost beyond the LLM token spend, and zero latency.
+- **Trajectory replay** — every past Desk Copilot run is now persisted as a JSON-lines narration log under `/data/wingman-narrations/{execution_id}.jsonl`. The Past-trajectories sidebar shows date + time per row and a `▸ replay` tag for runs that have a stored log. Clicking replays the canvas + feed at 4× speed against the recorded events — no agents fire, no LLM cost, identical visualisation.
+- **Pub/sub progress backbone** — new `engine/progress.py` in the runtime publishes per-tool events (`tool_call`, `tool_result`, `sub_started`, `sub_finished`) to Redis channel `wingman:progress:<root_execution_id>`. Sub-agents inherit the root id via a Redis-stored parent map written by `invoke_agent`, so events from the entire agent tree land on one channel. Falls back to no-op when `REDIS_URL` is unset.
+- **Wingman-api SSE endpoints** — `GET /api/wingman/desk/narration/{id}` streams the live channel as Server-Sent Events; `GET .../replay?speed=4` re-plays the persisted log; `GET .../log` returns the raw events as JSON. Wingman-web has a dedicated Node-runtime SSE proxy at `/api/wingman-narration/[id]` (same buffering-bypass pattern that previously unstuck the DAG drawer).
+
+### Changed
+
+- **`invoke_agent` switches to submitted-then-poll** — instead of blocking synchronously on `/api/agents/{id}/execute`, the tool now submits the sub-agent, captures its `execution_id` immediately, registers the parent → root map in Redis, publishes a `sub_started` event so the canvas can draw the specialist node live, and polls for completion. This is what makes the canvas show sub-agents lighting up while they run rather than appearing only after their tool_result.
+
+### Fixed
+
+- Trajectory log entries now carry `has_narration` so the sidebar can show the `▸ replay` affordance only for runs that actually have a recorded log.
+
+### Internals
+
+- `agent_executor` wraps every `tool.execute(...)` with `progress.publish(tool_call)` + `progress.publish(tool_result)`. Each event carries a 240-char result preview so the feed has something to display without re-fetching the full payload.
+- The wingman-api wrapper persists every event to `/data/wingman-narrations/{id}.jsonl` as it streams. Pod restarts don't lose the log; trajectory replay survives a deploy.
+- `wingman-api` deployment now mounts the shared `/tmp/abenix-shared-data` hostPath as `/data` — trajectory + narration JSONL + result cache all survive pod restarts.
+- `agent-runtime` + `wingman-api` get `REDIS_URL=redis://abenix-redis-master:6379/0` from the helm chart + standalone manifest, so the progress pub/sub channel is wired without any post-deploy patching.
+
+### UI
+
+- **Expandable DAG drawer with three sections** — the right-side drawer (every page that fires an agent run) now stacks DAG nodes (smaller, fixed-height, auto-scroll), Live agent network (force-directed canvas), and Narration feed. Each section collapses independently, and Canvas + Feed have a maximize button (esc to close) for full-screen reading. Width widened from 420 → 480 px.
+- **`wingman-brief-repair` smart fallback** — when the desk-copilot meta-agent finishes but emits text that doesn't parse as JSON, the `/desk/result` handler quietly fires a one-shot Haiku-backed `wingman-brief-repair` agent that re-emits the trader brief in the canonical schema. The repaired brief carries `_repaired: true` and surfaces a small amber chip on the Desk page so the trader knows what happened. One LLM call, no re-running the specialist chain.
+- **Agent Builder: `agent_type` selector + missing tools exposed** — the builder advanced panel now has an Agent type dropdown (Custom / OOB). The platform's tool catalog exposes `invoke_agent`, `recall_trajectory`, and `narrate` so every wingman agent (and any user-built equivalent) is fully reproducible from the UI. Admins can edit OOB agents directly; non-admins still get the "OOB read-only" guard.
+
+## v1.3.0 — 2026-05-15
+
 ### Added
 
 ### Changed
