@@ -6,6 +6,7 @@ import {
   Activity, Inbox, Ship, Beaker, Network, Sparkles,
   LineChart, Crosshair, ShieldCheck, Home, Anchor,
 } from 'lucide-react';
+import NotificationBell from './NotificationBell';
 
 const NAV = [
   { href: '/home', label: 'Home', icon: Home },
@@ -30,10 +31,11 @@ export default function Sidebar() {
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center">
             <Sparkles className="w-4 h-4 text-slate-900" />
           </div>
-          <div>
+          <div className="flex-1">
             <div className="text-base font-bold text-white tracking-tight">Wingman</div>
             <div className="text-[10px] uppercase tracking-wider text-emerald-400">Trader Workbench</div>
           </div>
+          <NotificationBell />
         </div>
       </div>
       <nav className="px-2 py-4 flex-1">

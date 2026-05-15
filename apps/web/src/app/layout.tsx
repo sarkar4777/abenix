@@ -10,8 +10,8 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Bodhi - AI Agent Marketplace',
-    template: '%s | Bodhi',
+    default: 'Abenix - AI Agent Marketplace',
+    template: '%s | Abenix',
   },
   icons: {
     icon: '/favicon.svg',

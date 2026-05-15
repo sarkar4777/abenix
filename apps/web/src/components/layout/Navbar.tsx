@@ -24,8 +24,8 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <img src="/logo.svg" alt="Bodhi" className="w-8 h-8" />
-            <span className="text-lg font-bold text-white">Bodhi</span>
+            <img src="/logo.svg" alt="Abenix" className="w-8 h-8" />
+            <span className="text-lg font-bold text-white">Abenix</span>
           </div>
           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gradient-to-r from-cyan-500 to-purple-600 text-white">
             PLATFORM

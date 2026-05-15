@@ -14,6 +14,7 @@ import PipelineStrip from '../components/PipelineStrip';
 import ExplainerPanel from '../components/ExplainerPanel';
 import { SCENARIOS_EXPLAINER } from '../components/explainer-specs';
 import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-helpers';
+import { useWingmanPageExecution } from '../components/WingmanExecutionsProvider';
 
 const SCENARIO_PIPELINE = [
   { id: 'wingman-scenario-forecaster', label: 'Forecaster', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'Sonnet 4.5 + Bayesian prior' },
@@ -102,6 +103,7 @@ const SCENARIO_ORDER = [
 ];
 
 export default function ScenariosPage() {
+  const { registerExecution } = useWingmanPageExecution('scenarios');
   const [corridors, setCorridors] = useState<Corridor[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [forecast, setForecast] = useState<Forecast | null>(null);
@@ -176,6 +178,13 @@ export default function ScenariosPage() {
         return;
       }
       setActiveExecution(execId);
+      registerExecution({
+        pageId: 'scenarios',
+        executionId: execId,
+        agentSlug: 'wingman-scenario-forecaster',
+        title: corridors.find((c) => c.id === selectedId)?.label || selectedId || 'forecast',
+        subjectId: selectedId || undefined,
+      });
       const t = setInterval(async () => {
         try {
           const rr = await fetch(`/api/wingman/scenario-result/${execId}`);

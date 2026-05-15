@@ -8,6 +8,7 @@ import PipelineStrip, { PipelineNode } from '../components/PipelineStrip';
 import DeskNetworkCanvas from '../components/DeskNetworkCanvas';
 import DeskNarrationFeed from '../components/DeskNarrationFeed';
 import { useNarrationStream } from '../components/useNarrationStream';
+import { useWingmanPageExecution } from '../components/WingmanExecutionsProvider';
 
 const TERMINAL = new Set(['completed', 'succeeded', 'failed', 'error', 'cancelled']);
 
@@ -82,6 +83,7 @@ export default function DeskPage() {
     speed: 4,
   });
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { pageActive, registerExecution } = useWingmanPageExecution('desk');
 
   const loadHistory = () => {
     fetch('/api/wingman/desk/trajectories?limit=20')
@@ -95,6 +97,39 @@ export default function DeskPage() {
     const t = setInterval(loadHistory, 30_000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (activeExecution) return;
+    const fromUrl = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('exec')
+      : null;
+    const fromRegistry = pageActive[0]?.executionId || null;
+    const restored = fromUrl || fromRegistry;
+    if (restored) {
+      setActiveExecution(restored);
+      setRunning(true);
+      if (pollerRef.current) clearInterval(pollerRef.current);
+      pollerRef.current = setInterval(() => pollResult(restored), 2500);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageActive.length]);
+
+  const pollResult = async (execId: string) => {
+    try {
+      const rr = await fetch(`/api/wingman/desk/result/${execId}`);
+      const jj = await rr.json();
+      const data: DeskResponse = jj?.data;
+      if (!data) return;
+      if (TERMINAL.has((data.status || '').toLowerCase())) {
+        setMeta(data);
+        setAnswer(data.answer || null);
+        setRunning(false);
+        if (pollerRef.current) clearInterval(pollerRef.current);
+        pollerRef.current = null;
+        loadHistory();
+      }
+    } catch { /* keep polling */ }
+  };
 
   const ask = async (q?: string) => {
     const text = (q ?? question).trim();
@@ -113,23 +148,14 @@ export default function DeskPage() {
       const execId = j?.data?.execution_id;
       if (!execId) { setRunning(false); return; }
       setActiveExecution(execId);
+      registerExecution({
+        pageId: 'desk',
+        executionId: execId,
+        agentSlug: 'wingman-desk-copilot',
+        title: text.slice(0, 80),
+      });
       if (pollerRef.current) clearInterval(pollerRef.current);
-      pollerRef.current = setInterval(async () => {
-        try {
-          const rr = await fetch(`/api/wingman/desk/result/${execId}`);
-          const jj = await rr.json();
-          const data: DeskResponse = jj?.data;
-          if (!data) return;
-          if (TERMINAL.has((data.status || '').toLowerCase())) {
-            setMeta(data);
-            setAnswer(data.answer || null);
-            setRunning(false);
-            if (pollerRef.current) clearInterval(pollerRef.current);
-            pollerRef.current = null;
-            loadHistory();
-          }
-        } catch { /* keep polling */ }
-      }, 2500);
+      pollerRef.current = setInterval(() => pollResult(execId), 2500);
     } catch {
       setRunning(false);
     }

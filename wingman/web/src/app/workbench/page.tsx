@@ -12,6 +12,7 @@ import PipelineStrip from '../components/PipelineStrip';
 import ExplainerPanel from '../components/ExplainerPanel';
 import { WORKBENCH_EXPLAINER } from '../components/explainer-specs';
 import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-helpers';
+import { useWingmanPageExecution } from '../components/WingmanExecutionsProvider';
 
 const ARB_PIPELINE = [
   { id: 'wingman-arb-analyzer', label: 'Arb Analyzer', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'wingman-arb-analyzer agent' },
@@ -94,6 +95,7 @@ export default function WorkbenchPage() {
   const [running, setRunning] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, AnalyzeResult>>({});
   const [activeExecution, setActiveExecution] = useState<string | null>(null);
+  const { registerExecution } = useWingmanPageExecution('arbitrage');
   const [brief, setBrief] = useState<MarketBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
   const [cacheMeta, setCacheMeta] = useState<Record<string, CacheMeta>>({});
@@ -198,10 +200,14 @@ export default function WorkbenchPage() {
       const j = await r.json();
       const data: AnalyzeResult = j.data;
       if (data?.execution_id) {
-        // Open the DAG drawer immediately so it subscribes while the
-        // agent is still running, then poll for the structured result.
         setActiveExecution(data.execution_id);
         setResults((prev) => ({ ...prev, [id]: { ...data, result: null } }));
+        registerExecution({
+          pageId: 'arbitrage',
+          executionId: data.execution_id,
+          agentSlug: 'wingman-arb-analyzer',
+          title: corridors.find((c) => c.id === id)?.label || id,
+        });
         startPolling(id, data.execution_id);
       } else {
         setRunning(null);

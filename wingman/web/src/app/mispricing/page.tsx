@@ -16,6 +16,7 @@ import PipelineStrip from '../components/PipelineStrip';
 import ExplainerPanel from '../components/ExplainerPanel';
 import { MISPRICING_EXPLAINER } from '../components/explainer-specs';
 import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-helpers';
+import { useWingmanPageExecution } from '../components/WingmanExecutionsProvider';
 
 const MISPRICING_PIPELINE = [
   { id: 'wingman-mispricing-extractor', label: 'Mispricing Lens', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'Haiku 4.5 + 2 ML models' },
@@ -138,6 +139,7 @@ const REGIME_LABELS: Record<string, { label: string; tone: string; dot: string }
 };
 
 export default function MispricingPage() {
+  const { registerExecution } = useWingmanPageExecution('mispricing');
   const [corridors, setCorridors] = useState<Corridor[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scan, setScan] = useState<Scan | null>(null);
@@ -206,6 +208,13 @@ export default function MispricingPage() {
       const execId = j?.data?.execution_id;
       if (!execId) { setRunning(false); return; }
       setActiveExecution(execId);
+      registerExecution({
+        pageId: 'mispricing',
+        executionId: execId,
+        agentSlug: 'wingman-mispricing-extractor',
+        title: corridors.find((c) => c.id === selectedId)?.label || selectedId || 'mispricing',
+        subjectId: selectedId || undefined,
+      });
       const t = setInterval(async () => {
         try {
           const rr = await fetch(`/api/wingman/mispricing-result/${execId}`);
