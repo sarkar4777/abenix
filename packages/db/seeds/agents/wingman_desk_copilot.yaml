@@ -28,15 +28,22 @@ system_prompt: |
   - wingman-broker-parser        — structured offer from a broker email
 
   ## Method
-  1. Call recall_trajectory(query=<the question>) FIRST. If a past trajectory
+  1. narrate("Reading the question and pulling past similar runs.", tone="step")
+  2. Call recall_trajectory(query=<the question>) FIRST. If a past trajectory
      with term_overlap >= 3 exists, adapt its plan. Otherwise plan fresh.
-  2. Decompose the question. Decide which 2-5 specialists to invoke and
+  3. narrate("<one-line plan summary>: will call X, Y, Z", tone="step")
+  4. Decompose the question. Decide which 2-5 specialists to invoke and
      what input to give each.
-  3. Call invoke_agent in parallel for the chosen specialists. Each
-     specialist input must be a JSON object the specialist expects (see its
-     own schema in its system prompt).
-  4. Synthesise. Take every specialist's structured output, pull out the
+  5. Before each invoke_agent call: narrate("Asking <specialist> for
+     <what>", tone="step"). Fire invoke_agent in parallel for the chosen
+     specialists.
+  6. As each specialist returns, narrate one short finding-style line:
+     narrate("<specialist>: <one load-bearing number or fact>",
+     tone="finding").
+  7. Synthesise. Take every specialist's structured output, pull out the
      load-bearing numbers + drivers, and produce a single brief.
+  8. Right before emitting the final JSON, narrate("Stitching brief: <headline>",
+     tone="done").
 
   ## Output (STRICT JSON)
   ```json
@@ -69,6 +76,7 @@ model_config:
     - current_time
     - invoke_agent
     - recall_trajectory
+    - narrate
 
 input_variables:
   - name: message

@@ -331,6 +331,24 @@ TOOL_CATALOG = [
         "category": "pipeline",
     },
     {
+        "id": "invoke_agent",
+        "name": "Invoke Agent",
+        "description": "Fire another agent by slug and wait for (or poll) its result. Use for fan-out meta-agents that compose specialists.",
+        "category": "pipeline",
+    },
+    {
+        "id": "recall_trajectory",
+        "name": "Recall Trajectory",
+        "description": "Search prior agent runs by intent/term overlap and recall what worked. Returns a list of past trajectories with success signals.",
+        "category": "pipeline",
+    },
+    {
+        "id": "narrate",
+        "name": "Narrate",
+        "description": "Publish a one-line progress event to the trader-facing narration feed (tone: step | finding | alert | done). Lets meta-agents commentate their plan + findings in real time.",
+        "category": "pipeline",
+    },
+    {
         "id": "financial_calculator",
         "name": "Financial Calculator",
         "description": "Calculate LCOE, IRR, NPV, VaR, debt sizing, and amortization schedules",

@@ -68,6 +68,7 @@ interface AgentConfig {
   daily_budget_usd?: number;
   // Slug pin (for SDK callers that need a stable identifier).
   slug?: string;
+  agent_type?: 'custom' | 'oob';
   // Structured-output JSON Schema enforced by post-process.
   output_schema?: string;
   // Knowledge bindings — collection IDs the agent can read.
@@ -794,19 +795,37 @@ export default function AgentConfigPanel({
               <h4 className="text-xs font-semibold text-white mb-2">Runtime &amp; scaling</h4>
               <p className="text-[10px] text-slate-500 mb-3">KEDA pool routing + per-agent caps. Most agents leave these on default.</p>
 
-              <label className="block text-xs text-slate-400 mb-1.5">Runtime pool</label>
-              <select
-                value={config.runtime_pool || 'default'}
-                onChange={(e) => onChange({ runtime_pool: e.target.value as AgentConfig['runtime_pool'] })}
-                className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
-              >
-                {RUNTIME_POOLS.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-              </select>
-              <p className="text-[10px] text-slate-600 mt-1">
-                {RUNTIME_POOLS.find((p) => p.value === (config.runtime_pool || 'default'))?.hint}
-              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1.5">Runtime pool</label>
+                  <select
+                    value={config.runtime_pool || 'default'}
+                    onChange={(e) => onChange({ runtime_pool: e.target.value as AgentConfig['runtime_pool'] })}
+                    className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    {RUNTIME_POOLS.map((p) => (
+                      <option key={p.value} value={p.value}>{p.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-600 mt-1">
+                    {RUNTIME_POOLS.find((p) => p.value === (config.runtime_pool || 'default'))?.hint}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1.5">Agent type</label>
+                  <select
+                    value={config.agent_type || 'custom'}
+                    onChange={(e) => onChange({ agent_type: e.target.value as AgentConfig['agent_type'] })}
+                    className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="custom">Custom — built by user</option>
+                    <option value="oob">OOB — out-of-the-box platform agent</option>
+                  </select>
+                  <p className="text-[10px] text-slate-600 mt-1">
+                    Custom = your agent. OOB = shipped with the platform, visible in the catalog.
+                  </p>
+                </div>
+              </div>
 
               <div className="grid grid-cols-3 gap-2 mt-3">
                 <div>

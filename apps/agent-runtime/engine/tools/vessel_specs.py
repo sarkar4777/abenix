@@ -39,43 +39,41 @@ from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
+
 # Densities at ~15 deg C, kg/L (== MT/m^3). Source mix: API MPMS, ISO 12185.
 _DENSITY_KG_PER_L: dict[str, dict[str, Any]] = {
-    "propane": {
-        "value": 0.508,
-        "note": "C3H8 liquid at boil point; storage temp ~ -42 C. At 15 C under pressure ~0.495.",
-    },
-    "butane": {"value": 0.580, "note": "n-C4H10 liquid"},
-    "ammonia": {"value": 0.682, "note": "NH3 liquid"},
-    "ethane": {"value": 0.546, "note": "C2H6 cryogenic liquid"},
-    "lpg_mix": {"value": 0.540, "note": "Typical 60/40 propane/butane export blend"},
-    "naphtha": {"value": 0.720, "note": "Light naphtha; heavier blends up to 0.76"},
-    "gasoline": {"value": 0.740, "note": "RBOB-grade motor gasoline"},
-    "jet": {"value": 0.810, "note": "Jet A-1 / kerosene"},
-    "ulsd": {"value": 0.840, "note": "Ultra-low-sulphur diesel"},
-    "gasoil": {"value": 0.860, "note": "Heating oil / gasoil"},
-    "fuel_oil": {"value": 0.950, "note": "VLSFO / HFO 380cSt"},
+    "propane":   {"value": 0.508, "note": "C3H8 liquid at boil point; storage temp ~ -42 C. At 15 C under pressure ~0.495."},
+    "butane":    {"value": 0.580, "note": "n-C4H10 liquid"},
+    "ammonia":   {"value": 0.682, "note": "NH3 liquid"},
+    "ethane":    {"value": 0.546, "note": "C2H6 cryogenic liquid"},
+    "lpg_mix":   {"value": 0.540, "note": "Typical 60/40 propane/butane export blend"},
+    "naphtha":   {"value": 0.720, "note": "Light naphtha; heavier blends up to 0.76"},
+    "gasoline":  {"value": 0.740, "note": "RBOB-grade motor gasoline"},
+    "jet":       {"value": 0.810, "note": "Jet A-1 / kerosene"},
+    "ulsd":      {"value": 0.840, "note": "Ultra-low-sulphur diesel"},
+    "gasoil":    {"value": 0.860, "note": "Heating oil / gasoil"},
+    "fuel_oil":  {"value": 0.950, "note": "VLSFO / HFO 380cSt"},
     "crude_wti": {"value": 0.825, "note": "WTI ~39.6 API"},
     "crude_brent": {"value": 0.835, "note": "Brent blend ~38 API"},
-    "methanol": {"value": 0.792, "note": "CH3OH"},
+    "methanol":  {"value": 0.792, "note": "CH3OH"},
 }
 
 # Approximate barrels per MT for the common $/MT <-> $/bbl conversion.
 # Computed as 6.2898 / density(kg/L). Cached for speed and to match
 # industry round-numbers traders memorise.
 _BBL_PER_MT: dict[str, float] = {
-    "propane": 12.40,
-    "butane": 10.84,
-    "naphtha": 8.90,
-    "gasoline": 8.50,
-    "jet": 7.90,
-    "ulsd": 7.46,
-    "gasoil": 7.45,
-    "fuel_oil": 6.35,
-    "crude_wti": 7.45,
-    "crude_brent": 7.45,
-    "ammonia": 9.16,
-    "lpg_mix": 11.65,
+    "propane":     12.40,
+    "butane":      10.84,
+    "naphtha":      8.90,
+    "gasoline":     8.50,
+    "jet":          7.90,
+    "ulsd":         7.46,
+    "gasoil":       7.45,
+    "fuel_oil":     6.35,
+    "crude_wti":    7.45,
+    "crude_brent":  7.45,
+    "ammonia":      9.16,
+    "lpg_mix":     11.65,
 }
 
 # Vessel-class registry. capacities expressed three ways:
@@ -364,11 +362,9 @@ class VesselSpecsTool(BaseTool):
         lines = [
             f"{key} ({row['family']}-family)",
             f"  Typical capacity   : {row['typical_capacity_cbm']:>7,} m^3",
-            (
-                f"  Typical propane MT : {row['typical_cargo_mt_propane']:>7,} MT"
-                if row["family"] == "LPG"
-                else f"  Default product    : {row.get('default_product', 'n/a')}"
-            ),
+            f"  Typical propane MT : {row['typical_cargo_mt_propane']:>7,} MT"
+            if row["family"] == "LPG"
+            else f"  Default product    : {row.get('default_product', 'n/a')}",
             f"  Service speed      : {row['speed_knots']} kt",
             f"  VLSFO burn         : {row['vlsfo_consumption_mt_day']} MT/day",
             f"  LOA / beam         : {row['loa_m']} m / {row['beam_m']} m",
@@ -473,31 +469,19 @@ class VesselSpecsTool(BaseTool):
 
         if fu == "bbl" and tu == "mt":
             if not bbl_per_mt:
-                return ToolResult(
-                    content=f"Unknown bbl/MT for '{product}'", is_error=True
-                )
+                return ToolResult(content=f"Unknown bbl/MT for '{product}'", is_error=True)
             out = value / bbl_per_mt
             return ToolResult(
                 content=f"{value} bbl of {product} = {out:.4f} MT (1 MT = {bbl_per_mt} bbl)",
-                metadata={
-                    "value_in": value,
-                    "value_out": round(out, 6),
-                    "product": product,
-                },
+                metadata={"value_in": value, "value_out": round(out, 6), "product": product},
             )
         if fu == "mt" and tu == "bbl":
             if not bbl_per_mt:
-                return ToolResult(
-                    content=f"Unknown bbl/MT for '{product}'", is_error=True
-                )
+                return ToolResult(content=f"Unknown bbl/MT for '{product}'", is_error=True)
             out = value * bbl_per_mt
             return ToolResult(
                 content=f"{value} MT of {product} = {out:.4f} bbl (1 MT = {bbl_per_mt} bbl)",
-                metadata={
-                    "value_in": value,
-                    "value_out": round(out, 6),
-                    "product": product,
-                },
+                metadata={"value_in": value, "value_out": round(out, 6), "product": product},
             )
 
         return ToolResult(

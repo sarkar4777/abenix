@@ -5,6 +5,9 @@ import { Sparkles, Loader2, Send, History, ArrowRight, Activity, Brain, Newspape
 import DagDrawer from '../components/DagDrawer';
 import HeroBar from '../components/HeroBar';
 import PipelineStrip, { PipelineNode } from '../components/PipelineStrip';
+import DeskNetworkCanvas from '../components/DeskNetworkCanvas';
+import DeskNarrationFeed from '../components/DeskNarrationFeed';
+import { useNarrationStream } from '../components/useNarrationStream';
 
 const TERMINAL = new Set(['completed', 'succeeded', 'failed', 'error', 'cancelled']);
 
@@ -54,6 +57,8 @@ interface Trajectory {
   created_at?: string;
   approval_id?: string | null;
   success_signal?: number | null;
+  execution_id?: string;
+  has_narration?: boolean;
 }
 
 const SAMPLE_QUESTIONS = [
@@ -70,6 +75,12 @@ export default function DeskPage() {
   const [answer, setAnswer] = useState<DeskAnswer | null>(null);
   const [activeExecution, setActiveExecution] = useState<string | null>(null);
   const [history, setHistory] = useState<Trajectory[]>([]);
+  const [replayingExecutionId, setReplayingExecutionId] = useState<string | null>(null);
+  const narrationStreamId = replayingExecutionId || activeExecution;
+  const { events: narrationEvents } = useNarrationStream(narrationStreamId, {
+    replay: !!replayingExecutionId,
+    speed: 4,
+  });
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadHistory = () => {
@@ -136,6 +147,22 @@ export default function DeskPage() {
     setQuestion(t.intent || '');
     setMeta(null);
     setActiveExecution(null);
+    if (t.has_narration && t.execution_id) setReplayingExecutionId(t.execution_id);
+    else setReplayingExecutionId(null);
+  };
+
+  const fmtTrajectoryTs = (iso?: string): string => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      const today = new Date();
+      const same = d.toDateString() === today.toDateString();
+      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (same) return `today ${time}`;
+      return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+    } catch {
+      return iso;
+    }
   };
 
   const planNodes: PipelineNode[] = useMemo(() => {
@@ -220,6 +247,30 @@ export default function DeskPage() {
             </div>
           </div>
 
+          {(running || activeExecution || replayingExecutionId) && narrationStreamId && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3" data-testid="desk-live-canvas">
+              <DeskNetworkCanvas
+                rootExecutionId={narrationStreamId}
+                events={narrationEvents}
+                height={360}
+                title={replayingExecutionId ? `Replay · 4x` : 'Live agent network'}
+              />
+              <DeskNarrationFeed
+                rootExecutionId={narrationStreamId}
+                events={narrationEvents}
+                height={360}
+              />
+            </div>
+          )}
+          {replayingExecutionId && (
+            <button
+              onClick={() => setReplayingExecutionId(null)}
+              className="text-[10px] text-slate-400 hover:text-emerald-300 underline"
+            >
+              ← back to live
+            </button>
+          )}
+
           {meta?.status === 'failed' && (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 text-[12px] text-rose-200">
               <div className="font-semibold mb-1 uppercase tracking-wider text-[10px]">Run failed</div>
@@ -229,6 +280,12 @@ export default function DeskPage() {
 
           {answer && (
             <>
+              {(answer as any)._repaired && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200 flex items-center gap-2">
+                  <Sparkles className="w-3 h-3" />
+                  Brief was repaired by wingman-brief-repair (Haiku) — meta-agent emitted non-JSON; salvaged offline.
+                </div>
+              )}
               <BriefCard answer={answer} cost={meta?.cost_usd} durationMs={meta?.duration_ms} />
               {(answer.plan && answer.plan.length > 0) && <PlanList plan={answer.plan} outputs={answer.specialist_outputs} />}
               {(answer.drivers && answer.drivers.length > 0) && <DriversList drivers={answer.drivers} />}
@@ -261,6 +318,12 @@ export default function DeskPage() {
                   data-testid={`desk-trajectory-${t.id}`}
                   className="w-full text-left rounded-lg border border-slate-800 bg-slate-950/40 hover:border-emerald-500/30 px-3 py-2.5"
                 >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[9px] text-slate-500 font-mono">{fmtTrajectoryTs(t.created_at)}</span>
+                    {t.has_narration && (
+                      <span className="text-[8px] text-emerald-400 uppercase tracking-wider flex items-center gap-0.5">▸ replay</span>
+                    )}
+                  </div>
                   <div className="text-[11px] text-slate-200 leading-snug line-clamp-2">{t.intent}</div>
                   <div className="flex items-center gap-2 mt-1.5 text-[9px]">
                     {(t.agents_invoked || []).slice(0, 3).map((a) => (

@@ -30,6 +30,7 @@ from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
+
 # Industry-standard $/gal -> $/bbl factor (42 gallons per barrel).
 _BBL_PER_GAL = 42.0
 
@@ -85,21 +86,10 @@ class RefinedProductsForwardsTool(BaseTool):
             },
             "crack_type": {
                 "type": "string",
-                "enum": [
-                    "3-2-1",
-                    "gasoline-vs-wti",
-                    "diesel-vs-wti",
-                    "gasoline-vs-brent",
-                    "diesel-vs-brent",
-                ],
+                "enum": ["3-2-1", "gasoline-vs-wti", "diesel-vs-wti", "gasoline-vs-brent", "diesel-vs-brent"],
                 "default": "3-2-1",
             },
-            "lookback_days": {
-                "type": "integer",
-                "default": 30,
-                "minimum": 5,
-                "maximum": 365,
-            },
+            "lookback_days": {"type": "integer", "default": 30, "minimum": 5, "maximum": 365},
         },
         "required": ["action"],
     }
@@ -177,11 +167,7 @@ class RefinedProductsForwardsTool(BaseTool):
         if price is None:
             return ToolResult(content=f"No Yahoo data for {sym}", is_error=True)
         price_bbl = self._to_usd_per_bbl(sym, price)
-        unit = (
-            "$/gal"
-            if sym in _GAL_QUOTED
-            else "$/MMBtu" if sym in _MMBTU_QUOTED else "$/bbl"
-        )
+        unit = "$/gal" if sym in _GAL_QUOTED else "$/MMBtu" if sym in _MMBTU_QUOTED else "$/bbl"
         return ToolResult(
             content=(
                 f"{product} front-month future ({sym}): {price:.4f} {unit} "

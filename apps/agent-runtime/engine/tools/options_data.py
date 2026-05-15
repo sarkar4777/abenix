@@ -39,6 +39,7 @@ from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
+
 # Skew threshold expressed in IV-percentage-points (e.g. 0.04 = 4 vol points)
 _SKEW_NERVOUS = 0.04
 _IV_NERVOUS = 0.35  # absolute IV above this counts as "nervous"
@@ -243,10 +244,12 @@ class OptionsDataTool(BaseTool):
             "  25-delta proxy (10% OTM strikes):",
             f"    OTM call IV: {summary['otm_call_iv_10pct']:.4f}",
             f"    OTM put IV:  {summary['otm_put_iv_10pct']:.4f}",
-            f"    Risk reversal (call - put): " f"{summary['risk_reversal_25d']:+.4f}",
+            f"    Risk reversal (call - put): "
+            f"{summary['risk_reversal_25d']:+.4f}",
             f"  Open interest: {summary['call_oi']:,} calls / "
             f"{summary['put_oi']:,} puts",
-            f"  Put/Call OI ratio: " f"{summary['put_call_oi_ratio'] or 'n/a'}",
+            f"  Put/Call OI ratio: "
+            f"{summary['put_call_oi_ratio'] or 'n/a'}",
         ]
 
         rr = summary["risk_reversal_25d"]
@@ -326,12 +329,16 @@ class OptionsDataTool(BaseTool):
                 "spot": spot,
                 "expiries": [r["expiry"] for r in rows],
                 "atm_iv_by_expiry": [r["atm_iv"] for r in rows],
-                "risk_reversal_by_expiry": [r["risk_reversal_25d"] for r in rows],
+                "risk_reversal_by_expiry": [
+                    r["risk_reversal_25d"] for r in rows
+                ],
                 "slope_front_minus_back": round(slope, 4),
             },
         )
 
-    def _regime(self, ticker: Any, symbol: str, expiry: str) -> ToolResult:
+    def _regime(
+        self, ticker: Any, symbol: str, expiry: str
+    ) -> ToolResult:
         spot = self._spot_price(ticker)
         summary = self._summary_for_expiry(ticker, expiry, spot)
         if "error" in summary:

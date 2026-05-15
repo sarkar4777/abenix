@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -8,9 +9,12 @@ from typing import Any
 
 import httpx
 
+from engine import progress
 from engine.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
+
+TERMINAL = {"completed", "succeeded", "failed", "error", "cancelled"}
 
 
 class InvokeAgentTool(BaseTool):
@@ -45,9 +49,15 @@ class InvokeAgentTool(BaseTool):
     }
 
     def __init__(
-        self, *, tenant_id: str = "", api_key: str = "", api_base: str = ""
+        self,
+        *,
+        tenant_id: str = "",
+        execution_id: str = "",
+        api_key: str = "",
+        api_base: str = "",
     ) -> None:
         self._tenant_id = tenant_id
+        self._execution_id = execution_id
         self._api_key = (
             api_key
             or os.environ.get("ABENIX_PLATFORM_API_KEY", "")
@@ -73,19 +83,18 @@ class InvokeAgentTool(BaseTool):
                 is_error=True,
             )
 
+        root_id = await progress.root_for(self._execution_id) if self._execution_id else ""
+
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._api_key.startswith("af_"):
             headers["X-API-Key"] = self._api_key
         else:
             headers["Authorization"] = f"Bearer {self._api_key}"
+
         t0 = time.time()
         try:
-            async with httpx.AsyncClient(
-                base_url=self._api_base, timeout=timeout + 30
-            ) as client:
-                lookup = await client.get(
-                    f"/api/agents?search={slug}&limit=5", headers=headers
-                )
+            async with httpx.AsyncClient(base_url=self._api_base, timeout=timeout + 30) as client:
+                lookup = await client.get(f"/api/agents?search={slug}&limit=5", headers=headers)
                 if lookup.status_code != 200:
                     return ToolResult(
                         content=f"agent lookup failed: HTTP {lookup.status_code} {lookup.text[:300]}",
@@ -94,36 +103,62 @@ class InvokeAgentTool(BaseTool):
                 items = (lookup.json() or {}).get("data") or []
                 if isinstance(items, dict):
                     items = items.get("items") or []
-                match = next(
-                    (a for a in items if (a.get("slug") or "").lower() == slug.lower()),
-                    None,
-                )
+                match = next((a for a in items if (a.get("slug") or "").lower() == slug.lower()), None)
                 if match is None:
-                    return ToolResult(
-                        content=f"agent slug not found: {slug}", is_error=True
-                    )
+                    return ToolResult(content=f"agent slug not found: {slug}", is_error=True)
                 agent_id = match.get("id")
 
-                body = {
-                    "message": (
-                        json.dumps(payload) if not isinstance(payload, str) else payload
-                    ),
+                submit_body = {
+                    "message": json.dumps(payload) if not isinstance(payload, str) else payload,
                     "stream": False,
-                    "wait": True,
-                    "wait_timeout_seconds": timeout,
+                    "wait_mode": "submitted",
                 }
-                exec_r = await client.post(
+                submit_r = await client.post(
                     f"/api/agents/{agent_id}/execute",
                     headers=headers,
-                    content=json.dumps(body),
+                    content=json.dumps(submit_body),
                 )
-                if exec_r.status_code != 200:
+                if submit_r.status_code != 200:
                     return ToolResult(
-                        content=f"agent execute failed: HTTP {exec_r.status_code} {exec_r.text[:300]}",
+                        content=f"agent execute submit failed: HTTP {submit_r.status_code} {submit_r.text[:300]}",
                         is_error=True,
                     )
-                data = (exec_r.json() or {}).get("data") or exec_r.json() or {}
-                output = data.get("output") or data.get("output_message") or ""
+                submit_data = (submit_r.json() or {}).get("data") or submit_r.json() or {}
+                sub_exec_id = submit_data.get("execution_id") or submit_data.get("id")
+                if not sub_exec_id:
+                    return ToolResult(content="submitted but no sub-execution_id returned", is_error=True)
+
+                if root_id:
+                    await progress.set_parent(sub_exec_id, root_id)
+                    await progress.publish(self._execution_id, {
+                        "phase": "sub_started",
+                        "agent_slug": slug,
+                        "agent_name": (match.get("name") or slug),
+                        "sub_execution_id": sub_exec_id,
+                    }, root_execution_id=root_id)
+
+                deadline = t0 + timeout
+                row: dict[str, Any] = {}
+                while time.time() < deadline:
+                    await asyncio.sleep(2.0)
+                    poll_r = await client.get(f"/api/executions/{sub_exec_id}", headers=headers)
+                    if poll_r.status_code != 200:
+                        continue
+                    row = (poll_r.json() or {}).get("data") or {}
+                    status = (row.get("status") or "running").lower()
+                    if status in TERMINAL:
+                        break
+
+                if not row or (row.get("status") or "running").lower() not in TERMINAL:
+                    if root_id:
+                        await progress.publish(self._execution_id, {
+                            "phase": "sub_timeout",
+                            "agent_slug": slug,
+                            "sub_execution_id": sub_exec_id,
+                        }, root_execution_id=root_id)
+                    return ToolResult(content=f"agent {slug} timed out after {timeout}s", is_error=True)
+
+                output = row.get("output") or row.get("output_message") or ""
                 duration_ms = int((time.time() - t0) * 1000)
                 parsed: Any = output
                 try:
@@ -137,23 +172,28 @@ class InvokeAgentTool(BaseTool):
                         except Exception:
                             parsed = {"raw": s[:2000]}
 
+                if root_id:
+                    await progress.publish(self._execution_id, {
+                        "phase": "sub_finished",
+                        "agent_slug": slug,
+                        "sub_execution_id": sub_exec_id,
+                        "status": row.get("status"),
+                        "duration_ms": row.get("duration_ms") or duration_ms,
+                        "cost_usd": row.get("cost"),
+                    }, root_execution_id=root_id)
+
                 envelope = {
                     "agent_slug": slug,
                     "agent_id": agent_id,
-                    "execution_id": data.get("execution_id") or data.get("id"),
-                    "status": (data.get("status") or "completed"),
+                    "execution_id": sub_exec_id,
+                    "status": (row.get("status") or "completed"),
                     "output": parsed,
-                    "duration_ms": data.get("duration_ms") or duration_ms,
-                    "cost_usd": data.get("cost"),
+                    "duration_ms": row.get("duration_ms") or duration_ms,
+                    "cost_usd": row.get("cost"),
                 }
-                return ToolResult(
-                    content=json.dumps(envelope, default=str),
-                    metadata={"agent_slug": slug},
-                )
+                return ToolResult(content=json.dumps(envelope, default=str), metadata={"agent_slug": slug})
         except httpx.TimeoutException:
-            return ToolResult(
-                content=f"agent {slug} timed out after {timeout}s", is_error=True
-            )
+            return ToolResult(content=f"agent {slug} timed out after {timeout}s", is_error=True)
         except Exception as e:
             logger.warning("invoke_agent %s failed: %s", slug, e)
             return ToolResult(content=f"invoke_agent {slug} failed: {e}", is_error=True)

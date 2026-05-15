@@ -114,6 +114,7 @@ interface AgentConfig {
   slug?: string;
   output_schema?: string;
   knowledge_collection_ids?: string[];
+  agent_type?: 'custom' | 'oob';
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -365,6 +366,7 @@ export default function BuilderPage() {
             ? mc.output_schema
             : mc.output_schema ? JSON.stringify(mc.output_schema, null, 2) : '',
           knowledge_collection_ids: a.knowledge_collection_ids || mc.knowledge_collection_ids || [],
+          agent_type: (a.agent_type || mc.agent_type || 'custom') as 'custom' | 'oob',
         };
         setConfig(loaded);
         setMcpExtensions(loadedMcpExtensions);
@@ -698,10 +700,11 @@ export default function BuilderPage() {
     if (config.slug && config.slug.trim() && !agentId) {
       payload.slug = config.slug.trim();
     }
-    // The icon lives as a top-level column (icon_url) on the agents
-    // table, not inside model_config — the API accepts either name.
     if (config.icon && config.icon.trim()) {
       payload.icon_url = config.icon.trim();
+    }
+    if (config.agent_type) {
+      payload.agent_type = config.agent_type;
     }
 
     try {

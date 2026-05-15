@@ -14,6 +14,7 @@ COPY sdk/ ./sdk/
 COPY main.py .
 COPY cache.py .
 COPY trajectories.py .
+COPY narration.py .
 COPY data/ ./data/
 
 ENV PYTHONPATH=/app:/app/sdk

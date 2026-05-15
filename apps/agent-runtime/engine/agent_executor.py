@@ -38,6 +38,17 @@ def _provider_key(model: str) -> str:
 
 
 MAX_ITERATIONS = 10
+
+
+def _short(obj: Any, limit: int = 160) -> str:
+    try:
+        import json as _j
+        s = _j.dumps(obj, default=str)
+    except Exception:
+        s = str(obj)
+    return s if len(s) <= limit else s[:limit] + "..."
+
+
 # Maximum characters per tool result kept in context. Large results (web pages,
 # API responses) are truncated before being sent back to the LLM to prevent
 # blowing the context window. The full result is still emitted in traces/streams.
@@ -503,8 +514,30 @@ class AgentExecutor:
                 tool = self.tool_registry.get(tc["name"])
                 if tool:
                     tool_start = time.monotonic()
+                    try:
+                        from engine import progress as _wm_progress
+                        await _wm_progress.publish(self.execution_id, {
+                            "phase": "tool_call",
+                            "tool": tc["name"],
+                            "arguments_preview": _short(tc.get("arguments")),
+                            "agent_id": self.agent_id,
+                        })
+                    except Exception:
+                        pass
                     result = await tool.execute(tc["arguments"])
                     tool_dur = int((time.monotonic() - tool_start) * 1000)
+                    try:
+                        from engine import progress as _wm_progress
+                        await _wm_progress.publish(self.execution_id, {
+                            "phase": "tool_result",
+                            "tool": tc["name"],
+                            "is_error": bool(result.is_error),
+                            "duration_ms": tool_dur,
+                            "result_preview": (result.content or "")[:240],
+                            "agent_id": self.agent_id,
+                        })
+                    except Exception:
+                        pass
                     tool_execution_duration_seconds.labels(
                         tool_name=tc["name"]
                     ).observe(tool_dur / 1000)
@@ -786,8 +819,30 @@ class AgentExecutor:
                 tool = self.tool_registry.get(tc["name"])
                 if tool:
                     tool_start = time.monotonic()
+                    try:
+                        from engine import progress as _wm_progress
+                        await _wm_progress.publish(self.execution_id, {
+                            "phase": "tool_call",
+                            "tool": tc["name"],
+                            "arguments_preview": _short(tc.get("arguments")),
+                            "agent_id": self.agent_id,
+                        })
+                    except Exception:
+                        pass
                     result = await tool.execute(tc["arguments"])
                     tool_dur = int((time.monotonic() - tool_start) * 1000)
+                    try:
+                        from engine import progress as _wm_progress
+                        await _wm_progress.publish(self.execution_id, {
+                            "phase": "tool_result",
+                            "tool": tc["name"],
+                            "is_error": bool(result.is_error),
+                            "duration_ms": tool_dur,
+                            "result_preview": (result.content or "")[:240],
+                            "agent_id": self.agent_id,
+                        })
+                    except Exception:
+                        pass
                     tool_execution_duration_seconds.labels(
                         tool_name=tc["name"]
                     ).observe(tool_dur / 1000)
@@ -1109,6 +1164,7 @@ def _ensure_tool_classes() -> None:
     from engine.tools.code_asset import CodeAssetTool
     from engine.tools.invoke_agent import InvokeAgentTool
     from engine.tools.recall_trajectory import RecallTrajectoryTool
+    from engine.tools.narrate import NarrateTool
 
     _CONTEXT_TOOL_FACTORIES.update(
         {
@@ -1129,6 +1185,7 @@ def _ensure_tool_classes() -> None:
             "scope_gate": ScopeGateTool,
             "invoke_agent": InvokeAgentTool,
             "recall_trajectory": RecallTrajectoryTool,
+            "narrate": NarrateTool,
         }
     )
     _TOOL_CLASSES_LOADED = True
@@ -1308,13 +1365,19 @@ def build_tool_registry(
 
     InvokeAgentCls = _CONTEXT_TOOL_FACTORIES.get("invoke_agent")
     if InvokeAgentCls:
-        context_tools["invoke_agent"] = lambda: InvokeAgentCls(tenant_id=tenant_id)
+        context_tools["invoke_agent"] = lambda: InvokeAgentCls(
+            tenant_id=tenant_id, execution_id=execution_id
+        )
+
+    NarrateCls = _CONTEXT_TOOL_FACTORIES.get("narrate")
+    if NarrateCls:
+        context_tools["narrate"] = lambda: NarrateCls(
+            execution_id=execution_id, agent_name=agent_name, agent_slug=agent_name
+        )
 
     RecallCls = _CONTEXT_TOOL_FACTORIES.get("recall_trajectory")
     if RecallCls:
-        context_tools["recall_trajectory"] = lambda: RecallCls(
-            db_url=db_url, tenant_id=tenant_id
-        )
+        context_tools["recall_trajectory"] = lambda: RecallCls(db_url=db_url, tenant_id=tenant_id)
 
     registry = ToolRegistry()
     for name in tool_names:

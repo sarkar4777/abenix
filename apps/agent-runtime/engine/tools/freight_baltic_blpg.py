@@ -28,6 +28,7 @@ import httpx
 
 from engine.tools.base import BaseTool, ToolResult
 
+
 # Q1-2026 indicative levels in $/MT propane for a VLGC voyage. These
 # match OPEC MOMR-quoted spot levels within +/- $4 typically.
 _BLPG_CURATED_USD_MT: dict[str, dict[str, Any]] = {
@@ -130,11 +131,7 @@ class FreightBalticBlpgTool(BaseTool):
                 is_error=True,
             )
         live = await self._fetch_live(route_code)
-        source = (
-            "Baltic subscription feed"
-            if live
-            else "Curated Q1-2026 public-domain levels"
-        )
+        source = "Baltic subscription feed" if live else "Curated Q1-2026 public-domain levels"
         merged = {**row, **(live or {})}
         mid = float(merged["mid_usd_mt"])
         low = float(merged.get("low_usd_mt") or mid * 0.9)

@@ -46,6 +46,7 @@ if SDK_PATH not in sys.path:
 from abenix_sdk import Abenix, ActingSubject  # type: ignore  # noqa: E402
 import cache as result_cache  # type: ignore  # noqa: E402
 import trajectories as trajectory_store  # type: ignore  # noqa: E402
+import narration as narration_store  # type: ignore  # noqa: E402
 
 logger = logging.getLogger("wingman.api")
 logging.basicConfig(level=logging.INFO)
@@ -1374,6 +1375,43 @@ async def desk_ask(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_BRIEF_REPAIR_CACHE: dict[str, dict[str, Any]] = {}
+
+
+async def _repair_brief_via_agent(execution_id: str, raw: str, question: str) -> dict[str, Any]:
+    if not raw:
+        return {}
+    if execution_id in _BRIEF_REPAIR_CACHE:
+        return _BRIEF_REPAIR_CACHE[execution_id]
+    payload = {"raw": raw[:8000], "question": question or ""}
+    try:
+        async with _abenix_client() as forge:
+            result = await forge.execute(
+                "wingman-brief-repair",
+                json.dumps(payload),
+                wait_timeout_seconds=45,
+            )
+        repaired = _parse_agent_json(result.output or "") or {}
+        if repaired:
+            repaired["_repaired"] = True
+            _BRIEF_REPAIR_CACHE[execution_id] = repaired
+            logger.info("brief-repair %s: salvaged %d-char output", execution_id, len(raw))
+            return repaired
+    except Exception as e:
+        logger.warning("brief-repair %s failed: %s", execution_id, e)
+    floor = {
+        "intent": question or "",
+        "headline": "Brief could not be parsed for this run.",
+        "brief": (raw or "")[:1200],
+        "recommended_action": "watch",
+        "confidence": "low",
+        "_repaired": False,
+        "_unparsed": True,
+    }
+    _BRIEF_REPAIR_CACHE[execution_id] = floor
+    return floor
+
+
 @app.get("/api/wingman/desk/result/{execution_id}")
 async def desk_result(execution_id: str) -> dict[str, Any]:
     async with _abenix_client() as forge:
@@ -1387,6 +1425,9 @@ async def desk_result(execution_id: str) -> dict[str, Any]:
     raw = row.get("output") or row.get("output_message") or ""
     if terminal and raw:
         parsed = _parse_agent_json(raw)
+        if status == "completed" and not parsed:
+            question = _DESK_INDEX.get(execution_id) or ""
+            parsed = await _repair_brief_via_agent(execution_id, raw, question)
 
     if status == "completed" and parsed:
         question = _DESK_INDEX.get(execution_id) or parsed.get("intent") or ""
@@ -1405,6 +1446,7 @@ async def desk_result(execution_id: str) -> dict[str, Any]:
                 "execution_id": execution_id,
                 "cost_usd": row.get("cost"),
                 "duration_ms": row.get("duration_ms"),
+                "has_narration": narration_store.has(execution_id),
             })
         except Exception as e:
             logger.warning("trajectory write failed for %s: %s", execution_id, e)
@@ -1421,6 +1463,35 @@ async def desk_result(execution_id: str) -> dict[str, Any]:
             "duration_ms": row.get("duration_ms"),
         }
     }
+
+
+@app.get("/api/wingman/desk/narration/{execution_id}")
+async def desk_narration(execution_id: str) -> StreamingResponse:
+    async def gen():
+        async for chunk in narration_store.sse_stream(execution_id):
+            yield chunk
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-store, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    })
+
+
+@app.get("/api/wingman/desk/narration/{execution_id}/replay")
+async def desk_narration_replay(execution_id: str, speed: float = 4.0) -> StreamingResponse:
+    async def gen():
+        async for chunk in narration_store.replay_stream(execution_id, speed=speed):
+            yield chunk
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-store, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    })
+
+
+@app.get("/api/wingman/desk/narration/{execution_id}/log")
+async def desk_narration_log(execution_id: str) -> dict[str, Any]:
+    return {"data": {"execution_id": execution_id, "events": narration_store.load(execution_id)}}
 
 
 @app.get("/api/wingman/desk/trajectories")

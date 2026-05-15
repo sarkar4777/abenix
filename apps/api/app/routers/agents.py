@@ -676,6 +676,9 @@ async def create_agent(
     if body.icon_url and not is_safe_url(body.icon_url):
         return error("Invalid icon URL", 400)
 
+    requested_type = (body.agent_type or "custom").lower()
+    if requested_type == "oob" and user.role.value != "admin":
+        return error("Only admins can create OOB agents", 403)
     agent = Agent(
         tenant_id=user.tenant_id,
         creator_id=user.id,
@@ -684,7 +687,7 @@ async def create_agent(
         description=sanitize_input(body.description),
         system_prompt=body.system_prompt,
         model_config_=body.agent_model_config.model_dump(),
-        agent_type=AgentType.CUSTOM,
+        agent_type=AgentType(requested_type),
         status=AgentStatus.DRAFT,
         category=sanitize_input(body.category) if body.category else body.category,
         icon_url=body.icon_url,
@@ -725,10 +728,9 @@ async def update_agent(
     if not agent:
         return error("Agent not found", 404)
 
-    if agent.agent_type == AgentType.OOB:
-        return error("Cannot edit pre-built agents", 403)
+    if agent.agent_type == AgentType.OOB and user.role.value != "admin":
+        return error("Only admins can edit OOB agents", 403)
 
-    # Only creator, admin, or users with edit share can modify
     if agent.creator_id != user.id and user.role.value != "admin":
         share_check = await db.execute(
             select(AgentShare).where(
@@ -796,6 +798,13 @@ async def update_agent(
             agent.status = AgentStatus(body.status)
         except ValueError:
             return error(f"Invalid status: {body.status}", 400)
+    if body.agent_type is not None:
+        if user.role.value != "admin":
+            return error("Only admins can change agent_type", 403)
+        try:
+            agent.agent_type = AgentType(body.agent_type.lower())
+        except ValueError:
+            return error(f"Invalid agent_type: {body.agent_type}", 400)
 
     await db.commit()
     await db.refresh(agent)

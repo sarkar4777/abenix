@@ -476,7 +476,6 @@ async def _load_asset(
     except ImportError:
         return None
     import re as _re
-
     looks_like_uuid = bool(_re.fullmatch(r"[0-9a-fA-F-]{32,36}", asset_id or ""))
     try:
         engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=1)

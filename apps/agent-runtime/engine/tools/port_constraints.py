@@ -34,74 +34,30 @@ from engine.tools.base import BaseTool, ToolResult
 # Vessel max DWT proxy by class — used when port publishes max DWT rather
 # than max LOA/draught explicitly. Aligned with vessel_specs registry.
 _VESSEL_MAX_DWT: dict[str, int] = {
-    "VLGC": 60_000,
-    "MGC": 28_000,
-    "LGC": 45_000,
-    "SGC": 9_000,
-    "VLCC": 320_000,
-    "Suezmax": 165_000,
-    "Aframax": 120_000,
-    "LR2": 115_000,
-    "LR1": 75_000,
-    "MR2": 52_000,
-    "MR1": 40_000,
+    "VLGC": 60_000, "MGC": 28_000, "LGC": 45_000, "SGC": 9_000,
+    "VLCC": 320_000, "Suezmax": 165_000, "Aframax": 120_000,
+    "LR2": 115_000, "LR1": 75_000, "MR2": 52_000, "MR1": 40_000,
     "Handysize": 30_000,
 }
 _VESSEL_LOA_M: dict[str, float] = {
-    "VLGC": 230,
-    "MGC": 182,
-    "LGC": 210,
-    "SGC": 130,
-    "VLCC": 333,
-    "Suezmax": 274,
-    "Aframax": 245,
-    "LR2": 245,
-    "LR1": 228,
-    "MR2": 183,
-    "MR1": 175,
-    "Handysize": 150,
+    "VLGC": 230, "MGC": 182, "LGC": 210, "SGC": 130,
+    "VLCC": 333, "Suezmax": 274, "Aframax": 245,
+    "LR2": 245, "LR1": 228, "MR2": 183, "MR1": 175, "Handysize": 150,
 }
 _VESSEL_DRAUGHT_M: dict[str, float] = {
-    "VLGC": 11.7,
-    "MGC": 10.6,
-    "LGC": 11.2,
-    "SGC": 7.8,
-    "VLCC": 22.5,
-    "Suezmax": 16.5,
-    "Aframax": 14.5,
-    "LR2": 14.0,
-    "LR1": 12.5,
-    "MR2": 11.0,
-    "MR1": 10.4,
-    "Handysize": 9.5,
+    "VLGC": 11.7, "MGC": 10.6, "LGC": 11.2, "SGC": 7.8,
+    "VLCC": 22.5, "Suezmax": 16.5, "Aframax": 14.5,
+    "LR2": 14.0, "LR1": 12.5, "MR2": 11.0, "MR1": 10.4, "Handysize": 9.5,
 }
 _VESSEL_BEAM_M: dict[str, float] = {
-    "VLGC": 36.6,
-    "MGC": 28.4,
-    "LGC": 32.0,
-    "SGC": 21.5,
-    "VLCC": 60.0,
-    "Suezmax": 48.0,
-    "Aframax": 42.0,
-    "LR2": 42.0,
-    "LR1": 32.2,
-    "MR2": 32.2,
-    "MR1": 27.5,
-    "Handysize": 23.5,
+    "VLGC": 36.6, "MGC": 28.4, "LGC": 32.0, "SGC": 21.5,
+    "VLCC": 60.0, "Suezmax": 48.0, "Aframax": 42.0,
+    "LR2": 42.0, "LR1": 32.2, "MR2": 32.2, "MR1": 27.5, "Handysize": 23.5,
 }
 _VESSEL_AIR_DRAUGHT_M: dict[str, float] = {
-    "VLGC": 32,
-    "MGC": 28,
-    "LGC": 30,
-    "SGC": 20,
-    "VLCC": 47,
-    "Suezmax": 39,
-    "Aframax": 36,
-    "LR2": 35,
-    "LR1": 32,
-    "MR2": 30,
-    "MR1": 28,
-    "Handysize": 25,
+    "VLGC": 32, "MGC": 28, "LGC": 30, "SGC": 20,
+    "VLCC": 47, "Suezmax": 39, "Aframax": 36,
+    "LR2": 35, "LR1": 32, "MR2": 30, "MR1": 28, "Handysize": 25,
 }
 
 # Curated port table — focus is on liquid-bulk terminals where Wingman /
@@ -203,16 +159,7 @@ _PORTS: dict[str, dict[str, Any]] = {
         "max_draught_m": 21,
         "max_air_draught_m": 999,
         "max_dwt": 320_000,
-        "products": [
-            "lpg",
-            "ethane",
-            "naphtha",
-            "gasoline",
-            "diesel",
-            "jet",
-            "crude",
-            "fuel_oil",
-        ],
+        "products": ["lpg", "ethane", "naphtha", "gasoline", "diesel", "jet", "crude", "fuel_oil"],
         "notes": "Largest bunker hub globally; full VLCC + VLGC capable.",
     },
     "JPYOK": {
@@ -223,15 +170,7 @@ _PORTS: dict[str, dict[str, Any]] = {
         "max_draught_m": 18,
         "max_air_draught_m": 56,
         "max_dwt": 280_000,
-        "products": [
-            "lpg",
-            "naphtha",
-            "gasoline",
-            "diesel",
-            "jet",
-            "crude",
-            "fuel_oil",
-        ],
+        "products": ["lpg", "naphtha", "gasoline", "diesel", "jet", "crude", "fuel_oil"],
         "notes": "Chiba terminal handles VLGC propane; Rainbow Bridge limits air draught.",
     },
     "JPCHB": {
@@ -508,7 +447,9 @@ class PortConstraintsTool(BaseTool):
             metadata={"ports": list(_PORTS.keys())},
         )
 
-    def _check(self, locode: str, vessel_class: str, product: str) -> ToolResult:
+    def _check(
+        self, locode: str, vessel_class: str, product: str
+    ) -> ToolResult:
         row = self._resolve(locode)
         if not row:
             return ToolResult(content=f"Unknown LOCODE '{locode}'", is_error=True)
@@ -521,16 +462,14 @@ class PortConstraintsTool(BaseTool):
         air = _VESSEL_AIR_DRAUGHT_M.get(vessel_class)
         dwt = _VESSEL_MAX_DWT.get(vessel_class)
         if loa is None:
-            return ToolResult(
-                content=f"Unknown vessel class '{vessel_class}'", is_error=True
-            )
+            return ToolResult(content=f"Unknown vessel class '{vessel_class}'", is_error=True)
 
         checks: dict[str, str] = {
-            "loa": _classify(loa, row["max_loa_m"]),
-            "beam": _classify(beam, row["max_beam_m"]),
-            "draught": _classify(draught, row["max_draught_m"]),
-            "air_draught": _classify(air, row["max_air_draught_m"]),
-            "dwt": _classify(dwt, row["max_dwt"]),
+            "loa":         _classify(loa,      row["max_loa_m"]),
+            "beam":        _classify(beam,     row["max_beam_m"]),
+            "draught":     _classify(draught,  row["max_draught_m"]),
+            "air_draught": _classify(air,      row["max_air_draught_m"]),
+            "dwt":         _classify(dwt,      row["max_dwt"]),
         }
         product_ok = "n/a"
         if product:
@@ -575,11 +514,8 @@ class PortConstraintsTool(BaseTool):
                 "overall": overall,
                 "checks": checks,
                 "vessel": {
-                    "loa_m": loa,
-                    "beam_m": beam,
-                    "draught_m": draught,
-                    "air_draught_m": air,
-                    "dwt": dwt,
+                    "loa_m": loa, "beam_m": beam, "draught_m": draught,
+                    "air_draught_m": air, "dwt": dwt,
                 },
                 "port": {
                     "max_loa_m": row["max_loa_m"],
