@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, XCircle, ChevronDown, ChevronRight, RefreshCw, Activity } from 'lucide-react';
-import { apiFetch } from '@/lib/api-client';
+import { CheckCircle2, XCircle, ChevronDown, ChevronRight, RefreshCw, Activity, Radio } from 'lucide-react';
+import { apiFetch, API_URL } from '@/lib/api-client';
 
 export interface InvocationStats {
   window: string;
@@ -56,6 +56,7 @@ export default function InvocationsTable({ kind, resourceId }: Props) {
   const [stats, setStats] = useState<InvocationStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [live, setLive] = useState(false);
 
   const basePath = kind === 'code_asset' ? '/api/code-assets' : '/api/ml-models';
 
@@ -74,6 +75,58 @@ export default function InvocationsTable({ kind, resourceId }: Props) {
   }, [basePath, resourceId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!resourceId) return;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const url = `${API_URL}${basePath}/${resourceId}/invocations/stream${token ? `?_t=${encodeURIComponent(token.slice(-12))}` : ''}`;
+    let cancelled = false;
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}${basePath}/${resourceId}/invocations/stream`, {
+          headers: token ? { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' } : { Accept: 'text/event-stream' },
+          signal: ctrl.signal,
+          cache: 'no-store',
+        });
+        if (!res.ok || !res.body) return;
+        setLive(true);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let currentEvent = '';
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith('data: ') && currentEvent === 'invocation') {
+              try {
+                const data = JSON.parse(line.slice(6)) as InvocationRow;
+                setRows((prev) => {
+                  if (prev.some((r) => r.id === data.id)) return prev;
+                  return [data, ...prev].slice(0, 100);
+                });
+                setStats((s) => s ? {
+                  ...s,
+                  total: s.total + 1,
+                  errors: s.errors + (data.is_error ? 1 : 0),
+                  success_rate: s.total + 1 > 0 ? 1 - (s.errors + (data.is_error ? 1 : 0)) / (s.total + 1) : null,
+                } : s);
+              } catch { /* malformed event line */ }
+              currentEvent = '';
+            }
+          }
+        }
+      } catch { /* aborted or network */ }
+      if (!cancelled) setLive(false);
+    })();
+    return () => { cancelled = true; ctrl.abort(); setLive(false); };
+  }, [resourceId, basePath]);
 
   return (
     <div className="space-y-4">
@@ -117,6 +170,11 @@ export default function InvocationsTable({ kind, resourceId }: Props) {
         <div className="px-4 py-2 border-b border-slate-700/60 flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Recent invocations</span>
           <span className="text-[10px] text-slate-500">{rows.length} shown</span>
+          {live && (
+            <span className="ml-auto flex items-center gap-1 text-[10px] text-emerald-300">
+              <Radio className="w-3 h-3 animate-pulse" /> live
+            </span>
+          )}
         </div>
         {loading && rows.length === 0 && <div className="px-4 py-6 text-[11px] text-slate-500 italic">loading…</div>}
         {!loading && rows.length === 0 && (

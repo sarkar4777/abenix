@@ -11,8 +11,23 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _DB_URL = os.environ.get("DATABASE_URL", "")
+_REDIS_URL = os.environ.get("REDIS_URL", "")
 _MAX_PAYLOAD_CHARS = 8000
 _MAX_TEXT_CHARS = 16000
+_PUBSUB_CHANNEL_PREFIX = "invocations:"
+
+
+async def _publish_event(kind: str, resource_id: str, event: dict) -> None:
+    if not _REDIS_URL or not resource_id:
+        return
+    try:
+        import redis.asyncio as redis_async  # type: ignore
+        client = redis_async.from_url(_REDIS_URL, decode_responses=True)
+        channel = f"{_PUBSUB_CHANNEL_PREFIX}{kind}:{resource_id}"
+        await client.publish(channel, json.dumps(event, default=str))
+        await client.aclose()
+    except Exception as e:
+        logger.debug("invocation_log.publish %s/%s failed: %s", kind, resource_id, e)
 
 
 def _truncate_json(value: Any) -> Any:
@@ -79,6 +94,7 @@ async def record_code_asset(
     eng = await _engine()
     if eng is None or not tenant_id or not code_asset_id:
         return
+    new_id = str(uuid.uuid4())
     try:
         from sqlalchemy import text as sql_text
         async with eng.begin() as conn:
@@ -94,7 +110,7 @@ async def record_code_asset(
                     ":schema_validated, :caller_source, :started_at, :completed_at, NOW(), NOW())"
                 ),
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": new_id,
                     "tid": str(tenant_id),
                     "aid": str(code_asset_id),
                     "eid": str(execution_id) if execution_id else None,
@@ -121,6 +137,21 @@ async def record_code_asset(
             await eng.dispose()
         except Exception:
             pass
+
+    try:
+        await _publish_event("code_asset", str(code_asset_id), {
+            "id": new_id,
+            "code_asset_id": str(code_asset_id),
+            "agent_id": agent_id,
+            "execution_id": execution_id,
+            "duration_ms": duration_ms,
+            "is_error": bool(is_error),
+            "exit_code": exit_code,
+            "error_message": _truncate_text(error_message),
+            "created_at": (completed_at or datetime.utcnow()).isoformat(),
+        })
+    except Exception:
+        pass
 
 
 async def record_ml_model(
@@ -159,6 +190,7 @@ async def record_ml_model(
     eng = await _engine()
     if eng is None or not tenant_id or not ml_model_id:
         return
+    new_id = str(uuid.uuid4())
     try:
         from sqlalchemy import text as sql_text
         async with eng.begin() as conn:
@@ -175,7 +207,7 @@ async def record_ml_model(
                     ":deployment_type, :cost_usd, :caller_source, NOW(), NOW())"
                 ),
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": new_id,
                     "tid": str(tenant_id),
                     "mid": str(ml_model_id),
                     "eid": str(execution_id) if execution_id else None,
@@ -200,6 +232,25 @@ async def record_ml_model(
             await eng.dispose()
         except Exception:
             pass
+
+    try:
+        await _publish_event("ml_model", str(ml_model_id), {
+            "id": new_id,
+            "ml_model_id": str(ml_model_id),
+            "agent_id": agent_id,
+            "execution_id": execution_id,
+            "operation": operation or "predict",
+            "duration_ms": duration_ms,
+            "is_error": bool(is_error),
+            "predicted_class": predicted_class,
+            "confidence": confidence,
+            "deployment_type": deployment_type,
+            "cost_usd": cost_usd,
+            "error_message": _truncate_text(error_message),
+            "created_at": datetime.utcnow().isoformat(),
+        })
+    except Exception:
+        pass
 
 
 async def record_kb_query(
@@ -234,6 +285,7 @@ async def record_kb_query(
     eng = await _engine()
     if eng is None or not tenant_id:
         return
+    new_id = str(uuid.uuid4())
     try:
         from sqlalchemy import text as sql_text
         async with eng.begin() as conn:
@@ -249,7 +301,7 @@ async def record_kb_query(
                     ":caller_source, NOW(), NOW())"
                 ),
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": new_id,
                     "tid": str(tenant_id),
                     "kid": str(kb_collection_id) if kb_collection_id else None,
                     "eid": str(execution_id) if execution_id else None,
@@ -272,6 +324,23 @@ async def record_kb_query(
             await eng.dispose()
         except Exception:
             pass
+
+    try:
+        await _publish_event("kb_query", str(kb_collection_id) if kb_collection_id else "any", {
+            "id": new_id,
+            "kb_collection_id": str(kb_collection_id) if kb_collection_id else None,
+            "agent_id": agent_id,
+            "execution_id": execution_id,
+            "query_text": _truncate_text(query_text),
+            "search_mode": search_mode,
+            "hit_count": hit_count,
+            "duration_ms": duration_ms,
+            "is_error": bool(is_error),
+            "error_message": _truncate_text(error_message),
+            "created_at": datetime.utcnow().isoformat(),
+        })
+    except Exception:
+        pass
 
 
 def fire_and_forget(coro):

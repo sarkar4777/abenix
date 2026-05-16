@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.4.1 — 2026-05-16
+
+### Added
+
+- **Real-time invocation feed (SSE)** — The Invocations panel on `/code-runner` and `/ml-models` now streams new rows live via Server-Sent Events. Once the tab is open, new code-asset pod runs and ML predictions prepend to the list automatically as agents fire elsewhere — no manual refresh. A small green "live" indicator turns on while the stream is connected. Powered by Redis pub/sub channel `invocations:{kind}:{resource_id}` with a 15-second heartbeat to keep the connection alive. Implementation: `apps/agent-runtime/engine/invocation_log.py` publishes after every DB insert; new endpoints `GET /api/code-assets/{id}/invocations/stream`, `GET /api/ml-models/{id}/invocations/stream`, `GET /api/knowledge-collections/{id}/queries/stream`; `InvocationsTable.tsx` consumes via `fetch + ReadableStream` (no EventSource, so we can send the Bearer token).
+- **Historical backfill script** — `scripts/backfill_resource_invocations.py` scans the last N days of `executions.tool_calls` JSONB blobs and inserts synthetic rows into the new invocation tables, marking them `caller_source='backfill'` so they can be distinguished from live hooks. Idempotent — re-runs skip existing rows. First production run on 2026-05-16 restored **216 ML model invocations** from 5478 historical executions across ~30 days. Run via `kubectl exec abenix-api -- python /tmp/backfill.py` with optional `BACKFILL_DAYS` env (default 30).
+- **Pre-built Grafana dashboard** — `infra/observability/dashboards/resource-invocations.json` ships nine panels covering code-asset invocation rate, p95 latency, ML predictions by operation, ML p95 latency, cumulative ML cost, KB query rate, 24h code-asset/ML error rates, and 24h ML spend. Auto-loaded via the existing `abenix-grafana-dashboards` ConfigMap (deploy-azure.sh globs `infra/observability/dashboards/*.json`). Template variables let you filter by `code_asset_id` or `ml_model_id`.
+
+### Documentation
+
+- **`/help` page** — Observability section now lists every new v1.4 Prometheus metric (`abenix_code_asset_invocations_total`, `abenix_ml_model_*`, `abenix_kb_query_*`), explains the resource invocation log, the SSE live-feed wiring, the backfill script, the Grafana dashboard, and the (planned v1.5.0) OpenTelemetry trace correlation. New dedicated **Archives** section documents the nightly archive schedule, default retention per table, the `/admin/archives` admin UI, dump format + sha256 verification, and the manual `kubectl cp` restore procedure (UI restore deferred to v1.5).
+- **README.md** — Observability row of the Enterprise readiness table updated to call out the v1.4 per-resource invocation log + live SSE + (v1.5+) Tempo distributed traces. New Archives row documents the nightly retention/archive system.
+
+### Internals
+
+- `engine/invocation_log.py` records the inserted row id and re-publishes it on the Redis channel after the DB commit — no race between insert and publish.
+- The SSE endpoints stream `event: start` immediately on connect, then `event: invocation` per published row, with `: heartbeat` pings every 15s. The web client uses `fetch + ReadableStream` rather than `EventSource` so the auth Bearer header propagates (EventSource doesn't allow custom headers in browsers).
+- Backfill script's idempotency uses `caller_source='backfill'` lookups per (execution_id, resource_id) rather than a DB constraint — keeps the schema flat and the script self-contained.
+
 ## v1.4.0 — 2026-05-16
 
 

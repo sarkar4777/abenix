@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  Activity, AlertTriangle, ArrowRight, BarChart3, BookOpen, Bot, Brain,
+  Activity, AlertTriangle, Archive, ArrowRight, BarChart3, BookOpen, Bot, Brain,
   Camera, Check, ChevronRight, Code2, Compass, Cpu, Database,
   DollarSign, Eye, FileJson, FileText, Gauge, GitBranch, Globe,
   HelpCircle, Key, Layers, Library, Link2, Network, Plug, Radio, Route,
@@ -1523,7 +1523,24 @@ spec:
               <li>abenix_notifications_sent_total{`{channel,severity}`}</li>
               <li>abenix_tool_calls_total{`{tool_name,outcome}`}</li>
               <li>abenix_http_requests_total + abenix_http_request_duration_seconds</li>
+              <li className="text-emerald-300">abenix_code_asset_invocations_total{`{code_asset_id,status}`} <span className="text-slate-500">(v1.4.0)</span></li>
+              <li className="text-emerald-300">abenix_code_asset_duration_seconds (histogram)</li>
+              <li className="text-emerald-300">abenix_ml_model_invocations_total{`{ml_model_id,operation,status}`} <span className="text-slate-500">(v1.4.0)</span></li>
+              <li className="text-emerald-300">abenix_ml_model_duration_seconds (histogram)</li>
+              <li className="text-emerald-300">abenix_ml_model_cost_usd_total{`{ml_model_id}`}</li>
+              <li className="text-emerald-300">abenix_kb_query_invocations_total{`{kb_collection_id,status}`}</li>
+              <li className="text-emerald-300">abenix_kb_query_duration_seconds (histogram)</li>
             </ul>
+
+            <h4 className="text-white font-semibold pt-3">Resource invocation log (v1.4)</h4>
+            <p>Every <code>code_asset</code> pod run, <code>ml_model</code> prediction, and <code>knowledge_search</code> query is now persisted as a first-class row in the new <code>code_asset_invocations</code>, <code>ml_model_invocations</code>, and <code>kb_query_invocations</code> tables. The Invocations panel on <a href="/code-runner" className="text-cyan-300 underline">/code-runner</a> and <a href="/ml-models" className="text-cyan-300 underline">/ml-models</a> reads from these tables: 24h stats card (totals, error rate, p95 duration, top calling agents, total ML cost) plus a scrollable list of recent runs. Click any row → expand to see input, output, stdout/stderr, predicted class, confidence, parent agent execution link.</p>
+            <p><strong className="text-white">Live updates (v1.4.1):</strong> Once you open the Invocations tab, new runs stream into the panel via SSE — the "live" indicator turns on, and new rows prepend to the list automatically as agents fire elsewhere. Powered by Redis pub/sub channel <code>invocations:{`{kind}:{resource_id}`}</code> with a 15-second heartbeat to keep the connection alive.</p>
+            <h4 className="text-white font-semibold pt-3">Backfill from existing executions (v1.4.2)</h4>
+            <p>Historical agent runs from before the v1.4.0 deploy live in <code>executions.tool_calls</code> JSONB blobs but not in the new invocation tables. Run <code>scripts/backfill_resource_invocations.py</code> via <code>kubectl exec abenix-api ... python /app/scripts/backfill_resource_invocations.py</code> with optional <code>BACKFILL_DAYS</code> env var (default 30). Script is idempotent — re-runs skip rows already backfilled (marked <code>caller_source=&apos;backfill&apos;</code>).</p>
+            <h4 className="text-white font-semibold pt-3">Pre-built Grafana dashboard (v1.4.3)</h4>
+            <p>Dashboard JSON at <code>infra/observability/dashboards/resource-invocations.json</code> ships via the existing Grafana ConfigMap provisioning. Nine panels: invocation rate per resource, p95 latency, error rate stat, cumulative ML cost, 24h spend stat. Auto-loaded by Grafana at startup. Template variables let you filter by <code>code_asset_id</code> or <code>ml_model_id</code>.</p>
+            <h4 className="text-white font-semibold pt-3">Distributed tracing (v1.5.0)</h4>
+            <p>OpenTelemetry spans wrap <code>agent.execute</code>, <code>tool.{`{name}`}</code>, <code>llm.call</code>, <code>code_asset.pod_run</code>, and <code>ml_model.predict</code>. Trace context propagates over HTTP (W3C TraceContext) and into sandbox pods via <code>TRACEPARENT</code> env. Backend: Grafana Tempo (same Grafana login, separate data source). Each execution row gets a <code>trace_id</code> column you can click to open the flame graph. Sampling: 10% baseline, 100% always-sample on error. Prompts and outputs are redacted from span attributes by default to avoid PII leaks.</p>
             <h4 className="text-white font-semibold pt-3">Notification fan-out</h4>
             <ul className="list-disc pl-5 space-y-0.5 text-[12px]">
               <li><strong>WebSocket</strong> — always on, powers the bell.</li>
@@ -1532,6 +1549,41 @@ spec:
             </ul>
             <h4 className="text-white font-semibold pt-3">Stale-execution sweeper</h4>
             <p>An APScheduler job runs every 5 minutes and marks any execution still <code>RUNNING</code> for &gt;<code>STALE_EXECUTION_MAX_MINUTES</code> (default 30) as <code>FAILED</code> with <code>failure_code=STALE_SWEEP</code>. A Postgres advisory lock ensures only one API replica runs the sweep per interval.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'archives',
+        title: 'Archives — retention + cold-storage dumps',
+        icon: <Archive className="w-4 h-4" />,
+        badge: 'admin',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p>Recording tables (anything that&apos;s append-only — invocations, executions, messages, activity logs) get garbage-collected on a schedule so they don&apos;t balloon the live DB. Old rows are streamed to gzipped JSONL on a persistent volume, then deleted from the source table after a sha256 verification.</p>
+            <p><strong className="text-white">Schedule:</strong> nightly at <code>02:00 UTC</code> via APScheduler inside <code>abenix-api</code> — same scheduler that handles cron triggers and the stale-execution sweeper.</p>
+            <p><strong className="text-white">Default retention:</strong></p>
+            <ul className="list-disc pl-5 space-y-0.5 text-[12px] font-mono">
+              <li>code_asset_invocations — 30 days</li>
+              <li>ml_model_invocations — 30 days</li>
+              <li>kb_query_invocations — 30 days</li>
+              <li>executions — 60 days</li>
+              <li>messages — 60 days</li>
+              <li>activity_logs — 90 days</li>
+            </ul>
+            <p>Admin-editable per-table at <a href="/admin/archives" className="text-cyan-300 underline">/admin/archives</a>. Toggle <code>enabled</code> off to pause archiving for a table; bump <code>retention_days</code> upward to keep more history.</p>
+            <p><strong className="text-white">Dump format:</strong> <code>/data/archives/{`{table}/{YYYY-MM}/{table}-{timestamp}-{batch}.jsonl.gz`}</code>. Each line is one row as JSON. Files survive pod restarts (hostPath volume); sha256 of the dump is stored in <code>archive_runs.file_sha256</code> so you can verify offline copies haven&apos;t been tampered with.</p>
+            <p><strong className="text-white">Manual trigger:</strong> on the admin page, click any table button to fire an archive right now. Useful before a long retention-policy change (archive what&apos;s about-to-expire first so it lands in a clean dump).</p>
+            <p><strong className="text-white">Restore:</strong> v1 has no restore UI by design. Admin downloads the .jsonl.gz via the &quot;dump&quot; link, extracts on a workstation, and re-imports into a forensic database. The original rows have stable UUIDs so a careful <code>INSERT ... ON CONFLICT DO NOTHING</code> can re-hydrate the live table if needed. Restore-from-UI ships in v1.5.0.</p>
+            <Callout tone="warn">
+              The hostPath volume is single-node. For multi-node clusters or higher durability, mount a PVC (RWX storage class) at <code>/data/archives</code> instead. The archiver writes via <code>ARCHIVE_ROOT</code> env, default <code>/data/archives</code>.
+            </Callout>
+            <h4 className="text-white font-semibold pt-3">End-user walkthrough</h4>
+            <ol className="list-decimal pl-5 space-y-1 text-[13px]">
+              <li>Day 0: admin opens <code>/admin/archives</code>, sees the seeded default retention policies, leaves them alone.</li>
+              <li>Day 30 at 02:00 UTC: scheduler fires the first archive job for <code>code_asset_invocations</code> — streams rows older than 30 days into <code>code_asset_invocations-2026-06-15T020000-{`{rand}`}.jsonl.gz</code> on the abenix-api pod&apos;s <code>/data/archives/</code>, verifies sha256, then deletes those rows in 1000-row batches.</li>
+              <li>Compliance audit hits: open <code>/admin/archives</code>, find the run for May 2026, click <strong>dump</strong>, download the gzipped JSONL, grep with <code>zcat | jq</code>.</li>
+              <li>If a row was hot-data that shouldn&apos;t have been archived, edit the retention policy upward (e.g. 30 → 90 days) so the same window stays live going forward.</li>
+            </ol>
           </div>
         ),
       },

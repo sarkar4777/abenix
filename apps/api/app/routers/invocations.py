@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +21,43 @@ from models.ml_model import MLModel
 from models.user import User
 
 router = APIRouter(tags=["invocations"])
+
+_REDIS_URL = os.environ.get("REDIS_URL", "")
+_PUBSUB_CHANNEL_PREFIX = "invocations:"
+
+
+async def _invocation_sse(kind: str, resource_id: str):
+    yield f"event: start\ndata: {json.dumps({'kind': kind, 'resource_id': str(resource_id)})}\n\n"
+    if not _REDIS_URL:
+        yield "event: closed\ndata: {\"reason\": \"redis not configured\"}\n\n"
+        return
+    try:
+        import redis.asyncio as redis_async  # type: ignore
+        client = redis_async.from_url(_REDIS_URL, decode_responses=True)
+    except Exception as e:
+        yield f"event: error\ndata: {json.dumps({'reason': str(e)})}\n\n"
+        return
+    pubsub = client.pubsub()
+    channel = f"{_PUBSUB_CHANNEL_PREFIX}{kind}:{resource_id}"
+    try:
+        await pubsub.subscribe(channel)
+        while True:
+            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
+            if msg is None:
+                yield ": heartbeat\n\n"
+                continue
+            data = msg.get("data")
+            if data:
+                yield f"event: invocation\ndata: {data}\n\n"
+    except asyncio.CancelledError:
+        return
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+            await client.aclose()
+        except Exception:
+            pass
 
 
 def _window_to_delta(window: str) -> timedelta:
@@ -86,6 +126,30 @@ async def list_code_asset_invocations(
         for r in rows
     ]
     return success({"items": items, "total": total})
+
+
+@router.get("/api/code-assets/{asset_id}/invocations/stream")
+async def stream_code_asset_invocations(
+    asset_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    asset = (await db.execute(select(CodeAsset).where(CodeAsset.id == asset_id))).scalar_one_or_none()
+    if not asset:
+        return StreamingResponse(iter([b"event: error\ndata: {\"reason\":\"not_found\"}\n\n"]), media_type="text/event-stream")
+    if asset.tenant_id != user.tenant_id and (
+        getattr(user.role, "value", str(user.role)).lower() != "admin"
+    ):
+        return StreamingResponse(iter([b"event: error\ndata: {\"reason\":\"forbidden\"}\n\n"]), media_type="text/event-stream")
+    return StreamingResponse(
+        _invocation_sse("code_asset", str(asset_id)),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/api/code-assets/{asset_id}/stats")
@@ -193,6 +257,30 @@ async def list_ml_model_invocations(
     return success({"items": items, "total": total})
 
 
+@router.get("/api/ml-models/{model_id}/invocations/stream")
+async def stream_ml_model_invocations(
+    model_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    m = (await db.execute(select(MLModel).where(MLModel.id == model_id))).scalar_one_or_none()
+    if not m:
+        return StreamingResponse(iter([b"event: error\ndata: {\"reason\":\"not_found\"}\n\n"]), media_type="text/event-stream")
+    if m.tenant_id != user.tenant_id and (
+        getattr(user.role, "value", str(user.role)).lower() != "admin"
+    ):
+        return StreamingResponse(iter([b"event: error\ndata: {\"reason\":\"forbidden\"}\n\n"]), media_type="text/event-stream")
+    return StreamingResponse(
+        _invocation_sse("ml_model", str(model_id)),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/api/ml-models/{model_id}/stats")
 async def ml_model_stats(
     model_id: uuid.UUID,
@@ -287,3 +375,19 @@ async def list_kb_query_invocations(
         for r in rows
     ]
     return success({"items": items, "total": total})
+
+
+@router.get("/api/knowledge-collections/{collection_id}/queries/stream")
+async def stream_kb_query_invocations(
+    collection_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    return StreamingResponse(
+        _invocation_sse("kb_query", str(collection_id)),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
