@@ -122,13 +122,13 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-# Register sharing/favorites/comments BEFORE agents router
-# so /api/agents/favorites and /api/agents/shared-with-me
-# don't get caught by /api/agents/{agent_id}
 app.include_router(agent_sharing.router)
 app.include_router(agent_comments.router)
 app.include_router(agent_favorites.router)
 app.include_router(agents.router)
+from app.routers import invocations as _invocations_mod, archives as _archives_mod
+app.include_router(_invocations_mod.router)
+app.include_router(_archives_mod.router)
 app.include_router(admin_scaling.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_pricing.router)

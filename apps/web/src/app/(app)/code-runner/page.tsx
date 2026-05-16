@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
+import InvocationsTable from '@/components/observability/InvocationsTable';
 
 interface AnalysisNote {
   level: 'info' | 'warn' | 'error';
@@ -364,7 +365,13 @@ export default function CodeRunnerPage() {
                   </button>
                 </div>
 
-                {/* Test runner */}
+                <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+                    <FlaskConical className="w-3.5 h-3.5 text-cyan-400" /> Invocations
+                  </h3>
+                  <InvocationsTable kind="code_asset" resourceId={selected.id} />
+                </div>
+
                 <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 space-y-3">
                   <h3 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
                     <FlaskConical className="w-3.5 h-3.5 text-emerald-400" /> Test run

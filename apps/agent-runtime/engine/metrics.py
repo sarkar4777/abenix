@@ -121,3 +121,54 @@ moderation_decisions_total = _safe_metric(
     "Moderation decisions grouped by source + outcome",
     ["source", "outcome"],
 )
+
+# Per-resource invocation counters — feed the resource-centric Grafana
+# dashboards and the /api/<resource>/{id}/stats endpoints alongside the DB
+# event log (code_asset_invocations / ml_model_invocations / kb_query_invocations).
+CODE_ASSET_INVOCATIONS_TOTAL = _safe_metric(
+    Counter,
+    "abenix_code_asset_invocations_total",
+    "Code asset pod invocations grouped by asset + status",
+    ["code_asset_id", "status"],
+)
+CODE_ASSET_DURATION_SECONDS = _safe_metric(
+    Histogram,
+    "abenix_code_asset_duration_seconds",
+    "Code asset pod end-to-end duration",
+    ["code_asset_id"],
+    buckets=(1, 2, 5, 10, 20, 30, 60, 120, 300, 600),
+)
+
+ML_MODEL_INVOCATIONS_TOTAL = _safe_metric(
+    Counter,
+    "abenix_ml_model_invocations_total",
+    "ML model predictions grouped by model + operation + status",
+    ["ml_model_id", "operation", "status"],
+)
+ML_MODEL_DURATION_SECONDS = _safe_metric(
+    Histogram,
+    "abenix_ml_model_duration_seconds",
+    "ML model inference latency",
+    ["ml_model_id", "operation"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30),
+)
+ML_MODEL_COST_USD_TOTAL = _safe_metric(
+    Counter,
+    "abenix_ml_model_cost_usd_total",
+    "Cumulative ML model inference cost in USD",
+    ["ml_model_id"],
+)
+
+KB_QUERY_INVOCATIONS_TOTAL = _safe_metric(
+    Counter,
+    "abenix_kb_query_invocations_total",
+    "Knowledge-base query invocations grouped by collection + status",
+    ["kb_collection_id", "status"],
+)
+KB_QUERY_DURATION_SECONDS = _safe_metric(
+    Histogram,
+    "abenix_kb_query_duration_seconds",
+    "Knowledge-base query latency",
+    ["kb_collection_id"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+)

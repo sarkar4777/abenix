@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
+import InvocationsTable from '@/components/observability/InvocationsTable';
 
 interface MLModel {
   id: string;
@@ -376,7 +377,13 @@ export default function MLModelsPage() {
                   </div>
                 )}
 
-                {/* Test Inference */}
+                <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+                    <Cpu className="w-3.5 h-3.5 text-cyan-400" /> Invocations
+                  </h3>
+                  <InvocationsTable kind="ml_model" resourceId={selected.id} />
+                </div>
+
                 <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
                   <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
                     <Play className="w-3.5 h-3.5 text-emerald-400" /> Test Inference

@@ -16,6 +16,16 @@ _MODEL_CACHE: dict[str, Any] = {}
 _MAX_CACHE = 5
 
 
+def _safe_parse_json(content: str | None):
+    if not content:
+        return None
+    try:
+        import json as _json
+        return _json.loads(content)
+    except Exception:
+        return {"raw": str(content)[:2000]}
+
+
 class MLModelTool(BaseTool):
     name = "ml_model"
     description = (
@@ -49,9 +59,11 @@ class MLModelTool(BaseTool):
         "required": ["operation"],
     }
 
-    def __init__(self, db_url: str = "", tenant_id: str = "") -> None:
+    def __init__(self, db_url: str = "", tenant_id: str = "", execution_id: str = "", agent_id: str = "") -> None:
         self.db_url = db_url or os.environ.get("DATABASE_URL", "")
         self.tenant_id = tenant_id
+        self._execution_id = execution_id
+        self._agent_id = agent_id
 
     async def _get_conn(self) -> Any:
         import asyncpg
@@ -73,18 +85,53 @@ class MLModelTool(BaseTool):
         if not op:
             return ToolResult(content="Error: operation is required", is_error=True)
 
+        import time as _time
+        _t0 = _time.monotonic()
         try:
             if op == "list_models":
-                return await self._list_models()
+                result = await self._list_models()
             elif op == "predict":
-                return await self._predict(arguments)
+                result = await self._predict(arguments)
             elif op == "get_model_info":
-                return await self._get_model_info(arguments)
+                result = await self._get_model_info(arguments)
             else:
-                return ToolResult(content=f"Unknown operation: {op}", is_error=True)
+                result = ToolResult(content=f"Unknown operation: {op}", is_error=True)
         except Exception as e:
             logger.error("MLModelTool error: %s", e)
-            return ToolResult(content=f"ML model error: {e}", is_error=True)
+            result = ToolResult(content=f"ML model error: {e}", is_error=True)
+        _duration_ms = int((_time.monotonic() - _t0) * 1000)
+        if op == "predict":
+            try:
+                from engine import invocation_log
+                md = result.metadata or {}
+                output_obj = _safe_parse_json(result.content) if not result.is_error else None
+                predicted_class = None
+                confidence = None
+                if isinstance(output_obj, dict):
+                    pred = output_obj.get("prediction") or output_obj.get("predicted_class")
+                    if isinstance(pred, (str, int, float)):
+                        predicted_class = str(pred)
+                    conf = output_obj.get("confidence") or output_obj.get("probability")
+                    if isinstance(conf, (int, float)):
+                        confidence = float(conf)
+                invocation_log.fire_and_forget(invocation_log.record_ml_model(
+                    tenant_id=self.tenant_id or None,
+                    ml_model_id=md.get("ml_model_id") or "",
+                    execution_id=self._execution_id or None,
+                    agent_id=self._agent_id or None,
+                    operation=op,
+                    input_payload=arguments.get("input_data") or arguments.get("input"),
+                    output=output_obj,
+                    predicted_class=predicted_class,
+                    confidence=confidence,
+                    duration_ms=_duration_ms,
+                    is_error=bool(result.is_error),
+                    error_message=result.content if result.is_error else None,
+                    deployment_type=md.get("deployment_type"),
+                ))
+            except Exception:
+                pass
+        return result
 
     async def _list_models(self) -> ToolResult:
         conn = await self._get_conn()
@@ -208,6 +255,8 @@ class MLModelTool(BaseTool):
                     "model_version": row["version"],
                     "framework": row["framework"],
                     "source": source,
+                    "ml_model_id": str(row.get("id") or ""),
+                    "deployment_type": source,
                 },
             )
         finally:

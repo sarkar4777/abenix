@@ -84,6 +84,10 @@ from models.connector import Connector, ConnectorAuthType, ConnectorKind
 from models.approval import Approval, ApprovalStatus
 from models.idempotency import ExecutionIdempotency
 from models.dead_letter import DeadLetterExecution
+from models.code_asset_invocation import CodeAssetInvocation
+from models.ml_model_invocation import MLModelInvocation
+from models.kb_query_invocation import KBQueryInvocation
+from models.archive import ArchiveRun, ArchiveRunStatus, RetentionPolicy
 
 __all__ = [
     "Base",
@@ -183,4 +187,10 @@ __all__ = [
     "ApprovalStatus",
     "ExecutionIdempotency",
     "DeadLetterExecution",
+    "CodeAssetInvocation",
+    "MLModelInvocation",
+    "KBQueryInvocation",
+    "ArchiveRun",
+    "ArchiveRunStatus",
+    "RetentionPolicy",
 ]

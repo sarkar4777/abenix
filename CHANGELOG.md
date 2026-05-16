@@ -1,5 +1,54 @@
 # Changelog
 
+## v1.4.0 — 2026-05-16
+
+
+### Added
+
+- **Desk Copilot live network canvas + narration feed** — when a trader hits Ask, the right pane now shows a force-directed SVG of the agent topology lighting up in real time. The Desk Copilot sits at the centre; each specialist invoked via `invoke_agent` blooms out as its own node; each tool the specialist fires spawns a child node; edges animate with particle pulses that trace the data flow. Beneath the canvas, a time-coded scrollable feed prints every tool call, every result preview, and every explicit `narrate(...)` line from the agent — colour-coded by phase (cyan for tool start, emerald for return, violet for sub-agent spawn, amber for narration). The trader watches an agentic brain at work instead of staring at "Thinking…".
+- **`narrate` runtime tool** — any agent can opt in by adding `narrate` to its tool list and calling `narrate("...", tone="step|finding|alert|done")` at decision points. The Desk Copilot does this five times per run by default (plan summary, pre-call, post-call findings, stitching). Adds zero cost beyond the LLM token spend, and zero latency.
+- **Trajectory replay** — every past Desk Copilot run is now persisted as a JSON-lines narration log under `/data/wingman-narrations/{execution_id}.jsonl`. The Past-trajectories sidebar shows date + time per row and a `▸ replay` tag for runs that have a stored log. Clicking replays the canvas + feed at 4× speed against the recorded events — no agents fire, no LLM cost, identical visualisation.
+- **Pub/sub progress backbone** — new `engine/progress.py` in the runtime publishes per-tool events (`tool_call`, `tool_result`, `sub_started`, `sub_finished`) to Redis channel `wingman:progress:<root_execution_id>`. Sub-agents inherit the root id via a Redis-stored parent map written by `invoke_agent`, so events from the entire agent tree land on one channel. Falls back to no-op when `REDIS_URL` is unset.
+- **Wingman-api SSE endpoints** — `GET /api/wingman/desk/narration/{id}` streams the live channel as Server-Sent Events; `GET .../replay?speed=4` re-plays the persisted log; `GET .../log` returns the raw events as JSON. Wingman-web has a dedicated Node-runtime SSE proxy at `/api/wingman-narration/[id]` (same buffering-bypass pattern that previously unstuck the DAG drawer).
+
+### Changed
+
+- **`invoke_agent` switches to submitted-then-poll** — instead of blocking synchronously on `/api/agents/{id}/execute`, the tool now submits the sub-agent, captures its `execution_id` immediately, registers the parent → root map in Redis, publishes a `sub_started` event so the canvas can draw the specialist node live, and polls for completion. This is what makes the canvas show sub-agents lighting up while they run rather than appearing only after their tool_result.
+
+### Fixed
+
+- Trajectory log entries now carry `has_narration` so the sidebar can show the `▸ replay` affordance only for runs that actually have a recorded log.
+
+### Internals
+
+- `agent_executor` wraps every `tool.execute(...)` with `progress.publish(tool_call)` + `progress.publish(tool_result)`. Each event carries a 240-char result preview so the feed has something to display without re-fetching the full payload.
+- The wingman-api wrapper persists every event to `/data/wingman-narrations/{id}.jsonl` as it streams. Pod restarts don't lose the log; trajectory replay survives a deploy.
+- `wingman-api` deployment now mounts the shared `/tmp/abenix-shared-data` hostPath as `/data` — trajectory + narration JSONL + result cache all survive pod restarts.
+- `agent-runtime` + `wingman-api` get `REDIS_URL=redis://abenix-redis-master:6379/0` from the helm chart + standalone manifest, so the progress pub/sub channel is wired without any post-deploy patching.
+
+### UI
+
+- **Expandable DAG drawer with three sections** — the right-side drawer (every page that fires an agent run) now stacks DAG nodes (smaller, fixed-height, auto-scroll), Live agent network (force-directed canvas), and Narration feed. Each section collapses independently, and Canvas + Feed have a maximize button (esc to close) for full-screen reading. Width widened from 420 → 480 px.
+- **`wingman-brief-repair` smart fallback** — when the desk-copilot meta-agent finishes but emits text that doesn't parse as JSON, the `/desk/result` handler quietly fires a one-shot Haiku-backed `wingman-brief-repair` agent that re-emits the trader brief in the canonical schema. The repaired brief carries `_repaired: true` and surfaces a small amber chip on the Desk page so the trader knows what happened. One LLM call, no re-running the specialist chain.
+- **Agent Builder: `agent_type` selector + missing tools exposed** — the builder advanced panel now has an Agent type dropdown (Custom / OOB). The platform's tool catalog exposes `invoke_agent`, `recall_trajectory`, and `narrate` so every wingman agent (and any user-built equivalent) is fully reproducible from the UI. Admins can edit OOB agents directly; non-admins still get the "OOB read-only" guard.
+
+### Resource observability + archive system
+
+- **Per-resource invocation log** — every `code_asset` pod run and every `ml_model` prediction now writes a first-class row into new `code_asset_invocations` and `ml_model_invocations` tables, with input payload, output, stdout/stderr (code_asset), predicted_class + confidence (ml_model), duration, exit code, parent agent execution id, and a per-row cost field. `knowledge_search` calls land in `kb_query_invocations` (table is live, runtime hook ships next round). Resource-centric UX: open `/code-runner` or `/ml-models`, pick a resource, scroll to the new **Invocations** panel — 24h stats card (totals, success rate, p95 duration, top calling agents, total cost for ML) on top, expandable row list below. Click a row → drills into input/output/stdout and a link to the parent agent execution.
+- **Prometheus counters + histograms** — `abenix_code_asset_invocations_total{code_asset_id, status}`, `abenix_code_asset_duration_seconds{code_asset_id}`, `abenix_ml_model_invocations_total{ml_model_id, operation, status}`, `abenix_ml_model_duration_seconds{ml_model_id, operation}`, `abenix_ml_model_cost_usd_total{ml_model_id}`, `abenix_kb_query_invocations_total`, `abenix_kb_query_duration_seconds`. Bounded cardinality (resource_id × status), feeds the existing Grafana stack.
+- **Archive system** — new admin page at `/admin/archives` lets admins see archive run history (rows archived, file size, sha256), manually trigger an archive for any recording table, edit retention policies per table (defaults: 30 days for invocations, 60 for executions/messages, 90 for activity logs), and download the resulting `.jsonl.gz` dumps. Nightly job at 02:00 UTC streams rows older than retention to `/data/archives/{table}/{YYYY-MM}/{table}-{timestamp}-{batch}.jsonl.gz` (gzip-compressed), verifies count + sha256, then deletes the source rows in 1000-row batches. New tables: `archive_runs` (manifest), `retention_policies` (admin-editable). UI restore is explicit non-goal v1; admins extract via `kubectl cp` if forensic lookup is needed.
+- **Where the dumps live** — abenix-api pod's `/data/archives/` (hostPath `/var/lib/abenix/data/archives/` on the node). Files survive pod restarts; admin can `kubectl cp abenix/<pod>:/data/archives/<file> ./` to pull bulk archives.
+- **What this unlocks** — "show me every prediction the broker-intent-classifier made yesterday" / "which code asset has the highest error rate this week" / "drill from a tool call into the parent agent execution and back to the trader question" — all queries are answerable without grovelling through `executions.tool_calls` JSONB blobs.
+
+### End-user walkthrough (Resource observability)
+
+1. Trader on `/desk` asks "Should I trade USGC→NWE propane this week?" — wingman-desk-copilot fans out to wingman-var-simulator → the Go binary runs as a code_asset → pod completes with VaR numbers.
+2. Trader (or admin) navigates to `/code-runner` → clicks the wingman-var-simulator asset → scrolls to **Invocations** → sees today's run with input JSON, exit code 0, stdout (the JSON envelope), duration. Clicks a row to expand: full input/output/stdout, plus the parent agent execution_id as a clickable link.
+3. The 24h stats card on top shows: 3 invocations, 0 errors, 100% success rate, avg duration 18s, top agent = `wingman-var-simulator`.
+4. Same flow on `/ml-models` — pick `wingman-broker-intent-classifier`, see the recent predictions with predicted class + confidence per row, total cost for the day.
+5. SRE opens Grafana (existing dashboard URL) → `code_asset_invocations_total` rate spike triggers an alert → drills into Prometheus, gets the offending `code_asset_id`, opens `/code-runner` for that asset, sees the error rows + stderr.
+6. After 30 days a row auto-archives at 02:00 UTC. Admin opens `/admin/archives`, finds the `code_asset_invocations` run, downloads the `.jsonl.gz` dump for offline analysis.
+
 ## v1.3.0 — 2026-05-16
 
 

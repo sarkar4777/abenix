@@ -113,12 +113,49 @@ class CodeAssetTool(BaseTool):
         tenant_id: str = "",
         redis_url: str = "",
         db_url: str = "",
+        execution_id: str = "",
+        agent_id: str = "",
     ):
         self._tenant_id = tenant_id
         self._redis_url = redis_url
         self._db_url = db_url or os.environ.get("DATABASE_URL", "")
+        self._execution_id = execution_id
+        self._agent_id = agent_id
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        import time as _time
+        from datetime import datetime as _dt, timezone as _tz
+        _started_at = _dt.now(_tz.utc)
+        _t0 = _time.monotonic()
+        result = await self._execute_impl(arguments)
+        _duration_ms = int((_time.monotonic() - _t0) * 1000)
+        try:
+            from engine import invocation_log
+            asset_id_for_log = (arguments.get("code_asset_id") or "").strip()
+            md = result.metadata or {}
+            invocation_log.fire_and_forget(invocation_log.record_code_asset(
+                tenant_id=self._tenant_id or None,
+                code_asset_id=md.get("resolved_code_asset_id") or asset_id_for_log,
+                execution_id=self._execution_id or None,
+                agent_id=self._agent_id or None,
+                input_payload=arguments.get("input"),
+                output=_safe_parse_output(result.content) if not result.is_error else None,
+                stdout=md.get("stdout"),
+                stderr=md.get("stderr"),
+                exit_code=md.get("exit_code"),
+                duration_ms=_duration_ms,
+                is_error=bool(result.is_error),
+                error_message=result.content if result.is_error else None,
+                image_tag=md.get("image"),
+                schema_validated=bool(md.get("schema_ok", False)),
+                started_at=_started_at,
+                completed_at=_dt.now(_tz.utc),
+            ))
+        except Exception:
+            pass
+        return result
+
+    async def _execute_impl(self, arguments: dict[str, Any]) -> ToolResult:
         asset_id = (arguments.get("code_asset_id") or "").strip()
         if not asset_id:
             return ToolResult(content="code_asset_id is required", is_error=True)
@@ -453,11 +490,24 @@ class CodeAssetTool(BaseTool):
             ),
             metadata={
                 "code_asset_id": asset_id,
+                "resolved_code_asset_id": asset.get("id") or asset_id,
                 "exit_code": sandbox_result.metadata.get("exit_code"),
                 "backend": sandbox_result.metadata.get("backend"),
+                "stdout": (asset_out or "")[:4000] if 'asset_out' in dir() else None,
+                "image": asset.get("suggested_image"),
                 "schema_ok": schema_ok,
             },
         )
+
+
+def _safe_parse_output(content: str | None):
+    if not content:
+        return None
+    try:
+        import json as _json
+        return _json.loads(content)
+    except Exception:
+        return {"raw": str(content)[:2000]}
 
 
 # ─── DB helpers (keep the tool importable without SQLAlchemy in the hot path) ─

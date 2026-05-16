@@ -43,6 +43,7 @@ import {
   ExternalLink,
   Workflow,
   Network,
+  Archive,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/stores/sidebar';
@@ -135,6 +136,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       // Platform operations
       { label: 'Scaling',           icon: Gauge,       href: '/admin/scaling',      adminOnly: true },
+      { label: 'Archives',          icon: Archive,     href: '/admin/archives',     adminOnly: true },
       { label: 'Model Selection',   icon: Cpu,         href: '/admin/llm-settings', adminOnly: true },
       { label: 'LLM Pricing',       icon: DollarSign,  href: '/admin/llm-pricing',  adminOnly: true },
       { label: 'Connectors',        icon: Plug,        href: '/admin/connectors',   adminOnly: true },

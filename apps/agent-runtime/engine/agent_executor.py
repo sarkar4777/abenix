@@ -1295,6 +1295,8 @@ def build_tool_registry(
         context_tools["ml_model"] = lambda: MLModelCls(
             db_url=db_url,
             tenant_id=tenant_id,
+            execution_id=execution_id,
+            agent_id=agent_id,
         )
     SandboxCls = _CONTEXT_TOOL_FACTORIES.get("sandboxed_job")
     if SandboxCls:
@@ -1316,6 +1318,8 @@ def build_tool_registry(
             tenant_id=tenant_id,
             redis_url=_redis_url2,
             db_url=db_url,
+            execution_id=execution_id,
+            agent_id=agent_id,
         )
 
     # ── Meeting + persona + safety tools — all need execution context.
