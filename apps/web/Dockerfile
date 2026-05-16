@@ -14,6 +14,13 @@ COPY apps/web/ ./apps/web/
 COPY packages/shared/ ./packages/shared/
 COPY turbo.json ./
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* vars are inlined at build time in Next.js client bundles,
+# so the View-Trace deep-link and any other client-side cluster URL must
+# be available here. deploy-azure.sh passes these as --build-args.
+ARG NEXT_PUBLIC_GRAFANA_URL=""
+ARG NEXT_PUBLIC_TEMPO_URL=""
+ENV NEXT_PUBLIC_GRAFANA_URL=${NEXT_PUBLIC_GRAFANA_URL}
+ENV NEXT_PUBLIC_TEMPO_URL=${NEXT_PUBLIC_TEMPO_URL}
 # Patch Next.js's lockfile-checker to no-op. The original throws
 # `Cannot read properties of undefined (reading 'os')` on alpine
 # because some optional-deps entries are missing platform-specific

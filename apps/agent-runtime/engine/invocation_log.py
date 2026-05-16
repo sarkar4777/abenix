@@ -22,6 +22,7 @@ async def _publish_event(kind: str, resource_id: str, event: dict) -> None:
         return
     try:
         import redis.asyncio as redis_async  # type: ignore
+
         client = redis_async.from_url(_REDIS_URL, decode_responses=True)
         channel = f"{_PUBSUB_CHANNEL_PREFIX}{kind}:{resource_id}"
         await client.publish(channel, json.dumps(event, default=str))
@@ -56,6 +57,7 @@ async def _engine():
         return None
     try:
         from sqlalchemy.ext.asyncio import create_async_engine
+
         return create_async_engine(_DB_URL, pool_pre_ping=True, pool_size=1)
     except Exception as e:
         logger.debug("invocation_log: engine init failed: %s", e)
@@ -84,10 +86,15 @@ async def record_code_asset(
 ) -> None:
     try:
         from engine import metrics
+
         status = "error" if is_error else "ok"
-        metrics.CODE_ASSET_INVOCATIONS_TOTAL.labels(code_asset_id=str(code_asset_id), status=status).inc()
+        metrics.CODE_ASSET_INVOCATIONS_TOTAL.labels(
+            code_asset_id=str(code_asset_id), status=status
+        ).inc()
         if duration_ms is not None:
-            metrics.CODE_ASSET_DURATION_SECONDS.labels(code_asset_id=str(code_asset_id)).observe(duration_ms / 1000.0)
+            metrics.CODE_ASSET_DURATION_SECONDS.labels(
+                code_asset_id=str(code_asset_id)
+            ).observe(duration_ms / 1000.0)
     except Exception:
         pass
 
@@ -97,6 +104,7 @@ async def record_code_asset(
     new_id = str(uuid.uuid4())
     try:
         from sqlalchemy import text as sql_text
+
         async with eng.begin() as conn:
             await conn.execute(
                 sql_text(
@@ -115,8 +123,16 @@ async def record_code_asset(
                     "aid": str(code_asset_id),
                     "eid": str(execution_id) if execution_id else None,
                     "agid": str(agent_id) if agent_id else None,
-                    "input": json.dumps(_truncate_json(input_payload), default=str) if input_payload is not None else None,
-                    "output": json.dumps(_truncate_json(output), default=str) if output is not None else None,
+                    "input": (
+                        json.dumps(_truncate_json(input_payload), default=str)
+                        if input_payload is not None
+                        else None
+                    ),
+                    "output": (
+                        json.dumps(_truncate_json(output), default=str)
+                        if output is not None
+                        else None
+                    ),
                     "stdout": _truncate_text(stdout),
                     "stderr": _truncate_text(stderr),
                     "exit_code": exit_code,
@@ -139,17 +155,21 @@ async def record_code_asset(
             pass
 
     try:
-        await _publish_event("code_asset", str(code_asset_id), {
-            "id": new_id,
-            "code_asset_id": str(code_asset_id),
-            "agent_id": agent_id,
-            "execution_id": execution_id,
-            "duration_ms": duration_ms,
-            "is_error": bool(is_error),
-            "exit_code": exit_code,
-            "error_message": _truncate_text(error_message),
-            "created_at": (completed_at or datetime.utcnow()).isoformat(),
-        })
+        await _publish_event(
+            "code_asset",
+            str(code_asset_id),
+            {
+                "id": new_id,
+                "code_asset_id": str(code_asset_id),
+                "agent_id": agent_id,
+                "execution_id": execution_id,
+                "duration_ms": duration_ms,
+                "is_error": bool(is_error),
+                "exit_code": exit_code,
+                "error_message": _truncate_text(error_message),
+                "created_at": (completed_at or datetime.utcnow()).isoformat(),
+            },
+        )
     except Exception:
         pass
 
@@ -174,16 +194,22 @@ async def record_ml_model(
 ) -> None:
     try:
         from engine import metrics
+
         status = "error" if is_error else "ok"
         metrics.ML_MODEL_INVOCATIONS_TOTAL.labels(
-            ml_model_id=str(ml_model_id), operation=operation or "predict", status=status,
+            ml_model_id=str(ml_model_id),
+            operation=operation or "predict",
+            status=status,
         ).inc()
         if duration_ms is not None:
             metrics.ML_MODEL_DURATION_SECONDS.labels(
-                ml_model_id=str(ml_model_id), operation=operation or "predict",
+                ml_model_id=str(ml_model_id),
+                operation=operation or "predict",
             ).observe(duration_ms / 1000.0)
         if cost_usd:
-            metrics.ML_MODEL_COST_USD_TOTAL.labels(ml_model_id=str(ml_model_id)).inc(float(cost_usd))
+            metrics.ML_MODEL_COST_USD_TOTAL.labels(ml_model_id=str(ml_model_id)).inc(
+                float(cost_usd)
+            )
     except Exception:
         pass
 
@@ -193,6 +219,7 @@ async def record_ml_model(
     new_id = str(uuid.uuid4())
     try:
         from sqlalchemy import text as sql_text
+
         async with eng.begin() as conn:
             await conn.execute(
                 sql_text(
@@ -213,9 +240,19 @@ async def record_ml_model(
                     "eid": str(execution_id) if execution_id else None,
                     "agid": str(agent_id) if agent_id else None,
                     "operation": operation or "predict",
-                    "input": json.dumps(_truncate_json(input_payload), default=str) if input_payload is not None else None,
-                    "output": json.dumps(_truncate_json(output), default=str) if output is not None else None,
-                    "predicted_class": (predicted_class or "")[:255] if predicted_class else None,
+                    "input": (
+                        json.dumps(_truncate_json(input_payload), default=str)
+                        if input_payload is not None
+                        else None
+                    ),
+                    "output": (
+                        json.dumps(_truncate_json(output), default=str)
+                        if output is not None
+                        else None
+                    ),
+                    "predicted_class": (
+                        (predicted_class or "")[:255] if predicted_class else None
+                    ),
                     "confidence": confidence,
                     "duration_ms": duration_ms,
                     "is_error": bool(is_error),
@@ -234,21 +271,25 @@ async def record_ml_model(
             pass
 
     try:
-        await _publish_event("ml_model", str(ml_model_id), {
-            "id": new_id,
-            "ml_model_id": str(ml_model_id),
-            "agent_id": agent_id,
-            "execution_id": execution_id,
-            "operation": operation or "predict",
-            "duration_ms": duration_ms,
-            "is_error": bool(is_error),
-            "predicted_class": predicted_class,
-            "confidence": confidence,
-            "deployment_type": deployment_type,
-            "cost_usd": cost_usd,
-            "error_message": _truncate_text(error_message),
-            "created_at": datetime.utcnow().isoformat(),
-        })
+        await _publish_event(
+            "ml_model",
+            str(ml_model_id),
+            {
+                "id": new_id,
+                "ml_model_id": str(ml_model_id),
+                "agent_id": agent_id,
+                "execution_id": execution_id,
+                "operation": operation or "predict",
+                "duration_ms": duration_ms,
+                "is_error": bool(is_error),
+                "predicted_class": predicted_class,
+                "confidence": confidence,
+                "deployment_type": deployment_type,
+                "cost_usd": cost_usd,
+                "error_message": _truncate_text(error_message),
+                "created_at": datetime.utcnow().isoformat(),
+            },
+        )
     except Exception:
         pass
 
@@ -271,9 +312,11 @@ async def record_kb_query(
 ) -> None:
     try:
         from engine import metrics
+
         status = "error" if is_error else "ok"
         metrics.KB_QUERY_INVOCATIONS_TOTAL.labels(
-            kb_collection_id=str(kb_collection_id) if kb_collection_id else "any", status=status,
+            kb_collection_id=str(kb_collection_id) if kb_collection_id else "any",
+            status=status,
         ).inc()
         if duration_ms is not None:
             metrics.KB_QUERY_DURATION_SECONDS.labels(
@@ -288,6 +331,7 @@ async def record_kb_query(
     new_id = str(uuid.uuid4())
     try:
         from sqlalchemy import text as sql_text
+
         async with eng.begin() as conn:
             await conn.execute(
                 sql_text(
@@ -309,7 +353,11 @@ async def record_kb_query(
                     "query_text": _truncate_text(query_text),
                     "search_mode": search_mode,
                     "top_k": top_k,
-                    "results": json.dumps(_truncate_json(results), default=str) if results is not None else None,
+                    "results": (
+                        json.dumps(_truncate_json(results), default=str)
+                        if results is not None
+                        else None
+                    ),
                     "hit_count": hit_count,
                     "duration_ms": duration_ms,
                     "is_error": bool(is_error),
@@ -326,19 +374,23 @@ async def record_kb_query(
             pass
 
     try:
-        await _publish_event("kb_query", str(kb_collection_id) if kb_collection_id else "any", {
-            "id": new_id,
-            "kb_collection_id": str(kb_collection_id) if kb_collection_id else None,
-            "agent_id": agent_id,
-            "execution_id": execution_id,
-            "query_text": _truncate_text(query_text),
-            "search_mode": search_mode,
-            "hit_count": hit_count,
-            "duration_ms": duration_ms,
-            "is_error": bool(is_error),
-            "error_message": _truncate_text(error_message),
-            "created_at": datetime.utcnow().isoformat(),
-        })
+        await _publish_event(
+            "kb_query",
+            str(kb_collection_id) if kb_collection_id else "any",
+            {
+                "id": new_id,
+                "kb_collection_id": str(kb_collection_id) if kb_collection_id else None,
+                "agent_id": agent_id,
+                "execution_id": execution_id,
+                "query_text": _truncate_text(query_text),
+                "search_mode": search_mode,
+                "hit_count": hit_count,
+                "duration_ms": duration_ms,
+                "is_error": bool(is_error),
+                "error_message": _truncate_text(error_message),
+                "created_at": datetime.utcnow().isoformat(),
+            },
+        )
     except Exception:
         pass
 

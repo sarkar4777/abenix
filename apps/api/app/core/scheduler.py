@@ -376,6 +376,7 @@ async def _nightly_archive() -> None:
     try:
         from app.services.archiver import run_all_archives
         from app.core.deps import async_session
+
         await run_all_archives(async_session)
     except Exception as e:
         logger.exception("nightly archive failed: %s", e)

@@ -106,6 +106,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ResolveAI API", version="0.2.0", lifespan=lifespan)
 
+try:
+    from abenix_sdk.tracing import init_tracing as _init_tracing
+    _init_tracing("resolveai-api", fastapi_app=app)
+except Exception:
+    pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -114,6 +114,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'MONITOR',
     defaultOpen: true,
     items: [
+      { label: 'Observability',icon: Gauge,    href: '/observability',   feature: 'view_executions' },
       { label: 'Executions',  icon: Activity,  href: '/executions',      feature: 'view_executions' },
       { label: 'Live Debug',  icon: Radio,     href: '/executions/live', feature: 'view_executions' },
       { label: 'Analytics',   icon: BarChart3, href: '/analytics',       feature: 'view_analytics' },
@@ -135,6 +136,7 @@ const NAV_GROUPS: NavGroup[] = [
     defaultOpen: false,
     items: [
       // Platform operations
+      { label: 'Cluster Health',    icon: Cpu,         href: '/admin/cluster',      adminOnly: true },
       { label: 'Scaling',           icon: Gauge,       href: '/admin/scaling',      adminOnly: true },
       { label: 'Archives',          icon: Archive,     href: '/admin/archives',     adminOnly: true },
       { label: 'Model Selection',   icon: Cpu,         href: '/admin/llm-settings', adminOnly: true },

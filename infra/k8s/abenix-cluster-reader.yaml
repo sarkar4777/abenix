@@ -1,0 +1,24 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: abenix-cluster-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get","list","watch"]
+  - apiGroups: [""]
+    resources: ["pods","persistentvolumeclaims"]
+    verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: abenix-cluster-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: abenix-cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: abenix

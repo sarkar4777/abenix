@@ -113,6 +113,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+try:
+    from abenix_sdk.tracing import init_tracing as _init_tracing
+    _init_tracing("sauditourism-api", fastapi_app=app)
+except Exception:
+    pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

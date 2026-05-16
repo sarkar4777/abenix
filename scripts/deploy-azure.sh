@@ -1225,10 +1225,18 @@ install_observability() {
       --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -1
   fi
   kubectl apply -f "${dir}/prometheus.yaml" -n "${NAMESPACE}" 2>&1 | tail -1
+  if [ -f "${dir}/tempo.yaml" ]; then
+    kubectl apply -f "${dir}/tempo.yaml" -n "${NAMESPACE}" 2>&1 | tail -1
+  fi
   kubectl apply -f "${dir}/grafana.yaml"    -n "${NAMESPACE}" 2>&1 | tail -1
   kubectl rollout restart deployment/abenix-grafana -n "${NAMESPACE}" 2>&1 | tail -1 || true
   kubectl wait --for=condition=Available --timeout=120s deploy/abenix-prometheus -n "${NAMESPACE}" 2>&1 | tail -1 || true
   kubectl wait --for=condition=Available --timeout=120s deploy/abenix-grafana -n "${NAMESPACE}" 2>&1 | tail -1 || true
+  # Grant the api SA read on nodes/pods/PVCs so /api/admin/cluster works.
+  # Idempotent: safe to apply every deploy.
+  if [ -f "${ROOT_DIR}/infra/k8s/abenix-cluster-reader.yaml" ]; then
+    kubectl apply -f "${ROOT_DIR}/infra/k8s/abenix-cluster-reader.yaml" 2>&1 | tail -2 || true
+  fi
   ok "Observability ready"
 }
 
@@ -1316,6 +1324,24 @@ spec:
           - path: /
             pathType: Prefix
             backend: { service: { name: sauditourism-api, port: { number: 8002 } } }
+    - host: grafana.${host}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: abenix-grafana, port: { number: 3000 } } }
+    - host: tempo.${host}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: abenix-tempo, port: { number: 3200 } } }
+    - host: prom.${host}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: abenix-prometheus, port: { number: 9090 } } }
 EOF
 
   echo "${host}" > "${ROOT_DIR}/.azure-endpoint"
@@ -1331,7 +1357,17 @@ EOF
     fi
   done
 
-  ok "Ingress ready: http://${host}  (ciq.${host}, tourism.${host}, iot.${host}, care.${host}, claims.${host})"
+  # Stamp Grafana + Tempo URLs so the "View Trace" button on /executions/[id]
+  # resolves to the ingress (not /grafana on the abenix origin, which 404s).
+  local grafana_url="http://grafana.${host}"
+  local tempo_url="http://tempo.${host}"
+  if kubectl -n "${NAMESPACE}" get deploy "${RELEASE_NAME}-web" >/dev/null 2>&1; then
+    kubectl -n "${NAMESPACE}" set env deploy/"${RELEASE_NAME}-web" \
+      NEXT_PUBLIC_GRAFANA_URL="${grafana_url}" \
+      NEXT_PUBLIC_TEMPO_URL="${tempo_url}" 2>&1 | tail -1 || true
+  fi
+
+  ok "Ingress ready: http://${host}  (ciq.${host}, tourism.${host}, iot.${host}, care.${host}, claims.${host}, grafana.${host}, tempo.${host})"
 }
 
 deploy_all() {

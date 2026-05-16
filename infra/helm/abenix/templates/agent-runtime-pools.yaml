@@ -124,6 +124,10 @@ spec:
               value: "/data/code-asset-cache"
             - name: REDIS_URL
               value: "redis://{{ $release }}-redis-master.{{ $ns }}.svc.cluster.local:6379/0"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://{{ $release }}-tempo.{{ $ns }}.svc.cluster.local:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "1.0"
           envFrom:
             - secretRef:
                 name: {{ $release }}-secrets

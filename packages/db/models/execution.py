@@ -61,6 +61,7 @@ class Execution(UUIDMixin, TenantMixin, Base):
         Numeric(10, 6), default=0, nullable=False
     )
     other_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

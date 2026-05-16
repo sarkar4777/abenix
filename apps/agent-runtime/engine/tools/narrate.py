@@ -37,7 +37,9 @@ class NarrateTool(BaseTool):
         "required": ["message"],
     }
 
-    def __init__(self, *, execution_id: str = "", agent_name: str = "", agent_slug: str = "") -> None:
+    def __init__(
+        self, *, execution_id: str = "", agent_name: str = "", agent_slug: str = ""
+    ) -> None:
         self._execution_id = execution_id
         self._agent_name = agent_name
         self._agent_slug = agent_slug
@@ -47,11 +49,14 @@ class NarrateTool(BaseTool):
         tone = (arguments.get("tone") or "step").strip()
         if not message:
             return ToolResult(content="narrate: message is required", is_error=True)
-        await progress.publish(self._execution_id, {
-            "phase": "narration",
-            "tone": tone,
-            "message": message[:240],
-            "agent_slug": self._agent_slug,
-            "agent_name": self._agent_name,
-        })
+        await progress.publish(
+            self._execution_id,
+            {
+                "phase": "narration",
+                "tone": tone,
+                "message": message[:240],
+                "agent_slug": self._agent_slug,
+                "agent_name": self._agent_name,
+            },
+        )
         return ToolResult(content="ok")

@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.5.1 — 2026-05-17
+
+### Added
+- Observability Hub at `/observability` — single page tying together the four telemetry layers (activity log, live updates, alerts, distributed tracing) with deep-links to each surface.
+- Cluster Health page at `/admin/cluster` — node CPU/memory, persistent volume claims, pod counts by phase, top-N database tables; works on minikube and AKS via the in-cluster Kubernetes API (no metrics-server required).
+- Spotlight global search (`⌘K` / `Ctrl+K`) — searches pages, agents, pipelines, knowledge bases, ML models, code assets, and execution IDs; live results stream in via `/api/search`.
+- New `ClusterRole` `abenix-cluster-reader` grants the api `ServiceAccount` read on nodes/pods/PVCs; applied idempotently by `deploy-azure.sh`.
+- OpenTelemetry distributed tracing — every agent execution emits an `agent.execute` span plus `tool.<name>` child spans; `trace_id` stored on the executions row; a "View Trace" chip on the execution detail page deep-links to Grafana Tempo Explore with the trace pre-loaded.
+- Tempo deployment (`grafana/tempo:2.6.0`) with OTLP gRPC ingest on `:4317`; emptyDir storage for v1, S3 backend documented for production.
+- Shared `abenix_sdk.tracing` helper auto-instruments FastAPI + HTTPx on every standalone app so cross-service requests produce one connected trace.
+- PII redactor: a `SpanProcessor` masks `llm.prompt`, `tool.args`, `agent.system_prompt` and similar fields with `sha256+length` before export.
+- Ingress hosts `grafana.<host>`, `tempo.<host>`, `prom.<host>` so the in-app "View Trace" deep-link resolves cleanly on minikube and AKS.
+- Grafana datasource UID pinning (`uid=tempo`, `uid=prometheus`) so deep-link templates stay stable across cluster rebuilds.
+- `portforward-azure.sh` forwards Grafana (`3010`), Tempo (`3200`), Prometheus (`9090`) alongside the apps.
+- `/help` page: end-user OpenTelemetry walkthrough.
+
+### Changed
+- `apps/web/Dockerfile` accepts `NEXT_PUBLIC_GRAFANA_URL` and `NEXT_PUBLIC_TEMPO_URL` as build args so the View Trace URL is baked into the client bundle (Next.js inlines `NEXT_PUBLIC_*` at build time).
+- Default trace sampler ratio set to `1.0` while volume is low; can be dialled down via `OTEL_TRACES_SAMPLER_ARG` when needed.
+
+### Fixed
+- `industrial-iot/api/main.py`: pre-existing `f`-string with no placeholders + undefined `target` variable in an exception handler.
+
 ## v1.4.1 — 2026-05-16
 
 ### Added

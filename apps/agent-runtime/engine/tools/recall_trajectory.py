@@ -11,7 +11,9 @@ from engine.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
-TRAJECTORY_ROOT = Path(os.environ.get("WINGMAN_TRAJECTORY_DIR", "/data/wingman-trajectories"))
+TRAJECTORY_ROOT = Path(
+    os.environ.get("WINGMAN_TRAJECTORY_DIR", "/data/wingman-trajectories")
+)
 _WORD_RX = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
 
 
@@ -31,9 +33,17 @@ class RecallTrajectoryTool(BaseTool):
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Plain-English description of the new task."},
+            "query": {
+                "type": "string",
+                "description": "Plain-English description of the new task.",
+            },
             "top_k": {"type": "integer", "default": 3, "minimum": 1, "maximum": 10},
-            "min_overlap_terms": {"type": "integer", "default": 2, "minimum": 1, "maximum": 10},
+            "min_overlap_terms": {
+                "type": "integer",
+                "default": 2,
+                "minimum": 1,
+                "maximum": 10,
+            },
         },
         "required": ["query"],
     }
@@ -54,7 +64,10 @@ class RecallTrajectoryTool(BaseTool):
             return ToolResult(content=json.dumps({"matches": []}))
 
         candidates: list[tuple[int, dict[str, Any]]] = []
-        for tenant_dir in (TRAJECTORY_ROOT / self._tenant_id, TRAJECTORY_ROOT / "shared"):
+        for tenant_dir in (
+            TRAJECTORY_ROOT / self._tenant_id,
+            TRAJECTORY_ROOT / "shared",
+        ):
             if not tenant_dir.exists():
                 continue
             for path in tenant_dir.glob("*.json"):
@@ -72,14 +85,16 @@ class RecallTrajectoryTool(BaseTool):
         candidates.sort(key=lambda x: (-x[0], -(x[1].get("created_at_epoch") or 0)))
         out = []
         for overlap, entry in candidates[:top_k]:
-            out.append({
-                "trajectory_id": entry.get("id"),
-                "intent": entry.get("intent") or entry.get("question"),
-                "agents_invoked": entry.get("agents_invoked") or [],
-                "brief_summary": (entry.get("brief") or "")[:280],
-                "term_overlap": overlap,
-                "created_at": entry.get("created_at"),
-                "approval_id": entry.get("approval_id"),
-                "success_signal": entry.get("success_signal"),
-            })
+            out.append(
+                {
+                    "trajectory_id": entry.get("id"),
+                    "intent": entry.get("intent") or entry.get("question"),
+                    "agents_invoked": entry.get("agents_invoked") or [],
+                    "brief_summary": (entry.get("brief") or "")[:280],
+                    "term_overlap": overlap,
+                    "created_at": entry.get("created_at"),
+                    "approval_id": entry.get("approval_id"),
+                    "success_signal": entry.get("success_signal"),
+                }
+            )
         return ToolResult(content=json.dumps({"matches": out}, default=str))

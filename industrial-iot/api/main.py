@@ -116,6 +116,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+try:
+    from abenix_sdk.tracing import init_tracing as _init_tracing
+    _init_tracing("industrial-iot-api", fastapi_app=app)
+except Exception:
+    pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -286,7 +292,7 @@ async def live_sse(topic: str) -> Response:
     except Exception as exc:
         logger.warning("SSE bridge: cannot connect to MQTT %s:%d (%s)", host, port, exc)
         async def err():
-            yield f"event: error\ndata: {{\"reachable\":false}}\n\n"
+            yield "event: error\ndata: {\"reachable\":false}\n\n"
         return StreamingResponse(err(), media_type="text/event-stream")
     client.subscribe(topic)
     client.loop_start()
@@ -398,7 +404,9 @@ async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
     if not exec_id:
         for tc in (getattr(result, "tool_calls", None) or []):
             cand = (tc.get("execution_id") if isinstance(tc, dict) else None)
-            if cand: exec_id = cand; break
+            if cand:
+                exec_id = cand
+                break
     return JSONResponse({
         "ok": True,
         "status": "completed",
@@ -461,7 +469,7 @@ async def _proxy(request: Request, path: str) -> Response:
                 headers=fwd_headers, timeout=120.0,
             )
     except httpx.HTTPError as exc:
-        logger.exception("proxy forward failed: %s", target)
+        logger.exception("proxy forward failed: %s", relative_path)
         return JSONResponse(
             status_code=502,
             content={"data": None, "error": f"upstream unreachable: {exc}", "meta": None},
@@ -608,7 +616,8 @@ async def edge_execute(request: Request) -> JSONResponse:
         target = f"{endpoint}/agents/{agent_slug}/execute"
         t0 = time.perf_counter()
         try:
-            er = await client.post(target, json=payload)
+            async with httpx.AsyncClient(timeout=30.0) as _hc:
+                er = await _hc.post(target, json=payload)
         except Exception as exc:
             return JSONResponse(
                 status_code=502,

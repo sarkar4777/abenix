@@ -127,6 +127,7 @@ app.include_router(agent_comments.router)
 app.include_router(agent_favorites.router)
 app.include_router(agents.router)
 from app.routers import invocations as _invocations_mod, archives as _archives_mod
+
 app.include_router(_invocations_mod.router)
 app.include_router(_archives_mod.router)
 app.include_router(admin_scaling.router)
@@ -226,6 +227,11 @@ app.include_router(connectors_router.router)
 app.include_router(approvals_router.router)
 app.include_router(admin_dlq_router.router)
 
+from app.routers import search as search_router, admin_cluster as admin_cluster_router
+
+app.include_router(search_router.router)
+app.include_router(admin_cluster_router.router)
+
 # the example app has been extracted to /example_app/ as a standalone application.
 # It uses the Abenix SDK for AI features via the actAs delegation pattern.
 
@@ -277,6 +283,8 @@ async def on_startup():
             "ALTER TABLE executions ADD COLUMN IF NOT EXISTS openai_cost NUMERIC(10, 6) NOT NULL DEFAULT 0",
             "ALTER TABLE executions ADD COLUMN IF NOT EXISTS google_cost NUMERIC(10, 6) NOT NULL DEFAULT 0",
             "ALTER TABLE executions ADD COLUMN IF NOT EXISTS other_cost NUMERIC(10, 6) NOT NULL DEFAULT 0",
+            "ALTER TABLE executions ADD COLUMN IF NOT EXISTS trace_id VARCHAR(32)",
+            "CREATE INDEX IF NOT EXISTS ix_executions_trace_id ON executions (trace_id) WHERE trace_id IS NOT NULL",
         ]
         for ddl in scaling_ddls:
             try:
@@ -290,6 +298,33 @@ async def on_startup():
     from app.core.scheduler import start_scheduler
 
     start_scheduler()
+
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _rp = _Path("/app/apps/agent-runtime")
+        if _rp.exists() and str(_rp) not in _sys.path:
+            _sys.path.insert(0, str(_rp))
+        from engine.tracing import init_tracing as _init_tracing
+
+        _init_tracing("abenix-api")
+        try:
+            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+            FastAPIInstrumentor.instrument_app(app)
+        except Exception as _e:
+            logging.getLogger("startup").debug(
+                "fastapi auto-instrument skipped: %s", _e
+            )
+        try:
+            from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+            HTTPXClientInstrumentor().instrument()
+        except Exception:
+            pass
+    except Exception as _e:
+        logging.getLogger("startup").info("tracing init skipped: %s", _e)
 
     # Subscribe to the Redis WS fan-out channel so notifications published
     # on any pod reach the user's WS connection regardless of which API

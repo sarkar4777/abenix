@@ -81,6 +81,7 @@ async def _mark_done(
     output_tokens: int | None = None,
     cost: float | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
+    trace_id: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import update
@@ -112,6 +113,17 @@ async def _mark_done(
         values["cost"] = round(float(cost), 6)
     if tool_calls is not None:
         values["tool_calls"] = tool_calls
+    if trace_id:
+        values["trace_id"] = trace_id
+    else:
+        try:
+            from engine.tracing import current_trace_id
+
+            _tid = current_trace_id()
+            if _tid:
+                values["trace_id"] = _tid
+        except Exception:
+            pass
     # On failure, classify the error_message into a stable failure_code so
     # /alerts can group it and the Surgeon has something to act on.
     if target_status == ExecutionStatus.FAILED and error:
@@ -443,6 +455,11 @@ async def _run_one(payload: dict) -> None:
             # briefing) and produced invalid partial JSON in the UI.
             _AGENT_OUTPUT_CAP = 50_000
             full_output_str = str(output)[:_AGENT_OUTPUT_CAP]
+            _tid_done = (
+                _last_done.get("trace_id") if isinstance(_last_done, dict) else None
+            )
+            if not _tid_done:
+                _tid_done = getattr(executor, "_trace_id_for_log", None)
             await _mark_done(
                 execution_id,
                 "completed",
@@ -452,6 +469,7 @@ async def _run_one(payload: dict) -> None:
                 output_tokens=getattr(result, "output_tokens", None),
                 cost=getattr(result, "cost", None),
                 tool_calls=_agg_tool_calls or None,
+                trace_id=_tid_done,
             )
             _done_evt: dict[str, Any] = {
                 "event": "done",
@@ -466,7 +484,14 @@ async def _run_one(payload: dict) -> None:
             await _publish(execution_id, _done_evt)
     except Exception as e:
         logger.exception("consumer: execution %s failed: %s", execution_id, e)
-        await _mark_done(execution_id, "failed", None, str(e)[:2000])
+        _tid_fail = None
+        try:
+            _tid_fail = getattr(executor, "_trace_id_for_log", None)  # type: ignore[name-defined]
+        except Exception:
+            pass
+        await _mark_done(
+            execution_id, "failed", None, str(e)[:2000], trace_id=_tid_fail
+        )
         await _publish(execution_id, {"event": "error", "error": str(e)[:2000]})
 
 
@@ -551,6 +576,13 @@ async def main() -> None:
     if mode != "remote":
         logger.info("consumer: RUNTIME_MODE=%s — not a remote consumer, exiting.", mode)
         return
+
+    try:
+        from engine.tracing import init_tracing
+
+        init_tracing(f"agent-runtime-{pool}")
+    except Exception as e:
+        logger.warning("consumer: tracing init failed (continuing without): %s", e)
 
     logger.info("consumer: starting pool=%s backend=%s", pool, backend_name)
 

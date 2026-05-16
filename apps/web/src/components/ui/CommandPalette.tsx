@@ -18,8 +18,33 @@ import {
   CreditCard,
   Key,
   Plus,
+  Activity,
+  Brain,
+  Code2,
+  FileText,
+  Server,
   type LucideIcon,
 } from 'lucide-react';
+
+interface RemoteResult {
+  category: string;
+  label: string;
+  subtitle?: string;
+  href: string;
+}
+
+function iconForCategory(c: string): LucideIcon {
+  switch (c) {
+    case 'Agents':       return Bot;
+    case 'Pipelines':    return Wrench;
+    case 'Knowledge':    return Database;
+    case 'ML Models':    return Brain;
+    case 'Code Assets':  return Code2;
+    case 'Executions':   return Activity;
+    case 'Pages':        return FileText;
+    default:             return Server;
+  }
+}
 
 interface Command {
   id: string;
@@ -167,11 +192,33 @@ export default function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const [remoteResults, setRemoteResults] = useState<RemoteResult[]>([]);
+
+  // Hit /api/search whenever the query stabilises. Local commands still match
+  // instantly; remote results stream in for agents/pipelines/KB/ML/etc.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) { setRemoteResults([]); return; }
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(q)}&limit=6`, { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null)
+        .then(payload => {
+          if (cancelled || !payload) return;
+          const arr: RemoteResult[] = (payload.data?.results || payload.results || []);
+          // The Pages category is already mirrored in NAVIGATION_COMMANDS, drop dupes.
+          setRemoteResults(arr.filter(r => r.category !== 'Pages'));
+        })
+        .catch(() => { if (!cancelled) setRemoteResults([]); });
+    }, 180);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [query]);
+
   const filteredCommands = useMemo(() => {
     if (!query.trim()) return ALL_COMMANDS;
 
     const lowerQuery = query.toLowerCase();
-    return ALL_COMMANDS.filter((cmd) => {
+    const localMatches = ALL_COMMANDS.filter((cmd) => {
       if (cmd.label.toLowerCase().includes(lowerQuery)) return true;
       if (cmd.category.toLowerCase().includes(lowerQuery)) return true;
       if (
@@ -181,7 +228,18 @@ export default function CommandPalette() {
       }
       return false;
     });
-  }, [query]);
+
+    const remoteAsCommands: Command[] = remoteResults.map((r, i) => ({
+      id: `remote-${r.category}-${i}-${r.href}`,
+      label: r.label,
+      icon: iconForCategory(r.category),
+      href: r.href,
+      category: r.category,
+      keywords: r.subtitle ? [r.subtitle] : [],
+    }));
+
+    return [...localMatches, ...remoteAsCommands];
+  }, [query, remoteResults]);
 
   const groupedCommands = useMemo(() => {
     const groups: { category: string; commands: Command[] }[] = [];
@@ -346,7 +404,7 @@ export default function CommandPalette() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleInputKeyDown}
-                placeholder="Search commands..."
+                placeholder="Search pages, agents, pipelines, KBs, models, executions..."
                 className="flex-1 bg-transparent text-sm text-white placeholder-slate-500 outline-none"
               />
               <kbd className="hidden rounded-md border border-slate-600 bg-slate-700/50 px-1.5 py-0.5 text-[10px] text-slate-400 sm:inline-block">

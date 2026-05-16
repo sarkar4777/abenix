@@ -9,6 +9,7 @@ If REDIS_URL is unset or unreachable, all helpers degrade to no-ops — the
 runtime keeps working, the Desk page just shows the platform-level events
 without the rich narration overlay.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -40,6 +41,7 @@ async def _client() -> Any | None:
             return _client_singleton
         try:
             import redis.asyncio as redis_async  # type: ignore
+
             client = redis_async.from_url(REDIS_URL, decode_responses=True)
             await client.ping()
             _client_singleton = client
@@ -61,7 +63,11 @@ async def set_parent(child_execution_id: str, root_execution_id: str) -> None:
     if c is None:
         return
     try:
-        await c.set(f"{PARENT_KEY_PREFIX}{child_execution_id}", root_execution_id, ex=PARENT_TTL_SECONDS)
+        await c.set(
+            f"{PARENT_KEY_PREFIX}{child_execution_id}",
+            root_execution_id,
+            ex=PARENT_TTL_SECONDS,
+        )
     except Exception as e:
         logger.debug("progress.set_parent failed: %s", e)
 

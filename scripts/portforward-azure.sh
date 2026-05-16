@@ -30,6 +30,11 @@ SERVICES=(
   "claimsiq:3005:3005:/actuator/health/liveness:ClaimsIQ"
   "wingman-web:3006:3006:/:Wingman Web"
   "wingman-api:8006:8006:/health:Wingman API"
+  # Observability stack — forwarded so the abenix UI "View Trace" deep-link
+  # to Grafana resolves on localhost, and humans can poke the dashboards.
+  "abenix-grafana:3010:3000:/api/health:Grafana"
+  "abenix-prometheus:9090:9090:/-/healthy:Prometheus"
+  "abenix-tempo:3200:3200:/ready:Tempo"
 )
 
 PID_DIR="/tmp/abenix-az-portforward"
@@ -124,7 +129,7 @@ start_all() {
   local open_browser="${1:-true}"
   check_prereqs
   stop_all
-  log "Starting 6 port-forwards to ${AKS_NAME} (namespace: ${NAMESPACE})..."
+  log "Starting ${#SERVICES[@]} port-forwards to ${AKS_NAME} (namespace: ${NAMESPACE})..."
   for spec in "${SERVICES[@]}"; do
     start_one "${spec}"
     local svc; svc=$(echo "$spec" | cut -d: -f1)
@@ -256,6 +261,11 @@ print_urls() {
     Claims queue        http://localhost:3005/claims
     Walkthrough         http://localhost:3005/help
     Health              http://localhost:3005/actuator/health
+
+  Observability
+    Grafana             http://localhost:3010    (admin / admin)
+    Tempo (raw API)     http://localhost:3200/api/search
+    Prometheus          http://localhost:9090/graph
 URLS
   echo ""
   echo -e "${B}Credentials${N}"

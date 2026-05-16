@@ -31,56 +31,69 @@ from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
-
 # Worldscale 2025 flat rate ($/MT, WS100 nominal) for the major TC routes.
 # Source: Worldscale Association 2025 schedule (representative levels;
 # the exact values revise every Jan 1).
 _WS_FLAT_RATE_USD_MT: dict[str, dict[str, Any]] = {
     "TC1": {
-        "origin": "Ras Tanura", "destination": "Yokohama",
-        "cargo_class": "LR2", "cargo_mt": 75_000,
+        "origin": "Ras Tanura",
+        "destination": "Yokohama",
+        "cargo_class": "LR2",
+        "cargo_mt": 75_000,
         "flat_rate_usd_mt": 17.45,
         "product": "naphtha",
         "label": "MEG -> Japan naphtha (LR2)",
     },
     "TC2": {
-        "origin": "Rotterdam", "destination": "New York",
-        "cargo_class": "MR2", "cargo_mt": 37_000,
+        "origin": "Rotterdam",
+        "destination": "New York",
+        "cargo_class": "MR2",
+        "cargo_mt": 37_000,
         "flat_rate_usd_mt": 18.65,
         "product": "gasoline",
         "label": "Cont -> US Atlantic gasoline (MR2)",
     },
     "TC5": {
-        "origin": "Ras Tanura", "destination": "Yokohama",
-        "cargo_class": "LR1", "cargo_mt": 55_000,
+        "origin": "Ras Tanura",
+        "destination": "Yokohama",
+        "cargo_class": "LR1",
+        "cargo_mt": 55_000,
         "flat_rate_usd_mt": 18.00,
         "product": "naphtha",
         "label": "MEG -> Japan naphtha (LR1)",
     },
     "TC6": {
-        "origin": "Skikda", "destination": "Lavera",
-        "cargo_class": "MR2", "cargo_mt": 30_000,
+        "origin": "Skikda",
+        "destination": "Lavera",
+        "cargo_class": "MR2",
+        "cargo_mt": 30_000,
         "flat_rate_usd_mt": 8.40,
         "product": "gasoline",
         "label": "Algeria -> France gasoline (MR2)",
     },
     "TC7": {
-        "origin": "Singapore", "destination": "Sydney",
-        "cargo_class": "MR2", "cargo_mt": 30_000,
+        "origin": "Singapore",
+        "destination": "Sydney",
+        "cargo_class": "MR2",
+        "cargo_mt": 30_000,
         "flat_rate_usd_mt": 22.15,
         "product": "gasoline",
         "label": "SG -> East Australia gasoline (MR2)",
     },
     "TC14": {
-        "origin": "New York", "destination": "Rotterdam",
-        "cargo_class": "MR2", "cargo_mt": 38_000,
+        "origin": "New York",
+        "destination": "Rotterdam",
+        "cargo_class": "MR2",
+        "cargo_mt": 38_000,
         "flat_rate_usd_mt": 17.10,
         "product": "gasoline",
         "label": "US Atlantic -> Cont gasoline (MR2)",
     },
     "TC17": {
-        "origin": "Jubail", "destination": "Dar es Salaam",
-        "cargo_class": "MR2", "cargo_mt": 35_000,
+        "origin": "Jubail",
+        "destination": "Dar es Salaam",
+        "cargo_class": "MR2",
+        "cargo_mt": 35_000,
         "flat_rate_usd_mt": 25.40,
         "product": "diesel",
         "label": "MEG -> East Africa diesel (MR2)",
@@ -152,7 +165,9 @@ class FreightWorldscaleTool(BaseTool):
         try:
             ws = float(args.get("ws_points") or 100)
         except (TypeError, ValueError):
-            return ToolResult(content="Error: ws_points must be a number", is_error=True)
+            return ToolResult(
+                content="Error: ws_points must be a number", is_error=True
+            )
         freight = ws / 100.0 * row["flat_rate_usd_mt"]
         return ToolResult(
             content=(
@@ -180,7 +195,9 @@ class FreightWorldscaleTool(BaseTool):
         try:
             ws = float(args.get("ws_points") or 100)
         except (TypeError, ValueError):
-            return ToolResult(content="Error: ws_points must be a number", is_error=True)
+            return ToolResult(
+                content="Error: ws_points must be a number", is_error=True
+            )
         cargo_mt = float(args.get("cargo_mt") or row["cargo_mt"])
         freight = ws / 100.0 * row["flat_rate_usd_mt"]
         total = freight * cargo_mt

@@ -39,6 +39,7 @@ interface ExecutionDetail {
   cost?: number;
   duration_ms?: number;
   model_used?: string;
+  trace_id?: string | null;
   tool_calls?: Array<{ name: string; arguments: Record<string, unknown>; result?: string; duration_ms?: number }>;
   confidence_score?: number;
   node_results?: Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown }>;
@@ -512,6 +513,21 @@ export default function ExecutionDetailPage() {
           </div>
           <p className="text-xs text-slate-500 mt-0.5 font-mono">{executionId.slice(0, 12)}... | {execution.model_used} | {new Date(execution.created_at).toLocaleString()}</p>
         </div>
+        {execution.trace_id && (() => {
+          const grafanaBase = (process.env.NEXT_PUBLIC_GRAFANA_URL || "http://localhost:3010").replace(/\/$/, "");
+          const left = JSON.stringify({datasource:'tempo',queries:[{query:execution.trace_id,queryType:'traceql'}],range:{from:'now-1h',to:'now'}});
+          return (
+            <a
+              href={`${grafanaBase}/explore?orgId=1&left=${encodeURIComponent(left)}`}
+              target="_blank" rel="noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 text-xs font-semibold hover:bg-cyan-500/20"
+              title={`Open trace ${execution.trace_id.slice(0,12)}… in Grafana Tempo`}
+              data-testid="execution-view-trace"
+            >
+              <GitBranch className="w-3.5 h-3.5" /> View Trace
+            </a>
+          );
+        })()}
         {execution.confidence_score != null && (
           <ConfidenceRing score={execution.confidence_score} />
         )}

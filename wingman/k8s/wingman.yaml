@@ -28,6 +28,8 @@ data:
   WINGMAN_ACTING_SUBJECT_TYPE: "wingman"
   PORT: "8006"
   REDIS_URL: "redis://abenix-redis-master:6379/0"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://abenix-tempo:4317"
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
 
 ---
 apiVersion: apps/v1

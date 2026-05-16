@@ -83,7 +83,9 @@ class InvokeAgentTool(BaseTool):
                 is_error=True,
             )
 
-        root_id = await progress.root_for(self._execution_id) if self._execution_id else ""
+        root_id = (
+            await progress.root_for(self._execution_id) if self._execution_id else ""
+        )
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._api_key.startswith("af_"):
@@ -93,8 +95,12 @@ class InvokeAgentTool(BaseTool):
 
         t0 = time.time()
         try:
-            async with httpx.AsyncClient(base_url=self._api_base, timeout=timeout + 30) as client:
-                lookup = await client.get(f"/api/agents?search={slug}&limit=5", headers=headers)
+            async with httpx.AsyncClient(
+                base_url=self._api_base, timeout=timeout + 30
+            ) as client:
+                lookup = await client.get(
+                    f"/api/agents?search={slug}&limit=5", headers=headers
+                )
                 if lookup.status_code != 200:
                     return ToolResult(
                         content=f"agent lookup failed: HTTP {lookup.status_code} {lookup.text[:300]}",
@@ -103,13 +109,20 @@ class InvokeAgentTool(BaseTool):
                 items = (lookup.json() or {}).get("data") or []
                 if isinstance(items, dict):
                     items = items.get("items") or []
-                match = next((a for a in items if (a.get("slug") or "").lower() == slug.lower()), None)
+                match = next(
+                    (a for a in items if (a.get("slug") or "").lower() == slug.lower()),
+                    None,
+                )
                 if match is None:
-                    return ToolResult(content=f"agent slug not found: {slug}", is_error=True)
+                    return ToolResult(
+                        content=f"agent slug not found: {slug}", is_error=True
+                    )
                 agent_id = match.get("id")
 
                 submit_body = {
-                    "message": json.dumps(payload) if not isinstance(payload, str) else payload,
+                    "message": (
+                        json.dumps(payload) if not isinstance(payload, str) else payload
+                    ),
                     "stream": False,
                     "wait_mode": "submitted",
                 }
@@ -123,25 +136,36 @@ class InvokeAgentTool(BaseTool):
                         content=f"agent execute submit failed: HTTP {submit_r.status_code} {submit_r.text[:300]}",
                         is_error=True,
                     )
-                submit_data = (submit_r.json() or {}).get("data") or submit_r.json() or {}
+                submit_data = (
+                    (submit_r.json() or {}).get("data") or submit_r.json() or {}
+                )
                 sub_exec_id = submit_data.get("execution_id") or submit_data.get("id")
                 if not sub_exec_id:
-                    return ToolResult(content="submitted but no sub-execution_id returned", is_error=True)
+                    return ToolResult(
+                        content="submitted but no sub-execution_id returned",
+                        is_error=True,
+                    )
 
                 if root_id:
                     await progress.set_parent(sub_exec_id, root_id)
-                    await progress.publish(self._execution_id, {
-                        "phase": "sub_started",
-                        "agent_slug": slug,
-                        "agent_name": (match.get("name") or slug),
-                        "sub_execution_id": sub_exec_id,
-                    }, root_execution_id=root_id)
+                    await progress.publish(
+                        self._execution_id,
+                        {
+                            "phase": "sub_started",
+                            "agent_slug": slug,
+                            "agent_name": (match.get("name") or slug),
+                            "sub_execution_id": sub_exec_id,
+                        },
+                        root_execution_id=root_id,
+                    )
 
                 deadline = t0 + timeout
                 row: dict[str, Any] = {}
                 while time.time() < deadline:
                     await asyncio.sleep(2.0)
-                    poll_r = await client.get(f"/api/executions/{sub_exec_id}", headers=headers)
+                    poll_r = await client.get(
+                        f"/api/executions/{sub_exec_id}", headers=headers
+                    )
                     if poll_r.status_code != 200:
                         continue
                     row = (poll_r.json() or {}).get("data") or {}
@@ -151,12 +175,19 @@ class InvokeAgentTool(BaseTool):
 
                 if not row or (row.get("status") or "running").lower() not in TERMINAL:
                     if root_id:
-                        await progress.publish(self._execution_id, {
-                            "phase": "sub_timeout",
-                            "agent_slug": slug,
-                            "sub_execution_id": sub_exec_id,
-                        }, root_execution_id=root_id)
-                    return ToolResult(content=f"agent {slug} timed out after {timeout}s", is_error=True)
+                        await progress.publish(
+                            self._execution_id,
+                            {
+                                "phase": "sub_timeout",
+                                "agent_slug": slug,
+                                "sub_execution_id": sub_exec_id,
+                            },
+                            root_execution_id=root_id,
+                        )
+                    return ToolResult(
+                        content=f"agent {slug} timed out after {timeout}s",
+                        is_error=True,
+                    )
 
                 output = row.get("output") or row.get("output_message") or ""
                 duration_ms = int((time.time() - t0) * 1000)
@@ -173,14 +204,18 @@ class InvokeAgentTool(BaseTool):
                             parsed = {"raw": s[:2000]}
 
                 if root_id:
-                    await progress.publish(self._execution_id, {
-                        "phase": "sub_finished",
-                        "agent_slug": slug,
-                        "sub_execution_id": sub_exec_id,
-                        "status": row.get("status"),
-                        "duration_ms": row.get("duration_ms") or duration_ms,
-                        "cost_usd": row.get("cost"),
-                    }, root_execution_id=root_id)
+                    await progress.publish(
+                        self._execution_id,
+                        {
+                            "phase": "sub_finished",
+                            "agent_slug": slug,
+                            "sub_execution_id": sub_exec_id,
+                            "status": row.get("status"),
+                            "duration_ms": row.get("duration_ms") or duration_ms,
+                            "cost_usd": row.get("cost"),
+                        },
+                        root_execution_id=root_id,
+                    )
 
                 envelope = {
                     "agent_slug": slug,
@@ -191,9 +226,14 @@ class InvokeAgentTool(BaseTool):
                     "duration_ms": row.get("duration_ms") or duration_ms,
                     "cost_usd": row.get("cost"),
                 }
-                return ToolResult(content=json.dumps(envelope, default=str), metadata={"agent_slug": slug})
+                return ToolResult(
+                    content=json.dumps(envelope, default=str),
+                    metadata={"agent_slug": slug},
+                )
         except httpx.TimeoutException:
-            return ToolResult(content=f"agent {slug} timed out after {timeout}s", is_error=True)
+            return ToolResult(
+                content=f"agent {slug} timed out after {timeout}s", is_error=True
+            )
         except Exception as e:
             logger.warning("invoke_agent %s failed: %s", slug, e)
             return ToolResult(content=f"invoke_agent {slug} failed: {e}", is_error=True)

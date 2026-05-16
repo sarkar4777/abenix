@@ -43,6 +43,7 @@ MAX_ITERATIONS = 10
 def _short(obj: Any, limit: int = 160) -> str:
     try:
         import json as _j
+
         s = _j.dumps(obj, default=str)
     except Exception:
         s = str(obj)
@@ -208,6 +209,21 @@ class AgentExecutor:
         self.sandbox = sandbox
 
     async def invoke(self, input_message: str) -> ExecutionResult:
+        from engine.tracing import get_tracer, current_trace_id
+
+        tracer = get_tracer("abenix.agent_executor")
+        with tracer.start_as_current_span("agent.execute") as _span:
+            _span.set_attribute("agent.id", str(self.agent_id))
+            _span.set_attribute(
+                "agent.name", str(getattr(self, "agent_name", "") or "")
+            )
+            _span.set_attribute("agent.model", str(self.model or ""))
+            _span.set_attribute("execution.id", str(self.execution_id or ""))
+            _span.set_attribute("tenant.id", str(getattr(self, "tenant_id", "") or ""))
+            self._trace_id_for_log = current_trace_id()
+            return await self._invoke_impl(input_message)
+
+    async def _invoke_impl(self, input_message: str) -> ExecutionResult:
         start = time.monotonic()
         self.sandbox.start()
 
@@ -516,26 +532,45 @@ class AgentExecutor:
                     tool_start = time.monotonic()
                     try:
                         from engine import progress as _wm_progress
-                        await _wm_progress.publish(self.execution_id, {
-                            "phase": "tool_call",
-                            "tool": tc["name"],
-                            "arguments_preview": _short(tc.get("arguments")),
-                            "agent_id": self.agent_id,
-                        })
+
+                        await _wm_progress.publish(
+                            self.execution_id,
+                            {
+                                "phase": "tool_call",
+                                "tool": tc["name"],
+                                "arguments_preview": _short(tc.get("arguments")),
+                                "agent_id": self.agent_id,
+                            },
+                        )
                     except Exception:
                         pass
-                    result = await tool.execute(tc["arguments"])
+                    from engine.tracing import get_tracer as _gt
+
+                    _tracer = _gt("abenix.agent_executor")
+                    with _tracer.start_as_current_span(f"tool.{tc['name']}") as _tspan:
+                        _tspan.set_attribute("tool.name", tc["name"])
+                        _tspan.set_attribute(
+                            "tool.args_preview", _short(tc.get("arguments"))
+                        )
+                        result = await tool.execute(tc["arguments"])
+                        _tspan.set_attribute(
+                            "tool.is_error", bool(getattr(result, "is_error", False))
+                        )
                     tool_dur = int((time.monotonic() - tool_start) * 1000)
                     try:
                         from engine import progress as _wm_progress
-                        await _wm_progress.publish(self.execution_id, {
-                            "phase": "tool_result",
-                            "tool": tc["name"],
-                            "is_error": bool(result.is_error),
-                            "duration_ms": tool_dur,
-                            "result_preview": (result.content or "")[:240],
-                            "agent_id": self.agent_id,
-                        })
+
+                        await _wm_progress.publish(
+                            self.execution_id,
+                            {
+                                "phase": "tool_result",
+                                "tool": tc["name"],
+                                "is_error": bool(result.is_error),
+                                "duration_ms": tool_dur,
+                                "result_preview": (result.content or "")[:240],
+                                "agent_id": self.agent_id,
+                            },
+                        )
                     except Exception:
                         pass
                     tool_execution_duration_seconds.labels(
@@ -619,6 +654,30 @@ class AgentExecutor:
         )
 
     async def stream(self, input_message: str) -> AsyncGenerator[ExecutionEvent, None]:
+        from engine.tracing import get_tracer, current_trace_id
+
+        tracer = get_tracer("abenix.agent_executor")
+        with tracer.start_as_current_span("agent.execute") as _span:
+            _span.set_attribute("agent.id", str(self.agent_id))
+            _span.set_attribute(
+                "agent.name", str(getattr(self, "agent_name", "") or "")
+            )
+            _span.set_attribute("agent.model", str(self.model or ""))
+            _span.set_attribute("execution.id", str(self.execution_id or ""))
+            _span.set_attribute("tenant.id", str(getattr(self, "tenant_id", "") or ""))
+            self._trace_id_for_log = current_trace_id()
+            async for _ev in self._stream_impl(input_message):
+                if (
+                    _ev.event == "done"
+                    and isinstance(_ev.data, dict)
+                    and self._trace_id_for_log
+                ):
+                    _ev.data["trace_id"] = self._trace_id_for_log
+                yield _ev
+
+    async def _stream_impl(
+        self, input_message: str
+    ) -> AsyncGenerator[ExecutionEvent, None]:
         start = time.monotonic()
         agent_active_streams.inc()
         self.sandbox.start()
@@ -821,26 +880,45 @@ class AgentExecutor:
                     tool_start = time.monotonic()
                     try:
                         from engine import progress as _wm_progress
-                        await _wm_progress.publish(self.execution_id, {
-                            "phase": "tool_call",
-                            "tool": tc["name"],
-                            "arguments_preview": _short(tc.get("arguments")),
-                            "agent_id": self.agent_id,
-                        })
+
+                        await _wm_progress.publish(
+                            self.execution_id,
+                            {
+                                "phase": "tool_call",
+                                "tool": tc["name"],
+                                "arguments_preview": _short(tc.get("arguments")),
+                                "agent_id": self.agent_id,
+                            },
+                        )
                     except Exception:
                         pass
-                    result = await tool.execute(tc["arguments"])
+                    from engine.tracing import get_tracer as _gt
+
+                    _tracer = _gt("abenix.agent_executor")
+                    with _tracer.start_as_current_span(f"tool.{tc['name']}") as _tspan:
+                        _tspan.set_attribute("tool.name", tc["name"])
+                        _tspan.set_attribute(
+                            "tool.args_preview", _short(tc.get("arguments"))
+                        )
+                        result = await tool.execute(tc["arguments"])
+                        _tspan.set_attribute(
+                            "tool.is_error", bool(getattr(result, "is_error", False))
+                        )
                     tool_dur = int((time.monotonic() - tool_start) * 1000)
                     try:
                         from engine import progress as _wm_progress
-                        await _wm_progress.publish(self.execution_id, {
-                            "phase": "tool_result",
-                            "tool": tc["name"],
-                            "is_error": bool(result.is_error),
-                            "duration_ms": tool_dur,
-                            "result_preview": (result.content or "")[:240],
-                            "agent_id": self.agent_id,
-                        })
+
+                        await _wm_progress.publish(
+                            self.execution_id,
+                            {
+                                "phase": "tool_result",
+                                "tool": tc["name"],
+                                "is_error": bool(result.is_error),
+                                "duration_ms": tool_dur,
+                                "result_preview": (result.content or "")[:240],
+                                "agent_id": self.agent_id,
+                            },
+                        )
                     except Exception:
                         pass
                     tool_execution_duration_seconds.labels(
@@ -1381,7 +1459,9 @@ def build_tool_registry(
 
     RecallCls = _CONTEXT_TOOL_FACTORIES.get("recall_trajectory")
     if RecallCls:
-        context_tools["recall_trajectory"] = lambda: RecallCls(db_url=db_url, tenant_id=tenant_id)
+        context_tools["recall_trajectory"] = lambda: RecallCls(
+            db_url=db_url, tenant_id=tenant_id
+        )
 
     registry = ToolRegistry()
     for name in tool_names:

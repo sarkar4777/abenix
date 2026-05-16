@@ -692,6 +692,7 @@ def _serialize_execution(e: Execution) -> dict:
         "cost": float(e.cost) if e.cost else None,
         "model_used": e.model_used,
         "duration_ms": e.duration_ms,
+        "trace_id": getattr(e, "trace_id", None),
         "tool_calls": e.tool_calls,
         "node_results": e.node_results,
         "error_message": e.error_message,

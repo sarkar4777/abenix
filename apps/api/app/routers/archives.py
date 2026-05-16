@@ -75,16 +75,20 @@ async def trigger_archive(
     if not table or table not in ARCHIVABLE_TABLES:
         return error(f"table must be one of {ARCHIVABLE_TABLES}", 400)
     run = await run_archive(db, table, triggered_by=user.id, is_manual=True)
-    return success({
-        "id": str(run.id),
-        "source_table": run.source_table,
-        "status": run.status.value if hasattr(run.status, "value") else str(run.status),
-        "rows_archived": run.rows_archived,
-        "rows_deleted": run.rows_deleted,
-        "file_uri": run.file_uri,
-        "file_size_bytes": run.file_size_bytes,
-        "error_message": run.error_message,
-    })
+    return success(
+        {
+            "id": str(run.id),
+            "source_table": run.source_table,
+            "status": (
+                run.status.value if hasattr(run.status, "value") else str(run.status)
+            ),
+            "rows_archived": run.rows_archived,
+            "rows_deleted": run.rows_deleted,
+            "file_uri": run.file_uri,
+            "file_size_bytes": run.file_size_bytes,
+            "error_message": run.error_message,
+        }
+    )
 
 
 @router.get("/retention-policies")
@@ -99,14 +103,24 @@ async def list_retention_policies(
     items = []
     for t in ARCHIVABLE_TABLES:
         rp = by_table.get(t)
-        items.append({
-            "source_table": t,
-            "retention_days": rp.retention_days if rp else DEFAULT_RETENTION_DAYS.get(t, 30),
-            "enabled": rp.enabled if rp else True,
-            "description": rp.description if rp else f"default {DEFAULT_RETENTION_DAYS.get(t, 30)} days",
-            "updated_by": str(rp.updated_by) if rp and rp.updated_by else None,
-            "updated_at": rp.updated_at.isoformat() if rp and rp.updated_at else None,
-        })
+        items.append(
+            {
+                "source_table": t,
+                "retention_days": (
+                    rp.retention_days if rp else DEFAULT_RETENTION_DAYS.get(t, 30)
+                ),
+                "enabled": rp.enabled if rp else True,
+                "description": (
+                    rp.description
+                    if rp
+                    else f"default {DEFAULT_RETENTION_DAYS.get(t, 30)} days"
+                ),
+                "updated_by": str(rp.updated_by) if rp and rp.updated_by else None,
+                "updated_at": (
+                    rp.updated_at.isoformat() if rp and rp.updated_at else None
+                ),
+            }
+        )
     return success({"items": items})
 
 
@@ -124,7 +138,11 @@ async def update_retention_policy(
     days = int((body or {}).get("retention_days") or 30)
     enabled = bool((body or {}).get("enabled", True))
     description = ((body or {}).get("description") or "").strip() or None
-    existing = (await db.execute(select(RetentionPolicy).where(RetentionPolicy.source_table == table))).scalar_one_or_none()
+    existing = (
+        await db.execute(
+            select(RetentionPolicy).where(RetentionPolicy.source_table == table)
+        )
+    ).scalar_one_or_none()
     if existing:
         existing.retention_days = days
         existing.enabled = enabled
@@ -141,12 +159,14 @@ async def update_retention_policy(
         )
         db.add(existing)
     await db.commit()
-    return success({
-        "source_table": existing.source_table,
-        "retention_days": existing.retention_days,
-        "enabled": existing.enabled,
-        "description": existing.description,
-    })
+    return success(
+        {
+            "source_table": existing.source_table,
+            "retention_days": existing.retention_days,
+            "enabled": existing.enabled,
+            "description": existing.description,
+        }
+    )
 
 
 @router.get("/{run_id}/download")
@@ -157,7 +177,9 @@ async def download_archive_file(
 ):
     if not _is_admin(user):
         return error("Admin only", 403)
-    run = (await db.execute(select(ArchiveRun).where(ArchiveRun.id == run_id))).scalar_one_or_none()
+    run = (
+        await db.execute(select(ArchiveRun).where(ArchiveRun.id == run_id))
+    ).scalar_one_or_none()
     if not run or not run.file_uri:
         return error("Archive not found", 404)
     p = Path(run.file_uri)

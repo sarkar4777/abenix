@@ -125,32 +125,40 @@ class CodeAssetTool(BaseTool):
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         import time as _time
         from datetime import datetime as _dt, timezone as _tz
+
         _started_at = _dt.now(_tz.utc)
         _t0 = _time.monotonic()
         result = await self._execute_impl(arguments)
         _duration_ms = int((_time.monotonic() - _t0) * 1000)
         try:
             from engine import invocation_log
+
             asset_id_for_log = (arguments.get("code_asset_id") or "").strip()
             md = result.metadata or {}
-            invocation_log.fire_and_forget(invocation_log.record_code_asset(
-                tenant_id=self._tenant_id or None,
-                code_asset_id=md.get("resolved_code_asset_id") or asset_id_for_log,
-                execution_id=self._execution_id or None,
-                agent_id=self._agent_id or None,
-                input_payload=arguments.get("input"),
-                output=_safe_parse_output(result.content) if not result.is_error else None,
-                stdout=md.get("stdout"),
-                stderr=md.get("stderr"),
-                exit_code=md.get("exit_code"),
-                duration_ms=_duration_ms,
-                is_error=bool(result.is_error),
-                error_message=result.content if result.is_error else None,
-                image_tag=md.get("image"),
-                schema_validated=bool(md.get("schema_ok", False)),
-                started_at=_started_at,
-                completed_at=_dt.now(_tz.utc),
-            ))
+            invocation_log.fire_and_forget(
+                invocation_log.record_code_asset(
+                    tenant_id=self._tenant_id or None,
+                    code_asset_id=md.get("resolved_code_asset_id") or asset_id_for_log,
+                    execution_id=self._execution_id or None,
+                    agent_id=self._agent_id or None,
+                    input_payload=arguments.get("input"),
+                    output=(
+                        _safe_parse_output(result.content)
+                        if not result.is_error
+                        else None
+                    ),
+                    stdout=md.get("stdout"),
+                    stderr=md.get("stderr"),
+                    exit_code=md.get("exit_code"),
+                    duration_ms=_duration_ms,
+                    is_error=bool(result.is_error),
+                    error_message=result.content if result.is_error else None,
+                    image_tag=md.get("image"),
+                    schema_validated=bool(md.get("schema_ok", False)),
+                    started_at=_started_at,
+                    completed_at=_dt.now(_tz.utc),
+                )
+            )
         except Exception:
             pass
         return result
@@ -493,7 +501,7 @@ class CodeAssetTool(BaseTool):
                 "resolved_code_asset_id": asset.get("id") or asset_id,
                 "exit_code": sandbox_result.metadata.get("exit_code"),
                 "backend": sandbox_result.metadata.get("backend"),
-                "stdout": (asset_out or "")[:4000] if 'asset_out' in dir() else None,
+                "stdout": (asset_out or "")[:4000] if "asset_out" in dir() else None,
                 "image": asset.get("suggested_image"),
                 "schema_ok": schema_ok,
             },
@@ -505,6 +513,7 @@ def _safe_parse_output(content: str | None):
         return None
     try:
         import json as _json
+
         return _json.loads(content)
     except Exception:
         return {"raw": str(content)[:2000]}
@@ -526,6 +535,7 @@ async def _load_asset(
     except ImportError:
         return None
     import re as _re
+
     looks_like_uuid = bool(_re.fullmatch(r"[0-9a-fA-F-]{32,36}", asset_id or ""))
     try:
         engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=1)
