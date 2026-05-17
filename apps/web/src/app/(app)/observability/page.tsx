@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Activity, AlertTriangle, GitBranch, Radio, Server, ExternalLink, ArrowRight } from 'lucide-react';
 
-const GRAFANA = (process.env.NEXT_PUBLIC_GRAFANA_URL || '').replace(/\/$/, '');
+const GRAFANA = (process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3010').replace(/\/$/, '');
 
 interface Phase {
   num: number;

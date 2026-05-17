@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { Server, Cpu, HardDrive, Database, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
+import { apiFetch } from '@/lib/api-client';
 
-const GRAFANA = (process.env.NEXT_PUBLIC_GRAFANA_URL || '').replace(/\/$/, '');
+const GRAFANA = (process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3010').replace(/\/$/, '');
 
 interface Node {
   name?: string;
@@ -56,17 +57,12 @@ export default function ClusterHealthPage() {
     let cancelled = false;
     setLoading(true);
     setErr(null);
-    fetch('/api/admin/cluster/summary', { credentials: 'include' })
-      .then(r => r.json().then(j => ({ status: r.status, body: j })))
-      .then(({ status, body }) => {
+    apiFetch<Summary>('/api/admin/cluster/summary', { silent: true })
+      .then(({ data: payload, error }) => {
         if (cancelled) return;
-        if (status >= 400) {
-          setErr(body?.detail || body?.error || `HTTP ${status}`);
-        } else {
-          setData(body.data || body);
-        }
+        if (error) setErr(error);
+        else if (payload) setData(payload);
       })
-      .catch(e => { if (!cancelled) setErr(String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [refreshKey]);
@@ -128,7 +124,7 @@ export default function ClusterHealthPage() {
           <div className="text-2xl font-bold text-white">{data?.nodes?.length ?? 0}</div>
           <div className="text-xs text-slate-400 mt-1">
             {data?.nodes?.length
-              ? `${data.nodes.reduce((a, n) => a + n.cpu_cores, 0).toFixed(1)} total cores`
+              ? `${data.nodes.reduce((a, n) => a + (n.cpu_cores || 0), 0).toFixed(1)} total cores`
               : '—'}
           </div>
         </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiFetch } from '@/lib/api-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -201,13 +202,11 @@ export default function CommandPalette() {
     if (!q) { setRemoteResults([]); return; }
     let cancelled = false;
     const handle = setTimeout(() => {
-      fetch(`/api/search?q=${encodeURIComponent(q)}&limit=6`, { credentials: 'include' })
-        .then(r => r.ok ? r.json() : null)
-        .then(payload => {
+      apiFetch<{ results: RemoteResult[] }>(`/api/search?q=${encodeURIComponent(q)}&limit=6`, { silent: true })
+        .then(({ data: payload }) => {
           if (cancelled || !payload) return;
-          const arr: RemoteResult[] = (payload.data?.results || payload.results || []);
           // The Pages category is already mirrored in NAVIGATION_COMMANDS, drop dupes.
-          setRemoteResults(arr.filter(r => r.category !== 'Pages'));
+          setRemoteResults((payload.results || []).filter(r => r.category !== 'Pages'));
         })
         .catch(() => { if (!cancelled) setRemoteResults([]); });
     }, 180);

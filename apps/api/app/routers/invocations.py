@@ -29,11 +29,10 @@ _PUBSUB_CHANNEL_PREFIX = "invocations:"
 async def _invocation_sse(kind: str, resource_id: str):
     yield f"event: start\ndata: {json.dumps({'kind': kind, 'resource_id': str(resource_id)})}\n\n"
     if not _REDIS_URL:
-        yield 'event: closed\ndata: {"reason": "redis not configured"}\n\n'
+        yield "event: closed\ndata: {\"reason\": \"redis not configured\"}\n\n"
         return
     try:
         import redis.asyncio as redis_async  # type: ignore
-
         client = redis_async.from_url(_REDIS_URL, decode_responses=True)
     except Exception as e:
         yield f"event: error\ndata: {json.dumps({'reason': str(e)})}\n\n"
@@ -85,9 +84,7 @@ async def list_code_asset_invocations(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    asset = (
-        await db.execute(select(CodeAsset).where(CodeAsset.id == asset_id))
-    ).scalar_one_or_none()
+    asset = (await db.execute(select(CodeAsset).where(CodeAsset.id == asset_id))).scalar_one_or_none()
     if not asset:
         return error("Code asset not found", 404)
     if asset.tenant_id != user.tenant_id and (
@@ -137,21 +134,13 @@ async def stream_code_asset_invocations(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    asset = (
-        await db.execute(select(CodeAsset).where(CodeAsset.id == asset_id))
-    ).scalar_one_or_none()
+    asset = (await db.execute(select(CodeAsset).where(CodeAsset.id == asset_id))).scalar_one_or_none()
     if not asset:
-        return StreamingResponse(
-            iter([b'event: error\ndata: {"reason":"not_found"}\n\n']),
-            media_type="text/event-stream",
-        )
+        return StreamingResponse(iter([b"event: error\ndata: {\"reason\":\"not_found\"}\n\n"]), media_type="text/event-stream")
     if asset.tenant_id != user.tenant_id and (
         getattr(user.role, "value", str(user.role)).lower() != "admin"
     ):
-        return StreamingResponse(
-            iter([b'event: error\ndata: {"reason":"forbidden"}\n\n']),
-            media_type="text/event-stream",
-        )
+        return StreamingResponse(iter([b"event: error\ndata: {\"reason\":\"forbidden\"}\n\n"]), media_type="text/event-stream")
     return StreamingResponse(
         _invocation_sse("code_asset", str(asset_id)),
         media_type="text/event-stream",
@@ -170,9 +159,7 @@ async def code_asset_stats(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    asset = (
-        await db.execute(select(CodeAsset).where(CodeAsset.id == asset_id))
-    ).scalar_one_or_none()
+    asset = (await db.execute(select(CodeAsset).where(CodeAsset.id == asset_id))).scalar_one_or_none()
     if not asset:
         return error("Code asset not found", 404)
     if asset.tenant_id != user.tenant_id and (
@@ -185,29 +172,19 @@ async def code_asset_stats(
         CodeAssetInvocation.code_asset_id == asset_id,
         CodeAssetInvocation.created_at >= since,
     )
-    total = (
-        await db.execute(
-            select(func.count(CodeAssetInvocation.id)).select_from(base.subquery())
+    total = (await db.execute(
+        select(func.count(CodeAssetInvocation.id)).select_from(base.subquery())
+    )).scalar() or 0
+    errors = (await db.execute(
+        select(func.count(CodeAssetInvocation.id)).select_from(
+            base.where(CodeAssetInvocation.is_error.is_(True)).subquery()
         )
-    ).scalar() or 0
-    errors = (
-        await db.execute(
-            select(func.count(CodeAssetInvocation.id)).select_from(
-                base.where(CodeAssetInvocation.is_error.is_(True)).subquery()
-            )
-        )
-    ).scalar() or 0
-    avg_ms = (
-        await db.execute(
-            select(func.avg(CodeAssetInvocation.duration_ms)).select_from(
-                base.subquery()
-            )
-        )
-    ).scalar()
+    )).scalar() or 0
+    avg_ms = (await db.execute(
+        select(func.avg(CodeAssetInvocation.duration_ms)).select_from(base.subquery())
+    )).scalar()
     by_agent_q = (
-        select(
-            CodeAssetInvocation.agent_id, func.count(CodeAssetInvocation.id).label("c")
-        )
+        select(CodeAssetInvocation.agent_id, func.count(CodeAssetInvocation.id).label("c"))
         .where(
             CodeAssetInvocation.code_asset_id == asset_id,
             CodeAssetInvocation.created_at >= since,
@@ -218,18 +195,16 @@ async def code_asset_stats(
         .limit(5)
     )
     by_agent_rows = (await db.execute(by_agent_q)).all()
-    return success(
-        {
-            "window": window,
-            "total": total,
-            "errors": errors,
-            "success_rate": (1.0 - (errors / total)) if total else None,
-            "avg_duration_ms": int(avg_ms) if avg_ms else None,
-            "top_agents": [
-                {"agent_id": str(r[0]), "count": r[1]} for r in by_agent_rows
-            ],
-        }
-    )
+    return success({
+        "window": window,
+        "total": total,
+        "errors": errors,
+        "success_rate": (1.0 - (errors / total)) if total else None,
+        "avg_duration_ms": int(avg_ms) if avg_ms else None,
+        "top_agents": [
+            {"agent_id": str(r[0]), "count": r[1]} for r in by_agent_rows
+        ],
+    })
 
 
 @router.get("/api/ml-models/{model_id}/invocations")
@@ -241,9 +216,7 @@ async def list_ml_model_invocations(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    m = (
-        await db.execute(select(MLModel).where(MLModel.id == model_id))
-    ).scalar_one_or_none()
+    m = (await db.execute(select(MLModel).where(MLModel.id == model_id))).scalar_one_or_none()
     if not m:
         return error("Model not found", 404)
     if m.tenant_id != user.tenant_id and (
@@ -258,13 +231,9 @@ async def list_ml_model_invocations(
         q = q.where(MLModelInvocation.is_error.is_(True))
     q = q.order_by(MLModelInvocation.created_at.desc()).limit(limit).offset(offset)
     rows = (await db.execute(q)).scalars().all()
-    total = (
-        await db.execute(
-            select(func.count(MLModelInvocation.id)).where(
-                MLModelInvocation.ml_model_id == model_id
-            )
-        )
-    ).scalar() or 0
+    total = (await db.execute(
+        select(func.count(MLModelInvocation.id)).where(MLModelInvocation.ml_model_id == model_id)
+    )).scalar() or 0
     items = [
         {
             "id": str(r.id),
@@ -294,21 +263,13 @@ async def stream_ml_model_invocations(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    m = (
-        await db.execute(select(MLModel).where(MLModel.id == model_id))
-    ).scalar_one_or_none()
+    m = (await db.execute(select(MLModel).where(MLModel.id == model_id))).scalar_one_or_none()
     if not m:
-        return StreamingResponse(
-            iter([b'event: error\ndata: {"reason":"not_found"}\n\n']),
-            media_type="text/event-stream",
-        )
+        return StreamingResponse(iter([b"event: error\ndata: {\"reason\":\"not_found\"}\n\n"]), media_type="text/event-stream")
     if m.tenant_id != user.tenant_id and (
         getattr(user.role, "value", str(user.role)).lower() != "admin"
     ):
-        return StreamingResponse(
-            iter([b'event: error\ndata: {"reason":"forbidden"}\n\n']),
-            media_type="text/event-stream",
-        )
+        return StreamingResponse(iter([b"event: error\ndata: {\"reason\":\"forbidden\"}\n\n"]), media_type="text/event-stream")
     return StreamingResponse(
         _invocation_sse("ml_model", str(model_id)),
         media_type="text/event-stream",
@@ -327,9 +288,7 @@ async def ml_model_stats(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    m = (
-        await db.execute(select(MLModel).where(MLModel.id == model_id))
-    ).scalar_one_or_none()
+    m = (await db.execute(select(MLModel).where(MLModel.id == model_id))).scalar_one_or_none()
     if not m:
         return error("Model not found", 404)
     if m.tenant_id != user.tenant_id and (
@@ -338,28 +297,19 @@ async def ml_model_stats(
         return error("Forbidden", 403)
 
     since = datetime.now(timezone.utc) - _window_to_delta(window)
-    where = [
-        MLModelInvocation.ml_model_id == model_id,
-        MLModelInvocation.created_at >= since,
-    ]
-    total = (
-        await db.execute(select(func.count(MLModelInvocation.id)).where(*where))
-    ).scalar() or 0
-    errors = (
-        await db.execute(
-            select(func.count(MLModelInvocation.id)).where(
-                *where, MLModelInvocation.is_error.is_(True)
-            )
-        )
-    ).scalar() or 0
-    avg_ms = (
-        await db.execute(select(func.avg(MLModelInvocation.duration_ms)).where(*where))
-    ).scalar()
-    total_cost = (
-        await db.execute(
-            select(func.coalesce(func.sum(MLModelInvocation.cost_usd), 0)).where(*where)
-        )
-    ).scalar() or 0
+    where = [MLModelInvocation.ml_model_id == model_id, MLModelInvocation.created_at >= since]
+    total = (await db.execute(
+        select(func.count(MLModelInvocation.id)).where(*where)
+    )).scalar() or 0
+    errors = (await db.execute(
+        select(func.count(MLModelInvocation.id)).where(*where, MLModelInvocation.is_error.is_(True))
+    )).scalar() or 0
+    avg_ms = (await db.execute(
+        select(func.avg(MLModelInvocation.duration_ms)).where(*where)
+    )).scalar()
+    total_cost = (await db.execute(
+        select(func.coalesce(func.sum(MLModelInvocation.cost_usd), 0)).where(*where)
+    )).scalar() or 0
     by_agent_q = (
         select(MLModelInvocation.agent_id, func.count(MLModelInvocation.id).label("c"))
         .where(*where, MLModelInvocation.agent_id.isnot(None))
@@ -368,19 +318,17 @@ async def ml_model_stats(
         .limit(5)
     )
     by_agent_rows = (await db.execute(by_agent_q)).all()
-    return success(
-        {
-            "window": window,
-            "total": total,
-            "errors": errors,
-            "success_rate": (1.0 - (errors / total)) if total else None,
-            "avg_duration_ms": int(avg_ms) if avg_ms else None,
-            "total_cost_usd": float(total_cost),
-            "top_agents": [
-                {"agent_id": str(r[0]), "count": r[1]} for r in by_agent_rows
-            ],
-        }
-    )
+    return success({
+        "window": window,
+        "total": total,
+        "errors": errors,
+        "success_rate": (1.0 - (errors / total)) if total else None,
+        "avg_duration_ms": int(avg_ms) if avg_ms else None,
+        "total_cost_usd": float(total_cost),
+        "top_agents": [
+            {"agent_id": str(r[0]), "count": r[1]} for r in by_agent_rows
+        ],
+    })
 
 
 @router.get("/api/knowledge-collections/{collection_id}/queries")
@@ -402,14 +350,13 @@ async def list_kb_query_invocations(
         .offset(offset)
     )
     rows = (await db.execute(q)).scalars().all()
-    total = (
-        await db.execute(
-            select(func.count(KBQueryInvocation.id)).where(
-                KBQueryInvocation.kb_collection_id == collection_id,
-                KBQueryInvocation.tenant_id == user.tenant_id,
-            )
+    total = (await db.execute(
+        select(func.count(KBQueryInvocation.id))
+        .where(
+            KBQueryInvocation.kb_collection_id == collection_id,
+            KBQueryInvocation.tenant_id == user.tenant_id,
         )
-    ).scalar() or 0
+    )).scalar() or 0
     items = [
         {
             "id": str(r.id),

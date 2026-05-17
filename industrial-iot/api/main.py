@@ -56,6 +56,10 @@ PIPELINES: dict[str, dict[str, Any]] = {
             "emits a remaining-useful-life (RUL) estimate with a recommended action."
         ),
         "wait_seconds": 240,
+        "required_assets": {
+            "pump_dsp_asset_id": "pump-dsp-correction",
+            "rul_asset_id": "rul-estimator",
+        },
     },
     "cold-chain": {
         "slug": "iot-coldchain-pipeline",
@@ -66,6 +70,9 @@ PIPELINES: dict[str, dict[str, Any]] = {
             "decides whether to release, dispose, or trigger a claim."
         ),
         "wait_seconds": 240,
+        "required_assets": {
+            "cold_chain_asset_id": "cold-chain-corrector",
+        },
     },
     "valueedge": {
         "slug": "iot-valueedge-pipeline",
@@ -375,6 +382,29 @@ async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
     if isinstance(message, (dict, list)):
         import json
         message = json.dumps(message)
+
+    asset_name_map = cfg.get("required_assets") or {}
+    if asset_name_map:
+        async with _sdk() as _forge:
+            for ctx_key, asset_name in asset_name_map.items():
+                if context.get(ctx_key):
+                    continue
+                try:
+                    resp = await _forge.http.request(
+                        "GET", "/api/code-assets?scope=all", timeout=10.0,
+                    )
+                    items = (resp.json() or {}).get("data") or []
+                    hit = next(
+                        (a for a in items
+                         if a.get("status") == "ready"
+                         and (a.get("name") == asset_name
+                              or (a.get("name") or "").startswith(asset_name + "-"))),
+                        None,
+                    )
+                    if hit:
+                        context[ctx_key] = hit["id"]
+                except Exception:
+                    pass
 
     sdk = _sdk()
     try:

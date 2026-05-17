@@ -37,11 +37,7 @@ def _path_for(table: str, run_started: datetime) -> Path:
 
 
 async def _resolve_retention_days(db: AsyncSession, table: str) -> int:
-    rp = (
-        await db.execute(
-            select(RetentionPolicy).where(RetentionPolicy.source_table == table)
-        )
-    ).scalar_one_or_none()
+    rp = (await db.execute(select(RetentionPolicy).where(RetentionPolicy.source_table == table))).scalar_one_or_none()
     if rp and rp.enabled:
         return rp.retention_days
     return DEFAULT_RETENTION_DAYS.get(table, 30)
@@ -61,13 +57,7 @@ async def _row_to_dict(row) -> dict[str, Any]:
     return out
 
 
-async def run_archive(
-    db: AsyncSession,
-    table: str,
-    *,
-    triggered_by: uuid.UUID | None = None,
-    is_manual: bool = False,
-) -> ArchiveRun:
+async def run_archive(db: AsyncSession, table: str, *, triggered_by: uuid.UUID | None = None, is_manual: bool = False) -> ArchiveRun:
     if table not in ARCHIVABLE_TABLES:
         raise ValueError(f"table {table} not archivable")
     run = ArchiveRun(
@@ -88,14 +78,10 @@ async def run_archive(
         run.cutoff_at = cutoff
         await db.commit()
 
-        rows = (
-            await db.execute(
-                sql_text(
-                    f"SELECT * FROM {table} WHERE created_at < :cutoff ORDER BY created_at ASC LIMIT 100000"
-                ),
-                {"cutoff": cutoff},
-            )
-        ).all()
+        rows = (await db.execute(
+            sql_text(f"SELECT * FROM {table} WHERE created_at < :cutoff ORDER BY created_at ASC LIMIT 100000"),
+            {"cutoff": cutoff},
+        )).all()
         if not rows:
             run.status = ArchiveRunStatus.COMPLETED
             run.completed_at = datetime.now(timezone.utc)
@@ -140,9 +126,7 @@ async def run_archive(
                 f"SELECT id FROM {table} WHERE created_at < :cutoff "
                 f"ORDER BY created_at ASC LIMIT :batch)"
             )
-            res = await db.execute(
-                del_q, {"cutoff": cutoff, "batch": BATCH_DELETE_SIZE}
-            )
+            res = await db.execute(del_q, {"cutoff": cutoff, "batch": BATCH_DELETE_SIZE})
             n = res.rowcount or 0
             deleted += n
             await db.commit()
@@ -153,9 +137,7 @@ async def run_archive(
         run.status = ArchiveRunStatus.COMPLETED
         run.completed_at = datetime.now(timezone.utc)
         await db.commit()
-        logger.info(
-            "archive %s: %d rows -> %s (%d bytes)", table, len(rows), path, file_size
-        )
+        logger.info("archive %s: %d rows -> %s (%d bytes)", table, len(rows), path, file_size)
         return run
     except Exception as e:
         logger.exception("archive %s failed: %s", table, e)
