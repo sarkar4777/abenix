@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.5.5 — 2026-05-20
+
+### Added
+- Six new help-docs screenshots in apps/web/public/docs-screenshots/ (29-34). Captured by e2e/capture_audit_screenshots.spec.ts which is re-runnable to refresh docs after any UI change.
+- /help: new 'Sharing resources with teammates' section covering the polymorphic ResourceShareDialog across agent / pipeline / ml_model / code_asset / knowledge_base.
+
+### Changed
+- e2e/uat_audit_fixes.spec.ts — KB dropzone + approvals payload + approvals expiry-tick tests now create + tear down their own fixtures via the API, removing 3 of the 4 conditional skips. 15/15 testable specs pass against a fresh deployed cluster.
+- Help docs (/help) — ML Models, Code Runner, Knowledge Bases, and Backend Approvals sections gained subsections covering every affordance shipped in passes 1-3 (Use-in-Agent deep-link, Edit-metadata panel, schema editor on upload, k8s replicas + resource preset, zip vs git XOR, multi-file dropzone, structured payload renderer, live expiry countdown). Each subsection includes a captured screenshot.
+
+### Fixed
+
 ## v1.5.4 — 2026-05-20
 
 ### Added

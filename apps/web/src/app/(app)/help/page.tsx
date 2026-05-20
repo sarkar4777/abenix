@@ -278,6 +278,16 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               'Output streams back to the calling agent as a <code>tool</code> message.',
             ]} />
             <Callout tone="info">Sandboxes are isolation-first: no network unless explicitly allowed, no host filesystem mount, ephemeral overlay FS, and an OOM watchdog. See the <a href="#scaling-sandbox" className="text-violet-300 underline">sandbox scaling notes</a>.</Callout>
+
+            <h4 className="text-white font-semibold pt-3">Source picker is exclusive — zip or git, not both</h4>
+            <p>The upload form has two sides: pick a <code>.zip</code> on the left, or paste a git URL on the right. Filling either side grays + disables the other so the precedence question never comes up.</p>
+            <Hero src={SS('31-code-runner-xor.png')} alt="Code Runner zip-vs-git XOR" caption="Type a git URL and the zip picker greys out — and vice versa." />
+
+            <h4 className="text-white font-semibold pt-3">Schemas lint inline</h4>
+            <p>The <em>I/O schemas</em> textareas validate JSON on blur. A malformed paste underlines the field red and shows the parser error next to it, instead of silently rejecting the save. The <strong>Save schemas + commands</strong> button only fires when both schemas parse cleanly.</p>
+
+            <h4 className="text-white font-semibold pt-3">Use it from an agent in one click</h4>
+            <p>Once status is <em>ready</em>, the <strong>Use in Agent</strong> button deep-links to the builder with the <code>code_asset</code> tool pre-added and <code>parameter_defaults.asset_id</code> pre-filled. Same flow as the ML model wire-in path. <strong>Share</strong> opens the generic dialog so a teammate can call the asset without owning the source.</p>
           </div>
         ),
       },
@@ -295,6 +305,27 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               'Click <strong>Deploy</strong>. The model spins up as its own pod (the <code>ml-model-&lt;id&gt;</code> Deployment) so a heavy model doesn&apos;t starve agents.',
               'The model is now callable as <code>ml_predict_&lt;slug&gt;</code> from any agent.',
             ]} />
+
+            <h4 className="text-white font-semibold pt-3">Wire it into an agent without leaving the page</h4>
+            <p>Once a model is <em>ready</em>, the detail panel shows two new CTAs next to <strong>Activate</strong> / <strong>Delete</strong>:</p>
+            <Hero src={SS('29-ml-use-in-agent.png')} alt="Use in Agent + Edit metadata + Share buttons" caption="Use in Agent · Edit metadata · Share — all live on the model detail panel." />
+            <ul className="list-disc list-inside space-y-1">
+              <li><strong>Use in Agent</strong> → deep-links to <code>/builder?tool=ml_model&model_name=&lt;name&gt;</code>. Lands in a fresh agent canvas with the <code>ml_model</code> tool already added and <code>parameter_defaults.model_name</code> pre-filled.</li>
+              <li><strong>Edit metadata</strong> → inline panel for description + <code>input_schema</code> + <code>output_schema</code>. JSON is linted on blur, so a malformed paste shows the error next to the field instead of silently saving.</li>
+              <li><strong>Share</strong> → opens the generic share dialog (see the <em>Sharing resources</em> note below) so a teammate can <code>view</code>, <code>use</code>, or <code>edit</code> the model without you handing them admin.</li>
+            </ul>
+
+            <h4 className="text-white font-semibold pt-3">Schema editor on upload — no .meta.json required</h4>
+            <p>The upload form has a collapsible <em>Schemas (optional, recommended)</em> section. Paste the feature list inline so the agent's <code>ml_model.get_model_info</code> call returns a real shape from day one. Skip it and the platform tries to infer from the model file, but explicit schemas are more reliable.</p>
+
+            <h4 className="text-white font-semibold pt-3">Kubernetes deployment — replicas + resource preset</h4>
+            <p>When the target is <strong>Kubernetes Pod</strong>, the panel exposes the two knobs that used to be opaque defaults:</p>
+            <Hero src={SS('30-ml-k8s-deploy-config.png')} alt="k8s deploy config" caption="Replicas 1-10 and small/medium/large resource preset. Each preset maps to a fixed cpu/memory request + limit pair." />
+            <ul className="list-disc list-inside space-y-1">
+              <li><strong>Replicas</strong>: 1-10. Each replica is an independent pod fronted by a single ClusterIP service.</li>
+              <li><strong>Resource preset</strong>: <code>small</code> (100m / 256Mi), <code>medium</code> (250m / 512Mi), <code>large</code> (500m / 1Gi). Limits scale 2-4× the request.</li>
+            </ul>
+            <p>Backend gates both inputs with structured error codes (<code>INVALID_REPLICAS</code>, <code>INVALID_RESOURCE_PRESET</code>) so the toast tells you exactly what went wrong on a bad value.</p>
           </div>
         ),
       },
@@ -306,6 +337,12 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Knowledge Bases (called <em>collections</em> in v2 terminology) store your documents and the entity / relationship graph extracted from them. This is the substrate every other feature is built on.</p>
             <Hero src={SS('07-knowledge-bases.png')} alt="Knowledge Bases" />
+
+            <h4 className="text-white font-semibold pt-3">Batch ingest — drop multiple files at once</h4>
+            <p>The dropzone accepts any number of files in one gesture. They upload serially (so backend stays responsive) with a progress bar and a per-file failure list when something doesn&apos;t parse. The OS file picker also accepts multi-select via <code>&lt;input multiple&gt;</code>.</p>
+            <Hero src={SS('32-kb-multi-upload.png')} alt="KB multi-file dropzone" caption="Drop a folder, click to multi-select, or paste a long list — same UI." />
+            <p>Use <strong>Share</strong> in the KB header to grant a teammate <code>view</code> / <code>use</code> / <code>edit</code> on this knowledge base without exposing every other KB in the tenant. See the <em>Sharing resources</em> note below.</p>
+
 
             <h4 className="text-white font-semibold pt-3">The hierarchy</h4>
             <p>A tenant has many <strong>projects</strong>. A project has many <strong>collections</strong>. A collection has many <strong>documents</strong>. Documents are chunked, embedded, and (optionally) Cognified into a typed entity / relationship graph.</p>
@@ -741,6 +778,32 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               'Operators see pending requests on the <strong>/approvals</strong> page (sidebar item) and on Slack/email if those channels are configured.',
             ]} />
             <Callout tone="info">Every approval action is hashed into the audit log: who approved, when, and the full payload that was approved. The sidebar shows a live count of pending approvals for the current user.</Callout>
+
+            <h4 className="text-white font-semibold pt-3">Reading the payload — no JSON parsing required</h4>
+            <p>The approval card&apos;s <em>Payload, signoff history</em> section now renders the request body as a readable key/value grid (nested objects and arrays are indented). A compliance reviewer can scan vendor, amount, risk tier, etc. at a glance instead of squinting at raw JSON. <strong>Show raw JSON</strong> keeps the full payload one click away for power users.</p>
+            <Hero src={SS('33-approvals-payload.png')} alt="Approval payload key/value renderer" caption="Structured fields up top, 'Show raw JSON' toggle at the bottom." />
+
+            <h4 className="text-white font-semibold pt-3">Live expiry countdown</h4>
+            <p>The amber expiry chip on each pending row ticks live — once remaining time drops below a minute it switches to second-granularity so a reviewer can watch the gate close. If you don&apos;t signoff before zero the request transitions to <code>expired</code> and the calling agent unblocks with a denial.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'sharing-resources',
+        title: 'Sharing resources with teammates',
+        icon: <ShieldCheck className="w-4 h-4" />,
+        badge: 'new',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p>Every shareable resource — <strong>agent</strong>, <strong>pipeline</strong>, <strong>ML model</strong>, <strong>code asset</strong>, <strong>knowledge base</strong> — uses the same dialog. Open it from the <strong>Share</strong> button on the resource detail page.</p>
+            <Hero src={SS('34-resource-share-dialog.png')} alt="Resource share dialog" caption="One dialog, four resource kinds, three permission levels." />
+            <ul className="list-disc list-inside space-y-1">
+              <li><strong>View</strong> — recipient sees it in their list; cannot run or change it.</li>
+              <li><strong>Use</strong> — recipient can call / run the resource but not modify the definition.</li>
+              <li><strong>Edit</strong> — full editor access; can change config, schema, version.</li>
+            </ul>
+            <p>The recipient must already be a member of your tenant — invite them first via <em>Settings → Team</em>. Shares are notification-aware: the recipient gets an in-app notification (and email, if configured) so they know what just landed in their queue. Anyone in the share list can be revoked one-click; the revoke action is audit-logged with the actor and timestamp.</p>
+            <Callout tone="info">All sharing routes through one polymorphic <code>resource_shares</code> table; the same RBAC predicate gates every endpoint, so you can&apos;t accidentally over-grant by going through one resource&apos;s UI vs another&apos;s.</Callout>
           </div>
         ),
       },

@@ -25,7 +25,7 @@ const API = process.env.API || 'http://localhost:8000';
 const EMAIL = process.env.AF_EMAIL || 'admin@abenix.dev';
 const PASSWORD = process.env.AF_PASSWORD || 'Admin123456';
 
-async function login(page: Page) {
+async function getToken(): Promise<string> {
   const resp = await fetch(`${API}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -33,7 +33,11 @@ async function login(page: Page) {
   });
   if (!resp.ok) throw new Error(`login failed: HTTP ${resp.status}`);
   const json = await resp.json();
-  const token = json.data?.access_token || json.access_token;
+  return json.data?.access_token || json.access_token;
+}
+
+async function login(page: Page) {
+  const token = await getToken();
   expect(token).toBeTruthy();
   const meResp = await fetch(`${API}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
   const me = await meResp.json().then((j) => j.data ?? j).catch(() => ({}));
@@ -44,6 +48,24 @@ async function login(page: Page) {
       localStorage.setItem('user', JSON.stringify(u || {}));
     } catch {}
   }, { t: token, u: me });
+}
+
+async function apiPost<T = any>(path: string, body: any, token: string): Promise<T> {
+  const r = await fetch(`${API}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`${path} -> HTTP ${r.status}: ${j?.error?.message || JSON.stringify(j)}`);
+  return j.data ?? j;
+}
+
+async function apiDelete(path: string, token: string): Promise<void> {
+  await fetch(`${API}${path}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
 test.describe('ML Models page — audit remediation', () => {
@@ -201,29 +223,55 @@ test.describe('Pass 2 — k8s deploy config + share dialogs + KB multi-file + ap
     await expect(page.getByTestId('resource-share-dialog')).toBeVisible();
   });
 
-  test('Knowledge Bases dropzone advertises multi-file uploads', async ({ page }) => {
-    await login(page);
-    await page.goto(`${BASE}/knowledge`);
-    await page.waitForLoadState('domcontentloaded');
-    const firstKB = page.locator('a, button').filter({ hasText: /\bchunks?\b|\bdocuments?\b/i }).first();
-    if (await firstKB.count() === 0) test.skip();
-    await firstKB.click();
-    const input = page.getByTestId('kb-dropzone-input');
-    await expect(input).toHaveAttribute('multiple', '');
-    await expect(page.locator('text=Drop files (multiple OK)').first()).toBeVisible();
+  test('Knowledge Bases dropzone advertises multi-file uploads (self-fixturing)', async ({ page }) => {
+    const token = await getToken();
+    const kbName = `e2e-audit-kb-${Date.now()}`;
+    const kb = await apiPost<{ id: string }>('/api/knowledge-bases', {
+      name: kbName, description: 'e2e audit-fix fixture (safe to delete)',
+      chunk_size: 1000, chunk_overlap: 200,
+    }, token);
+    try {
+      await login(page);
+      await page.goto(`${BASE}/knowledge?id=${kb.id}`);
+      await page.waitForLoadState('domcontentloaded');
+      await expect(page.locator('h1', { hasText: kbName })).toBeVisible({ timeout: 15_000 });
+      const input = page.getByTestId('kb-dropzone-input');
+      await expect(input).toHaveAttribute('multiple', '');
+      await expect(page.locator('text=Drop files (multiple OK)').first()).toBeVisible();
+    } finally {
+      await apiDelete(`/api/knowledge-bases/${kb.id}`, token);
+    }
   });
 
-  test('Approvals payload renders as key/value with show-raw toggle', async ({ page }) => {
-    await login(page);
-    await page.goto(`${BASE}/approvals`);
-    await page.waitForLoadState('domcontentloaded');
-    const payloadBtn = page.locator('button', { hasText: 'Payload, signoff history' }).first();
-    if (await payloadBtn.count() === 0) test.skip();
-    await payloadBtn.click();
-    const view = page.getByTestId('approval-payload-view').first();
-    await expect(view).toBeVisible();
-    const showRaw = view.locator('button', { hasText: 'Show raw JSON' });
-    await expect(showRaw).toBeVisible();
+  test('Approvals payload renders as key/value with show-raw toggle (self-fixturing)', async ({ page }) => {
+    const token = await getToken();
+    const created = await apiPost<{ id: string }>('/api/approvals', {
+      title: `e2e payload renderer ${Date.now()}`,
+      payload: { vendor: 'Acme Brokers', amount_usd: 2_400_000, risk_tier: 'high', nested: { reviewer: 'risk@acme.com', notes: ['budget OK', 'KYC passed'] } },
+      required_signoffs: 1,
+      expires_seconds: 600,
+      gate_kind: 'e2e-audit',
+    }, token);
+    try {
+      await login(page);
+      await page.goto(`${BASE}/approvals`);
+      await page.waitForLoadState('domcontentloaded');
+      const card = page.locator('div', { hasText: /e2e payload renderer/ }).first();
+      await expect(card).toBeVisible({ timeout: 15_000 });
+      const payloadBtn = card.locator('button', { hasText: 'Payload, signoff history' }).first();
+      await payloadBtn.click();
+      const view = page.getByTestId('approval-payload-view').first();
+      await expect(view).toBeVisible();
+      await expect(view.locator('text=Acme Brokers').first()).toBeVisible();
+      await expect(view.locator('button', { hasText: 'Show raw JSON' })).toBeVisible();
+    } finally {
+      // Cancel by denying to clean up the queue.
+      await fetch(`${API}/api/approvals/${created.id}/signoff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ decision: 'deny', reason: 'e2e fixture teardown' }),
+      });
+    }
   });
 });
 
@@ -260,22 +308,37 @@ test.describe('Pass 3 — polish + accessibility band', () => {
     expect(href).not.toContain('localhost:3010');
   });
 
-  test('Approvals expiry counter ticks live', async ({ page }) => {
-    await login(page);
-    await page.goto(`${BASE}/approvals`);
-    await page.waitForLoadState('domcontentloaded');
-    const exp = page.getByTestId('approval-expiry').first();
-    if (await exp.count() === 0) test.skip();
-    const t1 = (await exp.textContent()) || '';
-    await page.waitForTimeout(2000);
-    const t2 = (await exp.textContent()) || '';
-    // The counter may stay on the same minute, but in the seconds bucket
-    // it MUST tick. Just assert the component re-rendered with a
-    // string-shaped value — if useLiveClock died, the test still catches it.
-    expect(t2.length).toBeGreaterThan(0);
-    // If both are in the seconds-bucket they should differ.
-    if (/\d+s left/.test(t1) && /\d+s left/.test(t2)) {
-      expect(t1).not.toEqual(t2);
+  test('Approvals expiry counter ticks live (self-fixturing, sub-minute window)', async ({ page }) => {
+    const token = await getToken();
+    const created = await apiPost<{ id: string }>('/api/approvals', {
+      title: `e2e expiry tick ${Date.now()}`,
+      payload: { kind: 'tick-test' },
+      required_signoffs: 1,
+      expires_seconds: 30,
+      gate_kind: 'e2e-audit',
+    }, token);
+    try {
+      await login(page);
+      await page.goto(`${BASE}/approvals`);
+      await page.waitForLoadState('domcontentloaded');
+      const card = page.locator('div', { hasText: /e2e expiry tick/ }).first();
+      await expect(card).toBeVisible({ timeout: 15_000 });
+      const exp = card.getByTestId('approval-expiry').first();
+      await expect(exp).toBeVisible();
+      const t1 = (await exp.textContent()) || '';
+      await page.waitForTimeout(2500);
+      const t2 = (await exp.textContent()) || '';
+      if (/\d+s left/.test(t1) && /\d+s left/.test(t2)) {
+        expect(t1).not.toEqual(t2);
+      } else {
+        expect(t2.length).toBeGreaterThan(0);
+      }
+    } finally {
+      await fetch(`${API}/api/approvals/${created.id}/signoff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ decision: 'deny', reason: 'e2e fixture teardown' }),
+      });
     }
   });
 });
