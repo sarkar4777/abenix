@@ -30,6 +30,7 @@
     "reactflow": "^11.11.0",
     "recharts": "^3.7.0",
     "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "swr": "^2.4.0",
     "tailwind-merge": "^2.3.0",
     "tailwindcss-animate": "^1.0.7",

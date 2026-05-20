@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.5.6 — 2026-05-20
+
+### Added
+- scripts/sync-dev-docs.sh keeps apps/web/public/dev-docs in sync with docs/ after a markdown edit.
+- In-app /dev-docs page that loads the same markdown with sidebar navigation, client-side search across every file, in-context Mermaid rendering, and rewritten relative .md links for in-app navigation. Sidebar entry under WORKSPACE.
+- Developer documentation site — 35 markdown files under docs/ covering architecture (services, request lifecycle, tenants/RBAC, data stores, architectural patterns), runtime (agent loop, pipelines, tools, MCP, streaming, approvals/HITL), the polyglot SDK, data model, UI, deployment (helm, KEDA, observability, edge runtime, K8s specifics), the thin-app pattern + four vertical apps, how-to walkthroughs, and a reference catalogue. Mermaid diagrams render natively on GitHub.
+
+### Changed
+
+### Fixed
+
 ## v1.5.5 — 2026-05-20
 
 ### Added

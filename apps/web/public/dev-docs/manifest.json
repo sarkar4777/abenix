@@ -1,0 +1,106 @@
+{
+  "sections": [
+    {
+      "id": "intro",
+      "title": "Getting started",
+      "docs": [
+        {"slug": "README", "title": "Overview + table of contents"}
+      ]
+    },
+    {
+      "id": "architecture",
+      "title": "1. Architecture",
+      "docs": [
+        {"slug": "01-architecture/00-overview", "title": "System overview"},
+        {"slug": "01-architecture/01-tenants-rbac", "title": "Tenants + RBAC + sharing"},
+        {"slug": "01-architecture/02-request-lifecycle", "title": "Request lifecycle"},
+        {"slug": "01-architecture/03-services", "title": "Service inventory"},
+        {"slug": "01-architecture/04-data-stores", "title": "Data stores"},
+        {"slug": "01-architecture/05-architectural-patterns", "title": "Architectural patterns reference"}
+      ]
+    },
+    {
+      "id": "runtime",
+      "title": "2. Runtime",
+      "docs": [
+        {"slug": "02-runtime/00-agent-execution", "title": "Agent execution loop"},
+        {"slug": "02-runtime/01-pipelines", "title": "Pipelines (DAG engine)"},
+        {"slug": "02-runtime/02-tools", "title": "Tools framework"},
+        {"slug": "02-runtime/03-mcp", "title": "MCP integration"},
+        {"slug": "02-runtime/04-streaming-tracing", "title": "Streaming + OTel tracing"},
+        {"slug": "02-runtime/05-approvals-hitl", "title": "Approvals + HITL"}
+      ]
+    },
+    {
+      "id": "sdk",
+      "title": "3. SDK",
+      "docs": [
+        {"slug": "03-sdk/00-overview", "title": "SDK overview + actAs"},
+        {"slug": "03-sdk/01-python", "title": "Python SDK"},
+        {"slug": "03-sdk/02-typescript", "title": "TypeScript SDK"},
+        {"slug": "03-sdk/03-java", "title": "Java SDK"}
+      ]
+    },
+    {
+      "id": "data",
+      "title": "4. Data model",
+      "docs": [
+        {"slug": "04-data-model/00-overview", "title": "ERD + conventions"},
+        {"slug": "04-data-model/04-resource-shares", "title": "Polymorphic resource_shares"}
+      ]
+    },
+    {
+      "id": "ui",
+      "title": "5. UI",
+      "docs": [
+        {"slug": "05-ui/00-app-shell", "title": "App shell + auth + routing"},
+        {"slug": "05-ui/01-builder-canvas", "title": "Builder canvas"},
+        {"slug": "05-ui/02-api-client", "title": "API client + error envelope"},
+        {"slug": "05-ui/03-page-catalogue", "title": "Page catalogue"}
+      ]
+    },
+    {
+      "id": "deployment",
+      "title": "6. Deployment",
+      "docs": [
+        {"slug": "06-deployment/00-overview", "title": "Deploy overview"},
+        {"slug": "06-deployment/02-helm", "title": "Helm chart structure"},
+        {"slug": "06-deployment/03-keda", "title": "KEDA autoscaling"},
+        {"slug": "06-deployment/04-observability", "title": "Observability (Prom + Grafana + Tempo)"},
+        {"slug": "06-deployment/05-edge-runtime", "title": "Edge runtime"},
+        {"slug": "06-deployment/06-k8s-specifics", "title": "Kubernetes specifics"}
+      ]
+    },
+    {
+      "id": "standalone",
+      "title": "7. Standalone apps",
+      "docs": [
+        {"slug": "07-standalone-apps/00-pattern", "title": "Thin-app pattern"},
+        {"slug": "07-standalone-apps/01-wingman", "title": "Wingman"},
+        {"slug": "07-standalone-apps/02-example_app", "title": "the example app"},
+        {"slug": "07-standalone-apps/03-others", "title": "Saudi Tourism / ResolveAI / Industrial-IoT / ClaimsIQ"}
+      ]
+    },
+    {
+      "id": "howto",
+      "title": "8. How-to",
+      "docs": [
+        {"slug": "08-howto/00-local-setup", "title": "Local setup"},
+        {"slug": "08-howto/01-add-a-tool", "title": "Add a new tool"},
+        {"slug": "08-howto/02-add-an-agent", "title": "Add a new agent"},
+        {"slug": "08-howto/03-add-a-page", "title": "Add a new UI page"},
+        {"slug": "08-howto/04-debugging", "title": "Debugging"},
+        {"slug": "08-howto/05-testing", "title": "Testing"}
+      ]
+    },
+    {
+      "id": "reference",
+      "title": "9. Reference",
+      "docs": [
+        {"slug": "09-reference/00-rest-api", "title": "REST API"},
+        {"slug": "09-reference/01-env-vars", "title": "Environment variables"},
+        {"slug": "09-reference/03-glossary", "title": "Glossary"}
+      ]
+    }
+  ]
+}
