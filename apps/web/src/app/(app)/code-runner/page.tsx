@@ -1,12 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Box, Check, ChevronRight, CircleAlert, Code2, Download, FileArchive,
-  FlaskConical, Github, Loader2, Play, Trash2, Upload,
+  FlaskConical, Github, Loader2, Play, Trash2, Upload, Workflow, ArrowRight,
+  Share2,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
+import { toastSuccess, toastError } from '@/stores/toastStore';
+import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import InvocationsTable from '@/components/observability/InvocationsTable';
 
 interface AnalysisNote {
@@ -60,8 +64,17 @@ function fmtBytes(b: number | null): string {
 }
 
 export default function CodeRunnerPage() {
+  const router = useRouter();
   const { data: assets, mutate } = useApi<CodeAsset[]>('/api/code-assets');
   const [selected, setSelected] = useState<CodeAsset | null>(null);
+
+  // Inline JSON lint state for the schema textareas — replaces the
+  // alert() blocker so users see the error next to the field.
+  const [inputSchemaError, setInputSchemaError] = useState('');
+  const [outputSchemaError, setOutputSchemaError] = useState('');
+  const [testInputError, setTestInputError] = useState('');
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   // upload form
   const [newName, setNewName] = useState('');
@@ -113,49 +126,73 @@ export default function CodeRunnerPage() {
       await apiFetch<CodeAsset>('/api/code-assets', { method: 'POST', body: fd, headers: {} });
       setNewName(''); setNewDesc(''); setNewZip(null); setNewGitUrl(''); setNewGitRef('');
       if (fileRef.current) fileRef.current.value = '';
+      toastSuccess('Asset created', `Analyzing ${newName}…`);
       refresh();
     } catch (e: any) {
-      setUploadError(e?.message || 'Upload failed');
+      const msg = e?.message || 'Upload failed';
+      setUploadError(msg);
+      toastError('Upload failed', msg);
     }
     setUploading(false);
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this code asset?')) return;
-    await apiFetch(`/api/code-assets/${id}`, { method: 'DELETE' });
-    if (selected?.id === id) setSelected(null);
-    refresh();
+    try {
+      await apiFetch(`/api/code-assets/${id}`, { method: 'DELETE' });
+      toastSuccess('Asset deleted');
+      if (selected?.id === id) setSelected(null);
+      refresh();
+    } catch (e: any) {
+      toastError('Delete failed', e?.message || 'Unknown error');
+    }
   };
 
   const handleSaveMeta = async () => {
     if (!selected) return;
     let inSchema: any = null;
     let outSchema: any = null;
+    if (inputSchemaText.trim()) {
+      try { inSchema = JSON.parse(inputSchemaText); setInputSchemaError(''); }
+      catch (e: any) { setInputSchemaError(`Not valid JSON: ${e.message}`); return; }
+    } else setInputSchemaError('');
+    if (outputSchemaText.trim()) {
+      try { outSchema = JSON.parse(outputSchemaText); setOutputSchemaError(''); }
+      catch (e: any) { setOutputSchemaError(`Not valid JSON: ${e.message}`); return; }
+    } else setOutputSchemaError('');
+    setSavingMeta(true);
     try {
-      inSchema = inputSchemaText ? JSON.parse(inputSchemaText) : null;
-    } catch { alert('input_schema is not valid JSON'); return; }
-    try {
-      outSchema = outputSchemaText ? JSON.parse(outputSchemaText) : null;
-    } catch { alert('output_schema is not valid JSON'); return; }
-    const r = await apiFetch<CodeAsset>(`/api/code-assets/${selected.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        input_schema: inSchema,
-        output_schema: outSchema,
-        suggested_image: selected.suggested_image,
-        suggested_build_command: selected.suggested_build_command,
-        suggested_run_command: selected.suggested_run_command,
-      }),
-    });
-    if (r.data) setSelected(r.data);
-    refresh();
+      const r = await apiFetch<CodeAsset>(`/api/code-assets/${selected.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          input_schema: inSchema,
+          output_schema: outSchema,
+          suggested_image: selected.suggested_image,
+          suggested_build_command: selected.suggested_build_command,
+          suggested_run_command: selected.suggested_run_command,
+        }),
+      });
+      if (r.data) setSelected(r.data);
+      toastSuccess('Saved', 'Schemas + commands updated');
+      refresh();
+    } catch (e: any) {
+      toastError('Save failed', e?.message || 'Unknown error');
+    }
+    setSavingMeta(false);
+  };
+
+  const handleUseInAgent = () => {
+    if (!selected) return;
+    router.push(`/builder?tool=code_asset&asset_id=${encodeURIComponent(selected.id)}`);
   };
 
   const handleTest = async () => {
     if (!selected) return;
     let inp: any = {};
-    try { inp = testInput ? JSON.parse(testInput) : {}; }
-    catch { alert('input is not valid JSON'); return; }
+    if (testInput.trim()) {
+      try { inp = JSON.parse(testInput); setTestInputError(''); }
+      catch (e: any) { setTestInputError(`Not valid JSON: ${e.message}`); return; }
+    } else setTestInputError('');
     setTesting(true); setTestOutput(''); setTestOk(null);
     try {
       const r = await apiFetch<any>(`/api/code-assets/${selected.id}/test`, {
@@ -280,10 +317,23 @@ export default function CodeRunnerPage() {
                         </p>
                       )}
                     </div>
-                    <button onClick={() => handleDelete(selected.id)}
-                      className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs hover:bg-red-500/20 flex items-center gap-1">
-                      <Trash2 className="w-3 h-3" /> Delete
-                    </button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={handleUseInAgent} disabled={selected.status !== 'ready'}
+                        className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs hover:bg-cyan-500/20 disabled:opacity-30 transition-colors flex items-center gap-1"
+                        title={selected.status !== 'ready' ? 'Asset must be ready before wiring into an agent' : 'Open builder with code_asset tool pre-configured'}
+                        data-testid="code-use-in-agent">
+                        <Workflow className="w-3 h-3" /> Use in Agent <ArrowRight className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => setShowShare(true)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-700/30 border border-slate-600/40 text-slate-300 text-xs hover:bg-slate-700/50 hover:text-white transition-colors flex items-center gap-1"
+                        data-testid="code-share">
+                        <Share2 className="w-3 h-3" /> Share
+                      </button>
+                      <button onClick={() => handleDelete(selected.id)}
+                        className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs hover:bg-red-500/20 flex items-center gap-1">
+                        <Trash2 className="w-3 h-3" /> Delete
+                      </button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-4 gap-3">
                     <div className="rounded-lg bg-slate-900/50 p-3">
@@ -348,20 +398,35 @@ export default function CodeRunnerPage() {
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase mb-1">Input schema</p>
                     <textarea rows={4} value={inputSchemaText}
-                      onChange={e => setInputSchemaText(e.target.value)}
+                      onChange={e => { setInputSchemaText(e.target.value); setInputSchemaError(''); }}
+                      onBlur={e => {
+                        const v = e.target.value.trim();
+                        if (!v) { setInputSchemaError(''); return; }
+                        try { JSON.parse(v); setInputSchemaError(''); }
+                        catch (err: any) { setInputSchemaError(`Not valid JSON: ${err.message}`); }
+                      }}
                       placeholder='{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}'
-                      className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono" />
+                      className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none ${inputSchemaError ? 'border-red-500/60' : 'border-slate-700 focus:border-cyan-500'}`} />
+                    {inputSchemaError && <p className="text-[10px] text-red-300 mt-1 flex items-start gap-1"><CircleAlert className="w-3 h-3 mt-0.5 shrink-0" /><span>{inputSchemaError}</span></p>}
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase mb-1">Output schema</p>
                     <textarea rows={4} value={outputSchemaText}
-                      onChange={e => setOutputSchemaText(e.target.value)}
+                      onChange={e => { setOutputSchemaText(e.target.value); setOutputSchemaError(''); }}
+                      onBlur={e => {
+                        const v = e.target.value.trim();
+                        if (!v) { setOutputSchemaError(''); return; }
+                        try { JSON.parse(v); setOutputSchemaError(''); }
+                        catch (err: any) { setOutputSchemaError(`Not valid JSON: ${err.message}`); }
+                      }}
                       placeholder='{"type":"object","properties":{"weather":{"type":"string"}}}'
-                      className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono" />
+                      className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none ${outputSchemaError ? 'border-red-500/60' : 'border-slate-700 focus:border-cyan-500'}`} />
+                    {outputSchemaError && <p className="text-[10px] text-red-300 mt-1 flex items-start gap-1"><CircleAlert className="w-3 h-3 mt-0.5 shrink-0" /><span>{outputSchemaError}</span></p>}
                   </div>
-                  <button onClick={handleSaveMeta}
-                    className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs">
-                    Save schemas + commands
+                  <button onClick={handleSaveMeta} disabled={savingMeta}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs disabled:opacity-30 flex items-center gap-2"
+                    data-testid="code-save-meta">
+                    {savingMeta ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving...</> : <>Save schemas + commands</>}
                   </button>
                 </div>
 
@@ -379,8 +444,15 @@ export default function CodeRunnerPage() {
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase mb-1">Input JSON</p>
                     <textarea rows={3} value={testInput}
-                      onChange={e => setTestInput(e.target.value)}
-                      className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono" />
+                      onChange={e => { setTestInput(e.target.value); setTestInputError(''); }}
+                      onBlur={e => {
+                        const v = e.target.value.trim();
+                        if (!v) { setTestInputError(''); return; }
+                        try { JSON.parse(v); setTestInputError(''); }
+                        catch (err: any) { setTestInputError(`Not valid JSON: ${err.message}`); }
+                      }}
+                      className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none ${testInputError ? 'border-red-500/60' : 'border-slate-700 focus:border-cyan-500'}`} />
+                    {testInputError && <p className="text-[10px] text-red-300 mt-1 flex items-start gap-1"><CircleAlert className="w-3 h-3 mt-0.5 shrink-0" /><span>{testInputError}</span></p>}
                   </div>
                   <button onClick={handleTest} disabled={testing || selected.status !== 'ready'}
                     className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-600 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-2">
@@ -401,6 +473,15 @@ export default function CodeRunnerPage() {
           </div>
         </div>
       </div>
+      {selected && (
+        <ResourceShareDialog
+          open={showShare}
+          onClose={() => setShowShare(false)}
+          resourceType="code_asset"
+          resourceId={selected.id}
+          resourceName={selected.name}
+        />
+      )}
     </div>
   );
 }

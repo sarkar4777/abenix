@@ -216,6 +216,9 @@ export default function BuilderPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const agentParam = searchParams.get('agent');
+  const presetTool = searchParams.get('tool');
+  const presetModelName = searchParams.get('model_name');
+  const presetAssetId = searchParams.get('asset_id');
   const isMobile = useIsMobile();
 
   const [agentId, setAgentId] = useState<string | null>(agentParam);
@@ -319,6 +322,46 @@ export default function BuilderPage() {
   // Load agent or init empty
   useEffect(() => {
     if (!agentParam) {
+      if (presetTool === 'ml_model' && presetModelName) {
+        const presetConfig: AgentConfig = {
+          ...DEFAULT_CONFIG,
+          name: `${presetModelName} agent`,
+          description: `Calls the ${presetModelName} ML model on the input.`,
+          tool_config: {
+            ml_model: normalizeToolConfig({
+              parameter_defaults: { model_name: presetModelName, operation: 'predict' },
+              usage_instructions: `Call ml_model with operation='predict' and model_name='${presetModelName}'. The model's input_data shape is in its registry metadata — use get_model_info first if you need to confirm features.`,
+            }),
+          },
+        };
+        setConfig(presetConfig);
+        setSelectedTools(['ml_model']);
+        setNodes(buildInitialNodes(presetConfig, ['ml_model']));
+        setEdges(buildInitialEdges(['ml_model']));
+        setDirty(true);
+        setLoading(false);
+        return;
+      }
+      if (presetTool === 'code_asset' && presetAssetId) {
+        const presetConfig: AgentConfig = {
+          ...DEFAULT_CONFIG,
+          name: 'code-asset agent',
+          description: `Invokes the registered code asset ${presetAssetId} on the input.`,
+          tool_config: {
+            code_asset: normalizeToolConfig({
+              parameter_defaults: { asset_id: presetAssetId },
+              usage_instructions: `Call code_asset with asset_id='${presetAssetId}' and the input_data the asset's input_schema expects. Output follows the asset's output_schema.`,
+            }),
+          },
+        };
+        setConfig(presetConfig);
+        setSelectedTools(['code_asset']);
+        setNodes(buildInitialNodes(presetConfig, ['code_asset']));
+        setEdges(buildInitialEdges(['code_asset']));
+        setDirty(true);
+        setLoading(false);
+        return;
+      }
       setNodes(buildInitialNodes(DEFAULT_CONFIG, []));
       setEdges([]);
       setLoading(false);
@@ -386,7 +429,7 @@ export default function BuilderPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [agentParam, setNodes, setEdges, buildInitialNodes, buildInitialEdges]);
+  }, [agentParam, presetTool, presetModelName, presetAssetId, setNodes, setEdges, buildInitialNodes, buildInitialEdges]);
 
   // Update agent config & reflect in nodes
   const updateConfig = useCallback(
@@ -778,6 +821,21 @@ export default function BuilderPage() {
   // Combined dirty state (agent mode dirty or pipeline store dirty)
   const isDirty = dirty || pipelineStore.dirty;
 
+  const firstErrorNodeId = pipelineStore.validation.errors[0]?.node_id || null;
+  const firstWarningNodeId = pipelineStore.validation.warnings[0]?.node_id || null;
+  const focusErrorNode = useCallback((nodeId: string) => {
+    if (!nodeId) return;
+    setSelectedNodeId(nodeId);
+    try { pipelineStore.setSelectedStep?.(nodeId); } catch {}
+    const inst = reactFlowRef.current;
+    if (!inst) return;
+    setTimeout(() => {
+      const node = inst.getNode(nodeId);
+      if (!node) return;
+      inst.fitView({ nodes: [node], duration: 300, padding: 0.5, maxZoom: 1.2 });
+    }, 50);
+  }, [pipelineStore]);
+
   // Auto-save debounce
   useEffect(() => {
     if (!isDirty || !agentId) return;
@@ -919,6 +977,9 @@ export default function BuilderPage() {
           validationWarningCount={pipelineStore.validation.warnings.length}
           isValidating={pipelineStore.validation.isValidating}
           hasPipelineSteps={pipelineStore.steps.length > 0}
+          firstErrorNodeId={firstErrorNodeId}
+          firstWarningNodeId={firstWarningNodeId}
+          onFocusErrorNode={focusErrorNode}
         />
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           {/* Agent Name */}
@@ -1036,6 +1097,13 @@ export default function BuilderPage() {
         onRunPipeline={runPipeline}
         pipelineRunning={pipelineStore.execution.isRunning}
         onAIBuild={applyAIConfig}
+        validationErrorCount={pipelineStore.validation.errors.length}
+        validationWarningCount={pipelineStore.validation.warnings.length}
+        isValidating={pipelineStore.validation.isValidating}
+        hasPipelineSteps={pipelineStore.steps.length > 0}
+        firstErrorNodeId={firstErrorNodeId}
+        firstWarningNodeId={firstWarningNodeId}
+        onFocusErrorNode={focusErrorNode}
         getDraftForValidate={() => {
           if (builderMode === 'pipeline') {
             const serialized = pipelineStore.serialize();

@@ -37,6 +37,88 @@ const STATUS_BADGE: Record<string, string> = {
   expired: 'bg-slate-500/15 text-slate-400 border-slate-500/40',
 };
 
+function PayloadView({ payload }: { payload: unknown }) {
+  const [showRaw, setShowRaw] = useState(false);
+  if (!payload || typeof payload !== 'object') {
+    return (
+      <pre className="text-[11px] text-slate-300 bg-slate-900/60 border border-slate-800 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-words max-h-56">
+        {JSON.stringify(payload, null, 2)}
+      </pre>
+    );
+  }
+  const entries = Object.entries(payload as Record<string, unknown>);
+  if (entries.length === 0) {
+    return <p className="text-[11px] text-slate-500 italic">Empty payload.</p>;
+  }
+  return (
+    <div className="space-y-1.5" data-testid="approval-payload-view">
+      {entries.map(([key, value]) => (
+        <PayloadRow key={key} k={key} v={value} depth={0} />
+      ))}
+      <button
+        type="button"
+        onClick={() => setShowRaw((v) => !v)}
+        className="mt-2 text-[10px] text-slate-500 hover:text-slate-300"
+      >
+        {showRaw ? 'Hide raw JSON' : 'Show raw JSON'}
+      </button>
+      {showRaw && (
+        <pre className="text-[10px] text-slate-400 bg-slate-900/40 border border-slate-800/70 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words max-h-48 mt-1">
+          {JSON.stringify(payload, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function PayloadRow({ k, v, depth }: { k: string; v: unknown; depth: number }) {
+  const label = k.replace(/_/g, ' ');
+  if (v === null || v === undefined) {
+    return (
+      <div className="flex items-baseline gap-2 text-[11px]" style={{ paddingLeft: depth * 12 }}>
+        <span className="text-slate-500 uppercase tracking-wide text-[10px] min-w-[120px]">{label}</span>
+        <span className="text-slate-600 italic">—</span>
+      </div>
+    );
+  }
+  if (typeof v === 'object' && !Array.isArray(v)) {
+    const entries = Object.entries(v as Record<string, unknown>);
+    return (
+      <div style={{ paddingLeft: depth * 12 }}>
+        <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1 mt-1">{label}</p>
+        <div className="space-y-1">
+          {entries.map(([k2, v2]) => (
+            <PayloadRow key={k2} k={k2} v={v2} depth={depth + 1} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (Array.isArray(v)) {
+    return (
+      <div style={{ paddingLeft: depth * 12 }}>
+        <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1 mt-1">{label} <span className="text-slate-500 normal-case">({v.length} item{v.length === 1 ? '' : 's'})</span></p>
+        <div className="space-y-1">
+          {v.slice(0, 8).map((item, idx) => (
+            <PayloadRow key={idx} k={`#${idx}`} v={item} depth={depth + 1} />
+          ))}
+          {v.length > 8 && (
+            <p className="text-[10px] text-slate-600 italic" style={{ paddingLeft: (depth + 1) * 12 }}>
+              {v.length - 8} more…
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-baseline gap-2 text-[11px]" style={{ paddingLeft: depth * 12 }}>
+      <span className="text-slate-500 uppercase tracking-wide text-[10px] min-w-[120px]">{label}</span>
+      <span className="text-slate-200 font-mono break-words">{String(v)}</span>
+    </div>
+  );
+}
+
 function relTime(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso).getTime();
@@ -121,9 +203,7 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
         <div className="mt-3 space-y-3">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Payload</p>
-            <pre className="text-[11px] text-slate-300 bg-slate-900/60 border border-slate-800 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-words max-h-56">
-              {JSON.stringify(row.payload, null, 2)}
-            </pre>
+            <PayloadView payload={row.payload} />
           </div>
           {row.signoffs.length > 0 && (
             <div>

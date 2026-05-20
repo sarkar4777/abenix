@@ -14,9 +14,10 @@ try:
 except (IndexError, ImportError):
     pass  # No .env in Docker — env vars come from K8s ConfigMap/Secrets
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.exceptions import HTTPException, RequestValidationError
+from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from sqlalchemy import text
 
@@ -120,6 +121,43 @@ app.add_middleware(
     expose_headers=["Retry-After", "X-RateLimit-Remaining", "X-Request-ID"],
     max_age=600,
 )
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail
+    message = detail if isinstance(detail, str) else "Request failed"
+    payload: dict[str, Any] = {"message": message, "code": exc.status_code}
+    if isinstance(detail, dict):
+        if "error_code" in detail:
+            payload["error_code"] = detail.get("error_code")
+        if "details" in detail:
+            payload["details"] = detail.get("details")
+        if "message" in detail:
+            payload["message"] = detail.get("message")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"data": None, "error": payload},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "data": None,
+            "error": {
+                "message": "Request validation failed",
+                "code": 422,
+                "error_code": "VALIDATION_ERROR",
+                "details": {"errors": exc.errors()},
+            },
+        },
+    )
+
 
 app.include_router(auth.router)
 app.include_router(agent_sharing.router)

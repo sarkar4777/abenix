@@ -200,6 +200,35 @@ async def revoke_share(
     return success({"deleted": True})
 
 
+@router.get("/shares/of/{resource_type}/{resource_id}")
+async def list_shares_of_resource(
+    resource_type: str,
+    resource_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """List active shares for a single resource. Caller must own or admin the resource."""
+    kind = (resource_type or "").strip().lower()
+    if kind not in _SHAREABLE_KINDS:
+        return error(
+            f"resource_type must be one of {sorted(_SHAREABLE_KINDS)}; got '{kind}'",
+            400,
+        )
+    if not await _user_can_share(db, user, kind=kind, resource_id=resource_id):
+        return error(
+            "Resource not found or you don't have permission to view its shares", 403
+        )
+    q = await db.execute(
+        select(ResourceShare)
+        .where(
+            ResourceShare.resource_type == kind,
+            ResourceShare.resource_id == resource_id,
+        )
+        .order_by(desc(ResourceShare.created_at))
+    )
+    return success([_serialize_share(s) for s in q.scalars().all()])
+
+
 @router.get("/shares/received")
 async def list_shares_received(
     user: User = Depends(get_current_user),

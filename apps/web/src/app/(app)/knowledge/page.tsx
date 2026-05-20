@@ -10,10 +10,12 @@ import {
   Loader2,
   Plus,
   Search,
+  Share2,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
+import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { KnowledgeSkeleton } from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
@@ -170,11 +172,12 @@ function DropZone({
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [batchDone, setBatchDone] = useState(0);
+  const [batchFailed, setBatchFailed] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const upload = async (file: File) => {
-    setUploading(true);
-    setUploadError('');
+  const uploadOne = async (file: File): Promise<boolean> => {
     try {
       const form = new FormData();
       form.append('file', file);
@@ -184,28 +187,44 @@ function DropZone({
         body: form,
       });
       const json = await res.json();
-      if (json.error) {
-        setUploadError(json.error.message);
-        return;
-      }
+      if (json.error) return false;
       onUploaded(json.data);
+      return true;
     } catch {
-      setUploadError('Upload failed');
-    } finally {
-      setUploading(false);
+      return false;
     }
+  };
+
+  const uploadBatch = async (files: File[]) => {
+    if (!files.length) return;
+    setUploading(true);
+    setUploadError('');
+    setBatchTotal(files.length);
+    setBatchDone(0);
+    setBatchFailed([]);
+    const failed: string[] = [];
+    for (const f of files) {
+      const ok = await uploadOne(f);
+      if (!ok) failed.push(f.name);
+      setBatchDone((n) => n + 1);
+    }
+    setBatchFailed(failed);
+    if (failed.length > 0) {
+      setUploadError(`${failed.length} of ${files.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`);
+    }
+    setUploading(false);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) upload(file);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) uploadBatch(files);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) upload(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length) uploadBatch(files);
     e.target.value = '';
   };
 
@@ -225,22 +244,36 @@ function DropZone({
         ref={inputRef}
         type="file"
         accept=".pdf,.docx,.txt,.csv,.md,.json"
+        multiple
         onChange={handleFileChange}
         className="hidden"
+        data-testid="kb-dropzone-input"
       />
       {uploading ? (
         <div className="flex flex-col items-center gap-2">
           <Loader2 className="w-6 h-6 text-cyan-400 animate-spin" />
-          <p className="text-xs text-slate-400">Uploading...</p>
+          <p className="text-xs text-slate-400">
+            {batchTotal > 1
+              ? `Uploading ${batchDone} of ${batchTotal}…`
+              : 'Uploading...'}
+          </p>
+          {batchTotal > 1 && (
+            <div className="w-48 h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-cyan-500 transition-all"
+                style={{ width: `${(batchDone / batchTotal) * 100}%` }}
+              />
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex flex-col items-center gap-2">
           <Upload className={`w-6 h-6 ${dragging ? 'text-cyan-400' : 'text-slate-600'}`} />
           <p className="text-xs text-slate-400">
-            Drop files here or click to browse
+            Drop files (multiple OK) here or click to browse
           </p>
           <p className="text-[10px] text-slate-600">
-            PDF, DOCX, TXT, CSV, MD, JSON (max 50 MB)
+            PDF, DOCX, TXT, CSV, MD, JSON (max 50 MB each)
           </p>
         </div>
       )}
@@ -262,6 +295,7 @@ function KBDetailView({
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deletingKB, setDeletingKB] = useState(false);
   const [confirmDeleteKB, setConfirmDeleteKB] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   const pollInterval = useRef<ReturnType<typeof setInterval>>();
 
@@ -356,13 +390,22 @@ function KBDetailView({
             <span>Chunk size: {kb.chunk_size}</span>
           </div>
         </div>
-        <button
-          onClick={() => setConfirmDeleteKB(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
-        >
-          <Trash2 className="w-3 h-3" />
-          Delete KB
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowShare(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-300 hover:text-white border border-slate-600/40 hover:border-slate-500 rounded-lg transition-colors"
+            data-testid="kb-share"
+          >
+            <Share2 className="w-3 h-3" /> Share
+          </button>
+          <button
+            onClick={() => setConfirmDeleteKB(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
+          >
+            <Trash2 className="w-3 h-3" />
+            Delete KB
+          </button>
+        </div>
       </div>
 
       <DropZone kbId={kb.id} onUploaded={handleUploaded} />
@@ -426,6 +469,13 @@ function KBDetailView({
         description={`Are you sure you want to delete "${kb.name}"? All documents and embeddings will be permanently removed.`}
         confirmLabel="Delete"
         loading={deletingKB}
+      />
+      <ResourceShareDialog
+        open={showShare}
+        onClose={() => setShowShare(false)}
+        resourceType="knowledge_base"
+        resourceId={kb.id}
+        resourceName={kb.name}
       />
     </motion.div>
   );

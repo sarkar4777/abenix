@@ -27,6 +27,9 @@ interface BuilderTopBarProps {
   validationWarningCount?: number;
   isValidating?: boolean;
   hasPipelineSteps?: boolean;
+  firstErrorNodeId?: string | null;
+  firstWarningNodeId?: string | null;
+  onFocusErrorNode?: (nodeId: string) => void;
   getDraftForValidate?: () => {
     nodes: unknown[];
     tools: string[];
@@ -52,6 +55,9 @@ export default function BuilderTopBar({
   validationWarningCount = 0,
   isValidating = false,
   hasPipelineSteps = false,
+  firstErrorNodeId = null,
+  firstWarningNodeId = null,
+  onFocusErrorNode,
   getDraftForValidate,
 }: BuilderTopBarProps) {
   const router = useRouter();
@@ -176,10 +182,13 @@ export default function BuilderTopBar({
               </span>
             )}
             {!isValidating && validationErrorCount > 0 && (
-              <span
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-red-500/10 border border-red-500/30 text-red-400 text-[11px] rounded-md"
+              <button
+                type="button"
+                onClick={() => { if (firstErrorNodeId && onFocusErrorNode) onFocusErrorNode(firstErrorNodeId); }}
+                disabled={!firstErrorNodeId || !onFocusErrorNode}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-red-500/10 border border-red-500/30 text-red-400 text-[11px] rounded-md hover:bg-red-500/20 hover:border-red-500/50 disabled:cursor-not-allowed transition-colors"
                 data-testid="validation-chip-error"
-                title="Pipeline has validation errors. Click a node to see details."
+                title={firstErrorNodeId ? "Click to jump to the first error node" : "Pipeline has validation errors"}
               >
                 <AlertTriangle className="w-3 h-3" />
                 {validationErrorCount} {validationErrorCount === 1 ? 'error' : 'errors'}
@@ -188,16 +197,22 @@ export default function BuilderTopBar({
                     {' '}+ {validationWarningCount} warn
                   </span>
                 )}
-              </span>
+                {firstErrorNodeId && <span className="text-red-300/70 text-[10px]">→</span>}
+              </button>
             )}
             {!isValidating && validationErrorCount === 0 && validationWarningCount > 0 && (
-              <span
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] rounded-md"
+              <button
+                type="button"
+                onClick={() => { if (firstWarningNodeId && onFocusErrorNode) onFocusErrorNode(firstWarningNodeId); }}
+                disabled={!firstWarningNodeId || !onFocusErrorNode}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] rounded-md hover:bg-amber-500/20 hover:border-amber-500/50 disabled:cursor-not-allowed transition-colors"
                 data-testid="validation-chip-warning"
+                title={firstWarningNodeId ? "Click to jump to the first warning node" : "Pipeline has validation warnings"}
               >
                 <AlertTriangle className="w-3 h-3" />
                 {validationWarningCount} {validationWarningCount === 1 ? 'warning' : 'warnings'}
-              </span>
+                {firstWarningNodeId && <span className="text-amber-300/70 text-[10px]">→</span>}
+              </button>
             )}
             {!isValidating && validationErrorCount === 0 && validationWarningCount === 0 && (
               <span

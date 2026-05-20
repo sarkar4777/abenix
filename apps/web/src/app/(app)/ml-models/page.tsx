@@ -1,14 +1,18 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   Brain, Upload, Trash2, Play, Loader2, CheckCircle2, AlertCircle,
   Cloud, Monitor, Copy, Server, ChevronDown, ChevronUp, Sparkles,
-  FileCode2, Database, Tag, Clock, Cpu,
+  FileCode2, Database, Tag, Clock, Cpu, Workflow, ArrowRight, Pencil,
+  Share2,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
+import { toastSuccess, toastError } from '@/stores/toastStore';
+import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import InvocationsTable from '@/components/observability/InvocationsTable';
 
 interface MLModel {
@@ -65,53 +69,144 @@ function defaultInputFor(m: MLModel | null): string {
 }
 
 export default function MLModelsPage() {
+  const router = useRouter();
   const { data: models, mutate } = useApi<MLModel[]>('/api/ml-models');
   const [selected, setSelected] = useState<MLModel | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [deploying, setDeploying] = useState(false);
   const [predicting, setPredicting] = useState(false);
   const [deployType, setDeployType] = useState<'local' | 'k8s'>('local');
+  const [deployReplicas, setDeployReplicas] = useState<number>(1);
+  const [deployPreset, setDeployPreset] = useState<'small' | 'medium' | 'large'>('medium');
   const [predInput, setPredInput] = useState('{"features": [5.1, 3.5, 1.4, 0.2]}');
   const [predResult, setPredResult] = useState('');
   const [uploadName, setUploadName] = useState('');
   const [uploadDesc, setUploadDesc] = useState('');
+  const [uploadInputSchema, setUploadInputSchema] = useState('');
+  const [uploadOutputSchema, setUploadOutputSchema] = useState('');
+  const [uploadSchemaError, setUploadSchemaError] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Edit-metadata panel state — populated when the user clicks Edit on the detail card.
+  const [editing, setEditing] = useState(false);
+  const [editDesc, setEditDesc] = useState('');
+  const [editInputSchema, setEditInputSchema] = useState('');
+  const [editOutputSchema, setEditOutputSchema] = useState('');
+  const [editError, setEditError] = useState('');
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+
   const refresh = () => mutate();
+
+  useEffect(() => {
+    if (selected) {
+      setEditDesc(selected.description || '');
+      setEditInputSchema(
+        selected.input_schema ? JSON.stringify(selected.input_schema, null, 2) : '',
+      );
+      setEditOutputSchema(
+        selected.output_schema ? JSON.stringify(selected.output_schema, null, 2) : '',
+      );
+      setEditError('');
+      setEditing(false);
+    }
+  }, [selected?.id]);
 
   const handleUpload = async () => {
     if (!uploadFile || !uploadName) return;
+    let inputSchemaParsed: any = undefined;
+    let outputSchemaParsed: any = undefined;
+    if (uploadInputSchema.trim()) {
+      try { inputSchemaParsed = JSON.parse(uploadInputSchema); }
+      catch (e: any) { setUploadSchemaError(`input_schema JSON: ${e.message}`); return; }
+    }
+    if (uploadOutputSchema.trim()) {
+      try { outputSchemaParsed = JSON.parse(uploadOutputSchema); }
+      catch (e: any) { setUploadSchemaError(`output_schema JSON: ${e.message}`); return; }
+    }
+    setUploadSchemaError('');
+    setUploadError('');
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append('file', uploadFile);
-      fd.append('metadata', JSON.stringify({
+      const meta: Record<string, unknown> = {
         name: uploadName,
         description: uploadDesc,
         tags: [],
-      }));
+      };
+      if (inputSchemaParsed !== undefined) meta.input_schema = inputSchemaParsed;
+      if (outputSchemaParsed !== undefined) meta.output_schema = outputSchemaParsed;
+      fd.append('metadata', JSON.stringify(meta));
       await apiFetch<any>('/api/ml-models', { method: 'POST', body: fd, headers: {} });
       setUploadName(''); setUploadDesc(''); setUploadFile(null);
+      setUploadInputSchema(''); setUploadOutputSchema('');
+      if (fileRef.current) fileRef.current.value = '';
+      toastSuccess('Model uploaded', `${uploadName} is being validated`);
       refresh();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      const msg = e?.message || 'Upload failed';
+      setUploadError(msg);
+      toastError('Upload failed', msg);
     }
     setUploading(false);
+  };
+
+  const handleSaveMeta = async () => {
+    if (!selected) return;
+    let inSchema: any = null;
+    let outSchema: any = null;
+    if (editInputSchema.trim()) {
+      try { inSchema = JSON.parse(editInputSchema); }
+      catch (e: any) { setEditError(`input_schema JSON: ${e.message}`); return; }
+    }
+    if (editOutputSchema.trim()) {
+      try { outSchema = JSON.parse(editOutputSchema); }
+      catch (e: any) { setEditError(`output_schema JSON: ${e.message}`); return; }
+    }
+    setEditError('');
+    setSavingMeta(true);
+    try {
+      const res = await apiFetch<MLModel>(`/api/ml-models/${selected.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          description: editDesc,
+          input_schema: inSchema,
+          output_schema: outSchema,
+        }),
+      });
+      if (res.data) setSelected(res.data);
+      toastSuccess('Saved', 'Model metadata updated');
+      setEditing(false);
+      refresh();
+    } catch (e: any) {
+      const msg = e?.message || 'Save failed';
+      setEditError(msg);
+      toastError('Save failed', msg);
+    }
+    setSavingMeta(false);
   };
 
   const handleDeploy = async (modelId: string) => {
     setDeploying(true);
     try {
+      const body: Record<string, unknown> = { deployment_type: deployType, replicas: deployReplicas };
+      if (deployType === 'k8s') body.resource_preset = deployPreset;
       await apiFetch<any>(`/api/ml-models/${modelId}/deploy`, {
         method: 'POST',
-        body: JSON.stringify({ deployment_type: deployType, replicas: 1 }),
+        body: JSON.stringify(body),
       });
+      const desc = deployType === 'k8s'
+        ? `Polling ${deployReplicas}-replica ${deployPreset} k8s endpoint…`
+        : 'In-process serving — ready immediately';
+      toastSuccess('Deployment started', desc);
       refresh();
       // Start polling deployment status until it's running or failed
       pollDeploymentStatus(modelId);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      toastError('Deploy failed', e?.message || 'Unknown error');
     }
     setDeploying(false);
   };
@@ -166,24 +261,49 @@ export default function MLModelsPage() {
 
   const handleDelete = async (modelId: string) => {
     if (!confirm('Delete this model?')) return;
-    await apiFetch<any>(`/api/ml-models/${modelId}`, { method: 'DELETE' });
-    setSelected(null);
-    refresh();
+    try {
+      await apiFetch<any>(`/api/ml-models/${modelId}`, { method: 'DELETE' });
+      toastSuccess('Model deleted');
+      setSelected(null);
+      refresh();
+    } catch (e: any) {
+      toastError('Delete failed', e?.message || 'Unknown error');
+    }
   };
 
   const handleUndeploy = async (modelId: string) => {
-    await apiFetch<any>(`/api/ml-models/${modelId}/undeploy`, { method: 'DELETE' });
-    refresh();
+    try {
+      await apiFetch<any>(`/api/ml-models/${modelId}/undeploy`, { method: 'DELETE' });
+      toastSuccess('Undeployed');
+      refresh();
+    } catch (e: any) {
+      toastError('Undeploy failed', e?.message || 'Unknown error');
+    }
   };
 
   const handleActivate = async (modelId: string) => {
-    await apiFetch<any>(`/api/ml-models/${modelId}/activate`, { method: 'POST', body: '{}' });
-    refresh();
+    try {
+      await apiFetch<any>(`/api/ml-models/${modelId}/activate`, { method: 'POST', body: '{}' });
+      toastSuccess('Activated', 'This version is now the default for agents');
+      refresh();
+    } catch (e: any) {
+      toastError('Activate failed', e?.message || 'Unknown error');
+    }
   };
 
   const handleDeactivate = async (modelId: string) => {
-    await apiFetch<any>(`/api/ml-models/${modelId}/deactivate`, { method: 'POST', body: '{}' });
-    refresh();
+    try {
+      await apiFetch<any>(`/api/ml-models/${modelId}/deactivate`, { method: 'POST', body: '{}' });
+      toastSuccess('Deactivated');
+      refresh();
+    } catch (e: any) {
+      toastError('Deactivate failed', e?.message || 'Unknown error');
+    }
+  };
+
+  const handleUseInAgent = () => {
+    if (!selected) return;
+    router.push(`/builder?tool=ml_model&model_name=${encodeURIComponent(selected.name)}`);
   };
 
   return (
@@ -228,6 +348,34 @@ export default function MLModelsPage() {
                     {uploadFile ? `📎 ${uploadFile.name}` : '📎 Choose model file (.pkl, .pt, .onnx...)'}
                   </button>
                 </div>
+                <details className="rounded-lg border border-slate-700/50 bg-slate-900/30">
+                  <summary className="cursor-pointer px-2.5 py-1.5 text-[11px] text-slate-400 hover:text-white select-none">
+                    Schemas (optional, recommended)
+                  </summary>
+                  <div className="p-2.5 space-y-2 border-t border-slate-700/50">
+                    <p className="text-[10px] text-slate-500 leading-snug">
+                      Agents introspect these to know what features to send. Skip and we'll try to infer from the model file, but explicit schemas are more reliable.
+                    </p>
+                    <div>
+                      <label className="text-[10px] text-slate-500 uppercase mb-1 block">input_schema</label>
+                      <textarea value={uploadInputSchema} onChange={e => { setUploadInputSchema(e.target.value); setUploadSchemaError(''); }}
+                        rows={4} placeholder='{"features": ["age","income","tenure"], "example": [35, 50000, 24]}'
+                        className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1.5 text-[10px] text-white font-mono placeholder-slate-600 focus:border-purple-500 focus:outline-none resize-y" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 uppercase mb-1 block">output_schema</label>
+                      <textarea value={uploadOutputSchema} onChange={e => { setUploadOutputSchema(e.target.value); setUploadSchemaError(''); }}
+                        rows={3} placeholder='{"type":"regression","returns":"posterior mean + std"}'
+                        className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1.5 text-[10px] text-white font-mono placeholder-slate-600 focus:border-purple-500 focus:outline-none resize-y" />
+                    </div>
+                  </div>
+                </details>
+                {uploadSchemaError && (
+                  <p className="text-[10px] text-red-300 flex items-start gap-1"><AlertCircle className="w-3 h-3 mt-0.5 shrink-0" /><span>{uploadSchemaError}</span></p>
+                )}
+                {uploadError && !uploadSchemaError && (
+                  <p className="text-[10px] text-red-300 flex items-start gap-1"><AlertCircle className="w-3 h-3 mt-0.5 shrink-0" /><span>{uploadError}</span></p>
+                )}
                 <button onClick={handleUpload} disabled={uploading || !uploadFile || !uploadName}
                   className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-600 text-white text-xs font-semibold disabled:opacity-30 flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-purple-500/20 transition-all">
                   {uploading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading...</> : <><Upload className="w-3.5 h-3.5" /> Upload & Validate</>}
@@ -295,7 +443,22 @@ export default function MLModelsPage() {
                       </h2>
                       {selected.description && <p className="text-xs text-slate-400 mt-1">{selected.description}</p>}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={handleUseInAgent}
+                        className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs hover:bg-cyan-500/20 transition-colors flex items-center gap-1"
+                        data-testid="ml-use-in-agent">
+                        <Workflow className="w-3 h-3" /> Use in Agent <ArrowRight className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => setEditing(v => !v)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-700/30 border border-slate-600/40 text-slate-300 text-xs hover:bg-slate-700/50 hover:text-white transition-colors flex items-center gap-1"
+                        data-testid="ml-edit-metadata">
+                        <Pencil className="w-3 h-3" /> {editing ? 'Cancel' : 'Edit metadata'}
+                      </button>
+                      <button onClick={() => setShowShare(true)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-700/30 border border-slate-600/40 text-slate-300 text-xs hover:bg-slate-700/50 hover:text-white transition-colors flex items-center gap-1"
+                        data-testid="ml-share">
+                        <Share2 className="w-3 h-3" /> Share
+                      </button>
                       {selected.is_active ? (
                         <button onClick={() => handleDeactivate(selected.id)}
                           className="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors">
@@ -338,6 +501,42 @@ export default function MLModelsPage() {
                   )}
                 </div>
 
+                {/* Edit metadata panel — collapsed unless "Edit metadata" is clicked */}
+                {editing && (
+                  <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 space-y-3" data-testid="ml-edit-panel">
+                    <h3 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                      <Pencil className="w-3.5 h-3.5 text-cyan-400" /> Edit metadata
+                    </h3>
+                    <div>
+                      <label className="text-[10px] text-slate-500 uppercase mb-1 block">Description</label>
+                      <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={2}
+                        className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none resize-y" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] text-slate-500 uppercase mb-1 block">input_schema (JSON)</label>
+                        <textarea value={editInputSchema} onChange={e => { setEditInputSchema(e.target.value); setEditError(''); }}
+                          rows={6}
+                          className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1.5 text-[10px] text-white font-mono placeholder-slate-600 focus:border-cyan-500 focus:outline-none resize-y" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-500 uppercase mb-1 block">output_schema (JSON)</label>
+                        <textarea value={editOutputSchema} onChange={e => { setEditOutputSchema(e.target.value); setEditError(''); }}
+                          rows={6}
+                          className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1.5 text-[10px] text-white font-mono placeholder-slate-600 focus:border-cyan-500 focus:outline-none resize-y" />
+                      </div>
+                    </div>
+                    {editError && (
+                      <p className="text-[10px] text-red-300 flex items-start gap-1"><AlertCircle className="w-3 h-3 mt-0.5 shrink-0" /><span>{editError}</span></p>
+                    )}
+                    <button onClick={handleSaveMeta} disabled={savingMeta}
+                      className="px-4 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-semibold disabled:opacity-30 flex items-center gap-2 hover:bg-cyan-500/20 transition-colors"
+                      data-testid="ml-save-metadata">
+                      {savingMeta ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...</> : <>Save metadata</>}
+                    </button>
+                  </div>
+                )}
+
                 {/* Deploy */}
                 {selected.status === 'ready' && (
                   <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
@@ -346,14 +545,40 @@ export default function MLModelsPage() {
                     </h3>
                     <div className="flex items-center gap-3 mb-3">
                       <button onClick={() => setDeployType('local')}
-                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors ${deployType === 'local' ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300' : 'bg-slate-900/30 border border-slate-700 text-slate-400'}`}>
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors ${deployType === 'local' ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300' : 'bg-slate-900/30 border border-slate-700 text-slate-400'}`}
+                        data-testid="deploy-type-local">
                         <Monitor className="w-3.5 h-3.5" /> Local (in-process)
                       </button>
                       <button onClick={() => setDeployType('k8s')}
-                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors ${deployType === 'k8s' ? 'bg-blue-500/10 border border-blue-500/30 text-blue-300' : 'bg-slate-900/30 border border-slate-700 text-slate-400'}`}>
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors ${deployType === 'k8s' ? 'bg-blue-500/10 border border-blue-500/30 text-blue-300' : 'bg-slate-900/30 border border-slate-700 text-slate-400'}`}
+                        data-testid="deploy-type-k8s">
                         <Cloud className="w-3.5 h-3.5" /> Kubernetes Pod
                       </button>
                     </div>
+                    {deployType === 'k8s' && (
+                      <div className="mb-3 grid grid-cols-2 gap-3 rounded-lg bg-slate-900/40 border border-slate-700/40 p-3" data-testid="k8s-deploy-config">
+                        <div>
+                          <label className="text-[10px] text-slate-500 uppercase mb-1 block">Replicas</label>
+                          <input type="number" min={1} max={10} value={deployReplicas}
+                            onChange={e => setDeployReplicas(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                            className="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:border-blue-500 focus:outline-none"
+                            data-testid="deploy-replicas-input" />
+                          <p className="text-[9px] text-slate-600 mt-1">1–10. Each replica is an independent pod.</p>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-500 uppercase mb-1 block">Resource preset</label>
+                          <select value={deployPreset}
+                            onChange={e => setDeployPreset(e.target.value as 'small' | 'medium' | 'large')}
+                            className="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:border-blue-500 focus:outline-none"
+                            data-testid="deploy-preset-select">
+                            <option value="small">Small — 100m / 256Mi · 500m / 1Gi cap</option>
+                            <option value="medium">Medium — 250m / 512Mi · 1 / 2Gi cap</option>
+                            <option value="large">Large — 500m / 1Gi · 2 / 4Gi cap</option>
+                          </select>
+                          <p className="text-[9px] text-slate-600 mt-1">CPU & memory request / limit per pod.</p>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       <button onClick={() => handleDeploy(selected.id)} disabled={deploying}
                         className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-600 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-2 hover:shadow-lg hover:shadow-emerald-500/20 transition-all">
@@ -435,6 +660,15 @@ export default function MLModelsPage() {
           </div>
         </div>
       </div>
+      {selected && (
+        <ResourceShareDialog
+          open={showShare}
+          onClose={() => setShowShare(false)}
+          resourceType="ml_model"
+          resourceId={selected.id}
+          resourceName={`${selected.name} v${selected.version}`}
+        />
+      )}
     </div>
   );
 }

@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from models.ml_model import (
@@ -124,6 +124,17 @@ async def _ensure_for_tenant(
         # copy calls chmod via copymode. Only copyfile skips both.
         # Default share permissions are fine for the runtime to read.
         shutil.copyfile(pkl_path, dest)
+
+        # deactivate prior versions of the same name before inserting
+        await db.execute(
+            update(MLModel)
+            .where(
+                MLModel.tenant_id == tenant.id,
+                MLModel.name == model_name,
+                MLModel.is_active.is_(True),
+            )
+            .values(is_active=False)
+        )
 
         m = MLModel(
             tenant_id=tenant.id,

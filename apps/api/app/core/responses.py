@@ -12,8 +12,18 @@ def success(
     )
 
 
-def error(message: str, code: int = 400) -> JSONResponse:
+def error(
+    message: str,
+    code: int = 400,
+    error_code: str | None = None,
+    details: dict | None = None,
+) -> JSONResponse:
+    payload: dict[str, Any] = {"message": message, "code": code}
+    if error_code:
+        payload["error_code"] = error_code
+    if details:
+        payload["details"] = details
     return JSONResponse(
         status_code=code,
-        content={"data": None, "error": {"message": message, "code": code}},
+        content={"data": None, "error": payload},
     )

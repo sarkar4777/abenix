@@ -397,6 +397,45 @@ async def get_model(
     return success(await _serialize_with_deployments(model, db))
 
 
+@router.put("/{model_id}")
+async def update_model_metadata(
+    model_id: uuid.UUID,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Update description / input_schema / output_schema / tags on a model."""
+    result = await db.execute(
+        select(MLModel).where(
+            MLModel.id == model_id,
+            MLModel.tenant_id == user.tenant_id,
+        )
+    )
+    model = result.scalar_one_or_none()
+    if not model:
+        return error("Model not found", 404)
+    if "description" in body:
+        model.description = (body.get("description") or "")[:2000]
+    if "input_schema" in body:
+        schema = body.get("input_schema")
+        if schema is not None and not isinstance(schema, dict):
+            return error("input_schema must be a JSON object or null", 400)
+        model.input_schema = schema
+    if "output_schema" in body:
+        schema = body.get("output_schema")
+        if schema is not None and not isinstance(schema, dict):
+            return error("output_schema must be a JSON object or null", 400)
+        model.output_schema = schema
+    if "tags" in body:
+        tags = body.get("tags")
+        if not isinstance(tags, list):
+            return error("tags must be a list of strings", 400)
+        model.tags = [str(t) for t in tags][:32]
+    await db.commit()
+    await db.refresh(model)
+    return success(await _serialize_with_deployments(model, db))
+
+
 @router.delete("/{model_id}")
 async def delete_model(
     model_id: uuid.UUID,
@@ -446,6 +485,42 @@ async def deploy_model(
 
     dep_type = body.get("deployment_type", "local")
     replicas = int(body.get("replicas", 1))
+    if replicas < 1 or replicas > 10:
+        return error(
+            "replicas must be between 1 and 10",
+            400,
+            error_code="INVALID_REPLICAS",
+            details={"received": replicas},
+        )
+    _RESOURCE_PRESETS = {
+        "small": {
+            "req_cpu": "100m",
+            "req_mem": "256Mi",
+            "lim_cpu": "500m",
+            "lim_mem": "1Gi",
+        },
+        "medium": {
+            "req_cpu": "250m",
+            "req_mem": "512Mi",
+            "lim_cpu": "1",
+            "lim_mem": "2Gi",
+        },
+        "large": {
+            "req_cpu": "500m",
+            "req_mem": "1Gi",
+            "lim_cpu": "2",
+            "lim_mem": "4Gi",
+        },
+    }
+    preset_name = (body.get("resource_preset") or "medium").lower()
+    if preset_name not in _RESOURCE_PRESETS:
+        return error(
+            f"resource_preset must be one of {list(_RESOURCE_PRESETS)}",
+            400,
+            error_code="INVALID_RESOURCE_PRESET",
+            details={"received": preset_name},
+        )
+    preset = _RESOURCE_PRESETS[preset_name]
 
     try:
         dtype = DeploymentType(dep_type)
@@ -543,8 +618,8 @@ async def deploy_model(
                     ),
                 ],
                 resources=client.V1ResourceRequirements(
-                    requests={"cpu": "250m", "memory": "512Mi"},
-                    limits={"cpu": "1", "memory": "2Gi"},
+                    requests={"cpu": preset["req_cpu"], "memory": preset["req_mem"]},
+                    limits={"cpu": preset["lim_cpu"], "memory": preset["lim_mem"]},
                 ),
             )
 

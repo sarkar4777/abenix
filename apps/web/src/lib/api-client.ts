@@ -27,15 +27,37 @@ function getRefreshToken(): string | null {
   return localStorage.getItem('refresh_token');
 }
 
+export interface ApiErrorDetail {
+  message: string;
+  code: number;
+  error_code?: string;
+  details?: Record<string, unknown>;
+}
+
 interface ApiResponse<T> {
   data: T | null;
   error: string | null;
+  errorDetail?: ApiErrorDetail | null;
   meta: Record<string, unknown> | null;
 }
 
 interface FetchOptions extends Omit<RequestInit, 'headers'> {
   headers?: Record<string, string>;
-  silent?: boolean; // suppress toast notifications
+  silent?: boolean;
+  throwOnError?: boolean;
+}
+
+export class ApiError extends Error {
+  status: number;
+  errorCode?: string;
+  details?: Record<string, unknown>;
+  constructor(detail: ApiErrorDetail) {
+    super(detail.message);
+    this.name = 'ApiError';
+    this.status = detail.code;
+    this.errorCode = detail.error_code;
+    this.details = detail.details;
+  }
 }
 
 let isRefreshing = false;
@@ -79,11 +101,16 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 export async function apiFetch<T = unknown>(
   path: string,
   options: FetchOptions = {},
 ): Promise<ApiResponse<T>> {
-  const { silent, ...fetchOpts } = options;
+  const { silent, throwOnError, ...fetchOpts } = options;
+  const shouldThrow = throwOnError ?? MUTATION_METHODS.has(
+    String(fetchOpts.method || 'GET').toUpperCase()
+  );
   const token = getToken();
   const headers: Record<string, string> = { ...fetchOpts.headers };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -91,54 +118,73 @@ export async function apiFetch<T = unknown>(
     headers['Content-Type'] = 'application/json';
   }
 
+  let res: Response;
   try {
-    let res = await fetch(`${API_URL}${path}`, { ...fetchOpts, headers });
-
-    // Auto-refresh on 401
-    if (res.status === 401 && token) {
-      const newToken = await refreshAccessToken();
-      if (newToken) {
-        headers['Authorization'] = `Bearer ${newToken}`;
-        res = await fetch(`${API_URL}${path}`, { ...fetchOpts, headers });
-      } else {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        if (typeof window !== 'undefined') {
-          window.location.href = '/login';
-        }
-        return { data: null, error: 'Session expired', meta: null };
-      }
-    }
-
-    const json = await res.json();
-
-    // Handle rate limiting
-    if (res.status === 429) {
-      const retryAfter = res.headers.get('Retry-After');
-      const msg = retryAfter
-        ? `Rate limited. Try again in ${retryAfter}s.`
-        : 'Too many requests. Please slow down.';
-      if (!silent) emitToast(msg, 'warning');
-      return { data: null, error: msg, meta: null };
-    }
-
-    // Handle server errors
-    if (res.status >= 500) {
-      const msg = json.error?.message || `Server error (${res.status})`;
-      if (!silent) emitToast(msg, 'error');
-      return { data: null, error: msg, meta: null };
-    }
-
-    return {
-      data: json.data ?? null,
-      error: json.error?.message ?? json.error ?? (res.ok ? null : `HTTP ${res.status}`),
-      meta: json.meta ?? null,
-    };
+    res = await fetch(`${API_URL}${path}`, { ...fetchOpts, headers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Network error';
     if (!silent) emitToast(`Connection failed: ${msg}`, 'error');
-    return { data: null, error: msg, meta: null };
+    const detail: ApiErrorDetail = { message: msg, code: 0, error_code: 'NETWORK_ERROR' };
+    if (shouldThrow) throw new ApiError(detail);
+    return { data: null, error: msg, errorDetail: detail, meta: null };
   }
+
+  // Auto-refresh on 401
+  if (res.status === 401 && token) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      headers['Authorization'] = `Bearer ${newToken}`;
+      res = await fetch(`${API_URL}${path}`, { ...fetchOpts, headers });
+    } else {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
+      const detail: ApiErrorDetail = { message: 'Session expired', code: 401, error_code: 'SESSION_EXPIRED' };
+      if (shouldThrow) throw new ApiError(detail);
+      return { data: null, error: 'Session expired', errorDetail: detail, meta: null };
+    }
+  }
+
+  let json: any = {};
+  try { json = await res.json(); } catch { /* non-JSON 204 etc. */ }
+
+  // Rate limit
+  if (res.status === 429) {
+    const retryAfter = res.headers.get('Retry-After');
+    const msg = retryAfter
+      ? `Rate limited. Try again in ${retryAfter}s.`
+      : 'Too many requests. Please slow down.';
+    if (!silent) emitToast(msg, 'warning');
+    const detail: ApiErrorDetail = { message: msg, code: 429, error_code: 'RATE_LIMITED' };
+    if (shouldThrow) throw new ApiError(detail);
+    return { data: null, error: msg, errorDetail: detail, meta: null };
+  }
+
+  // Non-2xx — structured envelope if backend supplied one, else synthesise.
+  if (!res.ok) {
+    const errObj = (json && typeof json.error === 'object' && json.error) ? json.error : null;
+    const msg = (errObj?.message as string)
+      || (typeof json?.error === 'string' ? json.error : null)
+      || `Server error (${res.status})`;
+    const detail: ApiErrorDetail = {
+      message: msg,
+      code: errObj?.code ?? res.status,
+      error_code: errObj?.error_code,
+      details: errObj?.details,
+    };
+    if (res.status >= 500 && !silent) emitToast(msg, 'error');
+    if (shouldThrow) throw new ApiError(detail);
+    return { data: null, error: msg, errorDetail: detail, meta: null };
+  }
+
+  return {
+    data: json.data ?? null,
+    error: null,
+    errorDetail: null,
+    meta: json.meta ?? null,
+  };
 }
 
 export { API_URL };

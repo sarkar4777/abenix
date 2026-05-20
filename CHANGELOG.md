@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.5.3 — 2026-05-20
+
+### Added
+- e2e/uat_audit_fixes.spec.ts: 12 Playwright specs covering every audit-remediation surface (CTAs, schema editors, deep-link, k8s deploy config, share dialog open paths, pipeline-error focus, etc.). Run with USE_K8S=true BASE=… API=… npx playwright test e2e/uat_audit_fixes.spec.ts.
+- ResourceShareDialog component generalises the agent-only Share UI to ml_model / code_asset / knowledge_base via the polymorphic /api/me/shares endpoint; new GET /api/me/shares/of/{type}/{id} returns the live share list. Share buttons added on ML Models, Code Runner, and Knowledge Bases detail pages.
+
+### Changed
+- Pass 2: Approvals payload renders as a readable key/value grid (nested objects + arrays included) instead of a raw JSON blob; 'Show raw JSON' toggle keeps the full payload one click away for power users.
+- Pass 2: Knowledge Bases DropZone accepts multiple files at once with serial upload + progress bar + per-file failure list; <input multiple> exposes the same behaviour to the OS file picker.
+- Pass 2: ML Models k8s deploy panel exposes replicas (1-10) + small/medium/large resource preset; backend maps presets to cpu/mem request+limit pairs.
+- Pass 2: backend error() helper takes optional error_code + details; global HTTPException + RequestValidationError handlers route every non-2xx through the same envelope; apiFetch throws ApiError on mutating non-2xx and surfaces errorDetail (stable codes for NETWORK_ERROR, RATE_LIMITED, SESSION_EXPIRED, VALIDATION_ERROR, INVALID_REPLICAS, INVALID_RESOURCE_PRESET).
+- Pass 1: seed_ml_models.py deactivates prior versions of the same name so the ACTIVE badge tracks the latest seeded version; BuilderTopBar pipeline-validation chip is now a clickable button that fitView's the first error node.
+- Pass 1: Use-in-Agent CTAs (ml_model/code_asset) + builder deep-link with parameter_defaults pre-fill; ML Models upload form gains optional input_schema/output_schema editor + Edit-metadata panel via new PUT /api/ml-models/{id}; Code Runner schema editors lint inline on blur (no more alert).
+
+### Fixed
+
 ## v1.5.2 — 2026-05-20
 
 ### Added
