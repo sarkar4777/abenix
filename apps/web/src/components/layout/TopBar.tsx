@@ -402,9 +402,7 @@ export default function TopBar() {
 
               <div className="border-t border-slate-700/50 p-2">
                 <a
-                  href="/docs"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href="/dev-docs"
                   onClick={() => setUseCasesOpen(false)}
                   className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-700/30 transition-colors"
                 >

@@ -10,7 +10,7 @@ import {
 const navLinks = [
   { label: 'Capabilities', icon: Boxes, href: '#features' },
   { label: 'How it works', icon: Hammer, href: '#how-it-works' },
-  { label: 'Docs', icon: Book, href: '/docs' },
+  { label: 'Docs', icon: Book, href: '/dev-docs' },
 ];
 
 export default function Navbar() {

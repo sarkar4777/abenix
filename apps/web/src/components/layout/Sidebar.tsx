@@ -165,7 +165,6 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Settings',       icon: Settings,   href: '/settings' },
       { label: 'Help',           icon: HelpCircle, href: '/help' },
       { label: 'Developer docs', icon: Book,       href: '/dev-docs' },
-      { label: 'Docs',           icon: BookOpen, href: '/docs', external: true, badge: 'new' },
     ],
   },
 ];

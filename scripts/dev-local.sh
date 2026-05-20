@@ -150,6 +150,8 @@ kill_processes() {
   kill_port 3003 "Industrial-IoT Web"
   kill_port 8004 "ResolveAI API"
   kill_port 3004 "ResolveAI Web"
+  kill_port 8006 "Wingman API"
+  kill_port 3006 "Wingman Web"
 
   # Kill celery and orphaned python processes (including the Wave-2
   # NATS consumer we launched as `python consumer.py`).
@@ -634,6 +636,7 @@ WANT = {
     'INDUSTRIALIOT_ABENIX_API_KEY':'standalone-industrial-iot',
     'RESOLVEAI_ABENIX_API_KEY':    'standalone-resolveai',
     'CLAIMSIQ_ABENIX_API_KEY':     'standalone-claimsiq',
+    'WINGMAN_ABENIX_API_KEY':      'standalone-wingman',
 }
 
 async def run():
@@ -725,13 +728,20 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   # ── Step 12: Start ClaimsIQ standalone application (Java) ───
   if [ -f "$ROOT_DIR/claimsiq/start.sh" ]; then
     echo ""
-    log "Step 12/12 — Starting ClaimsIQ (Spring Boot + Vaadin, Java)…"
+    log "Step 12/13 — Starting ClaimsIQ (Spring Boot + Vaadin, Java)…"
     bash "$ROOT_DIR/claimsiq/start.sh" || warn "ClaimsIQ failed to start (non-fatal — needs Java 21 + Gradle)"
+  fi
+
+  # ── Step 13: Start Wingman standalone application ───────────
+  if [ -f "$ROOT_DIR/wingman/start.sh" ]; then
+    echo ""
+    log "Step 13/13 — Starting Wingman (energy commodity trading)…"
+    bash "$ROOT_DIR/wingman/start.sh" || warn "Wingman failed to start (non-fatal)"
   fi
 
   echo ""
   echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}  All apps running: core + 5 standalones${NC}"
+  echo -e "${GREEN}  All apps running: core + 6 standalones${NC}"
   echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
   echo ""
   echo -e "  ${CYAN}Abenix App${NC}     http://localhost:3000"
@@ -740,11 +750,13 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   echo -e "  ${CYAN}Industrial IoT${NC}     http://localhost:3003"
   echo -e "  ${CYAN}ResolveAI${NC}          http://localhost:3004  (customer-service agents)"
   echo -e "  ${CYAN}ClaimsIQ${NC}           http://localhost:3005  (insurance FNOL, Java + Vaadin)"
+  echo -e "  ${CYAN}Wingman${NC}            http://localhost:3006  (energy commodity trading)"
   echo -e "  ${CYAN}Abenix API${NC}     http://localhost:8000"
   echo -e "  ${CYAN}the example app API${NC}     http://localhost:8001"
   echo -e "  ${CYAN}Saudi Tourism API${NC}  http://localhost:8002"
   echo -e "  ${CYAN}Industrial-IoT API${NC} http://localhost:8003"
   echo -e "  ${CYAN}ResolveAI API${NC}      http://localhost:8004"
+  echo -e "  ${CYAN}Wingman API${NC}        http://localhost:8006"
   echo -e "  ${CYAN}API Docs${NC}           http://localhost:8000/docs"
   echo -e "  ${CYAN}Neo4j Browser${NC}      http://localhost:7474"
   echo ""

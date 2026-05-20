@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.6.0 — 2026-05-20
+
+### Added
+
+- Developer documentation deep-dive — four new runtime docs (agent-to-agent communication, pipeline data flow + template scoping, queues + KEDA tuning, state machines) and a 45-pattern architectural reference.
+- New "Building apps on Abenix" section. Frames the SDK + actAs contract for third-party apps that live outside this monorepo and own their own deploy.
+- `wingman/start.sh` and integration into `scripts/dev-local.sh` so developers can bring up the full platform locally including Wingman (api on :8006, web on :3006) with one command.
+
+### Changed
+
+- Rewrote `01-architecture/01-tenants-rbac.md` to cover the actAs delegation chain in depth — SubjectPolicy table semantics, the `can_delegate` scope, the no-re-delegation constraint, dual attribution in audit logs, share expiry and revocation.
+- Repointed the in-app Navbar / Sidebar / TopBar links from the legacy `/docs` page to the new `/dev-docs` developer site.
+- `scripts/dev-local.sh` now mints `WINGMAN_ABENIX_API_KEY` through the same idempotent standalone-key reconciler used for the other vertical apps.
+
+### Fixed
+
+- E2E `uat_wingman_mispricing.spec.ts` asserts the renamed `Propane Price at Risk` heading via `getByRole` instead of the stale text matcher that broke after the rename.
+
+### Removed
+
+- Old `/docs` page (4054-line user+dev mashup). User-facing docs live at `/help`, developer docs at `/dev-docs`.
+
 ## v1.5.6 — 2026-05-20
 
 ### Added

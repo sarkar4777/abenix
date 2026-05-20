@@ -17,6 +17,10 @@ These docs are written to be read **two ways**: on GitHub (the markdown renders 
 | **An SDK consumer** integrating from outside | [03-sdk/00-overview](03-sdk/00-overview.md) |
 | **A product engineer** building a vertical app on top | [07-standalone-apps/00-pattern](07-standalone-apps/00-pattern.md) |
 | **A debugger** trying to chase a bad scan / failed pipeline / silent agent | [08-howto/04-debugging](08-howto/04-debugging.md) |
+| **You want the deep version** — every recurring pattern in one page | [01-architecture/05-architectural-patterns](01-architecture/05-architectural-patterns.md) |
+| **You're orchestrating multiple agents** | [02-runtime/06-agent-to-agent](02-runtime/06-agent-to-agent.md) |
+| **You're tuning scaling / queue depth / KEDA** | [02-runtime/08-queue-scaling](02-runtime/08-queue-scaling.md) |
+| **You're debugging a stuck execution / pending approval** | [02-runtime/09-state-machines](02-runtime/09-state-machines.md) |
 
 ---
 
@@ -26,13 +30,14 @@ These docs are written to be read **two ways**: on GitHub (the markdown renders 
 The big picture — what services exist, how they communicate, what guarantees they offer.
 
 - [00 — System overview](01-architecture/00-overview.md)
-- [01 — Tenant model + RBAC + resource sharing](01-architecture/01-tenants-rbac.md)
+- [01 — Tenants, RBAC, the actAs delegation chain](01-architecture/01-tenants-rbac.md)
 - [02 — Request lifecycle (web → api → agent-runtime → tool → response)](01-architecture/02-request-lifecycle.md)
 - [03 — Service inventory (api, web, worker, agent-runtime, edge, standalone apps)](01-architecture/03-services.md)
 - [04 — Data stores (Postgres, Neo4j, Redis, S3, Kafka, NATS)](01-architecture/04-data-stores.md)
+- [05 — Architectural patterns reference (45 patterns)](01-architecture/05-architectural-patterns.md)
 
 ### 2. Runtime
-How an agent runs end-to-end, what a tool is, how pipelines work.
+How an agent runs end-to-end, what a tool is, how pipelines work, how agents talk to each other, how state machines move.
 
 - [00 — Agent execution loop](02-runtime/00-agent-execution.md)
 - [01 — Pipelines + the DAG engine](02-runtime/01-pipelines.md)
@@ -40,6 +45,10 @@ How an agent runs end-to-end, what a tool is, how pipelines work.
 - [03 — MCP server integration](02-runtime/03-mcp.md)
 - [04 — Streaming events + OpenTelemetry tracing](02-runtime/04-streaming-tracing.md)
 - [05 — Approvals / HITL gates](02-runtime/05-approvals-hitl.md)
+- [06 — Agent-to-agent communication (`invoke_agent` + root channels)](02-runtime/06-agent-to-agent.md)
+- [07 — Pipeline data flow + template scoping](02-runtime/07-pipeline-data-flow.md)
+- [08 — Queues, pools, and KEDA autoscaling](02-runtime/08-queue-scaling.md)
+- [09 — State machines (executions, approvals, pipelines, idempotency)](02-runtime/09-state-machines.md)
 
 ### 3. SDK
 The polyglot client surface — how external apps and standalone verticals talk to the platform.
@@ -75,13 +84,13 @@ From `git clone` to a running cluster.
 - [03 — Autoscaling with KEDA](06-deployment/03-keda.md)
 - [04 — Observability stack (Prometheus, Grafana, Tempo)](06-deployment/04-observability.md)
 
-### 7. Standalone apps
-The thin-app pattern + the vertical apps that ride on top of the platform.
+### 7. Building apps on Abenix
+How a third party builds a vertical app that uses Abenix as a remote platform. Includes references for the six example apps in this monorepo.
 
-- [00 — The thin-app pattern](07-standalone-apps/00-pattern.md)
-- [01 — Wingman (energy trading)](07-standalone-apps/01-wingman.md)
-- [02 — the example app (contract intelligence)](07-standalone-apps/02-example_app.md)
-- [03 — Saudi Tourism, ResolveAI, ClaimsIQ, Industrial-IoT](07-standalone-apps/03-others.md)
+- [00 — Building an app on top of Abenix (read this first)](07-standalone-apps/00-pattern.md)
+- [01 — Wingman (reference: energy trading)](07-standalone-apps/01-wingman.md)
+- [02 — the example app (reference: contract intelligence)](07-standalone-apps/02-example_app.md)
+- [03 — Saudi Tourism, ResolveAI, ClaimsIQ, Industrial-IoT (reference)](07-standalone-apps/03-others.md)
 
 ### 8. How-to (walkthroughs)
 Concrete step-by-step guides for the most common developer tasks.
