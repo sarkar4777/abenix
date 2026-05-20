@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.5.4 — 2026-05-20
+
+### Added
+- e2e/uat_audit_fixes.spec.ts now has 16 specs across CRITICAL/HIGH/polish bands; 12/12 testable pass against the deployed cluster, 4 conditional skips for missing fixtures (no KB documents, no pending approval, no broken pipeline).
+
+### Changed
+- Pass 3: Approvals expiry chip ticks live via a new useLiveClock hook; when remaining < 60s it switches to second-granularity so a reviewer can watch the gate close in real time.
+- Pass 3: Code Runner zip + git source inputs are mutually exclusive — filling one grays + disables the other so the precedence ambiguity from the audit goes away.
+- Pass 3: Cluster Health drops the localhost:3010 Grafana fallback. Link prefers summary.grafana_url from the backend, then NEXT_PUBLIC_GRAFANA_URL, then nothing — no more dead-end localhost button on remote deploys. Node rows now surface the 'error' string (DiskPressure, MemoryPressure, etc.) as a red sub-row beneath the affected node.
+- Pass 3 polish: disabled-button affordances bumped from opacity-30 to opacity-50 + cursor-not-allowed on ML Models + Code Runner; slate-500 secondary body text lifted to slate-400 on the audit hot-paths so small text clears WCAG AA contrast on the slate-900 background.
+
+### Fixed
+
 ## v1.5.3 — 2026-05-20
 
 ### Added

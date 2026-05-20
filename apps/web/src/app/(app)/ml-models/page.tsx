@@ -353,7 +353,7 @@ export default function MLModelsPage() {
                     Schemas (optional, recommended)
                   </summary>
                   <div className="p-2.5 space-y-2 border-t border-slate-700/50">
-                    <p className="text-[10px] text-slate-500 leading-snug">
+                    <p className="text-[10px] text-slate-400 leading-snug">
                       Agents introspect these to know what features to send. Skip and we'll try to infer from the model file, but explicit schemas are more reliable.
                     </p>
                     <div>
@@ -377,7 +377,7 @@ export default function MLModelsPage() {
                   <p className="text-[10px] text-red-300 flex items-start gap-1"><AlertCircle className="w-3 h-3 mt-0.5 shrink-0" /><span>{uploadError}</span></p>
                 )}
                 <button onClick={handleUpload} disabled={uploading || !uploadFile || !uploadName}
-                  className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-600 text-white text-xs font-semibold disabled:opacity-30 flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-purple-500/20 transition-all">
+                  className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-600 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-purple-500/20 transition-all">
                   {uploading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading...</> : <><Upload className="w-3.5 h-3.5" /> Upload & Validate</>}
                 </button>
               </div>
@@ -405,7 +405,7 @@ export default function MLModelsPage() {
                         </span>
                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${st.text} ${st.bg}`}>{m.status}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                      <div className="flex items-center gap-2 text-[10px] text-slate-400">
                         <span>v{m.version}</span>
                         <span>·</span>
                         <span>{m.framework}</span>
@@ -530,7 +530,7 @@ export default function MLModelsPage() {
                       <p className="text-[10px] text-red-300 flex items-start gap-1"><AlertCircle className="w-3 h-3 mt-0.5 shrink-0" /><span>{editError}</span></p>
                     )}
                     <button onClick={handleSaveMeta} disabled={savingMeta}
-                      className="px-4 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-semibold disabled:opacity-30 flex items-center gap-2 hover:bg-cyan-500/20 transition-colors"
+                      className="px-4 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 hover:bg-cyan-500/20 transition-colors"
                       data-testid="ml-save-metadata">
                       {savingMeta ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...</> : <>Save metadata</>}
                     </button>
@@ -618,14 +618,14 @@ export default function MLModelsPage() {
                     className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-slate-500 focus:border-emerald-500 focus:outline-none resize-none mb-2" />
                   {selected.input_schema?.features && Array.isArray(selected.input_schema.features) && (
                     <div className="mb-2 flex flex-wrap gap-1">
-                      <span className="text-[10px] text-slate-500 mr-1">expected ({selected.input_schema.features.length}):</span>
+                      <span className="text-[10px] text-slate-400 mr-1">expected ({selected.input_schema.features.length}):</span>
                       {selected.input_schema.features.map((f: string) => (
                         <span key={f} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-300 border border-slate-700/50">{f}</span>
                       ))}
                     </div>
                   )}
                   <button onClick={() => handlePredict(selected.id)} disabled={predicting || selected.status !== 'ready'}
-                    className="px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold disabled:opacity-30 flex items-center gap-2 hover:bg-emerald-500/20 transition-colors">
+                    className="px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 hover:bg-emerald-500/20 transition-colors">
                     {predicting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Predicting...</> : <><Play className="w-3.5 h-3.5" /> Run Prediction</>}
                   </button>
                   {predResult && (

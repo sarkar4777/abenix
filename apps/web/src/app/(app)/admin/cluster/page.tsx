@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Server, Cpu, HardDrive, Database, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 
-const GRAFANA = (process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3010').replace(/\/$/, '');
+const GRAFANA_ENV = (process.env.NEXT_PUBLIC_GRAFANA_URL || '').replace(/\/$/, '');
 
 interface Node {
   name?: string;
@@ -91,12 +91,17 @@ export default function ClusterHealthPage() {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </button>
-          {GRAFANA && (
-            <a href={`${GRAFANA}/?orgId=1`} target="_blank" rel="noreferrer"
-               className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20">
-              Open Grafana <ExternalLink className="w-3 h-3" />
-            </a>
-          )}
+          {(() => {
+            const grafana = (data?.grafana_url || GRAFANA_ENV || '').replace(/\/$/, '');
+            if (!grafana) return null;
+            return (
+              <a href={`${grafana}/?orgId=1`} target="_blank" rel="noreferrer"
+                 className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20"
+                 data-testid="cluster-grafana-link">
+                Open Grafana <ExternalLink className="w-3 h-3" />
+              </a>
+            );
+          })()}
         </div>
       </header>
 
@@ -155,20 +160,32 @@ export default function ClusterHealthPage() {
                 const memCap = n.mem_bytes || 0;
                 const memAlloc = n.mem_allocatable_bytes || 0;
                 return (
-                  <tr key={n.name} className="border-t border-slate-800/60">
-                    <td className="px-3 py-2 text-slate-300">
-                      <span className="inline-flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${n.ready ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                        {n.name}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 w-1/3 text-slate-400">
-                      {cap.toFixed(0)} cores total · {alloc.toFixed(2)} allocatable
-                    </td>
-                    <td className="px-3 py-2 w-1/3 text-slate-400" colSpan={2}>
-                      {fmtBytes(memCap)} total · {fmtBytes(memAlloc)} allocatable · {n.pods_capacity ?? 0} pod slots
-                    </td>
-                  </tr>
+                  <>
+                    <tr key={n.name} className="border-t border-slate-800/60">
+                      <td className="px-3 py-2 text-slate-300">
+                        <span className="inline-flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${n.ready ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                          {n.name}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 w-1/3 text-slate-400">
+                        {cap.toFixed(0)} cores total · {alloc.toFixed(2)} allocatable
+                      </td>
+                      <td className="px-3 py-2 w-1/3 text-slate-400" colSpan={2}>
+                        {fmtBytes(memCap)} total · {fmtBytes(memAlloc)} allocatable · {n.pods_capacity ?? 0} pod slots
+                      </td>
+                    </tr>
+                    {n.error && (
+                      <tr key={`${n.name}-error`} className="border-t border-red-500/20 bg-red-500/5" data-testid={`node-error-${n.name}`}>
+                        <td className="px-3 py-2 text-red-300" colSpan={4}>
+                          <span className="inline-flex items-start gap-2">
+                            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                            <span className="text-xs">{n.error}</span>
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
               {!data?.nodes?.length && (

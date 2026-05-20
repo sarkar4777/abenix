@@ -48,7 +48,7 @@ function PayloadView({ payload }: { payload: unknown }) {
   }
   const entries = Object.entries(payload as Record<string, unknown>);
   if (entries.length === 0) {
-    return <p className="text-[11px] text-slate-500 italic">Empty payload.</p>;
+    return <p className="text-[11px] text-slate-400 italic">Empty payload.</p>;
   }
   return (
     <div className="space-y-1.5" data-testid="approval-payload-view">
@@ -58,7 +58,7 @@ function PayloadView({ payload }: { payload: unknown }) {
       <button
         type="button"
         onClick={() => setShowRaw((v) => !v)}
-        className="mt-2 text-[10px] text-slate-500 hover:text-slate-300"
+        className="mt-2 text-[10px] text-slate-400 hover:text-slate-200"
       >
         {showRaw ? 'Hide raw JSON' : 'Show raw JSON'}
       </button>
@@ -131,11 +131,12 @@ function relTime(iso: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function expiryString(iso: string | null): string {
+function expiryString(iso: string | null, nowMs: number): string {
   if (!iso) return '';
   const target = new Date(iso).getTime();
-  const remaining = target - Date.now();
+  const remaining = target - nowMs;
   if (remaining <= 0) return 'expired';
+  if (remaining < 60_000) return `${Math.ceil(remaining / 1000)}s left`;
   const m = Math.floor(remaining / 60000);
   if (m < 60) return `${m}m left`;
   const h = Math.floor(m / 60);
@@ -143,11 +144,21 @@ function expiryString(iso: string | null): string {
   return `${Math.floor(h / 24)}d left`;
 }
 
+function useLiveClock(intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+  return now;
+}
+
 function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id: string, decision: 'approve' | 'deny', reason?: string) => void; busy: boolean }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const isPending = row.status === 'pending';
   const approveCount = row.signoffs.filter(s => s.decision === 'approve').length;
+  const now = useLiveClock(isPending && row.expires_at ? 1000 : 60_000);
 
   return (
     <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 mb-3">
@@ -164,8 +175,8 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
             <span>Created {relTime(row.created_at)}</span>
             <span>{approveCount}/{row.required_signoffs} approvals</span>
             {row.expires_at && row.status === 'pending' && (
-              <span className="text-amber-300/80 flex items-center gap-1">
-                <Clock className="w-3 h-3" /> {expiryString(row.expires_at)}
+              <span className="text-amber-300/80 flex items-center gap-1" data-testid="approval-expiry">
+                <Clock className="w-3 h-3" /> {expiryString(row.expires_at, now)}
               </span>
             )}
             {row.agent_execution_id && (
@@ -309,7 +320,7 @@ export default function ApprovalsPage() {
       <section className="mb-8">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Pending</h2>
-          <span className="text-[11px] text-slate-500">{pending.length} requests</span>
+          <span className="text-[11px] text-slate-400">{pending.length} requests</span>
         </div>
         {loading && pending.length === 0 ? (
           <div className="flex items-center gap-2 text-sm text-slate-500 py-8 justify-center">
@@ -330,7 +341,7 @@ export default function ApprovalsPage() {
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Recent decisions</h2>
-          <span className="text-[11px] text-slate-500">{recent.length} resolved</span>
+          <span className="text-[11px] text-slate-400">{recent.length} resolved</span>
         </div>
         {recent.length === 0 ? (
           <p className="text-xs text-slate-600">No decisions yet.</p>

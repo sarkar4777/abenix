@@ -239,22 +239,30 @@ export default function CodeRunnerPage() {
                   placeholder="Description (optional)"
                   className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
 
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center gap-2 ${newGitUrl ? 'opacity-40 pointer-events-none' : ''}`}>
                   <input ref={fileRef} type="file" accept=".zip"
                     onChange={e => setNewZip(e.target.files?.[0] || null)} className="hidden" />
                   <button onClick={() => fileRef.current?.click()}
-                    className="flex-1 px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-700 text-xs text-slate-400 hover:text-white hover:border-slate-600 text-left truncate flex items-center gap-2">
+                    disabled={!!newGitUrl}
+                    className="flex-1 px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-700 text-xs text-slate-400 hover:text-white hover:border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-left truncate flex items-center gap-2"
+                    data-testid="code-source-zip"
+                    aria-label="Choose a .zip file to upload">
                     <FileArchive className="w-3.5 h-3.5" />
                     {newZip ? newZip.name : 'Choose a .zip file'}
                   </button>
                 </div>
-                <div className="text-[10px] text-slate-500 text-center">— or —</div>
-                <input type="text" value={newGitUrl} onChange={e => setNewGitUrl(e.target.value)}
-                  placeholder="https://github.com/owner/repo"
-                  className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
-                <input type="text" value={newGitRef} onChange={e => setNewGitRef(e.target.value)}
-                  placeholder="branch / tag / commit (optional)"
-                  className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+                <div className="text-[10px] text-slate-400 text-center select-none">— or —</div>
+                <div className={newZip ? 'opacity-40 pointer-events-none space-y-2' : 'space-y-2'}>
+                  <input type="text" value={newGitUrl} onChange={e => setNewGitUrl(e.target.value)}
+                    placeholder="https://github.com/owner/repo"
+                    disabled={!!newZip}
+                    className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid="code-source-git-url" />
+                  <input type="text" value={newGitRef} onChange={e => setNewGitRef(e.target.value)}
+                    placeholder="branch / tag / commit (optional)"
+                    disabled={!!newZip}
+                    className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white disabled:opacity-50 disabled:cursor-not-allowed" />
+                </div>
 
                 {uploadError && (
                   <p className="text-xs text-red-400 flex items-center gap-1"><CircleAlert className="w-3 h-3" /> {uploadError}</p>
@@ -281,7 +289,7 @@ export default function CodeRunnerPage() {
                       </span>
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${STATUS_COLORS[a.status] || ''}`}>{a.status}</span>
                     </div>
-                    <div className="text-[10px] text-slate-500 flex gap-2">
+                    <div className="text-[10px] text-slate-400 flex gap-2">
                       <span>{a.detected_language || '—'} {a.detected_version || ''}</span>
                       <span>·</span>
                       <span>{fmtBytes(a.file_size_bytes)}</span>
@@ -319,7 +327,7 @@ export default function CodeRunnerPage() {
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <button onClick={handleUseInAgent} disabled={selected.status !== 'ready'}
-                        className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs hover:bg-cyan-500/20 disabled:opacity-30 transition-colors flex items-center gap-1"
+                        className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
                         title={selected.status !== 'ready' ? 'Asset must be ready before wiring into an agent' : 'Open builder with code_asset tool pre-configured'}
                         data-testid="code-use-in-agent">
                         <Workflow className="w-3 h-3" /> Use in Agent <ArrowRight className="w-3 h-3" />
@@ -365,7 +373,7 @@ export default function CodeRunnerPage() {
                           <ChevronRight className="w-3 h-3 mt-0.5 shrink-0" />
                           <div>
                             <div>{n.message}</div>
-                            {n.suggestion && <div className="text-[10px] text-slate-500 mt-0.5">Hint: {n.suggestion}</div>}
+                            {n.suggestion && <div className="text-[10px] text-slate-400 mt-0.5">Hint: {n.suggestion}</div>}
                           </div>
                         </li>
                       ))}
@@ -424,7 +432,7 @@ export default function CodeRunnerPage() {
                     {outputSchemaError && <p className="text-[10px] text-red-300 mt-1 flex items-start gap-1"><CircleAlert className="w-3 h-3 mt-0.5 shrink-0" /><span>{outputSchemaError}</span></p>}
                   </div>
                   <button onClick={handleSaveMeta} disabled={savingMeta}
-                    className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs disabled:opacity-30 flex items-center gap-2"
+                    className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     data-testid="code-save-meta">
                     {savingMeta ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving...</> : <>Save schemas + commands</>}
                   </button>

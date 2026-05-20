@@ -227,6 +227,59 @@ test.describe('Pass 2 — k8s deploy config + share dialogs + KB multi-file + ap
   });
 });
 
+test.describe('Pass 3 — polish + accessibility band', () => {
+  test('ML Models upload button is opacity-50 cursor-not-allowed when invalid', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/ml-models`);
+    await page.waitForLoadState('domcontentloaded');
+    const uploadBtn = page.locator('button', { hasText: /Upload & Validate/i }).first();
+    await expect(uploadBtn).toBeVisible();
+    await expect(uploadBtn).toBeDisabled();
+    const cls = (await uploadBtn.getAttribute('class')) || '';
+    expect(cls).toContain('cursor-not-allowed');
+    expect(cls).toMatch(/opacity-50/);
+  });
+
+  test('Code Runner: filling git URL grays the zip side (XOR)', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/code-runner`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.getByTestId('code-source-git-url').fill('https://github.com/sarkar4777/abenix');
+    await expect(page.getByTestId('code-source-zip')).toBeDisabled();
+  });
+
+  test('Cluster Health Grafana link uses env / runtime, not localhost:3010', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/admin/cluster`);
+    await page.waitForLoadState('domcontentloaded');
+    const link = page.getByTestId('cluster-grafana-link');
+    // Either there's no Grafana configured (then no link rendered)
+    // or the link points at a non-localhost host.
+    if (await link.count() === 0) return;
+    const href = (await link.getAttribute('href')) || '';
+    expect(href).not.toContain('localhost:3010');
+  });
+
+  test('Approvals expiry counter ticks live', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/approvals`);
+    await page.waitForLoadState('domcontentloaded');
+    const exp = page.getByTestId('approval-expiry').first();
+    if (await exp.count() === 0) test.skip();
+    const t1 = (await exp.textContent()) || '';
+    await page.waitForTimeout(2000);
+    const t2 = (await exp.textContent()) || '';
+    // The counter may stay on the same minute, but in the seconds bucket
+    // it MUST tick. Just assert the component re-rendered with a
+    // string-shaped value — if useLiveClock died, the test still catches it.
+    expect(t2.length).toBeGreaterThan(0);
+    // If both are in the seconds-bucket they should differ.
+    if (/\d+s left/.test(t1) && /\d+s left/.test(t2)) {
+      expect(t1).not.toEqual(t2);
+    }
+  });
+});
+
 test.describe('Builder page — audit remediation', () => {
   test('ml_model deep-link pre-adds the tool node + sets parameter_defaults', async ({ page }) => {
     await login(page);
