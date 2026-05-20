@@ -57,7 +57,9 @@ async def ensure_table_and_seed():
     )
 
     if not ciq_key:
-        print("  No the example app platform key found — skipping default policy seeding")
+        print(
+            "  No the example app platform key found — skipping default policy seeding"
+        )
         await conn.close()
         return
 

@@ -774,7 +774,7 @@ seed_agents() {
   log "Seeding via ${api_pod}..."
   # seed_kb runs AFTER seed_agents because it grants collections to agents by slug.
   local seed_failed=0
-  for script in seed_agents.py seed_users.py seed_portfolio_schemas.py seed_ml_models.py seed_code_assets.py seed_kb.py; do
+  for script in seed_agents.py seed_users.py seed_portfolio_schemas.py seed_ml_models.py seed_code_assets.py seed_kb.py seed_atlas.py; do
     # Capture exit code via a temp file because we still want to show
     # the last 10 lines of output. The seed_agents.py loader now exits
     # non-zero on schema validation failure (the ClaimsIQ fix); this

@@ -1,0 +1,237 @@
+project:
+  slug: wingman
+  name: "Wingman"
+  description: "Energy / commodity trading reference knowledge — market structure, freight, regs, internal policy."
+
+collections:
+  - slug: wingman-knowledge
+    name: "Wingman Trading Knowledge"
+    description: "Core domain reference — freight, options, Baltic, Worldscale, AIS, port limits, pricing."
+    default_visibility: project
+    vector_backend: pinecone
+    agent_slugs:
+      - wingman-desk-copilot
+      - wingman-arb-analyzer
+      - wingman-mispricing-extractor
+      - wingman-scenario-forecaster
+      - wingman-ops-monitor
+      - wingman-graph-query
+    agent_permission: READ
+    documents:
+      - id: wm-knw-001
+        title: "Baltic LPG Freight Indices (BLPG1/2/3)"
+        metadata: { topic: "freight", source: "Baltic Exchange" }
+        content: |
+          BLPG1 — Ras Tanura → Chiba (MEG → Far East). VLGC, 44,000 MT propane.
+          BLPG2 — Houston → Flushing (USGC → North-West Europe). VLGC, 44,000 MT.
+          BLPG3 — Houston → Chiba (USGC → Far East). VLGC, 44,000 MT.
+          Published daily 11:00 UTC. Assessment = $/MT for a VLGC at 1.0 Worldscale.
+          Use BLPG2 for transatlantic propane arb; BLPG3 for Asian Pacific arb.
+      - id: wm-knw-002
+        title: "Worldscale Tanker TC Routes"
+        metadata: { topic: "freight", source: "Worldscale Association" }
+        content: |
+          Refined-products tanker routes — Clean Petroleum Products (CPP).
+          TC1: 75kt MEG → Japan. TC2: 37kt Continent → US-Atlantic Coast.
+          TC5: 55kt MEG → Japan. TC6: 30kt Algeria → Euromed.
+          TC7: 30kt Singapore → Australia. TC14: 38kt USGC → Continent.
+          TC17: 35kt East Africa → MEG.
+          Worldscale points / 100 × annual flat = $/MT freight cost.
+          2025 flat-rate schedule published annually; mid-year adjustment for bunker.
+      - id: wm-knw-003
+        title: "VLGC Vessel Spec & Density Conversion"
+        metadata: { topic: "vessels", standard: "industry" }
+        content: |
+          VLGC (Very Large Gas Carrier): 84,000 m³ capacity. Carries ~44,000 MT propane.
+          Density propane @ -42°C = 581 kg/m³. Butane @ -2°C = 601 kg/m³.
+          MGC (Mid-size): 22,000–38,000 m³.  LGC: 60,000 m³.  Handysize: <15,000 m³.
+          Volume↔Mass: tons = m³ × density / 1000. Reverse for cargo planning.
+          Reefer container TEU = 30 m³ for refrigerated propane swaps.
+      - id: wm-knw-004
+        title: "EIA Mont Belvieu Propane Spot — How To Read"
+        metadata: { topic: "price-feeds", source: "EIA" }
+        content: |
+          Mont Belvieu, TX is the US benchmark hub for propane spot pricing.
+          EIA weekly stocks: published Wednesday 10:30 ET; 5-year seasonal normal
+          is the comparison baseline. Z-score inventory: (current − 5yr-avg) / 5yr-std.
+          Inventory_z > +1.0 implies oversupply → bearish for spot.
+          Front-month CME PG/M futures track Mont Belvieu spot ±$5/MT carry.
+      - id: wm-knw-005
+        title: "Options Risk-Reversal (25-Delta) Interpretation"
+        metadata: { topic: "options", standard: "derivatives" }
+        content: |
+          25-delta risk reversal = call IV − put IV (both 25-delta strikes).
+          Positive RR → calls priced over puts → bullish skew → market hedging upside.
+          Negative RR → puts priced over calls → bearish skew → market hedging downside.
+          For propane/crude basis: RR > +5 vol points often precedes spot rallies.
+          Use options regime label: 'fear' (RR < -3), 'neutral' (-3..+3), 'greed' (>+3).
+      - id: wm-knw-006
+        title: "AIS Ship-Type Filter for LPG Tankers"
+        metadata: { topic: "vessels", source: "IMO" }
+        content: |
+          AIS ship-type codes for LPG / chemical tankers:
+          80 = Tanker (generic). 84 = Tanker carrying hazardous Cat A (LPG).
+          81 = Tanker, hazardous Cat B (butane). 82 = Cat C (ammonia, naphtha).
+          Filter (80, 84) catches >95% of long-haul LPG fleet.
+          Speed-Over-Ground (SOG) < 4 knots near a port for >30 min implies
+          loading/discharging or anchor; SOG > 12 knots implies open-water transit.
+      - id: wm-knw-007
+        title: "Port Constraints — Houston & Antwerp"
+        metadata: { topic: "ports", source: "Port authorities" }
+        content: |
+          Houston Ship Channel (USGAL): max draught 13.7 m; LOA 366 m; beam 50 m;
+          air-draught 41 m (cargo cranes). VLGC capable at Bayport terminal.
+          Antwerp (BEANR): max draught 16.0 m; LOA 350 m; beam 50 m. Lock cycle
+          adds 4–6h. VLGC capable at MPET kuyper berths.
+          Flushing (NLVLI): outer anchorage; ship-to-ship for VLGC discharge into
+          smaller MGC for Antwerp/Rotterdam distribution.
+      - id: wm-knw-008
+        title: "Net Arbitrage Math — USGC → NWE Propane"
+        metadata: { topic: "pricing", standard: "internal" }
+        content: |
+          Net arb ($/MT) = NWE_dest_spot − USGC_origin_spot − BLPG2_freight
+                           − port_fees − financing − bunker_premium.
+          Port fees: ~$3.50/MT round-trip USGC/NWE.
+          Financing: 30 days × Libor + 2bp on cargo value ($800/MT × 44,000 MT × 0.05/365).
+          Bunker premium: applied when VLSFO > $650/MT.
+          Positive arb → cargo flows USGC → NWE.  Negative → cargo stays domestic.
+      - id: wm-knw-009
+        title: "Fair-Value Spread — Bayesian Ridge Model Inputs"
+        metadata: { topic: "ml-models", standard: "internal" }
+        content: |
+          The wingman-mispricing-fairvalue model takes 15 features per corridor:
+          origin_spot_z, dest_spot_z, freight_per_mt_z, inventory_z, exports_4w_pct,
+          fx_eur_usd_z, weather_dest_gust_z, season_q, crude_iv_atm_z,
+          crude_risk_reversal_25d, nat_gas_iv_atm_z, oil_put_call_ratio,
+          freight_baltic_z, freight_ws_per_mt_z, route_vessel_size_norm.
+          Output: posterior mean spread + posterior std for credible interval.
+          Holdout R² = 0.665, RMSE $7.49/MT. Retrained nightly on 21,400 obs.
+          Residual = observed − fair. Sigma = residual / posterior_std.
+          Trader threshold: |σ| > 1.5 → STRETCHED; > 2.0 → DISLOCATED.
+      - id: wm-knw-010
+        title: "Anomaly Detection — Isolation Forest Hard Gate"
+        metadata: { topic: "ml-models", standard: "internal" }
+        content: |
+          wingman-mispricing-anomaly: 9-feature Isolation Forest.
+          Features: origin_spot_z, dest_spot_z, freight_per_mt_z, inventory_z,
+          exports_4w_pct, fx_eur_usd_z, weather_dest_gust_z, season_q, spread_4w_mean_z.
+          Decision score > 0.6 → corridor state outside training distribution.
+          Hard gate: if flagged, the Lens verdict is forced to ANOMALY regardless
+          of residual size. Rationale: regression cannot be trusted out-of-distribution.
+          Validation TP 93.75% / FP 5.5% on synthetic shock set.
+
+  - slug: wingman-compliance
+    name: "Wingman Trading Rules & Regulations"
+    description: "Position limits, sanctions, internal mandates, hedge-accounting rules — drives the Compliance Lens."
+    default_visibility: project
+    vector_backend: pinecone
+    agent_slugs:
+      - wingman-compliance-validator
+      - wingman-desk-copilot
+    agent_permission: READ
+    documents:
+      - id: wm-reg-001
+        title: "CFTC Position Limits — Energy Futures (17 CFR Part 150)"
+        metadata: { topic: "regulation", jurisdiction: "US", source: "CFTC" }
+        content: |
+          17 CFR §150.2: Federal speculative position limits on physical-commodity
+          futures and options. NYMEX WTI: spot-month single-month 6,000 contracts;
+          all-months-combined 57,800. Natural gas (NG): spot-month 2,000; all-months 53,200.
+          Propane (PRJ): no federal limit but exchange limit 1,000 net long/short.
+          Exemptions: bona-fide hedging position must be documented and reported
+          on Form 304 within 1 business day of crossing the limit.
+      - id: wm-reg-002
+        title: "ESMA Position Limits — MiFID II / RTS 21"
+        metadata: { topic: "regulation", jurisdiction: "EU", source: "ESMA" }
+        content: |
+          MiFID II commodity derivative position limits (Regulation 2017/591):
+          ICE Brent spot-month 50,000 lots; other-month 100,000.
+          ICE Gasoil spot-month 20,000; other-month 40,000.
+          National competent authority (NCA) may set tighter local caps.
+          Reporting threshold: 2.5% of open interest. Exemption for hedging requires
+          ESMA-approved hedging mandate; renewed annually.
+      - id: wm-reg-003
+        title: "OFAC Sanctions — Restricted Counterparties (SDN summary)"
+        metadata: { topic: "sanctions", jurisdiction: "US", source: "OFAC" }
+        content: |
+          Counterparties on the OFAC SDN list are blocked from US-person dealings.
+          Categories relevant to LPG / crude: Russia (post-2022), Iran (since 1979),
+          Venezuela PDVSA (since 2019), DPRK, Syria. Secondary sanctions apply
+          to non-US parties transacting with primary-sanctioned entities.
+          Required check before any firm-offer acknowledgement:
+          1. Counterparty legal name against current SDN (date-stamped).
+          2. UBO (Ultimate Beneficial Owner) chain to 50%-ownership rule.
+          3. Vessel screening against SDN (IMO numbers + flag history).
+      - id: wm-reg-004
+        title: "EU Sanctions — Russia Oil Price Cap & Russian Crude Embargo"
+        metadata: { topic: "sanctions", jurisdiction: "EU", source: "EC" }
+        content: |
+          Regulation 833/2014 (as amended): Embargo on seaborne Russian crude
+          from 2022-12-05 into EU; Russian refined products from 2023-02-05.
+          G7 + EU price cap on Russian crude: $60/bbl (Urals); refined products
+          cap $100/bbl (premium products) and $45/bbl (discount products).
+          EU operators may transport / insure Russian crude ONLY if price ≤ cap.
+          Attestation requirement: per-cargo certified pricing affidavit.
+      - id: wm-reg-005
+        title: "Internal Trading Mandate — Algorithmic Execution Hours"
+        metadata: { topic: "policy", jurisdiction: "internal", source: "Trading Desk" }
+        content: |
+          Algorithmic execution rules (effective 2025-01-01):
+          - No algorithmic execution between 22:00 UTC and 04:00 UTC (illiquid window).
+          - Max single-order size 5,000 MT propane; 50,000 bbl crude futures.
+          - Max position notional $50M per corridor per book.
+          - All algo orders require pre-trade compliance check + post-trade reporting.
+          - Manual override permitted with desk-head approval, logged in audit trail.
+      - id: wm-reg-006
+        title: "Hedge Accounting — IFRS 9 / ASC 815 Designation"
+        metadata: { topic: "accounting", jurisdiction: "global", source: "IFRS/FASB" }
+        content: |
+          For a derivative to qualify for hedge accounting under IFRS 9 / ASC 815:
+          1. Formal designation document at inception (hedged item, instrument, risk).
+          2. Effectiveness assessment: hedge must be expected to offset 80-125% of
+             change in fair value or cash flows. Quarterly re-test required.
+          3. Hedge documentation must identify the eligible hedged item — for cash-flow
+             hedges this is a highly probable forecasted transaction or firm commitment.
+          Failure to designate at inception forfeits hedge accounting permanently
+          for that exposure. Mark-to-market then flows through P&L immediately.
+      - id: wm-reg-007
+        title: "Internal Policy — Maximum Tenor & Single-Counterparty Exposure"
+        metadata: { topic: "policy", jurisdiction: "internal", source: "Risk Committee" }
+        content: |
+          Risk Committee mandate (last reviewed 2025-03-15):
+          - Maximum tenor for paper trades: 24 months. Beyond 24 months requires
+            CRO sign-off via formal escalation memo.
+          - Maximum single-counterparty exposure: $25M unsecured / $100M secured.
+          - Aggregate corridor exposure cap: $200M notional, $20M VaR @ 99%.
+          - Concentration rule: no single counterparty > 30% of total book.
+      - id: wm-reg-008
+        title: "Suez Canal & Panama Canal Transit Restrictions"
+        metadata: { topic: "freight", jurisdiction: "transit", source: "SCA/ACP" }
+        content: |
+          Suez Canal Authority (SCA) — max draught 20.1 m (66 ft); LOA unlimited.
+          Suez & Aqaba sanctions overlay: SCA refuses transit for vessels under
+          Russian / Iranian flag without specific port-of-call certification.
+          Panama Canal Authority (ACP) — Neopanamax locks: max draught 15.2 m;
+          LOA 366 m; beam 49 m. VLGC fits Neopanamax. ACP reservation slots are
+          auctioned 90 days ahead. Drought-induced transit reduction in dry season.
+      - id: wm-reg-009
+        title: "Best Execution — MiFID II Article 27 & FINRA 5310"
+        metadata: { topic: "regulation", jurisdiction: "global", source: "MiFID/FINRA" }
+        content: |
+          Best execution obligation: trading firms must take all sufficient steps
+          to obtain the best possible result for client trades, considering price,
+          cost, speed, likelihood of execution and settlement, size, and nature.
+          MiFID II Art. 27 — quarterly reporting of top-5 venues per asset class.
+          FINRA 5310 — reasonable diligence to ascertain best market under prevailing
+          conditions. Documented best-ex policy required; review annually or on
+          material market change.
+      - id: wm-reg-010
+        title: "REMIT — EU Wholesale Energy Market Integrity"
+        metadata: { topic: "regulation", jurisdiction: "EU", source: "ACER" }
+        content: |
+          Regulation 1227/2011 (REMIT): Prohibits market manipulation, insider trading,
+          and false / misleading statements in EU wholesale energy markets (gas, power).
+          Reportable contracts: standard supply, OTC swaps, options on power/gas.
+          Trade reporting to ACER via Registered Reporting Mechanism (RRM); T+1 for
+          standard contracts. Position-data reporting threshold: 0.5% of total physical
+          delivery to consumers.

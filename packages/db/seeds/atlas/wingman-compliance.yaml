@@ -1,0 +1,211 @@
+name: "Wingman Compliance Graph"
+description: "Typed rules + sanctions + counterparties + routes for the Compliance Lens cross-check."
+
+nodes:
+  - id: cftc-150
+    label: "CFTC Pos Limits §150"
+    kind: concept
+    description: "US federal speculative position limits on energy futures."
+    properties:
+      jurisdiction: "US"
+      regulator: "CFTC"
+      doc_ref: "wm-reg-001"
+    x: 100
+    y: 100
+    tags: ["regulation", "us", "position-limit"]
+
+  - id: esma-rts21
+    label: "ESMA RTS 21 Pos Limits"
+    kind: concept
+    description: "EU MiFID II commodity derivative position limits."
+    properties:
+      jurisdiction: "EU"
+      regulator: "ESMA"
+      doc_ref: "wm-reg-002"
+    x: 100
+    y: 240
+    tags: ["regulation", "eu", "position-limit"]
+
+  - id: ofac-sdn
+    label: "OFAC SDN List"
+    kind: concept
+    description: "US sanctions: blocked counterparties + 50% UBO rule."
+    properties:
+      jurisdiction: "US"
+      regulator: "OFAC"
+      doc_ref: "wm-reg-003"
+    x: 100
+    y: 380
+    tags: ["sanctions", "us"]
+
+  - id: eu-833-2014
+    label: "EU 833/2014 Russia Sanctions"
+    kind: concept
+    description: "Embargo on seaborne Russian crude + price cap regime."
+    properties:
+      jurisdiction: "EU"
+      regulator: "European Commission"
+      doc_ref: "wm-reg-004"
+    x: 100
+    y: 520
+    tags: ["sanctions", "eu", "russia"]
+
+  - id: internal-algo-hours
+    label: "Algo Execution Hours"
+    kind: concept
+    description: "Internal mandate: no algorithmic execution 22:00-04:00 UTC."
+    properties:
+      doc_ref: "wm-reg-005"
+      max_single_order_mt: 5000
+      max_position_notional_usd: 50000000
+    x: 400
+    y: 100
+    tags: ["policy", "internal"]
+
+  - id: internal-tenor-cap
+    label: "Max Tenor 24m"
+    kind: concept
+    description: "Beyond 24-month tenor requires CRO sign-off."
+    properties:
+      max_tenor_months: 24
+      doc_ref: "wm-reg-007"
+    x: 400
+    y: 240
+    tags: ["policy", "internal"]
+
+  - id: internal-counterparty-cap
+    label: "Counterparty Exposure Caps"
+    kind: concept
+    description: "Max $25M unsecured / $100M secured per counterparty."
+    properties:
+      unsecured_cap_usd: 25000000
+      secured_cap_usd: 100000000
+      doc_ref: "wm-reg-007"
+    x: 400
+    y: 380
+    tags: ["policy", "internal", "credit-risk"]
+
+  - id: hedge-accounting-ifrs9
+    label: "IFRS 9 Hedge Accounting"
+    kind: concept
+    description: "Designation + effectiveness rules for hedge accounting."
+    properties:
+      effectiveness_band_pct: "80-125"
+      doc_ref: "wm-reg-006"
+    x: 400
+    y: 520
+    tags: ["accounting", "ifrs"]
+
+  - id: route-suez
+    label: "Suez Canal"
+    kind: instance
+    description: "Transit max draught 20.1m; sanctions overlay for Russian/Iranian flags."
+    properties:
+      max_draught_m: 20.1
+      sanctioned_flags: ["RU", "IR"]
+      doc_ref: "wm-reg-008"
+    x: 700
+    y: 100
+    tags: ["route", "infrastructure"]
+
+  - id: route-panama
+    label: "Panama Canal (Neopanamax)"
+    kind: instance
+    description: "Max draught 15.2m; VLGC fits; reservation slots auctioned 90d ahead."
+    properties:
+      max_draught_m: 15.2
+      max_loa_m: 366
+      doc_ref: "wm-reg-008"
+    x: 700
+    y: 240
+    tags: ["route", "infrastructure"]
+
+  - id: vessel-vlgc
+    label: "VLGC class"
+    kind: concept
+    description: "Very Large Gas Carrier — 44,000 MT propane / 84,000 m³."
+    properties:
+      capacity_mt: 44000
+      capacity_m3: 84000
+    x: 700
+    y: 380
+    tags: ["vessel"]
+
+  - id: vessel-mr2
+    label: "MR2 tanker"
+    kind: concept
+    description: "Medium-Range refined-products tanker. ~37,000 DWT."
+    properties:
+      capacity_dwt: 37000
+    x: 700
+    y: 520
+    tags: ["vessel"]
+
+  - id: port-houston
+    label: "Houston (USGAL)"
+    kind: instance
+    description: "USGC LPG export hub. VLGC-capable at Bayport."
+    properties:
+      max_draught_m: 13.7
+      max_loa_m: 366
+      vlgc_capable: true
+      doc_ref: "wm-knw-007"
+    x: 1000
+    y: 100
+    tags: ["port", "usgc"]
+
+  - id: port-antwerp
+    label: "Antwerp (BEANR)"
+    kind: instance
+    description: "NWE LPG import hub. VLGC-capable at MPET."
+    properties:
+      max_draught_m: 16.0
+      max_loa_m: 350
+      vlgc_capable: true
+      doc_ref: "wm-knw-007"
+    x: 1000
+    y: 240
+    tags: ["port", "nwe"]
+
+  - id: corridor-usgc-nwe
+    label: "Corridor USGC → NWE"
+    kind: instance
+    description: "Houston → Flushing/Antwerp; benchmark BLPG2; VLGC."
+    properties:
+      baltic_index: "BLPG2"
+      vessel_class: "VLGC"
+      tenor_max_months: 24
+    x: 1000
+    y: 380
+    tags: ["corridor"]
+
+  - id: counterparty-investment-grade
+    label: "Counterparty (IG)"
+    kind: concept
+    description: "Investment-grade counterparty: full credit limit applies."
+    properties:
+      credit_band: "IG"
+      unsecured_cap_usd: 25000000
+    x: 1000
+    y: 520
+    tags: ["counterparty", "credit"]
+
+edges:
+  - { from: corridor-usgc-nwe, to: vessel-vlgc, label: "requires" }
+  - { from: corridor-usgc-nwe, to: port-houston, label: "loads-at" }
+  - { from: corridor-usgc-nwe, to: port-antwerp, label: "delivers-to" }
+  - { from: corridor-usgc-nwe, to: internal-algo-hours, label: "must-comply-with" }
+  - { from: corridor-usgc-nwe, to: internal-tenor-cap, label: "must-comply-with" }
+  - { from: corridor-usgc-nwe, to: internal-counterparty-cap, label: "must-comply-with" }
+  - { from: corridor-usgc-nwe, to: cftc-150, label: "subject-to" }
+  - { from: corridor-usgc-nwe, to: esma-rts21, label: "subject-to" }
+  - { from: corridor-usgc-nwe, to: ofac-sdn, label: "screened-against" }
+  - { from: corridor-usgc-nwe, to: eu-833-2014, label: "screened-against" }
+  - { from: port-houston, to: vessel-vlgc, label: "supports" }
+  - { from: port-antwerp, to: vessel-vlgc, label: "supports" }
+  - { from: route-panama, to: vessel-vlgc, label: "transits" }
+  - { from: route-suez, to: vessel-vlgc, label: "transits" }
+  - { from: counterparty-investment-grade, to: internal-counterparty-cap, label: "governed-by" }
+  - { from: counterparty-investment-grade, to: ofac-sdn, label: "screened-against" }
+  - { from: internal-algo-hours, to: cftc-150, label: "aligns-with" }
+  - { from: hedge-accounting-ifrs9, to: corridor-usgc-nwe, label: "applicable-when-designated" }

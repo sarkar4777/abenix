@@ -229,7 +229,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <a
                 href="/chat"
-                className="group bg-slate-900/60 border border-slate-700/60 rounded-lg p-4 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
+                className="group bg-slate-900/60 border border-cyan-500/20 rounded-lg p-4 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-cyan-500/15 flex items-center justify-center">
@@ -247,7 +247,7 @@ export default function DashboardPage() {
               </a>
               <a
                 href="/agents/new"
-                className="group bg-slate-900/60 border border-slate-700/60 rounded-lg p-4 hover:border-purple-500/40 hover:bg-slate-900 transition-colors"
+                className="group bg-slate-900/60 border border-cyan-500/20 rounded-lg p-4 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-purple-500/15 flex items-center justify-center">
@@ -265,7 +265,7 @@ export default function DashboardPage() {
               </a>
               <a
                 href="/knowledge"
-                className="group bg-slate-900/60 border border-slate-700/60 rounded-lg p-4 hover:border-amber-500/40 hover:bg-slate-900 transition-colors"
+                className="group bg-slate-900/60 border border-cyan-500/20 rounded-lg p-4 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">
@@ -297,7 +297,7 @@ export default function DashboardPage() {
         {kpiCards.map((kpi) => (
           <div
             key={kpi.label}
-            className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 hover:border-slate-600/50 transition-colors"
+            className="bg-slate-800/30 border border-cyan-500/20 rounded-xl p-5 hover:border-cyan-500/40 transition-colors"
           >
             <div className="flex items-start justify-between mb-3">
               <div className={`w-10 h-10 rounded-lg ${kpi.iconBg} flex items-center justify-center`}>
@@ -312,7 +312,7 @@ export default function DashboardPage() {
           </div>
         ))}
         {/* User token usage card */}
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
+        <div className="bg-slate-800/30 border border-cyan-500/20 rounded-xl p-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-slate-500 uppercase">Your Token Usage</span>
             <Coins className="w-4 h-4 text-cyan-400" />
@@ -344,27 +344,27 @@ export default function DashboardPage() {
       </motion.div>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        <motion.div variants={item} className="lg:col-span-2 bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50">
+        <motion.div variants={item} className="lg:col-span-2 bg-slate-800/30 border border-cyan-500/20 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-cyan-500/20">
             <h2 className="text-sm font-semibold text-white">Live Activity</h2>
             <a href="/analytics" className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors">
               View all <ArrowRight className="w-3 h-3" />
             </a>
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/30">
+            <div className="bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20">
               <p className="text-xs text-slate-500 mb-1">Active Now</p>
               <p className="text-xl font-bold text-cyan-400">
                 {stats?.active_executions ?? 0}
               </p>
             </div>
-            <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/30">
+            <div className="bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20">
               <p className="text-xs text-slate-500 mb-1">Completed Today</p>
               <p className="text-xl font-bold text-emerald-400">
                 {stats?.today_completed ?? 0}
               </p>
             </div>
-            <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/30">
+            <div className="bg-slate-900/50 rounded-lg p-4 border border-cyan-500/20">
               <p className="text-xs text-slate-500 mb-1">Failed Today</p>
               <p className="text-xl font-bold text-red-400">
                 {stats?.today_failed ?? 0}
@@ -374,14 +374,14 @@ export default function DashboardPage() {
         </motion.div>
 
         <div className="space-y-6">
-          <motion.div variants={item} className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
+          <motion.div variants={item} className="bg-slate-800/30 border border-cyan-500/20 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-white mb-4">Quick Actions</h2>
             <div className="grid grid-cols-2 gap-3">
               {QUICK_ACTIONS.map((action) => (
                 <a
                   key={action.label}
                   href={action.href}
-                  className="flex flex-col items-center gap-2 p-3 rounded-lg bg-slate-800/50 border border-slate-700/30 hover:border-slate-600/50 transition-colors group"
+                  className="flex flex-col items-center gap-2 p-3 rounded-lg bg-slate-800/50 border border-cyan-500/20 hover:border-cyan-500/40 transition-colors group"
                 >
                   <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${action.color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
                     <action.icon className="w-4 h-4 text-white" />
@@ -394,7 +394,7 @@ export default function DashboardPage() {
             </div>
           </motion.div>
 
-          <motion.div variants={item} className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
+          <motion.div variants={item} className="bg-slate-800/30 border border-cyan-500/20 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-white">System Status</h2>
               {(() => {

@@ -56,8 +56,8 @@ system_prompt: |
         {"from": "offer:abc", "to": "counterparty:acme", "relation": "OFFER_FROM_COUNTERPARTY"}
       ]
     },
-    "narrative": "Three offers from Acme Energy in the last 90 days; one tied to a vessel that experienced a hurricane delay 12-Aug.",
-    "citations": ["Atlas: ontology=trading_v1", "Doc: kb-broker-emails-2026Q1"]
+    "narrative": "<narrative summarising the live Atlas subgraph result, with concrete counts and dates from the tool output>",
+    "citations": ["Atlas: ontology=trading_v1", "<kb collection slug returned by the Atlas tool>"]
   }
   ```
 

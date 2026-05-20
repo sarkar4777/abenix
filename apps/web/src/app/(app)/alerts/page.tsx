@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 
+const GRAFANA_URL = (process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3010').replace(/\/$/, '');
+
 interface FailureGroup {
   failure_code: string;
   count: number;
@@ -164,7 +166,7 @@ export default function AlertsPage() {
             <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-12 text-center">
               <Bell className="w-10 h-10 text-emerald-400/50 mx-auto mb-3" />
               <p className="text-sm text-slate-300">No failures in the last {hours} hour{hours === 1 ? '' : 's'}.</p>
-              <p className="text-xs text-slate-500 mt-1">Your platform is healthy. The Grafana dashboard at /grafana has the full picture.</p>
+              <p className="text-xs text-slate-500 mt-1">Your platform is healthy. <a href={GRAFANA_URL} target="_blank" rel="noopener" className="text-cyan-400 hover:underline">Open Grafana</a> for the full picture.</p>
             </div>
           )}
 
@@ -224,7 +226,7 @@ export default function AlertsPage() {
         {/* Footer note */}
         <div className="text-xs text-slate-500 text-center py-4">
           Real-time metrics + 60 days of history at{' '}
-          <a href="http://localhost:3030/d/abenix-overview" target="_blank" rel="noopener" className="text-cyan-400 hover:underline">
+          <a href={`${GRAFANA_URL}/d/abenix-overview`} target="_blank" rel="noopener" className="text-cyan-400 hover:underline">
             Grafana → Abenix Operations
           </a>
         </div>

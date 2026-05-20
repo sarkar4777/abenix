@@ -14,7 +14,7 @@ const TERMINAL = new Set(['completed', 'succeeded', 'failed', 'error', 'cancelle
 
 const KNOWN_SPECIALISTS: Record<string, { label: string; hint: string }> = {
   'wingman-arb-analyzer': { label: 'Arb analyzer', hint: '12mo forward net-arb' },
-  'wingman-mispricing-extractor': { label: 'Mispricing Lens', hint: 'Bayesian fair-value + IsoForest' },
+  'wingman-mispricing-extractor': { label: 'Price at Risk Lens', hint: 'Bayesian fair-value + IsoForest' },
   'wingman-scenario-forecaster': { label: 'Forward Scenarios', hint: 'GaussianNB prior + LLM posterior' },
   'wingman-ops-monitor': { label: 'Ops Monitor', hint: 'AIS + weather + alerts' },
   'wingman-graph-query': { label: 'Knowledge Graph', hint: 'typed Atlas traversal' },
@@ -200,7 +200,7 @@ export default function DeskPage() {
       hint: KNOWN_SPECIALISTS[p.agent]?.hint || p.rationale,
     }));
     return [
-      { id: 'wingman-desk-copilot', label: 'Desk Copilot', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'planner + synthesiser' },
+      { id: 'wingman-desk-copilot', label: 'Wingman Copilot', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'planner + synthesiser' },
       { id: 'recall_trajectory', label: 'Past trajectories', icon: 'cpu' as const, hint: 'phase-2 memory lookup' },
       { id: 'invoke_agent', label: 'Fan-out', icon: 'tool' as const, hint: 'invoke_agent → each specialist' },
       ...planned,
@@ -210,25 +210,14 @@ export default function DeskPage() {
   return (
     <div className="p-6">
       <HeroBar
-        eyebrow="DESK COPILOT"
+        eyebrow="WINGMAN COPILOT"
         title="Ask the desk anything."
-        subtitle="Type a real trader question. Desk Copilot plans which Wingman specialists to fire, fans them out in parallel, and stitches every answer into one brief — citations, drivers, conviction, recommended action. Trajectory memory means the second time you ask a similar question it is faster and cheaper."
-        rightSlot={
-          <div className="flex items-center gap-3 text-[10px]">
-            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold border border-emerald-500/40 text-emerald-300 bg-emerald-500/10 rounded px-2 py-1">
-              <Sparkles className="w-3 h-3" /> meta-agent
-            </span>
-            <span className="inline-flex flex-col items-end px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900/40">
-              <span className="text-[9px] uppercase tracking-wider text-slate-500">trajectories</span>
-              <span className="text-xs font-mono font-semibold text-white">{history.length}</span>
-            </span>
-          </div>
-        }
+        showTickers={false}
       />
 
       <PipelineStrip
         title="Pipeline · 1 meta-agent · trajectory memory · dynamic fan-out"
-        subtitle="Type a question — Desk Copilot recalls past similar runs, plans the specialists, and lights them up live."
+        subtitle="Type a question — Wingman Copilot recalls past similar runs, plans the specialists, and lights them up live."
         nodes={planNodes}
         executionId={activeExecution}
       />
@@ -322,9 +311,31 @@ export default function DeskPage() {
           )}
 
           {!answer && !running && (
-            <div className="rounded-xl border border-dashed border-slate-700 p-8 text-center text-[12px] text-slate-500">
-              <Sparkles className="w-5 h-5 inline-block text-emerald-400/60 mr-1" />
-              Ask any trader-style question. Desk Copilot will plan, fan out, and answer with citations.
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03] p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles className="w-4 h-4 text-emerald-300" />
+                <span className="text-[10px] uppercase tracking-wider text-emerald-300 font-bold">How Wingman Copilot works</span>
+              </div>
+              <p className="text-[12px] text-slate-300 leading-relaxed mb-4">
+                Ask a trader-style question. The meta-agent plans which specialists to fire (Price at Risk, Forward Scenarios, Operations, Knowledge Graph), fans them out in parallel, and stitches the answers into one brief with citations + recommended action.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 text-[10px]">
+                {[
+                  { num: '1', label: 'Plan', desc: 'Meta-agent picks specialists' },
+                  { num: '2', label: 'Recall', desc: 'Past trajectories for similar Qs' },
+                  { num: '3', label: 'Fan out', desc: 'Specialists run in parallel' },
+                  { num: '4', label: 'Stitch', desc: 'One brief · cited · actionable' },
+                ].map((s) => (
+                  <div key={s.num} className="rounded-lg border border-emerald-500/20 bg-slate-950/40 px-3 py-2.5">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-200 text-[10px] font-bold">{s.num}</span>
+                      <span className="text-[11px] font-semibold text-white">{s.label}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400">{s.desc}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 text-[10px] text-slate-500 italic">Trajectory memory: {history.length} past run{history.length === 1 ? '' : 's'} cached — similar Qs reuse the plan for speed + cost wins.</div>
             </div>
           )}
         </section>

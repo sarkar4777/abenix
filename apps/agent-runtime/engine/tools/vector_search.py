@@ -1,4 +1,4 @@
-"""RAG vector search tool - queries Pinecone for relevant document chunks."""
+﻿"""RAG vector search tool - queries Pinecone for relevant document chunks."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 from engine.tools.base import BaseTool, ToolResult
 
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
-PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 EMBEDDING_MODEL = "text-embedding-3-small"
 

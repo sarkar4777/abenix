@@ -35,8 +35,10 @@ async function afLogin(page: Page) {
 test.describe.serial('Wingman Mispricing Lens — end-to-end', () => {
   test('mispricing page renders explainer + sidebar entry', async ({ page }) => {
     await gotoOk(page, `${BASE_WM}/mispricing`, 3000);
-    await expect(page.getByText(/MISPRICING LENS/i)).toBeVisible();
-    await expect(page.getByText(/holy grail/i)).toBeVisible();
+    // After the rename, "Price at Risk Lens" appears in sidebar + hero eyebrow
+    // + pipeline strip — assert the page-title h1 is the canonical one.
+    await expect(page.getByRole('heading', { name: /propane price at risk/i })).toBeVisible();
+    await expect(page.getByText(/PRICE AT RISK LENS/i).first()).toBeVisible();
     await expect(page.getByTestId('model-explainer')).toBeVisible();
     await expect(page.getByText(/Bayesian Ridge — fair-value regression/i)).toBeVisible();
     await expect(page.getByText(/Isolation Forest — regime-break detector/i)).toBeVisible();
@@ -50,8 +52,11 @@ test.describe.serial('Wingman Mispricing Lens — end-to-end', () => {
     const run = page.getByTestId('run-mispricing-scan');
     await expect(run).toBeVisible();
     await run.click();
-    await expect(page.getByTestId('residual-gauge')).toBeVisible({ timeout: 150_000 });
-    await expect(page.getByTestId('trade-card')).toBeVisible({ timeout: 30_000 });
+    // Trade card is rendered regardless of which insights tab is active.
+    await expect(page.getByTestId('trade-card')).toBeVisible({ timeout: 150_000 });
+    // The residual gauge now lives behind the "Residual z-score · feature vector" tab.
+    await page.getByTestId('tab-residual').click();
+    await expect(page.getByTestId('residual-gauge')).toBeVisible({ timeout: 10_000 });
   });
 
   test('two mispricing ML models show up in AgentForge /ml-models', async ({ page }) => {

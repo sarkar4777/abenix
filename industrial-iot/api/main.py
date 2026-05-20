@@ -383,6 +383,9 @@ async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
         import json
         message = json.dumps(message)
 
+    if message and "message" not in context:
+        context["message"] = message
+
     asset_name_map = cfg.get("required_assets") or {}
     if asset_name_map:
         async with _sdk() as _forge:

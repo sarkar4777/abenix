@@ -19,7 +19,7 @@ import { CacheMeta, readCacheEnvelope, formatAge } from '../components/cache-hel
 import { useWingmanPageExecution } from '../components/WingmanExecutionsProvider';
 
 const MISPRICING_PIPELINE = [
-  { id: 'wingman-mispricing-extractor', label: 'Mispricing Lens', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'Haiku 4.5 + 2 ML models' },
+  { id: 'wingman-mispricing-extractor', label: 'Price at Risk Lens', kind: 'agent' as const, icon: 'sparkles' as const, hint: 'Haiku 4.5 + 2 ML models' },
   { id: 'eia_open_data', label: 'EIA spot', icon: 'db' as const, hint: 'origin + dest + inventories' },
   { id: 'yahoo_finance', label: 'FX', icon: 'db' as const, hint: 'EUR/USD' },
   { id: 'bunker_fuel', label: 'Freight', icon: 'tool' as const, hint: 'bunker-derived $/MT' },
@@ -183,6 +183,14 @@ export default function MispricingPage() {
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
+    // Kill any in-flight result pollers from a previous corridor so they
+    // can't overwrite the new corridor's scan when they eventually
+    // terminate. Same for setRunning — switching corridors resets to
+    // a clean slate.
+    Object.values(pollers.current).forEach((t) => clearInterval(t));
+    pollers.current = {};
+    setRunning(false);
+    setActiveExecution(null);
     setMeta(null);
     setGateOpened(null);
     loadCached(selectedId, { resetIfMissing: true }).then(() => { if (cancelled) return; });
@@ -191,7 +199,8 @@ export default function MispricingPage() {
       loadCached(selectedId, { resetIfMissing: false });
     }, 30_000);
     return () => { cancelled = true; clearInterval(poll); };
-  }, [selectedId, running]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   const runScan = async () => {
     if (!selectedId) return;
@@ -261,25 +270,20 @@ export default function MispricingPage() {
   return (
     <div className="p-6">
       <HeroBar
-        eyebrow="MISPRICING LENS"
-        title="The propane mispricing holy grail"
-        subtitle="A Bayesian Ridge fair-value model (15 features — base market + options + freight-quality) + Isolation Forest regime detector score every active LPG / CPP corridor. Residuals beyond 1σ are stretched, beyond 2σ are dislocated and route through the desk's HITL gate before any execution."
-        rightSlot={
-          <div className="flex flex-col items-end gap-1 text-[10px]">
-            <span className="text-slate-500 uppercase tracking-wider">method</span>
-            <span className="text-slate-300 font-mono">BayesianRidge(15) · IsoForest · Options · Freight · LLM</span>
-          </div>
-        }
+        eyebrow="PRICE AT RISK LENS"
+        title="The propane price at risk"
+        showTickers={false}
       />
 
-      <ExplainerPanel spec={MISPRICING_EXPLAINER} />
-
       <PipelineStrip
-        title="Pipeline · 1 agent · 2 ML models · 10 real tools (options + Baltic + Worldscale + vessel + density)"
-        subtitle="Bayesian Ridge fair-value (15 features: 8 base + 4 options + 3 freight-quality) + Isolation Forest anomaly fire in parallel with 3 news searches, the options-market regime classifier, Baltic BLPG, Worldscale TC routes, and vessel_specs density lookup; LLM drafts a residual thesis and trade card."
+        title="Pipeline · 1 agent · 2 ML models · 10 tools"
+        subtitle="Hover the agent chip for method · click a tool chip to see what it returns"
         nodes={MISPRICING_PIPELINE}
         executionId={activeExecution}
       />
+
+      <CompareAllCorridors />
+
 
       <section className="mb-5">
         <div className="flex flex-wrap items-center gap-2">
@@ -318,7 +322,7 @@ export default function MispricingPage() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-500/40 text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-50 text-xs font-semibold"
           >
             {running ? (
-              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scoring mispricing...</>
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scoring price at risk...</>
             ) : scan ? (
               <><Crosshair className="w-3.5 h-3.5" /> Refresh {selected ? selected.label : 'corridor'} <ArrowRight className="w-3 h-3" /></>
             ) : (
@@ -339,7 +343,7 @@ export default function MispricingPage() {
 
       {!scan && !running && (
         <div className="border border-dashed border-slate-700 rounded-xl p-8 text-center text-[12px] text-slate-500 mb-6">
-          Click <span className="text-emerald-300 font-semibold">Score corridor</span> to fire the Mispricing Lens.
+          Click <span className="text-emerald-300 font-semibold">Score corridor</span> to fire the Price at Risk Lens.
           The Bayesian Ridge regression and Isolation Forest fire in parallel via the platform's <span className="font-mono text-cyan-300">ml_model</span> tool;
           three Tavily news queries run alongside.
         </div>
@@ -348,19 +352,13 @@ export default function MispricingPage() {
       {scan && (
         <>
           <VerdictStrip scan={scan} />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
-            <div className="lg:col-span-2">
-              <SpreadChart scan={scan} />
-            </div>
-            <ResidualGauge scan={scan} />
-          </div>
-          <FeatureGrid scan={scan} />
+          <ScanInsightsTabs scan={scan} />
           <OptionsSignalsPanel scan={scan} />
           <FreightSignalsPanel scan={scan} />
           {scan.thesis && (
             <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4">
               <div className="flex items-center gap-2 mb-2 text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">
-                <Sparkles className="w-3.5 h-3.5" /> Thesis (LLM, cited drivers below)
+                <Sparkles className="w-3.5 h-3.5" /> Hypothesis (LLM, cited drivers below)
               </div>
               <p className="text-[13px] text-slate-200 leading-relaxed">{scan.thesis}</p>
             </div>
@@ -374,6 +372,27 @@ export default function MispricingPage() {
               gateOpened={gateOpened}
               gateError={gateError}
               onOpenGate={openGate}
+            />
+          )}
+          {scan.trade_card && selected && (
+            <CompliancePanel
+              action={{
+                action_kind: 'trade_card',
+                corridor: {
+                  id: selected.id,
+                  label: selected.label,
+                  origin_port: selected.origin_port,
+                  destination_port: selected.destination_port,
+                  vessel_class: 'VLGC',
+                },
+                structure: {
+                  side: scan.direction === 'cheap' ? 'buy' : 'sell',
+                  size_mt: (scan.trade_card.size_kt || 0) * 1000,
+                  tenor_months: Math.max(1, Math.round((scan.trade_card.horizon_days || 30) / 30)),
+                  instrument: scan.trade_card.structure || 'spread',
+                },
+                timing_utc: new Date().toISOString(),
+              }}
             />
           )}
           {meta && (
@@ -396,6 +415,133 @@ export default function MispricingPage() {
         expectedTools={EXPECTED_TOOLS}
       />
     </div>
+  );
+}
+
+// Compare all corridors at-a-glance: fetches /api/wingman/signals (cached)
+// and renders a single ranked table so the trader can see which corridor
+// is most dislocated without clicking through each chip.
+function CompareAllCorridors() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const j = await fetch('/api/wingman/signals').then((r) => r.json());
+        if (!cancelled) setRows(j?.data?.signals || []);
+      } catch { /* ignore */ }
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  if (rows.length === 0) return null;
+  const ranked = [...rows].sort((a, b) => Math.abs(b?.residual_sigma ?? 0) - Math.abs(a?.residual_sigma ?? 0));
+  return (
+    <section className="mb-4" data-testid="compare-corridors">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.04] hover:bg-cyan-500/[0.07]"
+      >
+        <span className="text-[11px] font-semibold text-cyan-200 inline-flex items-center gap-2">
+          <Activity className="w-3.5 h-3.5" /> Compare verdicts across all {rows.length} corridors
+        </span>
+        <ArrowRight className={`w-3.5 h-3.5 text-cyan-300 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-2 overflow-x-auto rounded-xl border border-cyan-500/20">
+          <table className="w-full text-[11px]">
+            <thead className="bg-slate-900/60 text-slate-400 uppercase text-[9px] tracking-wider">
+              <tr>
+                <th className="text-left px-3 py-2">Corridor</th>
+                <th className="text-left px-3 py-2">Verdict</th>
+                <th className="text-right px-3 py-2">Observed</th>
+                <th className="text-right px-3 py-2">Fair value</th>
+                <th className="text-right px-3 py-2">Residual σ</th>
+                <th className="text-left px-3 py-2">Direction</th>
+                <th className="text-left px-3 py-2">Regime</th>
+                <th className="text-left px-3 py-2">Cached</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranked.map((r) => {
+                const v = (r.verdict || '').toLowerCase();
+                const tone =
+                  v === 'dislocated' ? 'text-rose-200' :
+                  v === 'stretched'  ? 'text-amber-200' :
+                  v === 'aligned'    ? 'text-emerald-200' : 'text-slate-400';
+                const sigma = r.residual_sigma;
+                const ageMin = r.age_seconds != null ? Math.round(r.age_seconds / 60) : null;
+                return (
+                  <tr key={r.id} className="border-t border-slate-800">
+                    <td className="px-3 py-2 text-white font-semibold">{r.label}</td>
+                    <td className={`px-3 py-2 uppercase text-[10px] font-bold tracking-wider ${tone}`}>{r.verdict || '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-200">{r.observed_spread_usd_mt != null ? `$${r.observed_spread_usd_mt.toFixed(1)}` : '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-300">{r.fair_value_spread_usd_mt != null ? `$${r.fair_value_spread_usd_mt.toFixed(1)}` : '—'}</td>
+                    <td className={`px-3 py-2 text-right font-mono font-bold ${sigma == null ? 'text-slate-500' : Math.abs(sigma) >= 2 ? 'text-rose-200' : Math.abs(sigma) >= 1 ? 'text-amber-200' : 'text-emerald-200'}`}>
+                      {sigma != null ? `${sigma >= 0 ? '+' : ''}${sigma.toFixed(2)}σ` : '—'}
+                    </td>
+                    <td className={`px-3 py-2 ${(r.direction || '').toLowerCase() === 'rich' ? 'text-rose-300' : (r.direction || '').toLowerCase() === 'cheap' ? 'text-emerald-300' : 'text-slate-500'}`}>{r.direction || '—'}</td>
+                    <td className="px-3 py-2 font-mono text-[10px] text-slate-400">{(r.market_regime || '—').toLowerCase()}</td>
+                    <td className="px-3 py-2 text-[10px] text-slate-500">{ageMin == null ? 'never' : ageMin < 60 ? `${ageMin}m ago` : `${Math.round(ageMin / 60)}h ago`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ScanInsightsTabs({ scan }: { scan: Scan }) {
+  const [tab, setTab] = useState<'chart' | 'residual'>('chart');
+  const hasFeatures = scan.feature_vector && Object.keys(scan.feature_vector).length > 0;
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-1.5 mb-3" role="tablist">
+        <TabButton active={tab === 'chart'} onClick={() => setTab('chart')} testId="tab-chart">
+          Fair-value chart
+        </TabButton>
+        <TabButton active={tab === 'residual'} onClick={() => setTab('residual')} testId="tab-residual">
+          Residual z-score · feature vector
+        </TabButton>
+      </div>
+      {tab === 'chart' ? (
+        <SpreadChart scan={scan} />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <ResidualGauge scan={scan} />
+          <div className="lg:col-span-2">
+            {hasFeatures ? <FeatureGrid scan={scan} /> : (
+              <div className="rounded-xl border border-dashed border-slate-700 p-6 text-[12px] text-slate-500 h-full flex items-center justify-center">
+                No feature vector returned by the latest scan.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabButton({ active, onClick, children, testId }: { active: boolean; onClick: () => void; children: React.ReactNode; testId?: string }) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      data-testid={testId}
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+        active
+          ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
+          : 'border-slate-800 bg-slate-900/30 text-slate-400 hover:text-white hover:bg-slate-800/40'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -593,7 +739,13 @@ function RegimeChip({ regime }: { regime?: string }) {
 
 function OptionsSignalsPanel({ scan }: { scan: Scan }) {
   const o = scan.options_signals;
-  if (!o) return null;
+  const hasAny =
+    o != null &&
+    (o.crude_atm_iv != null ||
+      o.crude_risk_reversal_25d != null ||
+      o.nat_gas_atm_iv != null ||
+      o.crude_put_call_oi_ratio != null);
+  if (!hasAny) return null;
   const tone = REGIME_LABELS[(scan.market_regime || 'unknown').toLowerCase()] || REGIME_LABELS.unknown;
   return (
     <div data-testid="options-signals-panel" className={`mb-4 rounded-xl border ${tone.tone.split(' ').slice(0, 2).join(' ')} p-4`}>
@@ -804,6 +956,174 @@ function KV({ label, value, tone = 'text-white' }: { label: string; value: strin
     <div className="px-3 py-2 rounded bg-slate-950/40 border border-slate-800">
       <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
       <div className={`font-mono font-semibold ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
+interface ComplianceCheck { rule: string; limit: string; observed: string; pass: boolean }
+interface ComplianceCitation { source: 'kb' | 'atlas'; doc_title?: string; doc_id?: string; node_label?: string; node_id?: string; quote: string; url?: string }
+interface ComplianceVerdict {
+  verdict: 'ALLOWED' | 'WARN' | 'BLOCK';
+  summary: string;
+  reasons: string[];
+  remediation: string[];
+  citations: ComplianceCitation[];
+  checks: ComplianceCheck[];
+  rules_version: string;
+  fingerprint?: string;
+  execution_id?: string;
+  cost_usd?: number;
+  duration_ms?: number;
+}
+
+function CompliancePanel({ action }: { action: Record<string, any> }) {
+  const [data, setData] = useState<ComplianceVerdict | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [cacheHit, setCacheHit] = useState<boolean | null>(null);
+  const localCache = useRef<Map<string, ComplianceVerdict>>(new Map());
+
+  const fingerprint = useMemo(() => {
+    if (!action) return '';
+    const { timing_utc, ...rest } = action;
+    return JSON.stringify(rest);
+  }, [action]);
+
+  useEffect(() => {
+    if (!fingerprint) return;
+    const cached = localCache.current.get(fingerprint);
+    if (cached) {
+      setData(cached);
+      setCacheHit(true);
+      setLoading(false);
+      setErr(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    setData(null);
+    fetch('/api/wingman/compliance/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+      .then(async (r) => {
+        const text = await r.text();
+        let body: any = null;
+        try { body = text ? JSON.parse(text) : null; } catch { body = null; }
+        return { status: r.status, body, text };
+      })
+      .then(({ status, body, text }) => {
+        if (cancelled) return;
+        if (status >= 400 || !body) {
+          // Backend returned non-JSON (e.g. "Internal Server Error") — show
+          // a friendly summary rather than a JSON.parse exception.
+          const snippet = text ? text.slice(0, 120).replace(/\s+/g, ' ').trim() : '';
+          setErr(body?.detail || `Compliance check unavailable (HTTP ${status}${snippet ? ` — ${snippet}` : ''})`);
+        } else {
+          const verdict: ComplianceVerdict | null = body.data || null;
+          setData(verdict);
+          setCacheHit(body.cache === 'hit');
+          if (verdict) localCache.current.set(fingerprint, verdict);
+        }
+      })
+      .catch(e => { if (!cancelled) setErr(`Compliance check unreachable — ${String(e).slice(0, 120)}`); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [fingerprint]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const tone = !data ? { border: 'border-slate-700', bg: 'bg-slate-900/40', text: 'text-slate-300', dot: 'bg-slate-500' }
+    : data.verdict === 'ALLOWED' ? { border: 'border-emerald-500/40', bg: 'bg-emerald-500/10', text: 'text-emerald-200', dot: 'bg-emerald-400' }
+    : data.verdict === 'WARN'    ? { border: 'border-amber-500/40',   bg: 'bg-amber-500/10',   text: 'text-amber-200',   dot: 'bg-amber-400' }
+    :                              { border: 'border-rose-500/40',    bg: 'bg-rose-500/10',    text: 'text-rose-200',    dot: 'bg-rose-400' };
+
+  return (
+    <div className={`mb-4 rounded-xl border ${tone.border} ${tone.bg} p-4`} data-testid="compliance-panel">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className={`w-4 h-4 ${tone.text}`} />
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-2">
+              Compliance check
+              {cacheHit === true && <span className="text-[9px] text-slate-500">(cached)</span>}
+            </div>
+            <div className="text-sm font-bold text-white flex items-center gap-2">
+              <span className={`inline-block w-2 h-2 rounded-full ${tone.dot}`} />
+              {loading ? 'Validating…' : err ? 'Check failed' : data ? data.verdict : '—'}
+            </div>
+          </div>
+        </div>
+        {data && (
+          <button onClick={() => setExpanded(v => !v)} className="text-[11px] text-slate-400 hover:text-slate-200">
+            {expanded ? 'hide details' : 'show details'}
+          </button>
+        )}
+      </div>
+      {err && <div className="text-[11px] text-rose-300">{err}</div>}
+      {data && <p className="text-[12px] text-slate-300 leading-relaxed">{data.summary}</p>}
+      {expanded && data && (
+        <div className="mt-3 space-y-3">
+          {data.reasons.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Reasons</div>
+              <ul className="text-[12px] text-slate-200 list-disc pl-5 space-y-1">
+                {data.reasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+          {data.remediation.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Remediation</div>
+              <ul className="text-[12px] text-emerald-200 list-disc pl-5 space-y-1">
+                {data.remediation.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+          {data.checks.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Rule checks</div>
+              <div className="space-y-1">
+                {data.checks.map((c, i) => (
+                  <div key={i} className="text-[11px] flex items-start gap-2">
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full mt-1.5 ${c.pass ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                    <div>
+                      <span className="text-slate-200 font-medium">{c.rule}</span>
+                      <span className="text-slate-500"> · limit: {c.limit} · observed: {c.observed}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {data.citations.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Citations</div>
+              <div className="flex flex-wrap gap-2">
+                {data.citations.map((c, i) => (
+                  <a
+                    key={i}
+                    href={c.url || '#'}
+                    target={c.url ? '_blank' : undefined}
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border border-slate-700 bg-slate-900/60 text-slate-300 hover:bg-slate-800"
+                    title={c.quote}
+                  >
+                    {c.source === 'kb' ? '📄' : '🕸'} {c.doc_title || c.node_label}
+                    {c.url && <ExternalLink className="w-3 h-3" />}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="text-[10px] text-slate-600 font-mono">
+            rules: {data.rules_version}
+            {data.fingerprint && ` · fp ${data.fingerprint.slice(0,8)}`}
+            {data.execution_id && ` · exec ${data.execution_id.slice(0,8)}`}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

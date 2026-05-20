@@ -153,6 +153,8 @@ export default function InboxPage() {
         executionId={activeExecution}
       />
 
+      <CustomEmailComposer onExecution={setActiveExecution} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {emails.map((e) => {
           const offer = parsed[e.id];
@@ -274,6 +276,177 @@ function Row({ k, v }: { k: string; v: string }) {
     <div className="flex justify-between gap-2">
       <span className="text-slate-500">{k}</span>
       <span className="text-slate-200 text-right">{v}</span>
+    </div>
+  );
+}
+
+// Paste-your-own composer: trader drops a raw broker email in, we fire
+// the classifier + parser agents against it and render the structured
+// offer. Same DAG drawer + same approval flow as the seed emails.
+function CustomEmailComposer({ onExecution }: { onExecution: (id: string) => void }) {
+  const TERMINAL = new Set(['completed', 'succeeded', 'failed', 'error', 'cancelled']);
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState<'classify' | 'parse' | null>(null);
+  const [cls, setCls] = useState<Classification | null>(null);
+  const [offer, setOffer] = useState<Offer | null>(null);
+  const [ack, setAck] = useState<string | null>(null);
+  const pollersRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+  const SAMPLE = `From: trader@northsea-brokers.com
+Subject: Indication — 23kt propane CFR Antwerp Jul-10
+
+Looking for buyer of 23kt propane cargo CFR Antwerp, lifting Jul 10-15.
+Floating price: Mont Belvieu monthly average + 4 c/gal. C3 95%+.
+Vessel TBN, MR/LR2 accepted. Counterparty: Vitol. Firm by Wed EOD.`;
+
+  const fire = async (kind: 'classify' | 'parse') => {
+    if (!body.trim()) return;
+    setBusy(kind);
+    setCls(null); setOffer(null); setAck(null);
+    try {
+      const r = await fetch(`/api/wingman/inbox/custom/${kind}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+      const j = await r.json();
+      const exec = j?.data?.execution_id;
+      if (!exec) { setBusy(null); return; }
+      onExecution(exec);
+      const url = kind === 'classify' ? `/api/wingman/classify-result/${exec}` : `/api/wingman/parse-result/${exec}`;
+      const t = setInterval(async () => {
+        try {
+          const rr = await fetch(url);
+          const jj = await rr.json();
+          const status = (jj?.data?.status || '').toLowerCase();
+          if (TERMINAL.has(status)) {
+            if (kind === 'classify') setCls(jj.data?.classification || {});
+            else setOffer(jj.data?.offer || {});
+            setBusy(null);
+            clearInterval(t);
+            delete pollersRef.current[exec];
+          }
+        } catch { /* keep polling */ }
+      }, 1500);
+      pollersRef.current[exec] = t;
+    } catch { setBusy(null); }
+  };
+
+  const acknowledge = async () => {
+    if (!offer?.id) return;
+    try {
+      const r = await fetch(`/api/wingman/offers/${offer.id}/acknowledge`, { method: 'POST' });
+      const j = await r.json();
+      if (j?.data?.approval_id) setAck(j.data.approval_id);
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <div className="mb-5 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.04] p-4" data-testid="inbox-composer">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-cyan-300 font-bold">Paste your own email</div>
+          <div className="text-sm font-semibold text-white">Test the classifier + parser on any broker message</div>
+        </div>
+        <button
+          onClick={() => setBody(SAMPLE)}
+          className="text-[10px] text-cyan-300 hover:text-cyan-200 px-2 py-1 rounded border border-cyan-500/30 hover:bg-cyan-500/10"
+        >
+          Use sample email
+        </button>
+      </div>
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={5}
+        placeholder="Paste a broker email here (from/subject/body all in one block)…"
+        data-testid="inbox-composer-textarea"
+        className="w-full bg-slate-950/60 border border-slate-800 rounded-lg p-3 text-[12px] text-slate-200 placeholder-slate-600 focus:border-cyan-500/40 focus:outline-none font-mono"
+      />
+      <div className="flex items-center gap-2 mt-2 flex-wrap">
+        <button
+          onClick={() => fire('classify')}
+          disabled={!body.trim() || busy !== null}
+          className="px-3 py-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 text-[11px] font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+        >
+          {busy === 'classify' ? <><Loader2 className="w-3 h-3 animate-spin" /> Classifying…</> : <><Brain className="w-3 h-3" /> Classify intent</>}
+        </button>
+        <button
+          onClick={() => fire('parse')}
+          disabled={!body.trim() || busy !== null}
+          className="px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 text-[11px] font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+        >
+          {busy === 'parse' ? <><Loader2 className="w-3 h-3 animate-spin" /> Extracting…</> : 'Extract structured offer'}
+        </button>
+        {(cls || offer) && (
+          <button
+            onClick={() => { setBody(''); setCls(null); setOffer(null); setAck(null); }}
+            className="text-[10px] text-slate-500 hover:text-rose-300 px-2 py-1 rounded ml-auto"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {cls && (
+        <div className="mt-3 p-2.5 rounded-lg border border-purple-500/30 bg-purple-500/[0.06] text-[11px]">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-[9px] uppercase tracking-wider text-purple-300 font-bold">ML classification</span>
+            {cls.predicted_intent && (
+              <span className="font-mono px-1.5 py-0.5 rounded border border-purple-500/40 bg-purple-500/10 text-purple-200">{cls.predicted_intent}</span>
+            )}
+            {cls.confidence != null && <span className="text-slate-400">{(cls.confidence * 100).toFixed(0)}% conf</span>}
+            {(cls.urgency_score ?? 0) > 0.4 && <span className="text-amber-300">· urgent {((cls.urgency_score ?? 0) * 100).toFixed(0)}%</span>}
+          </div>
+          {cls.top_3 && (
+            <div className="flex gap-3">
+              {cls.top_3.map((t, i) => (
+                <div key={i} className="flex-1">
+                  <div className="text-[10px] text-slate-300 truncate">{t.label}</div>
+                  <div className="h-1 rounded-full bg-slate-800 overflow-hidden mt-0.5">
+                    <div className="h-full bg-purple-400" style={{ width: `${Math.max(0, Math.min(1, t.p)) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {offer && (
+        <div className="mt-3 p-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] text-[11px]">
+          <div className="flex items-center gap-2 mb-1.5">
+            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+            <span className="text-[9px] uppercase tracking-wider text-emerald-300 font-bold">Structured offer</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {[
+              ['Volume', offer.volume_mt ? `${offer.volume_mt} MT` : '—'],
+              ['Grade', offer.grade || '—'],
+              ['Port', offer.port || '—'],
+              ['Pricing', offer.pricing || '—'],
+              ['Validity', offer.validity || '—'],
+              ['Counterparty', offer.counterparty || '—'],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-2 px-2 py-1 rounded bg-slate-950/40">
+                <span className="text-slate-500">{k}</span>
+                <span className="text-slate-200 text-right truncate">{v}</span>
+              </div>
+            ))}
+          </div>
+          {offer.id && !ack && (
+            <button
+              onClick={acknowledge}
+              className="mt-2 w-full px-3 py-1.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 text-[11px] font-semibold inline-flex items-center justify-center gap-1.5"
+            >
+              <ShieldAlert className="w-3 h-3" /> Send to Approvals queue
+            </button>
+          )}
+          {ack && (
+            <div className="mt-2 text-[10px] text-slate-400">
+              Approval gate <span className="font-mono text-blue-300">{ack.slice(0, 8)}</span> opened — see <a href="/approvals" className="text-blue-300 hover:underline">queue</a>.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

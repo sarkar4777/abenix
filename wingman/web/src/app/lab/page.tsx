@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Anchor, Ship, Gauge, Database, TrendingUp, MapPin, Wrench,
   Calculator, ArrowRight, Sparkles, ChevronDown,
@@ -14,7 +14,7 @@ const LAB_EXPLAINER: ExplainerSpec = {
   what:
     'The Market & Freight Lab is the interactive surface for every market-and-freight ' +
     'platform tool Wingman uses. Click any card to see what the tool returns, what ' +
-    'inputs it takes, and how the Mispricing Lens consumes it.',
+    'inputs it takes, and how the Price at Risk Lens consumes it.',
   how:
     'Each card is a thin client over a generic Abenix platform tool. The same tool — same ' +
     'inputs, same outputs — is callable from any agent or pipeline you build in the ' +
@@ -102,13 +102,18 @@ const PORTS = [
   { code: 'EGSUE', name: 'Suez Canal',        loa: 400, beam: 77.5, draught: 20.1, air: 68, dwt: 350_000, products: 'transit only' },
 ];
 
+// Industry-standard units: propane/LPG in $/MT (cargo unit), crude + refined
+// products in $/bbl (Argus/Platts), natgas $/MMBtu. Front values are
+// illustrative snapshots from May 18 2026; live tool fires fresh on every
+// Mispricing / Workbench scan. Convert to $/MT for cargo math via
+// propane × 524.95 gal/MT, crude ÷ 7.45 bbl/MT.
 const FUTURES = [
-  { product: 'gasoline',   symbol: 'RB=F', front: 2.27, unit: '$/gal', bbl: 95.34, source: 'NYMEX RBOB' },
-  { product: 'heating_oil',symbol: 'HO=F', front: 2.39, unit: '$/gal', bbl: 100.38, source: 'NYMEX ULSD' },
-  { product: 'wti',        symbol: 'CL=F', front: 76.18, unit: '$/bbl', bbl: 76.18, source: 'NYMEX WTI' },
-  { product: 'brent',      symbol: 'BZ=F', front: 81.05, unit: '$/bbl', bbl: 81.05, source: 'ICE Brent' },
-  { product: 'natural_gas',symbol: 'NG=F', front: 2.84,  unit: '$/MMBtu', bbl: null,  source: 'NYMEX HH' },
-  { product: 'propane',    symbol: 'PG=F', front: 0.96,  unit: '$/gal', bbl: 40.32, source: 'NYMEX Mont Belvieu' },
+  { product: 'gasoline',   symbol: 'RB=F', front: 3.56,   unit: '$/gal', src_value: 3.56,  src_unit: '$/gal',  source: 'NYMEX RBOB (×42 → $/bbl, ×333 → $/MT)' },
+  { product: 'heating_oil',symbol: 'HO=F', front: 3.95,   unit: '$/gal', src_value: 3.95,  src_unit: '$/gal',  source: 'NY Harbor ULSD (Argus standard $/bbl × 7.45)' },
+  { product: 'wti',        symbol: 'CL=F', front: 107.35, unit: '$/bbl', src_value: 107.35,src_unit: '$/bbl', source: 'NYMEX WTI · Cushing (universal crude benchmark)' },
+  { product: 'brent',      symbol: 'BZ=F', front: 107.71, unit: '$/bbl', src_value: 107.71,src_unit: '$/bbl', source: 'ICE Brent · Europe (global crude benchmark)' },
+  { product: 'natural_gas',symbol: 'NG=F', front: 3.00,   unit: '$/MMBtu', src_value: 3.00, src_unit: '$/MMBtu', source: 'NYMEX Henry Hub (US gas standard)' },
+  { product: 'propane',    symbol: 'B0=F', front: 462.0,  unit: '$/MT', src_value: 0.88,  src_unit: '$/gal',  source: 'NYMEX Mont Belvieu · B0=F (LPG cargo unit, × 524.95 gal/MT)' },
 ];
 
 const OPTIONS_SAMPLE = [
@@ -171,10 +176,14 @@ export default function LabPage() {
 
       <ExplainerPanel spec={LAB_EXPLAINER} />
 
-      {/* Tool cards — 2-col grid */}
+      <LabTabs />
+
+      {/* Tool cards — 2-col grid; each section has a stable anchor so the
+          tab nav above scrolls to it instead of needing a router. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-4">
 
         {/* 1) VESSEL SPECS */}
+        <div id="lab-vessel" className="contents" />
         <Card
           icon={<Ship className="w-4 h-4 text-cyan-300" />}
           tool="vessel_specs"
@@ -202,6 +211,7 @@ export default function LabPage() {
         </Card>
 
         {/* 2) DENSITY + CONVERSION */}
+        <div id="lab-density" className="contents" />
         <Card
           icon={<Gauge className="w-4 h-4 text-emerald-300" />}
           tool="vessel_specs · density / convert"
@@ -249,6 +259,7 @@ export default function LabPage() {
         </Card>
 
         {/* 3) BALTIC BLPG */}
+        <div id="lab-freight" className="contents" />
         <Card
           icon={<Anchor className="w-4 h-4 text-cyan-300" />}
           tool="freight_baltic_blpg"
@@ -278,7 +289,7 @@ export default function LabPage() {
             </tbody>
           </table>
           <div className="text-[10px] text-slate-500 mt-3">
-            Used by Mispricing Lens as feature <span className="font-mono text-emerald-300">freight_baltic_z</span> on every LPG corridor scan.
+            Used by Price at Risk Lens as feature <span className="font-mono text-emerald-300">freight_baltic_z</span> on every LPG corridor scan.
           </div>
         </Card>
 
@@ -319,6 +330,7 @@ export default function LabPage() {
         </Card>
 
         {/* 5) PORT CONSTRAINTS */}
+        <div id="lab-port" className="contents" />
         <Card
           icon={<MapPin className="w-4 h-4 text-rose-300" />}
           tool="port_constraints"
@@ -383,6 +395,7 @@ export default function LabPage() {
         </Card>
 
         {/* 6) REFINED PRODUCTS FORWARDS */}
+        <div id="lab-futures" className="contents" />
         <Card
           icon={<TrendingUp className="w-4 h-4 text-violet-300" />}
           tool="refined_products_forwards"
@@ -394,8 +407,8 @@ export default function LabPage() {
               <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
                 <th className="text-left py-2">Product</th>
                 <th className="text-left py-2">Symbol</th>
-                <th className="text-right py-2">Front</th>
-                <th className="text-right py-2">$/bbl-equiv</th>
+                <th className="text-right py-2">Front · $/MT</th>
+                <th className="text-right py-2">Source</th>
               </tr>
             </thead>
             <tbody>
@@ -404,18 +417,31 @@ export default function LabPage() {
                   <td className="py-2 text-slate-300 capitalize">{f.product.replace(/_/g, ' ')}</td>
                   <td className="py-2 font-mono text-violet-300">{f.symbol}</td>
                   <td className="py-2 text-right font-mono text-white">{f.front.toFixed(2)} {f.unit}</td>
-                  <td className="py-2 text-right font-mono text-slate-400">{f.bbl ? `$${f.bbl.toFixed(2)}` : '—'}</td>
+                  <td className="py-2 text-right font-mono text-slate-400">{f.src_value} {f.src_unit}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="mt-3 rounded-lg border border-violet-500/30 bg-violet-500/[0.04] p-3 text-[12px]">
-            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">3-2-1 Gulf Coast crack (indicative)</div>
-            <div className="font-mono text-violet-200">((2 × ${FUTURES[0].bbl?.toFixed(2)} + ${FUTURES[1].bbl?.toFixed(2)}) − 3 × ${FUTURES[2].front.toFixed(2)}) ÷ 3 = <span className="font-bold text-white">${(((2 * (FUTURES[0].bbl || 0)) + (FUTURES[1].bbl || 0) - (3 * FUTURES[2].front)) / 3).toFixed(2)}/bbl</span></div>
-          </div>
+          {(() => {
+            // 3-2-1 Gulf Coast crack = (2×RBOB + ULSD − 3×WTI) / 3, all in $/bbl.
+            // Refined products $/gal × 42 → $/bbl; crude already $/bbl.
+            const rbobBbl = FUTURES[0].src_value * 42;
+            const ulsdBbl = FUTURES[1].src_value * 42;
+            const wtiBbl = FUTURES[2].src_value;
+            const crack = ((2 * rbobBbl) + ulsdBbl - (3 * wtiBbl)) / 3;
+            return (
+              <div className="mt-3 rounded-lg border border-violet-500/30 bg-violet-500/[0.04] p-3 text-[12px]">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">3-2-1 Gulf Coast crack (indicative)</div>
+                <div className="font-mono text-violet-200">
+                  ((2 × ${rbobBbl.toFixed(2)} + ${ulsdBbl.toFixed(2)}) − 3 × ${wtiBbl.toFixed(2)}) ÷ 3 = <span className="font-bold text-white">${crack.toFixed(2)}/bbl</span>
+                </div>
+              </div>
+            );
+          })()}
         </Card>
 
         {/* 7) OPTIONS DATA */}
+        <div id="lab-options" className="contents" />
         <Card
           icon={<TrendingUp className="w-4 h-4 text-fuchsia-300" />}
           tool="options_data"
@@ -451,11 +477,11 @@ export default function LabPage() {
           </div>
         </Card>
 
-        {/* 8) HOW MISPRICING LENS USES THEM */}
+        {/* 8) HOW PRICE AT RISK LENS USES THEM */}
         <Card
           icon={<Sparkles className="w-4 h-4 text-emerald-300" />}
           tool="wingman-mispricing-fairvalue"
-          title="How the Mispricing Lens consumes these"
+          title="How the Price at Risk Lens consumes these"
           subtitle="Three of these tools feed the Bayesian fair-value model directly as features. The other four enrich the agent's narrative + trade-card math."
         >
           <ul className="text-[12px] text-slate-300 space-y-2 leading-relaxed">
@@ -463,7 +489,7 @@ export default function LabPage() {
             <li><span className="font-mono text-emerald-300">feature [13] freight_ws_per_mt_z</span> — z-score of <span className="font-mono">freight_worldscale</span> density-corrected $/MT.</li>
             <li><span className="font-mono text-emerald-300">feature [14] route_vessel_size_norm</span> — from <span className="font-mono">vessel_specs</span> typical cargo MT ÷ 50,000.</li>
             <li><span className="font-mono text-fuchsia-300">features [8-11]</span> — from <span className="font-mono">options_data</span> (Brent IV + 25-Δ RR + HH IV + crude P/C OI).</li>
-            <li><span className="text-slate-400">Other tools</span> — <span className="font-mono">port_constraints</span> flags impossible cargoes before the trade card is drafted; <span className="font-mono">refined_products_forwards</span> + 3-2-1 crack contextualise the spread in the LLM thesis.</li>
+            <li><span className="text-slate-400">Other tools</span> — <span className="font-mono">port_constraints</span> flags impossible cargoes before the trade card is drafted; <span className="font-mono">refined_products_forwards</span> + 3-2-1 crack contextualise the spread in the LLM hypothesis.</li>
           </ul>
           <div className="mt-3 text-[11px] text-emerald-300 flex items-center gap-1">
             Holdout R² 0.665 · RMSE $7.49/MT · posterior std ~$8.5/MT. <ArrowRight className="w-3 h-3" />
@@ -524,5 +550,57 @@ function RegimeBadge({ label }: { label: string }) {
     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold border ${tone}`}>
       {label.replace(/_/g, ' ')}
     </span>
+  );
+}
+
+// Sticky-ish tab nav at the top of the Lab; jumps to each section anchor
+// (vessel / density / freight / port / futures / options). Smooth scroll
+// + active highlight as the user scrolls.
+const LAB_TABS = [
+  { id: 'lab-vessel',  label: 'Vessel registry' },
+  { id: 'lab-density', label: 'Density math' },
+  { id: 'lab-freight', label: 'Freight (Baltic + WS)' },
+  { id: 'lab-port',    label: 'Port × vessel' },
+  { id: 'lab-futures', label: 'Refined-product futures' },
+  { id: 'lab-options', label: 'Options + skew' },
+];
+
+function LabTabs() {
+  const [active, setActive] = useState<string>(LAB_TABS[0].id);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const obs = new IntersectionObserver((entries) => {
+      const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+      if (visible[0]) setActive((visible[0].target as HTMLElement).id);
+    }, { rootMargin: '-30% 0px -50% 0px', threshold: [0.0, 0.25, 0.5, 0.75, 1.0] });
+    LAB_TABS.forEach((t) => {
+      const el = document.getElementById(t.id);
+      if (el) obs.observe(el);
+    });
+    return () => obs.disconnect();
+  }, []);
+  const jump = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  return (
+    <nav className="sticky top-0 z-30 -mx-6 px-6 py-2 bg-slate-950/70 backdrop-blur border-b border-cyan-500/15 mb-3" data-testid="lab-tabs">
+      <div className="flex items-center gap-1.5 overflow-x-auto">
+        {LAB_TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => jump(t.id)}
+            data-testid={`lab-tab-${t.id}`}
+            className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors ${
+              active === t.id
+                ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-200'
+                : 'border-slate-800 text-slate-400 hover:text-white hover:border-cyan-500/40'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </nav>
   );
 }

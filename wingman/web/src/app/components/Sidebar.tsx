@@ -10,9 +10,9 @@ import NotificationBell from './NotificationBell';
 
 const NAV = [
   { href: '/home', label: 'Home', icon: Home },
-  { href: '/desk', label: 'Desk Copilot', icon: Sparkles },
+  { href: '/desk', label: 'Wingman Copilot', icon: Sparkles },
   { href: '/workbench', label: 'Arbitrage Workbench', icon: Activity },
-  { href: '/mispricing', label: 'Mispricing Lens', icon: Crosshair },
+  { href: '/mispricing', label: 'Price at Risk Lens', icon: Crosshair },
   { href: '/lab', label: 'Market & Freight Lab', icon: Anchor },
   { href: '/scenarios', label: 'Forward Scenarios', icon: LineChart },
   { href: '/inbox', label: 'Broker Inbox', icon: Inbox },
@@ -60,7 +60,7 @@ export default function Sidebar() {
       <div className="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500">
         <div className="text-slate-300">Demo Trader</div>
         <div className="text-slate-500 truncate">demo-trader@wingman.local</div>
-        <div className="mt-2 text-[10px] text-slate-600">Powered by Bodhi · v0.1</div>
+        <div className="mt-2 text-[10px] text-slate-600">Powered by Abenix · v0.1</div>
       </div>
     </aside>
   );

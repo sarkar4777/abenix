@@ -1,4 +1,4 @@
-"""Persona feed — the UI's hook for adding ring-fenced data to the KB."""
+﻿"""Persona feed â€” the UI's hook for adding ring-fenced data to the KB."""
 
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ async def delete_item(
     p = q.scalars().first()
     if not p:
         return error("not found", 404)
-    # Delete vectors from Pinecone first (ring-fencing — don't leave orphans)
+    # Delete vectors from Pinecone first (ring-fencing â€” don't leave orphans)
     ok = await _pinecone_delete_chunks(
         tenant_id=str(user.tenant_id),
         ids=p.pinecone_ids or [],
@@ -164,7 +164,7 @@ async def upload_file(
     if not raw:
         return error("empty file", 400)
 
-    # Extract text — txt / md / pdf (best-effort). Other formats → return error.
+    # Extract text â€” txt / md / pdf (best-effort). Other formats â†’ return error.
     text = _extract_text(file.filename or "", raw)
     if not text.strip():
         return error(
@@ -252,7 +252,7 @@ async def revoke_voice(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Revoke consent AND delete the voice from the provider side. No agent
-    can use it after this call even if the user_id → voice_id mapping leaks."""
+    can use it after this call even if the user_id â†’ voice_id mapping leaks."""
     old_voice_id = user.voice_id
     old_provider = (user.voice_provider or "").lower()
     user.voice_id = None
@@ -283,7 +283,7 @@ async def upload_voice_clip(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Upload a 30-120s reference audio clip → ElevenLabs clone → register"""
+    """Upload a 30-120s reference audio clip â†’ ElevenLabs clone â†’ register"""
     api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
     if not api_key:
         return error(
@@ -303,12 +303,12 @@ async def upload_voice_clip(
             name=(name or f"Abenix-{user.id}")[:60],
             reference_audio_bytes=raw,
             reference_filename=file.filename or "voice.wav",
-            description=f"Abenix user {user.id} — consent required before use",
+            description=f"Abenix user {user.id} â€” consent required before use",
             labels={"abenix_user": str(user.id), "tenant": str(user.tenant_id)},
         )
     except RuntimeError as e:
         # The voice-clone helper packs the provider error into the
-        # exception message as JSON so we can forward useful detail —
+        # exception message as JSON so we can forward useful detail â€”
         # commonly "paid_plan_required" for free-tier ElevenLabs accounts.
         try:
             import json as _json
@@ -335,7 +335,7 @@ async def upload_voice_clip(
     except Exception as e:
         return error(f"clone failed: {e}", 500)
     if not voice_id:
-        return error("clone failed — check ELEVENLABS_API_KEY validity + quota", 500)
+        return error("clone failed â€” check ELEVENLABS_API_KEY validity + quota", 500)
     user.voice_id = voice_id
     user.voice_provider = "elevenlabs"
     # consent remains NULL until the user explicitly calls /voice/consent
@@ -454,10 +454,10 @@ async def _pinecone_upsert_chunks(
         return []
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     pinecone_key = os.environ.get("PINECONE_API_KEY", "").strip()
-    index_name = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+    index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
     if not (api_key and pinecone_key):
         logger.warning(
-            "persona upsert skipped — missing OPENAI_API_KEY or PINECONE_API_KEY"
+            "persona upsert skipped â€” missing OPENAI_API_KEY or PINECONE_API_KEY"
         )
         return []
     try:
@@ -466,7 +466,7 @@ async def _pinecone_upsert_chunks(
     except ImportError:
         return []
 
-    # The entire upsert path is best-effort — any failure (bad Pinecone
+    # The entire upsert path is best-effort â€” any failure (bad Pinecone
     # key, quota exceeded, OpenAI rate limit) must NOT bring down the
     # /api/persona/notes endpoint. The DB row is saved regardless with
     # status='failed' so the UI shows an actionable state to the admin.
@@ -522,7 +522,7 @@ async def _pinecone_delete_chunks(*, tenant_id: str, ids: list[str]) -> bool:
     if not ids:
         return True
     pinecone_key = os.environ.get("PINECONE_API_KEY", "").strip()
-    index_name = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+    index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
     if not pinecone_key:
         return False
     try:

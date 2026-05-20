@@ -22,16 +22,25 @@ class ArchiveRun(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "archive_runs"
 
     source_table: Mapped[str] = mapped_column(String(64), index=True)
-    triggered_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    triggered_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     is_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     status: Mapped[ArchiveRunStatus] = mapped_column(
-        Enum(ArchiveRunStatus, name="archive_run_status"), default=ArchiveRunStatus.PENDING
+        Enum(ArchiveRunStatus, name="archive_run_status"),
+        default=ArchiveRunStatus.PENDING,
     )
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
-    cutoff_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cutoff_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     rows_archived: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     rows_deleted: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -39,8 +48,12 @@ class ArchiveRun(Base, UUIDMixin, TimestampMixin):
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     file_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    oldest_row_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    newest_row_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    oldest_row_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    newest_row_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -57,4 +70,6 @@ class RetentionPolicy(Base, TimestampMixin):
     retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )

@@ -1507,8 +1507,9 @@ spec:
             <Hero src={SS('09-grafana-dashboard.png')} alt="Grafana — Abenix Operations dashboard" caption="Operations Overview — LLM spend, tokens, execution outcomes, failure breakdown by code, stale sweeps" />
             <Callout tone="info">
               Grafana is intentionally <strong>not exposed on the public ingress</strong>. Reach it via port-forward:
-              <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 mt-2 overflow-x-auto">{`kubectl -n abenix port-forward svc/abenix-grafana 3030:3000
-# Then browse http://localhost:3030 (admin / abenix-admin)`}</pre>
+              <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 mt-2 overflow-x-auto">{`bash scripts/portforward-azure.sh start
+# Forwards Grafana on http://localhost:3010 (admin / abenix-admin)
+# Tempo raw API on http://localhost:3200, Prometheus on http://localhost:9090`}</pre>
             </Callout>
             <p><strong className="text-white">Metrics emitted:</strong></p>
             <ul className="list-disc pl-5 space-y-0.5 text-[12px] font-mono">
@@ -1556,7 +1557,7 @@ spec:
               <li>Service map (Grafana Tempo &quot;Service Graph&quot; tab): shows the call graph across abenix-api → agent-runtime → external Anthropic API → sandbox pod (when code_asset fires). Red edges flag latency outliers.</li>
             </ol>
             <Callout tone="info">
-              Grafana Tempo runs as <code>abenix-tempo</code> in-cluster (single-replica, local emptyDir storage, 7-day retention). For multi-node clusters or higher durability, swap the storage block to <code>backend: s3</code> in the ConfigMap. Tempo is on the same Grafana port-forward (3030 → 3000); navigate to <strong>Explore → Tempo</strong> to start querying.
+              Grafana Tempo runs as <code>abenix-tempo</code> in-cluster (single-replica, local emptyDir storage, 7-day retention). For multi-node clusters or higher durability, swap the storage block to <code>backend: s3</code> in the ConfigMap. Tempo is forwarded by <code>portforward-azure.sh</code> on <code>http://localhost:3200</code>; you can also reach traces through Grafana at <code>http://localhost:3010</code> → <strong>Explore → Tempo</strong>.
             </Callout>
             <h4 className="text-white font-semibold pt-3">Notification fan-out</h4>
             <ul className="list-disc pl-5 space-y-0.5 text-[12px]">

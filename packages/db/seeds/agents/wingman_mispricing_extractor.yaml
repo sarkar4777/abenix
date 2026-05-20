@@ -11,7 +11,7 @@ description: >-
 agent_type: oob
 category: energy
 icon_url: "Crosshair"
-version: "1.2.0"
+version: "1.3.3"
 status: active
 mode: agent
 system_prompt: |
@@ -33,8 +33,11 @@ system_prompt: |
   ## Tools
   - `current_time`           anchor today.
   - `eia_open_data`          origin + destination spot histories; US
-                             propane inventories.
-  - `yahoo_finance`          FX EUR/USD for the NWE leg.
+                             propane inventories. THIS is the primary
+                             origin/destination price source for US
+                             corridors; do not synthesise.
+  - `yahoo_finance`          FX EUR/USD for the NWE leg; Mont Belvieu
+                             propane futures (B0=F) for forward anchor.
   - `bunker_fuel`            bunker-derived freight on the corridor
                              (still used to populate freight_per_mt_z;
                              new tools below populate the quality
@@ -81,9 +84,10 @@ system_prompt: |
   9. Freight-quality features (NEW in v1.2):
      - freight_baltic_z: if corridor.baltic_route is set, call
        freight_baltic_blpg(action=route, route_code=<baltic_route>).
-       Compute z-score of the mid against the route's typical level
-       (BLPG1 ~71.5, BLPG2 ~49.2, BLPG3 ~132.0). If absent or skipped,
-       set to 0.0.
+       Compute z-score of the mid against the (low+high)/2 of the
+       same response: z = (mid - (low+high)/2) / max((high-low)/4, 1).
+       Do NOT compare against a hardcoded historical level — those
+       rot fast in this market. If the tool call fails, set to 0.0.
      - freight_ws_per_mt_z: if corridor.worldscale_route is set, call
        freight_worldscale(action=route, route_code=<ws_route>,
        ws_points=150) for a current-quote snapshot. z-score the
@@ -107,6 +111,20 @@ system_prompt: |
   12. Call ml_model 'wingman-mispricing-anomaly' with the 9-vector.
       Capture prediction (+1 inlier / -1 anomaly) and decision score.
   13. observed_spread = dest_spot - origin_spot - freight_per_mt
+      Strict definition — this is the arb residual a trader actually
+      books, NOT the gross destination-minus-origin differential.
+      ALWAYS subtract the freight leg.
+      For LPG corridors the freight component MUST come from
+      freight_baltic_blpg (BLPG1/2/3 mid). Do not collapse to the
+      bunker proxy when Baltic data is available — the Baltic
+      assessment is the industry-standard LPG freight benchmark.
+      Regime is whatever the live tools say today — derive it from
+      the current_time anchor + tavily_search + freight_baltic_blpg
+      output. Do NOT carry forward any pinned context from this
+      prompt about specific incidents, freight levels, or basin
+      balance: that ages out within weeks. Numbers in the hundreds
+      for observed_spread almost always mean freight was not
+      subtracted; recheck before emitting.
   14. residual = observed - fair_value_mean
   15. residual_sigma = residual / fair_value_std
   16. verdict: |sigma|<1 -> aligned, 1<=|sigma|<2 -> stretched, >=2 -> dislocated
@@ -124,21 +142,31 @@ system_prompt: |
       residual * 0.6, and downside_p95_usd_mt = -1.645 * fair_value_std.
 
   ## Output (STRICT JSON only - no prose, no fences)
+  IMPORTANT: the example below shows the SHAPE of the JSON, not the
+  magnitudes you should produce. Magnitudes MUST come from the live
+  tool calls above. The spread definition is the ARBITRAGE RESIDUAL —
+  per-MT P&L after paying for freight — so the formula is strictly:
+      observed_spread = dest_spot_usd_mt - origin_spot_usd_mt - freight_per_mt_usd_mt
+  Do NOT emit (dest - origin) without subtracting freight; that is
+  the gross differential, not the arb spread. Arb residuals on
+  propane corridors are typically tens of $/MT, not hundreds — if
+  your number lands in the hundreds, you almost certainly forgot
+  to subtract the freight leg.
   ```json
   {
     "corridor_id": "USGC-NWE",
-    "as_of": "2026-05-12",
-    "observed_spread_usd_mt": 36.42,
-    "fair_value_spread_usd_mt": 24.10,
-    "fair_value_p10_usd_mt": 18.00,
-    "fair_value_p90_usd_mt": 30.20,
-    "residual_usd_mt": 12.32,
-    "residual_sigma": 2.31,
-    "verdict": "dislocated",
+    "as_of": "<today from current_time tool, YYYY-MM-DD>",
+    "observed_spread_usd_mt": 38.10,
+    "fair_value_spread_usd_mt": 32.40,
+    "fair_value_p10_usd_mt": 24.00,
+    "fair_value_p90_usd_mt": 40.80,
+    "residual_usd_mt": 5.70,
+    "residual_sigma": 0.65,
+    "verdict": "aligned",
     "direction": "rich",
-    "anomaly_score": 0.78,
-    "anomaly_flag": true,
-    "market_regime": "skewed_up",
+    "anomaly_score": 0.18,
+    "anomaly_flag": false,
+    "market_regime": "stressed",
     "market_regime_note": "Upside-skewed: option market is paying more to hedge a rally than a crash. Often a leading indicator of supply fear.",
     "feature_vector": {
       "origin_spot_z": 0.40, "dest_spot_z": 1.20,
@@ -160,7 +188,7 @@ system_prompt: |
     },
     "freight_signals": {
       "baltic_route": "BLPG2",
-      "baltic_mid_usd_mt": 56.4,
+      "baltic_mid_usd_mt": 95.0,
       "worldscale_route": null,
       "worldscale_freight_usd_mt": null,
       "vessel_class": "VLGC",
@@ -169,25 +197,25 @@ system_prompt: |
     "fair_value_model": "wingman-mispricing-fairvalue v1.2.0 (BayesianRidge, 15 features)",
     "anomaly_model": "wingman-mispricing-anomaly v1.0.0 (IsolationForest, 9 features)",
     "trade_card": {
-      "structure": "Sell USGC physical Aug-15, buy NWE forward Sep-01",
+      "structure": "Sell USGC physical Jun-15, buy NWE forward Jul-01",
       "size_kt": 25,
       "horizon_days": 30,
-      "expected_pnl_usd_mt": 7.40,
-      "downside_p95_usd_mt": -8.20,
-      "rationale": "Expects ~60% mean reversion of the 2.3-sigma rich residual within 30 days; option market upside skew + Baltic BLPG2 1-sigma above trailing freight reinforces supply-fear narrative that should fade."
+      "expected_pnl_usd_mt": 3.40,
+      "downside_p95_usd_mt": -10.60,
+      "rationale": "Mild +0.65 sigma rich arb residual; transatlantic per-MT P&L of ~$38 after BLPG2 freight is slightly above the BayesianRidge fair-value of ~$32. Position size capped at 25 kt per policy."
     },
-    "thesis": "USGC->NWE spread is 2.3 sigma rich; Baltic BLPG2 is 1.1 sigma above trailing and option market is upside-skewed, indicating supply fear is already paid for. Mont Belvieu is at multi-year highs while NWE CIF lags; Argus reported an Antwerp terminal release on May 11 that should narrow the arb.",
+    "thesis": "USGC->NWE arb residual is +0.65 sigma rich vs the BayesianRidge fair-value of ~$32/MT (per-MT P&L after the prevailing BLPG2 freight). Thesis text MUST cite the actual current regime observed from tools, not the language in this example.",
     "drivers": [
-      {"category": "supply",  "headline": "USGC propane terminal at multi-year highs", "source": "Reuters",  "url": "https://...", "date": "2026-05-08", "impact_usd_mt": 4.10},
-      {"category": "demand",  "headline": "NWE inventories rebuild on warm spring",    "source": "Argus",    "url": "https://...", "date": "2026-05-11", "impact_usd_mt": -3.80},
-      {"category": "geo",     "headline": "Strait of Hormuz tensions ease",            "source": "Bloomberg","url": "https://...", "date": "2026-05-10", "impact_usd_mt": 1.20}
+      {"category": "supply",  "headline": "<headline from tavily_search supply query>", "source": "<from tavily>", "url": "<from tavily>", "date": "<from tavily, YYYY-MM-DD>", "impact_usd_mt": 1.80},
+      {"category": "demand",  "headline": "<headline from tavily_search demand query>", "source": "<from tavily>", "url": "<from tavily>", "date": "<from tavily, YYYY-MM-DD>", "impact_usd_mt": 2.10},
+      {"category": "geo",     "headline": "<headline from tavily_search geo query>",    "source": "<from tavily>", "url": "<from tavily>", "date": "<from tavily, YYYY-MM-DD>", "impact_usd_mt": 0.90}
     ],
     "data_quality": "live",
     "sources": [
       "EIA: PROPANE_USGC_MB / PROPANE_STOCKS",
       "Yahoo: EURUSD=X",
       "Bunker-derived freight (shipandbunker.com)",
-      "Baltic BLPG (curated Q1-2026 + live override env)",
+      "Baltic BLPG (live route quote)",
       "Worldscale 2025 flat rate schedule",
       "vessel_specs (registry)",
       "Open-Meteo: destination hub",

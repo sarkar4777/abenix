@@ -215,7 +215,7 @@ export default function ScenariosPage() {
     <div className="p-6">
       <HeroBar
         eyebrow="FORWARD SCENARIOS"
-        title="What might happen, weighted"
+        title="Forward Weighted Scenario Curves"
         subtitle="A Bayesian (GaussianNB) prior over five regimes is refined into a posterior using current supply, demand, geopolitical, and regulatory news. Each scenario's curve, probability, and $/MT drivers are sourced and citable."
         rightSlot={
           <div className="flex flex-col items-end gap-1 text-[10px]">
@@ -403,9 +403,36 @@ function FanChart({
   highlightId: string | null;
   onHover: (id: string | null) => void;
 }) {
-  // Merge every scenario curve + the expected curve + the p10/p90 band
-  // into a single dataset keyed on tenor_months — recharts ComposedChart
-  // wants flat rows with one column per series.
+  // What-if probability sliders: trader can re-weight each scenario, the
+  // expected curve + P10/P90 band recompute live. Default weights match
+  // the agent's posterior. "Reset" snaps back to the LLM weights.
+  const [weights, setWeights] = useState<Record<string, number>>(() => {
+    const out: Record<string, number> = {};
+    forecast.scenarios.forEach((s) => { out[s.id] = s.probability; });
+    return out;
+  });
+  // If the forecast object changes (re-run), reset weights to the new
+  // posterior weights.
+  useEffect(() => {
+    const out: Record<string, number> = {};
+    forecast.scenarios.forEach((s) => { out[s.id] = s.probability; });
+    setWeights(out);
+  }, [forecast]);
+
+  // Renormalize so all weights sum to 1 (preserves shape).
+  const normWeights = useMemo(() => {
+    const sum = Object.values(weights).reduce((a, b) => a + b, 0);
+    if (sum <= 0) return weights;
+    const out: Record<string, number> = {};
+    for (const k of Object.keys(weights)) out[k] = weights[k] / sum;
+    return out;
+  }, [weights]);
+
+  const customised = useMemo(() => {
+    // Diff vs the agent's posterior so we can highlight which sliders moved.
+    return forecast.scenarios.some((s) => Math.abs((normWeights[s.id] ?? 0) - s.probability) > 0.005);
+  }, [forecast, normWeights]);
+
   const data = useMemo(() => {
     const tenors = forecast.expected_curve.map((p) => p.tenor_months);
     const base: Record<number, any> = {};
@@ -426,8 +453,33 @@ function FanChart({
         base[pt.tenor_months][s.id] = pt.value;
       }
     }
+    // Recompute the weighted expected curve + band when sliders move.
+    if (customised) {
+      for (const t of tenors) {
+        const row = base[t];
+        let exp = 0;
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (const s of forecast.scenarios) {
+          const v = row[s.id];
+          if (typeof v !== 'number') continue;
+          exp += v * (normWeights[s.id] ?? 0);
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        row.expected_custom = Number(exp.toFixed(2));
+        row.p10_custom = Number.isFinite(lo) ? lo : null;
+        row.p90_custom = Number.isFinite(hi) ? hi : null;
+      }
+    }
     return tenors.map((t) => base[t]).filter(Boolean);
-  }, [forecast]);
+  }, [forecast, normWeights, customised]);
+
+  const resetWeights = () => {
+    const out: Record<string, number> = {};
+    forecast.scenarios.forEach((s) => { out[s.id] = s.probability; });
+    setWeights(out);
+  };
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 mb-4">
@@ -436,6 +488,7 @@ function FanChart({
           <div className="text-[10px] uppercase tracking-wider text-slate-500">Forward net-arb · scenario fan</div>
           <div className="text-sm font-bold text-white">
             Expected curve · P10/P90 band · {forecast.scenarios.length} scenarios
+            {customised && <span className="ml-2 text-[10px] text-amber-300 font-normal">(custom weights · agent posterior overridden)</span>}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[10px]">
@@ -452,8 +505,51 @@ function FanChart({
               >
                 <span className="w-2 h-2 rounded-full" style={{ background: s.color || FALLBACK_COLORS[s.id] || '#94a3b8' }} />
                 <span className="text-slate-300">{s.label.split(' — ')[0] || s.id}</span>
-                <span className="text-slate-500 font-mono">{(s.probability * 100).toFixed(0)}%</span>
+                <span className="text-slate-500 font-mono">{((normWeights[s.id] ?? 0) * 100).toFixed(0)}%</span>
               </button>
+            );
+          })}
+          {customised && (
+            <button
+              onClick={resetWeights}
+              className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-400 hover:text-rose-300 hover:border-rose-500/40"
+            >
+              Reset to agent posterior
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* What-if probability sliders */}
+      <div className="mt-2 mb-3 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-3" data-testid="scenarios-sliders">
+        <div className="flex items-baseline justify-between gap-3 mb-2 flex-wrap">
+          <div className="text-[10px] uppercase tracking-wider text-cyan-300 font-bold">What-if · drag any slider to re-weight</div>
+          <div className="text-[10px] text-slate-500 leading-snug max-w-2xl">
+            Probabilities always sum to 100% — bump one up, the others scale down proportionally (auto-normalize).
+            The cyan curve is your weighted forecast; the dashed grey line is the agent's posterior for comparison.
+            Each row shows your weight · agent's posterior in grey to its right.
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+          {forecast.scenarios.map((s) => {
+            const w = normWeights[s.id] ?? 0;
+            const color = s.color || FALLBACK_COLORS[s.id] || '#94a3b8';
+            return (
+              <div key={s.id} className="flex items-center gap-2 text-[10px]">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                <span className="text-slate-300 truncate flex-1" title={s.label}>{s.label.split(' — ')[0] || s.id}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={weights[s.id] ?? 0}
+                  onChange={(e) => setWeights((prev) => ({ ...prev, [s.id]: Number(e.target.value) }))}
+                  className="w-32 accent-cyan-400"
+                />
+                <span className="font-mono text-slate-200 w-10 text-right">{(w * 100).toFixed(0)}%</span>
+                <span className="font-mono text-slate-600 w-12 text-right text-[9px]">posterior {(s.probability * 100).toFixed(0)}%</span>
+              </div>
             );
           })}
         </div>
@@ -484,13 +580,18 @@ function FanChart({
             />
             {/* P10/P90 band (drawn first so it sits behind the lines).
                 Recharts supports a tuple dataKey returning [lower, upper]
-                — that yields a true band rather than two stacked areas. */}
+                — that yields a true band rather than two stacked areas.
+                When sliders move, use the recomputed _custom band. */}
             <Area
               type="monotone"
-              dataKey={(d: any) => [d.p10 ?? d.expected, d.p90 ?? d.expected]}
+              dataKey={(d: any) => {
+                const lo = customised ? (d.p10_custom ?? d.p10 ?? d.expected) : (d.p10 ?? d.expected);
+                const hi = customised ? (d.p90_custom ?? d.p90 ?? d.expected) : (d.p90 ?? d.expected);
+                return [lo, hi];
+              }}
               stroke="none"
-              fill="#475569"
-              fillOpacity={0.18}
+              fill={customised ? '#22d3ee' : '#475569'}
+              fillOpacity={customised ? 0.18 : 0.18}
               isAnimationActive={false}
               name="P10–P90 band"
             />
@@ -512,11 +613,25 @@ function FanChart({
                 />
               );
             })}
-            {/* Probability-weighted expected curve — solid white on top. */}
+            {/* Probability-weighted expected curve — solid white on top.
+                When sliders are moved, render the custom curve in cyan
+                and dim the original posterior line. */}
+            {customised && (
+              <Line
+                type="monotone"
+                dataKey="expected"
+                stroke="#94a3b8"
+                strokeDasharray="3 3"
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                name="Agent posterior (original)"
+              />
+            )}
             <Line
               type="monotone"
-              dataKey="expected"
-              stroke="#f8fafc"
+              dataKey={customised ? 'expected_custom' : 'expected'}
+              stroke={customised ? '#22d3ee' : '#f8fafc'}
               strokeWidth={2.5}
               dot={{ r: 2.5, fill: '#f8fafc' }}
               isAnimationActive={false}

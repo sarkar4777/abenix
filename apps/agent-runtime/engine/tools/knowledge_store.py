@@ -1,4 +1,4 @@
-"""Knowledge Store tool — push content into the knowledge base from agents."""
+﻿"""Knowledge Store tool â€” push content into the knowledge base from agents."""
 
 from __future__ import annotations
 
@@ -135,7 +135,7 @@ class KnowledgeStoreTool(BaseTool):
                         cognify_result.relationships_written
                     )
                     logger.info(
-                        "knowledge_store: cognified doc %s — %d entities, %d relationships",
+                        "knowledge_store: cognified doc %s â€” %d entities, %d relationships",
                         doc_id,
                         cognify_result.entities_after_resolution,
                         cognify_result.relationships_written,
@@ -161,7 +161,7 @@ class KnowledgeStoreTool(BaseTool):
                 f"Vector store: {results.get('vectors_stored', 0)} embeddings indexed"
             )
         elif results.get("vector_error"):
-            summary_parts.append(f"Vector store: failed — {results['vector_error']}")
+            summary_parts.append(f"Vector store: failed â€” {results['vector_error']}")
 
         if run_cognify:
             if results["cognify_status"] == "complete":
@@ -231,7 +231,7 @@ class KnowledgeStoreTool(BaseTool):
             from pinecone import Pinecone
 
             pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY", ""))
-            index_name = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+            index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
             index = pc.Index(index_name)
 
             vectors = []

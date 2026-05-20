@@ -27,7 +27,7 @@ data:
   # Default matches the index the worker code references and the README
   # documents. The previous default of plain "abenix" 404'd in
   # every real account because nobody's index is named that.
-  PINECONE_INDEX_NAME: {{ .Values.pinecone.indexName | default "abenix-knowledge" | quote }}
+  PINECONE_INDEX_NAME: {{ .Values.pinecone.indexName | default "agentforge-knowledge" | quote }}
   UPLOAD_DIR: {{ .Values.objectStorage.uploadDir | default "/data/uploads" | quote }}
   EXPORT_DIR: {{ .Values.objectStorage.exportDir | default "/data/exports" | quote }}
   STORAGE_BACKEND: {{ .Values.objectStorage.type | default "local" | quote }}

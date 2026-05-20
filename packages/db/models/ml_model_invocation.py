@@ -23,7 +23,9 @@ class MLModelInvocation(Base, UUIDMixin, TenantMixin, TimestampMixin):
         UUID(as_uuid=True), nullable=True, index=True
     )
 
-    operation: Mapped[str] = mapped_column(String(64), default="predict", nullable=False)
+    operation: Mapped[str] = mapped_column(
+        String(64), default="predict", nullable=False
+    )
     input_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     predicted_class: Mapped[str | None] = mapped_column(String(255), nullable=True)

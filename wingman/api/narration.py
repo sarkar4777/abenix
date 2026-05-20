@@ -1,4 +1,4 @@
-"""Narration event store + SSE feed for the Desk Copilot live canvas.
+"""Narration event store + SSE feed for the Wingman Copilot live canvas.
 
 Events flow:
     1. Runtime publishes per-tool events to Redis channel wingman:progress:<root>.

@@ -10,7 +10,23 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Empty string so all fetches go to relative /api/wingman/* and hit the
+// Next.js rewrite which proxies to wingman-api. The previous fallback
+// pointed at abenix-api:8000 which 404s on wingman endpoints.
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
+
+const HERO_NAV = [
+  { href: '/desk',       label: 'Wingman Copilot',     icon: Sparkles,     primary: true,  blurb: 'Ask the desk anything' },
+  { href: '/workbench',  label: 'Arbitrage Workbench', icon: Activity,     blurb: 'Live corridor scans' },
+  { href: '/mispricing', label: 'Price at Risk Lens',  icon: Crosshair,    blurb: 'Bayesian fair-value + HITL' },
+  { href: '/lab',        label: 'Market & Freight Lab', icon: Anchor,      blurb: 'Vessel · freight · options' },
+  { href: '/scenarios',  label: 'Forward Scenarios',   icon: LineChart,    blurb: 'Probability fan chart' },
+  { href: '/inbox',      label: 'Broker Inbox',        icon: Inbox,        blurb: 'Live broker emails, parsed' },
+  { href: '/ops',        label: 'Operations Watch',    icon: Ship,         blurb: 'AIS-tracked vessels' },
+  { href: '/strategy',   label: 'Strategy Lab',        icon: Beaker,       blurb: 'NL → backtest → VaR' },
+  { href: '/graph',      label: 'Knowledge Graph',     icon: Network,      blurb: 'Atlas, queryable' },
+  { href: '/approvals',  label: 'Approvals',           icon: ShieldCheck,  blurb: 'HITL gate' },
+];
 
 const PRODUCT_PILLARS = [
   {
@@ -22,7 +38,7 @@ const PRODUCT_PILLARS = [
   },
   {
     href: '/mispricing',
-    title: 'Mispricing Lens',
+    title: 'Price at Risk Lens',
     blurb: 'Bayesian fair-value model (15 features incl. options skew + Baltic freight + density-corrected Worldscale) with sigma-banded verdict and HITL trade card.',
     icon: Crosshair,
     accent: 'from-fuchsia-400 to-pink-400',
@@ -83,7 +99,7 @@ const TOOL_GROUPS = [
     label: 'Market & price data',
     items: [
       { id: 'eia_open_data',             desc: 'EIA: Mont Belvieu propane, WTI/Brent, HH natgas, refined products' },
-      { id: 'yahoo_finance',             desc: 'Yahoo futures: front-month + history' },
+      { id: 'yahoo_finance',             desc: 'ICE futures: front-month + history' },
       { id: 'refined_products_forwards', desc: 'NYMEX/ICE futures + 3-2-1 crack spreads' },
       { id: 'options_data',              desc: 'IV, 25-delta skew, put/call OI, regime label' },
     ],
@@ -148,9 +164,9 @@ const ML_MODELS = [
 ];
 
 const AGENT_PIPELINE = [
-  { label: 'Mispricing Extractor', kind: 'agent', icon: 'sparkles' },
+  { label: 'Price at Risk Extractor', kind: 'agent', icon: 'sparkles' },
   { label: 'EIA spot',             kind: 'tool',  icon: 'db' },
-  { label: 'Yahoo forwards',       kind: 'tool',  icon: 'db' },
+  { label: 'ICE forwards',         kind: 'tool',  icon: 'db' },
   { label: 'Baltic BLPG',          kind: 'tool',  icon: 'anchor' },
   { label: 'Worldscale',           kind: 'tool',  icon: 'anchor' },
   { label: 'Vessel specs',         kind: 'tool',  icon: 'gauge' },
@@ -205,50 +221,27 @@ export default function HomePage() {
         <div className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-cyan-500/10 blur-3xl pointer-events-none" />
 
         <div className="relative">
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-emerald-300 mb-4">
-            <Sparkles className="w-3.5 h-3.5" />
-            Wingman · Trader Workbench
-            <span className="text-slate-500">|</span>
-            <span className="text-slate-400 normal-case tracking-normal">{now}</span>
-          </div>
-
-          <h1 className="text-5xl lg:text-6xl font-bold tracking-tight leading-[1.15] pb-2 bg-gradient-to-r from-white via-emerald-100 to-cyan-200 bg-clip-text text-transparent">
-            Energy arbitrage you can actually trust.
-          </h1>
-          <p className="mt-5 text-lg text-slate-300 max-w-3xl leading-relaxed">
-            An agentic copilot for the LPG and clean-products desk. Every corridor, every trade idea, every recommendation is grounded in real EIA prints, Baltic + Worldscale freight, Yahoo futures, options skew, vessel + port reality, and live news — synthesised by a Bayesian model that knows when it doesn't know.
-          </p>
-
-          <div className="mt-7 flex flex-wrap gap-3">
-            <Link
-              href="/desk"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm transition-colors"
-              data-testid="home-cta-desk"
-            >
-              Ask the Desk Copilot
-              <Sparkles className="w-4 h-4" />
-            </Link>
-            <Link
-              href="/workbench"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10 font-semibold text-sm transition-colors"
-            >
-              Open Arb Workbench
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-            <Link
-              href="/mispricing"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10 font-semibold text-sm transition-colors"
-            >
-              Mispricing Lens
-              <Crosshair className="w-4 h-4" />
-            </Link>
-            <Link
-              href="/approvals"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800/60 font-semibold text-sm transition-colors"
-            >
-              Pending HITL
-              <ShieldCheck className="w-4 h-4" />
-            </Link>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
+            {HERO_NAV.map((n) => (
+              <Link
+                key={n.href}
+                href={n.href}
+                data-testid={`home-cta-${n.href.replace('/', '')}`}
+                className={`group inline-flex flex-col gap-0.5 px-3 py-2.5 rounded-xl text-sm transition-colors ${
+                  n.primary
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold border border-emerald-500'
+                    : 'border border-emerald-500/30 bg-slate-950/40 text-emerald-100 hover:bg-emerald-500/10 hover:border-emerald-500/60 font-medium'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <n.icon className="w-3.5 h-3.5" />
+                  {n.label}
+                </span>
+                <span className={`text-[10px] font-normal leading-tight ${n.primary ? 'text-slate-900/70' : 'text-slate-500'}`}>
+                  {n.blurb}
+                </span>
+              </Link>
+            ))}
           </div>
 
           {/* Live tickers (best-effort) */}
@@ -274,12 +267,15 @@ export default function HomePage() {
         </div>
       </motion.section>
 
+      {/* ── TODAY'S SIGNALS — every active corridor at a glance ───────── */}
+      <TodaysSignals />
+
       {/* ── EVERY MARKET, EVERY FREIGHT, EVERY PORT ───────────────────── */}
       <section className="mt-12">
         <SectionHeader
           eyebrow="Every market signal a desk reads"
           title="From the tank at Mont Belvieu to the berth at Chiba."
-          subtitle="Spot, forwards, options, Baltic + Worldscale freight, vessel specs, port constraints, weather, news — all live, all interrogable, all consumed by the Mispricing model on every scan. Open the Lab to drive each one yourself."
+          subtitle="Spot, forwards, options, Baltic + Worldscale freight, vessel specs, port constraints, weather, news — all live, all interrogable, all consumed by the Price at Risk model on every scan. Open the Lab to drive each one yourself."
         />
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <NewToolCard
@@ -320,14 +316,14 @@ export default function HomePage() {
             tool="refined_products_forwards"
             title="Refined-product futures + cracks"
             blurb="NYMEX/ICE continuous front-month (RB / HO / CL / BZ / NG / PG) + 3-2-1 Gulf Coast crack."
-            value="WTI $76.18 / RBOB $95/bbl / 3-2-1 ~$28"
+            value="WTI $800/MT · RBOB $1,186/MT · 3-2-1 crack $48/bbl"
           />
           <NewToolCard
             icon={<TrendingUp className="w-4 h-4 text-fuchsia-300" />}
             href="/mispricing"
             tool="options_data"
             title="Options market signals"
-            blurb="Brent + HH implied vol, 25-delta risk reversal (skew), put/call OI, regime label. Powers 4 of the 15 Mispricing features."
+            blurb="Brent + HH implied vol, 25-delta risk reversal (skew), put/call OI, regime label. Powers 4 of the 15 Price at Risk features."
             value="CL=F: IV 34.5% · RR +0.06 → skewed_up"
           />
         </div>
@@ -337,7 +333,7 @@ export default function HomePage() {
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
           <Link href="/mispricing" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10 font-semibold text-[12px] transition-colors">
-            See them feeding the Mispricing Lens
+            See them feeding the Price at Risk Lens
             <Crosshair className="w-3.5 h-3.5" />
           </Link>
         </div>
@@ -348,7 +344,7 @@ export default function HomePage() {
         <ValueCard
           icon={<TrendingUp className="w-5 h-5 text-emerald-300" />}
           title="Find the arb in 30 seconds, not 30 minutes"
-          body="Open a corridor card and an autonomous agent pipeline gathers EIA, Yahoo, Baltic, options, weather and news in parallel. You read a single sigma-banded verdict instead of pasting numbers into a spreadsheet."
+          body="Open a corridor card and an autonomous agent pipeline gathers EIA, ICE, Baltic, options, weather and news in parallel. You read a single sigma-banded verdict instead of pasting numbers into a spreadsheet."
         />
         <ValueCard
           icon={<ShieldCheck className="w-5 h-5 text-cyan-300" />}
@@ -394,7 +390,7 @@ export default function HomePage() {
         <SectionHeader
           eyebrow="Under the hood"
           title="How a corridor scan actually executes"
-          subtitle="Every page on Wingman is a thin client over the same agentic engine. The pipeline below is what runs when you click Analyze on Arb Workbench or Re-score on Mispricing Lens — every step is a real tool or model call."
+          subtitle="Every page on Wingman is a thin client over the same agentic engine. The pipeline below is what runs when you click Analyze on Arb Workbench or Re-score on Price at Risk Lens — every step is a real tool or model call."
         />
         <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/60 p-6">
           <div className="flex flex-wrap items-center gap-2">
@@ -408,7 +404,7 @@ export default function HomePage() {
             ))}
           </div>
           <p className="text-[12px] text-slate-400 mt-5 leading-relaxed max-w-3xl">
-            The orchestration is just a YAML agent — <span className="font-mono text-slate-300">wingman-mispricing-extractor</span> — that lists the 13 tools above. The runtime calls them in parallel where it can, builds a 15-feature vector, evaluates two ML models, asks an LLM to draft the thesis citing live Tavily headlines, and emits a structured JSON the page reads. Add a new tool to the YAML and it shows up here instantly.
+            The orchestration is just a YAML agent — <span className="font-mono text-slate-300">wingman-mispricing-extractor</span> — that lists the 13 tools above. The runtime calls them in parallel where it can, builds a 15-feature vector, evaluates two ML models, asks an LLM to draft the hypothesis citing live Tavily headlines, and emits a structured JSON the page reads. Add a new tool to the YAML and it shows up here instantly.
           </p>
         </div>
       </section>
@@ -485,6 +481,9 @@ export default function HomePage() {
           />
         </div>
       </section>
+
+      {/* ── ARCHITECTURE MATRIX — page-by-page tools/features/models map */}
+      <ArchitectureMatrix />
 
       {/* ── FOOTER LINE ──────────────────────────────────────────────── */}
       <section className="mt-16 mb-8 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6">
@@ -564,6 +563,301 @@ function CodeAssetSlot({ title, blurb }: { title: string; blurb: string }) {
       </div>
       <div className="text-[12px] text-slate-300 leading-relaxed">{blurb}</div>
     </div>
+  );
+}
+
+// ── Today's signals: single roll-up endpoint that returns every active
+// corridor's cached verdict, fair-value gap, regime and freshness.
+// Cached on the backend (same TTL as the mispricing cache), so the home
+// page paints instantly with no agent fire. Polls every 60s.
+interface CorridorSignal {
+  id: string; label: string; product?: string;
+  origin_port?: string; destination_port?: string;
+  verdict?: string; direction?: string;
+  observed_spread_usd_mt?: number;
+  fair_value_spread_usd_mt?: number;
+  fair_value_p10_usd_mt?: number;
+  fair_value_p90_usd_mt?: number;
+  residual_usd_mt?: number;
+  residual_sigma?: number;
+  market_regime?: string;
+  anomaly_flag?: boolean;
+  age_seconds?: number;
+  fresh?: boolean;
+  data_quality?: string;
+}
+
+function TodaysSignals() {
+  const [rows, setRows] = useState<CorridorSignal[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const j = await fetch(`${API}/api/wingman/signals`).then((r) => r.json());
+        const sigs: CorridorSignal[] = j?.data?.signals || [];
+        if (!cancelled) {
+          setRows(sigs);
+          setLoaded(true);
+        }
+      } catch { if (!cancelled) setLoaded(true); }
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  if (!loaded) return null;
+  const haveAny = rows.some((r) => r.observed_spread_usd_mt != null);
+  return (
+    <section className="mt-8" data-testid="todays-signals">
+      <div className="flex items-end justify-between mb-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.25em] text-emerald-300 font-bold mb-1">Today's signals</div>
+          <h2 className="text-lg font-bold text-white">Every active corridor at a glance</h2>
+          <p className="text-[11px] text-slate-500 mt-0.5">Cached verdicts from the Price at Risk Lens · refreshes every 60s · click a card to deep-dive</p>
+        </div>
+        <Link href="/mispricing" className="text-[11px] text-cyan-300 hover:text-cyan-200 flex items-center gap-1">
+          Open Price at Risk Lens <ArrowRight className="w-3 h-3" />
+        </Link>
+      </div>
+      {!haveAny ? (
+        <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-[12px] text-slate-500">
+          No corridor scans cached yet — open <Link href="/mispricing" className="text-emerald-300 hover:underline">Price at Risk Lens</Link> and hit Score on any corridor to populate.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          {rows.map((r) => <SignalCard key={r.id} sig={r} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SignalCard({ sig }: { sig: CorridorSignal }) {
+  const v = (sig.verdict || '').toLowerCase();
+  const tone =
+    v === 'dislocated' ? 'border-rose-500/40 bg-rose-500/[0.06]' :
+    v === 'stretched'  ? 'border-amber-500/40 bg-amber-500/[0.06]' :
+    v === 'aligned'    ? 'border-emerald-500/40 bg-emerald-500/[0.06]' :
+                         'border-slate-700/60 bg-slate-900/40';
+  const verdictTone =
+    v === 'dislocated' ? 'text-rose-200 border-rose-500/50 bg-rose-500/15' :
+    v === 'stretched'  ? 'text-amber-200 border-amber-500/50 bg-amber-500/15' :
+    v === 'aligned'    ? 'text-emerald-200 border-emerald-500/50 bg-emerald-500/15' :
+                         'text-slate-400 border-slate-700/50 bg-slate-800/30';
+  const dir = (sig.direction || '').toLowerCase();
+  const ageMin = sig.age_seconds != null ? Math.round(sig.age_seconds / 60) : null;
+  const ageStr =
+    ageMin == null ? 'never' :
+    ageMin < 1 ? 'just now' :
+    ageMin < 60 ? `${ageMin}m ago` :
+    `${Math.round(ageMin / 60)}h ago`;
+  const regime = (sig.market_regime || '').toLowerCase();
+  const sigma = sig.residual_sigma;
+  const sigmaTone = sigma == null ? 'text-slate-500' : Math.abs(sigma) >= 2 ? 'text-rose-200' : Math.abs(sigma) >= 1 ? 'text-amber-200' : 'text-emerald-200';
+  return (
+    <Link
+      href={`/mispricing?corridor=${sig.id}`}
+      className={`group block rounded-xl border p-4 hover:bg-emerald-500/[0.04] transition-colors ${tone}`}
+      data-testid={`signal-${sig.id}`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="min-w-0">
+          <div className="text-[12px] font-semibold text-white truncate">{sig.label}</div>
+          <div className="text-[10px] text-slate-500 truncate">{sig.origin_port} → {sig.destination_port}</div>
+        </div>
+        {sig.verdict ? (
+          <span className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border ${verdictTone}`}>
+            {sig.verdict}
+          </span>
+        ) : (
+          <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border border-slate-700 text-slate-500">no scan</span>
+        )}
+      </div>
+      {sig.observed_spread_usd_mt != null ? (
+        <>
+          <div className="grid grid-cols-3 gap-2 text-[11px]">
+            <div>
+              <div className="text-[9px] uppercase text-slate-500">Observed</div>
+              <div className="font-mono font-bold text-white">${sig.observed_spread_usd_mt.toFixed(1)}<span className="text-[9px] text-slate-500">/MT</span></div>
+            </div>
+            <div>
+              <div className="text-[9px] uppercase text-slate-500">Fair value</div>
+              <div className="font-mono text-slate-300">${(sig.fair_value_spread_usd_mt ?? 0).toFixed(1)}</div>
+            </div>
+            <div>
+              <div className="text-[9px] uppercase text-slate-500">Residual σ</div>
+              <div className={`font-mono font-bold ${sigmaTone}`}>
+                {sigma != null ? `${sigma >= 0 ? '+' : ''}${sigma.toFixed(2)}σ` : '—'}
+              </div>
+            </div>
+          </div>
+          <div className="mt-2.5 flex items-center justify-between text-[10px] font-mono text-slate-500">
+            <span className="inline-flex items-center gap-2">
+              {dir && <span className={dir === 'rich' ? 'text-rose-300' : 'text-emerald-300'}>{dir}</span>}
+              {regime && regime !== 'unknown' && (
+                <span className="px-1.5 py-0.5 rounded border border-slate-700/40 bg-slate-900/60">{regime}</span>
+              )}
+              {sig.anomaly_flag && <span className="px-1.5 py-0.5 rounded border border-rose-500/40 bg-rose-500/10 text-rose-200">anomaly</span>}
+            </span>
+            <span className={sig.fresh ? 'text-emerald-400' : 'text-amber-300'}>{ageStr}</span>
+          </div>
+        </>
+      ) : (
+        <div className="text-[11px] text-slate-500 italic">
+          No recent scan — open Price at Risk Lens to score.
+        </div>
+      )}
+    </Link>
+  );
+}
+
+// ── Architecture matrix: collapsed by default. Maps every page to the
+// data sources, feature vectors, ML models, and AI agents it uses, so a
+// new trader (or analyst) can audit the whole platform in one place.
+const PAGE_ARCH: Array<{
+  page: string; href: string; agent: string; tools: string[];
+  features?: string[]; models?: string[]; outputs: string[];
+}> = [
+  {
+    page: 'Wingman Copilot', href: '/desk', agent: 'wingman-desk-copilot (Haiku 4.5, meta-agent)',
+    tools: ['recall_trajectory', 'invoke_agent (fans out to specialists)'],
+    models: ['Haiku 4.5 planner', 'past-trajectory memory'],
+    outputs: ['Brief · Plan · Drivers · Confidence · Recommended action'],
+  },
+  {
+    page: 'Arbitrage Workbench', href: '/workbench', agent: 'wingman-arb-analyzer v1.1 (Haiku 4.5)',
+    tools: ['eia_open_data', 'yahoo_finance', 'bunker_fuel', 'open_meteo', 'tavily_search', 'options_data', 'vessel_specs', 'freight_baltic_blpg', 'freight_worldscale', 'financial_calculator'],
+    models: ['Haiku 4.5 narrative'],
+    outputs: ['Net-arb $/MT', 'forward curve', 'cost stack', 'hedge recipe', 'cargo optimizer', 'IV overlay', 'storage carry'],
+  },
+  {
+    page: 'Price at Risk Lens', href: '/mispricing', agent: 'wingman-mispricing-extractor v1.2 (Haiku 4.5)',
+    tools: ['eia_open_data', 'yahoo_finance', 'bunker_fuel', 'options_data', 'freight_baltic_blpg', 'freight_worldscale', 'vessel_specs', 'open_meteo', 'tavily_search', 'ml_model'],
+    features: [
+      'origin_spot_z · dest_spot_z · freight_per_mt_z · inventory_z (4 base)',
+      'exports_4w_pct · fx_eur_usd_z · weather_dest_gust_z · season_q (4 base)',
+      'crude_iv_atm_z · crude_risk_reversal · nat_gas_iv_atm_z · oil_put_call_ratio (4 options)',
+      'freight_baltic_z · freight_ws_per_mt_z · route_vessel_size_norm (3 freight-quality)',
+    ],
+    models: ['wingman-mispricing-fairvalue (BayesianRidge, 15 feat)', 'wingman-mispricing-anomaly (IsolationForest, 9 feat)', 'Haiku 4.5 hypothesis'],
+    outputs: ['Verdict (aligned/stretched/dislocated)', 'fair value + P10/P90 band', 'residual z-score', 'options regime', 'trade card → HITL gate'],
+  },
+  {
+    page: 'Market & Freight Lab', href: '/lab', agent: '— sandbox, no agent fires',
+    tools: ['vessel_specs', 'freight_baltic_blpg', 'freight_worldscale', 'port_constraints', 'refined_products_forwards', 'options_data'],
+    outputs: ['Tool-level explorer: vessel registry · density math · Baltic mid · Worldscale flat × points · port × vessel compat · futures snapshot · IV/skew'],
+  },
+  {
+    page: 'Forward Scenarios', href: '/scenarios', agent: 'wingman-scenario-forecaster (Haiku 4.5)',
+    tools: ['eia_open_data', 'yahoo_finance', 'tavily_search', 'ml_model', 'financial_calculator'],
+    features: ['8 normalised market signals fed to GaussianNB classifier'],
+    models: ['wingman-scenario-prior (GaussianNB, 5-regime, 90.8% holdout)', 'Haiku 4.5 posterior refinement'],
+    outputs: ['5 scenario curves with probabilities', 'P10/P50/P90 fan', 'driver-by-driver $/MT attribution'],
+  },
+  {
+    page: 'Broker Inbox', href: '/inbox', agent: 'wingman-broker-classifier + wingman-broker-parser',
+    tools: ['ml_model (TF-IDF)', 'text_analyzer', 'date_calculator'],
+    models: ['wingman-broker-intent-classifier (TF-IDF + LogReg, Macro F1 0.91)', 'Haiku 4.5 structured-offer extractor'],
+    outputs: ['intent (RFQ/IOI/done/chatter)', 'structured offer JSON', '→ Approvals gate (broker.ack)'],
+  },
+  {
+    page: 'Operations Watch', href: '/ops', agent: 'wingman-ops-monitor (Haiku 4.5 thin orchestrator)',
+    tools: ['ais_stream (AISStream.io WebSocket)', 'open_meteo'],
+    outputs: ['Live vessel scatter (LPG tankers, ship-type 84)', 'port weather + alerts'],
+  },
+  {
+    page: 'Strategy Lab', href: '/strategy', agent: 'wingman-strategy-encoder → wingman-backtester → wingman-var-simulator',
+    tools: ['ml_model', 'financial_calculator', 'risk_analyzer', 'code_asset (Go VaR binary)'],
+    outputs: ['Encoded rule JSON', 'hit-rate', '90-day P&L equity curve', 'Monte Carlo VaR loss distribution'],
+  },
+  {
+    page: 'Knowledge Graph', href: '/graph', agent: 'wingman-graph-query (Haiku 4.5)',
+    tools: ['knowledge_search (Atlas)'],
+    outputs: ['Subgraph traversal', 'natural-language answer over typed ontology (corridor·vessel·counterparty·news·offer)'],
+  },
+  {
+    page: 'Approvals', href: '/approvals', agent: '— SDK gate, no agent (HITL)',
+    tools: ['approval_gate (SDK)'],
+    outputs: ['trade.execute · broker.ack · strategy.activate · scenario.publish gates'],
+  },
+];
+
+function ArchitectureMatrix() {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="mt-10" data-testid="architecture-matrix">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-3 rounded-xl border border-cyan-500/20 bg-slate-950/40 hover:bg-cyan-500/[0.04] transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <Workflow className="w-4 h-4 text-cyan-300" />
+          <div className="text-left">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-cyan-300 font-bold mb-0.5">How it works</div>
+            <div className="text-sm font-semibold text-white">Architecture map · every page → tools → features → models</div>
+          </div>
+        </div>
+        <ArrowRight className={`w-4 h-4 text-cyan-300 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-3 overflow-hidden rounded-xl border border-cyan-500/20">
+          <table className="w-full text-[11px]">
+            <thead className="bg-slate-900/80 text-slate-300 uppercase text-[9px] tracking-wider">
+              <tr>
+                <th className="text-left px-3 py-2.5">Page</th>
+                <th className="text-left px-3 py-2.5">Agent</th>
+                <th className="text-left px-3 py-2.5">Data sources / tools</th>
+                <th className="text-left px-3 py-2.5">Feature vectors</th>
+                <th className="text-left px-3 py-2.5">ML / AI models</th>
+                <th className="text-left px-3 py-2.5">Outputs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PAGE_ARCH.map((row, i) => (
+                <tr key={row.page} className={i % 2 === 0 ? 'bg-slate-950/40' : 'bg-slate-900/40'}>
+                  <td className="align-top px-3 py-3">
+                    <Link href={row.href} className="font-semibold text-white hover:text-emerald-300 inline-flex items-center gap-1">
+                      {row.page} <ArrowRight className="w-3 h-3" />
+                    </Link>
+                  </td>
+                  <td className="align-top px-3 py-3 text-slate-400 font-mono text-[10px] leading-snug">{row.agent}</td>
+                  <td className="align-top px-3 py-3 leading-snug">
+                    <div className="flex flex-wrap gap-1">
+                      {row.tools.map((t) => (
+                        <span key={t} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-200">{t}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="align-top px-3 py-3 text-slate-300 text-[10px] leading-snug">
+                    {row.features ? (
+                      <ul className="space-y-0.5">
+                        {row.features.map((f, k) => <li key={k}>{f}</li>)}
+                      </ul>
+                    ) : <span className="text-slate-600 italic">—</span>}
+                  </td>
+                  <td className="align-top px-3 py-3 leading-snug">
+                    {row.models ? (
+                      <div className="flex flex-col gap-1">
+                        {row.models.map((m) => (
+                          <span key={m} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-200">{m}</span>
+                        ))}
+                      </div>
+                    ) : <span className="text-slate-600 italic">—</span>}
+                  </td>
+                  <td className="align-top px-3 py-3 text-slate-300 text-[10px] leading-snug">
+                    <ul className="space-y-0.5">
+                      {row.outputs.map((o, k) => <li key={k}>{o}</li>)}
+                    </ul>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

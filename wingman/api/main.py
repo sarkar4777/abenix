@@ -174,10 +174,11 @@ def _wrap_cached(page: str, key: str) -> dict[str, Any]:
     entry = result_cache.read(page, key)
     if entry is None:
         return {"data": None}
+    payload = _convert_units_deep(entry["payload"])
     return {
         "data": {
             "key": key,
-            "payload": entry["payload"],
+            "payload": payload,
             "cached_at": entry["written_at"],
             "age_seconds": entry["age_seconds"],
             "ttl_seconds": entry["ttl_seconds"],
@@ -240,136 +241,39 @@ async def _run_agent_with_retry(
     return {}
 
 
-def _synthesize_mispricing(corridor_id: str) -> dict[str, Any]:
-    import random
-    corridor = next((c for c in CORRIDORS if c["id"] == corridor_id), None)
-    rng = random.Random(hash(corridor_id) & 0xFFFFFFFF)
-    fv = 28.0 + rng.uniform(-4, 4)
-    obs = fv + rng.uniform(-2, 12)
-    std = 7.5 + rng.uniform(-1, 1)
-    residual = obs - fv
-    sigma = residual / std if std else 0.0
-    verdict = "aligned" if abs(sigma) < 1 else ("stretched" if abs(sigma) < 2 else "dislocated")
-    direction = "rich" if residual > 0 else "cheap"
-    return {
-        "corridor_id": corridor_id,
-        "as_of": datetime.now(timezone.utc).date().isoformat(),
-        "observed_spread_usd_mt": round(obs, 2),
-        "fair_value_spread_usd_mt": round(fv, 2),
-        "fair_value_p10_usd_mt": round(fv - 1.282 * std, 2),
-        "fair_value_p90_usd_mt": round(fv + 1.282 * std, 2),
-        "residual_usd_mt": round(residual, 2),
-        "residual_sigma": round(sigma, 2),
-        "verdict": verdict,
-        "direction": direction,
-        "anomaly_score": round(rng.uniform(-0.2, 0.2), 2),
-        "anomaly_flag": False,
-        "market_regime": "calm",
-        "fair_value_model": "wingman-mispricing-fairvalue v1.2.0 (BayesianRidge, 15 features)",
-        "anomaly_model": "wingman-mispricing-anomaly v1.0.0 (IsolationForest, 9 features)",
-        "feature_vector": {
-            "origin_spot_z": round(rng.uniform(-1, 1.5), 2),
-            "dest_spot_z": round(rng.uniform(-0.5, 2), 2),
-            "freight_per_mt_z": round(rng.uniform(-1, 1), 2),
-            "inventory_z": round(rng.uniform(-1.5, 0.5), 2),
-            "exports_4w_pct": round(rng.uniform(-0.05, 0.05), 3),
-            "fx_eur_usd_z": round(rng.uniform(-0.5, 0.5), 2),
-            "weather_dest_gust_z": round(rng.uniform(-0.5, 1), 2),
-            "season_q": (datetime.now(timezone.utc).month - 1) // 3 + 1,
-            "spread_4w_mean_z": round(rng.uniform(-1, 1), 2),
-        },
-        "trade_card": {
-            "structure": f"{'Sell' if residual > 0 else 'Buy'} {corridor['origin_port'] if corridor else 'origin'} physical, "
-                         f"{'buy' if residual > 0 else 'sell'} {corridor['destination_port'] if corridor else 'dest'} forward 30d",
-            "size_kt": 25 if abs(sigma) < 3 else 50,
-            "horizon_days": 30,
-            "expected_pnl_usd_mt": round(residual * 0.6, 2),
-            "downside_p95_usd_mt": round(-1.645 * std, 2),
-            "rationale": f"Mean-reversion of the {sigma:+.2f}σ residual over a 30-day horizon; "
-                         f"size capped per Wingman policy.",
-        },
-        "thesis": (
-            f"{corridor['label'] if corridor else corridor_id} spread is {sigma:+.2f} sigma {'rich' if residual > 0 else 'cheap'} "
-            f"vs fair value of ${fv:.2f}/MT. {'Mean-reversion candidate' if abs(sigma) >= 1 else 'No actionable signal'} "
-            "on the current 15-feature read."
-        ),
-        "drivers": [
-            {"category": "supply", "headline": "EIA weekly propane inventories drew vs build consensus",
-             "source": "EIA", "url": "https://www.eia.gov/dnav/pet/pet_stoc_wstk_dcu_nus_w.htm",
-             "date": datetime.now(timezone.utc).date().isoformat(), "impact_usd_mt": round(rng.uniform(2, 5), 2)},
-            {"category": "demand", "headline": "Destination-region heating + petchem demand seasonally firm",
-             "source": "Argus", "url": "https://www.argusmedia.com/en/news",
-             "date": datetime.now(timezone.utc).date().isoformat(), "impact_usd_mt": round(rng.uniform(-3, 1), 2)},
-            {"category": "geo", "headline": "Baltic LPG freight stable; no Strait of Hormuz disruption flagged",
-             "source": "Bloomberg", "url": "https://www.bloomberg.com",
-             "date": datetime.now(timezone.utc).date().isoformat(), "impact_usd_mt": round(rng.uniform(-1, 1.5), 2)},
-        ],
-        "data_quality": "synthesized",
-        "method": "deterministic synthesis (LLM envelope unparseable after retries)",
-    }
-
-
-def _synthesize_scenarios(corridor_id: str) -> dict[str, Any]:
-    import math
-    import random
-    corridor = next((c for c in CORRIDORS if c["id"] == corridor_id), None)
-    rng = random.Random((hash(corridor_id) ^ 0xA53A) & 0xFFFFFFFF)
-    today = datetime.now(timezone.utc).date()
-    base_level = 28.0 + rng.uniform(-3, 3)
-    months = list(range(0, 13))
-    base_curve = [
-        {"tenor_months": m, "date": (today.replace(day=1) + timedelta(days=30 * m)).isoformat(),
-         "value": round(base_level + math.sin(m * 0.4) * 1.5 - m * 0.15, 2)}
-        for m in months
-    ]
-    scenario_defs = [
-        ("base", "Base case — supply/demand balance holds", 0.45, "#22c55e", -0.0),
-        ("bull_geopolitical", "Geopolitical de-escalation lifts spread", 0.20, "#f59e0b", +6.5),
-        ("bear_supply_glut", "Saudi CP holds + inventories build", 0.18, "#3b82f6", -5.0),
-        ("bear_demand_shock", "Asia cracker turnaround dents demand", 0.12, "#ef4444", -7.5),
-        ("tail_event", "Low-probability supply shock", 0.05, "#a855f7", +12.0),
-    ]
-    scenarios = []
-    for sid, label, prob, color, shift in scenario_defs:
-        curve = [{**row, "value": round(row["value"] + shift, 2)} for row in base_curve]
-        scenarios.append({
-            "id": sid, "label": label, "probability": prob, "color": color,
-            "narrative": f"{label}. Path shifted {shift:+.1f} $/MT vs base.",
-            "curve": curve,
-            "drivers": [
-                {"category": "supply", "headline": f"{label} — supply driver", "source": "Argus",
-                 "url": "https://www.argusmedia.com", "date": today.isoformat(),
-                 "impact_usd_mt": round(shift * 0.4, 2)},
-            ],
-        })
-    expected = []
-    for i, row in enumerate(base_curve):
-        v = sum(s["curve"][i]["value"] * s["probability"] for s in scenarios)
-        lo = min(s["curve"][i]["value"] for s in scenarios)
-        hi = max(s["curve"][i]["value"] for s in scenarios)
-        expected.append({"tenor_months": row["tenor_months"], "date": row["date"],
-                          "value": round(v, 2), "p10": round(lo, 2), "p90": round(hi, 2)})
-    return {
-        "corridor_id": corridor_id,
-        "as_of": today.isoformat(),
-        "base_curve": base_curve,
-        "expected_curve": expected,
-        "scenarios": scenarios,
-        "bayesian_prior": {
-            "model": "wingman-scenario-prior v1.0.0",
-            "probabilities": {s["id"]: s["probability"] for s in scenarios},
-        },
-        "narrative": f"Probability-weighted forward curve for {corridor['label'] if corridor else corridor_id}; "
-                     "five named regimes with cited drivers per scenario.",
-        "method": "deterministic synthesis (LLM envelope unparseable after retries)",
-    }
-
-
 _MISPRICING_EXPECTED_KEYS = ("verdict", "observed_spread_usd_mt", "fair_value_spread_usd_mt", "residual_sigma")
 _SCENARIO_EXPECTED_KEYS = ("scenarios", "expected_curve", "base_curve")
 
 
+def _scan_has_required_numbers(scan: dict[str, Any]) -> bool:
+    """A scan is load-bearing when observed and fair-value are both
+    numeric floats — the sign doesn't matter (a closed arb is a real
+    market state) but None / NaN / non-numeric means the agent didn't
+    actually compute them from tool outputs."""
+    if not isinstance(scan, dict):
+        return False
+    obs = scan.get("observed_spread_usd_mt")
+    fv = scan.get("fair_value_spread_usd_mt")
+    if obs is None or fv is None:
+        return False
+    try:
+        obs_f = float(obs)
+        fv_f = float(fv)
+    except (TypeError, ValueError):
+        return False
+    import math
+    return math.isfinite(obs_f) and math.isfinite(fv_f)
+
+
 async def _warm_mispricing(corridor_id: str) -> dict[str, Any]:
+    """Fire the Abenix mispricing extractor agent and return whatever it
+    produces. The agent itself sources every number from real-service
+    tools (eia_open_data, yahoo_finance, freight_baltic_blpg, options_data,
+    vessel_specs, tavily_search) plus the two deployed ML models — there
+    is no synthesis, no anchoring, and no manual cache write on this path.
+    If the agent fails or returns numbers that aren't load-bearing,
+    return an empty envelope; the UI then renders the "data unavailable"
+    state instead of a fake snapshot."""
     corridor = next((c for c in CORRIDORS if c["id"] == corridor_id), None)
     if not corridor:
         return {}
@@ -380,10 +284,10 @@ async def _warm_mispricing(corridor_id: str) -> dict[str, Any]:
         timeout=300,
         max_retries=2,
     )
-    if not parsed:
-        logger.info("mispricing synth fallback firing for %s", corridor_id)
-        parsed = _synthesize_mispricing(corridor_id)
-    return parsed
+    if parsed and _scan_has_required_numbers(parsed):
+        return parsed
+    logger.info("mispricing agent unavailable for %s — UI will show data-unavailable state", corridor_id)
+    return {}
 
 
 async def _warm_scenarios(corridor_id: str) -> dict[str, Any]:
@@ -398,8 +302,8 @@ async def _warm_scenarios(corridor_id: str) -> dict[str, Any]:
         max_retries=2,
     )
     if not parsed:
-        logger.info("scenarios synth fallback firing for %s", corridor_id)
-        parsed = _synthesize_scenarios(corridor_id)
+        logger.info("scenarios agent unavailable for %s — UI will show data-unavailable state", corridor_id)
+        return {}
     return parsed
 
 
@@ -447,12 +351,138 @@ async def list_corridors() -> dict[str, Any]:
     return {"data": CORRIDORS}
 
 
+# Today's signals — one call returns every active corridor's latest
+# cached Price-at-Risk scan summary. Pure cache reads (no agent fires)
+# so the home page paints fast. The mispricing cache already has its own
+# TTL; this endpoint just rolls them up.
+@app.get("/api/wingman/signals")
+async def todays_signals() -> dict[str, Any]:
+    active = [c for c in CORRIDORS if c.get("active")]
+    rows: list[dict[str, Any]] = []
+    for c in active:
+        entry = result_cache.read("mispricing", c["id"])
+        scan = (entry or {}).get("payload") or {}
+        rows.append({
+            "id": c["id"],
+            "label": c["label"],
+            "product": c.get("product"),
+            "origin_port": c.get("origin_port"),
+            "destination_port": c.get("destination_port"),
+            "verdict": scan.get("verdict"),
+            "direction": scan.get("direction"),
+            "observed_spread_usd_mt": scan.get("observed_spread_usd_mt"),
+            "fair_value_spread_usd_mt": scan.get("fair_value_spread_usd_mt"),
+            "fair_value_p10_usd_mt": scan.get("fair_value_p10_usd_mt"),
+            "fair_value_p90_usd_mt": scan.get("fair_value_p90_usd_mt"),
+            "residual_usd_mt": scan.get("residual_usd_mt"),
+            "residual_sigma": scan.get("residual_sigma"),
+            "market_regime": scan.get("market_regime"),
+            "anomaly_flag": scan.get("anomaly_flag"),
+            "cached_at": (entry or {}).get("written_at"),
+            "age_seconds": (entry or {}).get("age_seconds"),
+            "fresh": (entry or {}).get("fresh"),
+            "data_quality": scan.get("data_quality"),
+        })
+    return {"data": {"signals": rows, "as_of": time.time()}}
+
+
+# Convert every price-like indicator to $/MT using industry-standard
+# densities/conversions so the whole UI shows one unit. Propane uses the
+# API/EIA density of 0.508 kg/L (1 gal = 1.923 kg → 524.95 gal/MT).
+# Crude (WTI/Brent) uses API gravity ~35° avg (1 MT ≈ 7.45 bbl). HH gas
+# and FX rates have no MT equivalent so they're left untouched.
+_PROPANE_GAL_PER_MT = 524.95
+_CRUDE_BBL_PER_MT = 7.45
+
+# Regex post-processor: agent LLM narratives sometimes quote prices in
+# native $/gal or $/bbl ("Mont Belvieu propane $0.864/gal", "WTI
+# $105.78/bbl"). Convert in-place so trader sees consistent $/MT.
+# Heuristic: $X/gal is propane unless the surrounding 30 chars say
+# "RBOB" or "ULSD"/"gasoline"/"diesel" (refined products use 333/308
+# gal/MT). $X/bbl is always crude.
+import re as _re
+_GAL_PAT = _re.compile(r"\$([0-9]+(?:\.[0-9]+)?)\s*/\s*gal\b")
+_BBL_PAT = _re.compile(r"\$([0-9]+(?:\.[0-9]+)?)\s*/\s*bbl\b")
+
+def _convert_text_units(s: str) -> str:
+    """Convert only $X/gal mentions of LPG to $/MT. Crude/refined $/bbl is
+    industry-standard and stays. RBOB/ULSD $/gal is also industry-standard
+    in the US and stays. Only propane-context $/gal flips."""
+    if not s or not isinstance(s, str):
+        return s
+    def _gal_sub(m: _re.Match) -> str:
+        val = float(m.group(1))
+        ctx = s[max(0, m.start() - 50): m.start() + 40].lower()
+        is_lpg = any(k in ctx for k in (
+            "propane", "butane", "lpg", "ethane", "ngl",
+            "mont belvieu", "belvieu", "blpg",
+        ))
+        is_refined_or_crude = any(k in ctx for k in (
+            "rbob", "gasoline", "ulsd", "diesel", "heating oil", "jet",
+        ))
+        if is_lpg and not is_refined_or_crude:
+            return f"${round(val * _PROPANE_GAL_PER_MT, 1)}/MT"
+        return m.group(0)
+    return _GAL_PAT.sub(_gal_sub, s)
+
+def _convert_units_deep(obj: Any) -> Any:
+    """Walk an agent-output dict and convert $/gal/$/bbl in every string."""
+    if isinstance(obj, str):
+        return _convert_text_units(obj)
+    if isinstance(obj, list):
+        return [_convert_units_deep(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _convert_units_deep(v) for k, v in obj.items()}
+    return obj
+
+def _normalize_to_usd_per_mt(indicators: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Industry-standard unit rule:
+    - LPG / propane / butane / ethane → $/MT (cargo trader unit)
+    - Crude (WTI/Brent/Dubai/OPEC)    → $/bbl (universal benchmark — KEEP)
+    - Refined products (RBOB/ULSD)    → $/bbl (Argus/Platts standard — KEEP)
+    - Henry Hub natgas                → $/MMBtu (US convention — KEEP)
+    - EU TTF                          → €/MWh (EU convention — KEEP)
+    Only $/gal-quoted LPG gets converted; crude/refined $/bbl stays as-is.
+    """
+    out: list[dict[str, Any]] = []
+    for raw in (indicators or []):
+        ind = dict(raw)
+        unit = (ind.get("unit") or "").strip()
+        label = (ind.get("label") or "").lower()
+        latest = ind.get("latest")
+        if latest is None or unit not in ("$/gal",):
+            out.append(ind)
+            continue
+        is_lpg = any(k in label for k in ("propane", "butane", "lpg", "ethane", "ngl"))
+        if not is_lpg:
+            out.append(ind)
+            continue
+        try:
+            ind["latest"] = round(float(latest) * _PROPANE_GAL_PER_MT, 2)
+            ind["source_unit"] = unit
+            ind["source_value"] = latest
+            ind["unit"] = "$/MT"
+            hist = ind.get("history")
+            if isinstance(hist, list):
+                ind["history"] = [
+                    {**h, "value": round(float(h["value"]) * _PROPANE_GAL_PER_MT, 2)}
+                    for h in hist
+                    if isinstance(h, dict) and h.get("value") is not None
+                ]
+        except (TypeError, ValueError):
+            pass
+        out.append(ind)
+    return out
+
+
 @app.get("/api/wingman/market-brief")
 async def market_brief() -> dict[str, Any]:
     result_cache.mark_visit("market-brief")
     entry = result_cache.read("market-brief", "snapshot")
     if entry and entry["fresh"] and (entry["payload"].get("indicators") or []):
-        return {"data": entry["payload"]}
+        payload = dict(entry["payload"])
+        payload["indicators"] = _normalize_to_usd_per_mt(payload.get("indicators") or [])
+        return {"data": payload}
 
     async with _abenix_client() as forge:
         try:
@@ -464,7 +494,9 @@ async def market_brief() -> dict[str, Any]:
         except Exception as e:
             logger.exception("market-brief agent failed")
             if entry:
-                return {"data": entry["payload"]}
+                fb = dict(entry["payload"])
+                fb["indicators"] = _normalize_to_usd_per_mt(fb.get("indicators") or [])
+                return {"data": fb}
             raise HTTPException(status_code=502, detail=f"Market brief failed: {e}")
 
     parsed: dict[str, Any] = {}
@@ -494,12 +526,15 @@ async def market_brief() -> dict[str, Any]:
         "error_message": err_msg or None,
     }
     if (payload.get("indicators") or []) and not err_msg:
+        payload["indicators"] = _normalize_to_usd_per_mt(payload["indicators"])
         try:
             result_cache.write("market-brief", "snapshot", payload)
         except Exception as e:
             logger.warning("cache write market-brief failed: %s", e)
     elif entry:
-        return {"data": entry["payload"]}
+        fb = dict(entry["payload"])
+        fb["indicators"] = _normalize_to_usd_per_mt(fb.get("indicators") or [])
+        return {"data": fb}
     return {"data": payload}
 
 
@@ -507,7 +542,11 @@ async def market_brief() -> dict[str, Any]:
 async def market_brief_cached() -> dict[str, Any]:
     """Last successful market brief — refreshed by the warmer every 5 min."""
     result_cache.mark_visit("market-brief")
-    return _wrap_cached("market-brief", "snapshot")
+    wrapped = _wrap_cached("market-brief", "snapshot")
+    inner = (wrapped.get("data") or {}).get("payload") or {}
+    if isinstance(inner.get("indicators"), list):
+        inner["indicators"] = _normalize_to_usd_per_mt(inner["indicators"])
+    return wrapped
 
 
 def _parse_agent_json(raw: str) -> dict[str, Any]:
@@ -618,7 +657,7 @@ async def analyze_result(execution_id: str) -> dict[str, Any]:
                 logger.warning("cache write analyze/%s failed: %s", corridor_id, e)
 
     return {
-        "data": {
+        "data": _convert_units_deep({
             "corridor_id": corridor_id,
             "execution_id": execution_id,
             "status": status,
@@ -635,7 +674,7 @@ async def analyze_result(execution_id: str) -> dict[str, Any]:
             "failure_code": row.get("failure_code"),
             "cost_usd": row.get("cost"),
             "duration_ms": row.get("duration_ms"),
-        }
+        })
     }
 
 
@@ -686,6 +725,41 @@ async def classify_broker_email(email_id: str) -> dict[str, Any]:
             "status": submitted.status or "running",
         }
     }
+
+
+# Custom-email endpoints: trader pastes their own email body, we run the
+# same classifier / parser agents without an entry in BROKER_EMAILS. The
+# request-supplied body is the only mutable thing.
+@app.post("/api/wingman/inbox/custom/classify")
+async def classify_custom_email(body: dict[str, Any]) -> dict[str, Any]:
+    text = (body or {}).get("body") or ""
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="body is required")
+    async with _abenix_client() as forge:
+        submitted = await forge.execute(
+            "wingman-broker-classifier",
+            json.dumps({"body": text}),
+            wait="submitted",
+        )
+    if submitted.execution_id:
+        _CLASSIFY_INDEX[submitted.execution_id] = "custom"
+    return {"data": {"email_id": "custom", "execution_id": submitted.execution_id, "status": submitted.status or "running"}}
+
+
+@app.post("/api/wingman/inbox/custom/parse")
+async def parse_custom_email(body: dict[str, Any]) -> dict[str, Any]:
+    text = (body or {}).get("body") or ""
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="body is required")
+    async with _abenix_client() as forge:
+        submitted = await forge.execute(
+            "wingman-broker-parser",
+            json.dumps({"body": text}),
+            wait="submitted",
+        )
+    if submitted.execution_id:
+        _PARSE_INDEX[submitted.execution_id] = "custom"
+    return {"data": {"email_id": "custom", "execution_id": submitted.execution_id, "status": submitted.status or "running"}}
 
 
 @app.get("/api/wingman/classify-result/{execution_id}")
@@ -1186,9 +1260,7 @@ async def scenario_result(execution_id: str) -> dict[str, Any]:
     corridor_id = _SCENARIO_INDEX.get(execution_id)
     is_load_bearing = any(parsed.get(k) for k in _SCENARIO_EXPECTED_KEYS) if parsed else False
     if terminal and corridor_id and not is_load_bearing:
-        logger.info("scenario-result %s for %s: terminal+junk -> synth fallback", execution_id, corridor_id)
-        parsed = _synthesize_scenarios(corridor_id)
-        is_load_bearing = True
+        logger.info("scenario-result %s for %s: agent unavailable — no cache write", execution_id, corridor_id)
     if status == "completed" and parsed and corridor_id and is_load_bearing:
         candidate = {
             **parsed,
@@ -1201,7 +1273,7 @@ async def scenario_result(execution_id: str) -> dict[str, Any]:
         except Exception as e:
             logger.warning("cache write scenarios/%s failed: %s", corridor_id, e)
     return {
-        "data": {
+        "data": _convert_units_deep({
             "corridor_id": corridor_id,
             "execution_id": execution_id,
             "status": status,
@@ -1210,7 +1282,7 @@ async def scenario_result(execution_id: str) -> dict[str, Any]:
             "failure_code": row.get("failure_code"),
             "cost_usd": row.get("cost"),
             "duration_ms": row.get("duration_ms"),
-        }
+        })
     }
 
 
@@ -1221,7 +1293,7 @@ async def scenarios_cached(corridor_id: str) -> dict[str, Any]:
     return _wrap_cached("scenarios", corridor_id)
 
 
-# ─── Mispricing Lens ─────────────────────────────────────────────────────
+# ─── Price at Risk Lens ─────────────────────────────────────────────────
 
 _MISPRICING_INDEX: dict[str, str] = {}
 
@@ -1266,11 +1338,12 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
     if terminal and raw:
         parsed = _parse_agent_json(raw)
     corridor_id = _MISPRICING_INDEX.get(execution_id)
-    is_load_bearing = any(parsed.get(k) is not None for k in _MISPRICING_EXPECTED_KEYS) if parsed else False
+    is_load_bearing = (
+        any(parsed.get(k) is not None for k in _MISPRICING_EXPECTED_KEYS)
+        and _scan_has_required_numbers(parsed)
+    ) if parsed else False
     if terminal and corridor_id and not is_load_bearing:
-        logger.info("mispricing-result %s for %s: terminal+junk -> synth fallback", execution_id, corridor_id)
-        parsed = _synthesize_mispricing(corridor_id)
-        is_load_bearing = True
+        logger.info("mispricing-result %s for %s: agent unavailable — no cache write", execution_id, corridor_id)
     if status == "completed" and parsed and corridor_id and is_load_bearing:
         candidate = {
             **parsed,
@@ -1283,7 +1356,7 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
         except Exception as e:
             logger.warning("cache write mispricing/%s failed: %s", corridor_id, e)
     return {
-        "data": {
+        "data": _convert_units_deep({
             "corridor_id": corridor_id,
             "execution_id": execution_id,
             "status": status,
@@ -1292,7 +1365,7 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
             "failure_code": row.get("failure_code"),
             "cost_usd": row.get("cost"),
             "duration_ms": row.get("duration_ms"),
-        }
+        })
     }
 
 
@@ -1346,7 +1419,7 @@ async def mispricing_trade_card(
     }
 
 
-# ─── Desk Copilot (meta agent) ──────────────────────────────────────────
+# ─── Wingman Copilot (meta agent) ──────────────────────────────────────────
 
 _DESK_INDEX: dict[str, str] = {}
 
@@ -1452,7 +1525,7 @@ async def desk_result(execution_id: str) -> dict[str, Any]:
             logger.warning("trajectory write failed for %s: %s", execution_id, e)
 
     return {
-        "data": {
+        "data": _convert_units_deep({
             "execution_id": execution_id,
             "status": status,
             "question": _DESK_INDEX.get(execution_id),
@@ -1461,7 +1534,7 @@ async def desk_result(execution_id: str) -> dict[str, Any]:
             "failure_code": row.get("failure_code"),
             "cost_usd": row.get("cost"),
             "duration_ms": row.get("duration_ms"),
-        }
+        })
     }
 
 
@@ -1512,6 +1585,75 @@ async def desk_trajectory_detail(trajectory_id: str) -> dict[str, Any]:
     return {"data": obj}
 
 
+# ─── Compliance Lens — cross-check trades / rules / hedges / offers ────
+
+_COMPLIANCE_RULES_VERSION = "2025-Q2-v1"
+
+
+def _action_fingerprint(action: dict[str, Any]) -> str:
+    import hashlib
+    payload = json.dumps(action, sort_keys=True, default=str)
+    return hashlib.sha256((payload + "|" + _COMPLIANCE_RULES_VERSION).encode("utf-8")).hexdigest()[:24]
+
+
+@app.post("/api/wingman/compliance/validate")
+async def compliance_validate(body: dict[str, Any]) -> dict[str, Any]:
+    action = (body or {}).get("action") or {}
+    if not action.get("action_kind"):
+        raise HTTPException(status_code=400, detail="action.action_kind required")
+
+    fingerprint = _action_fingerprint(action)
+    cached = result_cache.read("compliance", fingerprint)
+    if cached is not None:
+        return {"data": cached, "cache": "hit"}
+
+    async with _abenix_client() as forge:
+        result = await forge.execute(
+            "wingman-compliance-validator",
+            json.dumps(action),
+            wait_timeout_seconds=120,
+        )
+    raw = result.output or "{}"
+    parsed: dict[str, Any] = {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        s = raw.strip()
+        first, last = s.find("{"), s.rfind("}")
+        if first != -1 and last > first:
+            try:
+                parsed = json.loads(s[first : last + 1])
+            except Exception:
+                parsed = {}
+    if not parsed:
+        parsed = {
+            "verdict": "WARN",
+            "summary": "Compliance check could not parse validator output; treat as WARN.",
+            "reasons": ["validator returned unstructured output"],
+            "remediation": ["re-run the check or open the trade for manual review"],
+            "citations": [],
+            "checks": [],
+            "rules_version": _COMPLIANCE_RULES_VERSION,
+        }
+    parsed["fingerprint"] = fingerprint
+    parsed["execution_id"] = getattr(result, "execution_id", None)
+    parsed["cost_usd"] = getattr(result, "cost", None)
+    parsed["duration_ms"] = getattr(result, "duration_ms", None)
+    try:
+        result_cache.write("compliance", fingerprint, parsed)
+    except Exception:
+        pass
+    return {"data": parsed, "cache": "miss"}
+
+
+@app.get("/api/wingman/compliance/cached/{fingerprint}")
+async def compliance_cached(fingerprint: str) -> dict[str, Any]:
+    cached = result_cache.read("compliance", fingerprint)
+    if cached is None:
+        raise HTTPException(status_code=404, detail="not in cache")
+    return {"data": cached}
+
+
 @app.post("/api/wingman/desk/trajectories/{trajectory_id}/outcome")
 async def desk_trajectory_outcome(trajectory_id: str, body: dict[str, Any]) -> dict[str, Any]:
     ok = trajectory_store.attach_outcome(
@@ -1526,162 +1668,6 @@ async def desk_trajectory_outcome(trajectory_id: str, body: dict[str, Any]) -> d
 
 
 # ─── Knowledge Graph (Atlas) ─────────────────────────────────────────────
-
-
-_COUNTERPARTY_REGISTRY: list[dict[str, Any]] = [
-    {"id": "cp:acme-energy",         "name": "Acme Energy",          "country": "US", "credit_rating": "A",   "flags": [],                  "domain": "acme-energy-brokers.com"},
-    {"id": "cp:hellenic-shipping",   "name": "Hellenic Shipping",    "country": "GR", "credit_rating": "BBB", "flags": ["credit-watch"],    "domain": "hellenic-shipping-brokers.com"},
-    {"id": "cp:nordic-bunker",       "name": "Nordic Bunker",        "country": "NO", "credit_rating": "A-",  "flags": [],                  "domain": "nordic-bunker.com"},
-    {"id": "cp:continental-petro",   "name": "Continental Petrochem","country": "BE", "credit_rating": "BB+", "flags": ["credit-watch"],    "domain": "continental-petrochem.com"},
-    {"id": "cp:global-energy",       "name": "Global Energy Brokers","country": "US", "credit_rating": "A",   "flags": [],                  "domain": "global-energy-brokers.net"},
-]
-
-_VESSEL_REGISTRY: list[dict[str, Any]] = [
-    {"id": "vessel:9342111", "mmsi": 538009342, "name": "ECO Pacific",     "type": "VLGC",  "dwt": 84_000, "ais_region": "Atlantic"},
-    {"id": "vessel:9415523", "mmsi": 538009415, "name": "Northern Gas",    "type": "VLGC",  "dwt": 86_000, "ais_region": "Atlantic"},
-    {"id": "vessel:9512788", "mmsi": 311009512, "name": "Avance Aurora",   "type": "VLGC",  "dwt": 84_000, "ais_region": "Pacific"},
-    {"id": "vessel:9647212", "mmsi": 211009647, "name": "Star Mercury",    "type": "MR2",   "dwt": 47_000, "ais_region": "Atlantic"},
-    {"id": "vessel:9758901", "mmsi": 538009758, "name": "BW Yushi",        "type": "VLGC",  "dwt": 90_000, "ais_region": "Pacific"},
-]
-
-_NEWS_EVENTS: list[dict[str, Any]] = [
-    {"id": "evt:gulf-hurricane-aug",  "kind": "weather",       "severity": "high",   "date": "2026-04-29", "headline": "Tropical Storm Bertha disrupts Houston ship channel — 36-hour closure",          "impact_usd_mt": +8.5, "source": "NOAA"},
-    {"id": "evt:saudi-cp-may",        "kind": "regulation",    "severity": "medium", "date": "2026-05-05", "headline": "Saudi CP raised $12/mt for May propane contract price",                          "impact_usd_mt": +3.2, "source": "Saudi Aramco"},
-    {"id": "evt:eia-stock-draw",      "kind": "supply",        "severity": "medium", "date": "2026-05-09", "headline": "EIA weekly propane stocks drew 2.4 MMbbl vs +0.5 consensus",                     "impact_usd_mt": +4.1, "source": "EIA"},
-    {"id": "evt:vlgc-rates-spike",    "kind": "freight",       "severity": "medium", "date": "2026-05-10", "headline": "BLPG3 Ras Tanura→Chiba VLGC rate up 12% w/w on tonnage tightness",               "impact_usd_mt": +5.0, "source": "Baltic"},
-    {"id": "evt:china-cracker-restart","kind": "demand",       "severity": "low",    "date": "2026-05-11", "headline": "Zhejiang Petrochemical restarts 1.6 mtpa cracker after Q1 turnaround",           "impact_usd_mt": -2.0, "source": "Platts"},
-]
-
-
-def _domain_to_counterparty(domain: str) -> dict[str, Any] | None:
-    for cp in _COUNTERPARTY_REGISTRY:
-        if cp["domain"] in (domain or ""):
-            return cp
-    return None
-
-
-def _synthesize_graph_answer(question: str) -> dict[str, Any]:
-    q = (question or "").lower()
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    def add_node(n: dict[str, Any]) -> None:
-        if n["id"] in seen:
-            return
-        seen.add(n["id"])
-        nodes.append(n)
-
-    def add_edge(src: str, dst: str, rel: str) -> None:
-        edges.append({"from": src, "to": dst, "relation": rel})
-
-    citations: list[str] = []
-
-    if "credit-watch" in q or "credit watch" in q or "creditwatch" in q:
-        watch = [cp for cp in _COUNTERPARTY_REGISTRY if "credit-watch" in cp["flags"]]
-        for cp in watch:
-            add_node({"id": cp["id"], "type": "Counterparty", "name": cp["name"],
-                      "credit_rating": cp["credit_rating"], "country": cp["country"], "flag": "credit-watch"})
-            for c in CORRIDORS:
-                if c.get("active"):
-                    cid = f"corridor:{c['id']}"
-                    add_node({"id": cid, "type": "Corridor", "name": c["label"],
-                              "origin_port": c["origin_port"], "destination_port": c["destination_port"],
-                              "product": c["product"]})
-                    add_edge(f"offer:from-{cp['id']}", cp["id"], "OFFER_FROM_COUNTERPARTY")
-                    add_node({"id": f"offer:from-{cp['id']}", "type": "Offer",
-                              "broker": cp["name"], "corridor": c["id"], "status": "open"})
-                    add_edge(f"offer:from-{cp['id']}", cid, "OFFER_MATCHED_TO_STRATEGY")
-        names = [cp["name"] for cp in watch] or ["(none)"]
-        narrative = (
-            f"{len(watch)} counterparty(ies) flagged credit-watch: {', '.join(names)}. "
-            f"Both are currently active across the live USGC->NWE and USGC->FE corridors "
-            f"via open broker offers, so any execution on those corridors will require a "
-            f"compliance signoff via the HITL Approvals gate."
-        )
-        citations = ["Atlas: counterparty_registry v1", "Wingman: broker_emails.json", "Compliance: credit-watch list v2026-05"]
-
-    elif "vessel" in q or "vlgc" in q or "mr2" in q or "fixture" in q or "atlantic" in q or "pacific" in q:
-        region = "Atlantic" if "atlantic" in q else ("Pacific" if "pacific" in q else None)
-        vessels = [v for v in _VESSEL_REGISTRY if region is None or v["ais_region"] == region]
-        corridor = next((c for c in CORRIDORS if c["id"].lower() in q), None) or CORRIDORS[0]
-        cid = f"corridor:{corridor['id']}"
-        add_node({"id": cid, "type": "Corridor", "name": corridor["label"],
-                  "origin_port": corridor["origin_port"], "destination_port": corridor["destination_port"],
-                  "product": corridor["product"]})
-        for v in vessels:
-            add_node({"id": v["id"], "type": "Vessel", "name": v["name"], "mmsi": v["mmsi"],
-                      "vessel_type": v["type"], "dwt_mt": v["dwt"], "ais_region": v["ais_region"]})
-            add_edge(v["id"], cid, "VESSEL_TRANSITS_CORRIDOR")
-            cp = _COUNTERPARTY_REGISTRY[(v["mmsi"]) % len(_COUNTERPARTY_REGISTRY)]
-            add_node({"id": cp["id"], "type": "Counterparty", "name": cp["name"],
-                      "credit_rating": cp["credit_rating"], "country": cp["country"],
-                      "flag": ", ".join(cp["flags"]) or "ok"})
-            add_edge(cp["id"], v["id"], "COUNTERPARTY_OPERATES_VESSEL")
-        narrative = (
-            f"{len(vessels)} vessels traced on {corridor['label']} in the last 30 days "
-            f"({region or 'both basins'}). Tonnage profile is VLGC-heavy; counterparty exposure "
-            f"is concentrated in {vessels[0]['name'] if vessels else 'n/a'} and its operator."
-        )
-        citations = ["AISStream.io: live feed", "Wingman: vessel registry v1", f"Atlas: corridor {corridor['id']}"]
-
-    elif "news" in q or "event" in q or "impact" in q or "moved" in q or "spread" in q:
-        for e in _NEWS_EVENTS:
-            add_node({"id": e["id"], "type": "MarketEvent", "name": e["headline"],
-                      "kind": e["kind"], "severity": e["severity"], "date": e["date"],
-                      "impact_usd_mt": e["impact_usd_mt"], "source": e["source"]})
-            for c in CORRIDORS:
-                if c.get("active"):
-                    cid = f"corridor:{c['id']}"
-                    add_node({"id": cid, "type": "Corridor", "name": c["label"],
-                              "origin_port": c["origin_port"], "destination_port": c["destination_port"],
-                              "product": c["product"]})
-                    add_edge(e["id"], cid, "EVENT_AFFECTS_VESSEL")
-        top = sorted(_NEWS_EVENTS, key=lambda x: abs(x["impact_usd_mt"]), reverse=True)[:3]
-        narrative = (
-            "Top three news drivers in the last 7 days, ranked by absolute spread impact: "
-            + "; ".join(f"{e['headline']} ({e['impact_usd_mt']:+.1f} $/MT)" for e in top)
-            + ". Net effect of +18.8 $/MT on the USGC->NWE propane spread."
-        )
-        citations = [f"News: {e['source']} {e['date']}" for e in top]
-
-    else:
-        for c in CORRIDORS:
-            if not c.get("active"):
-                continue
-            cid = f"corridor:{c['id']}"
-            add_node({"id": cid, "type": "Corridor", "name": c["label"],
-                      "origin_port": c["origin_port"], "destination_port": c["destination_port"],
-                      "product": c["product"]})
-        for e in BROKER_EMAILS[:5]:
-            domain = (e.get("from") or "").split("@")[-1]
-            cp = _domain_to_counterparty(domain)
-            if not cp:
-                continue
-            add_node({"id": cp["id"], "type": "Counterparty", "name": cp["name"],
-                      "credit_rating": cp["credit_rating"], "country": cp["country"],
-                      "flag": ", ".join(cp["flags"]) or "ok"})
-            offer_id = f"offer:{e['id']}"
-            add_node({"id": offer_id, "type": "Offer",
-                      "subject": e.get("subject"), "received_at": e.get("received_at")})
-            add_edge(offer_id, cp["id"], "OFFER_FROM_COUNTERPARTY")
-            if CORRIDORS:
-                add_edge(offer_id, f"corridor:{CORRIDORS[0]['id']}", "OFFER_MATCHED_TO_STRATEGY")
-        narrative = (
-            "Cross-section of the trading desk: 2 active corridors, "
-            f"{len([n for n in nodes if n['type']=='Counterparty'])} active counterparties, "
-            f"{len([n for n in nodes if n['type']=='Offer'])} live offers in the inbox. "
-            "Ask a more specific question (credit-watch, vessels in basin, news events) "
-            "to drill in."
-        )
-        citations = ["Wingman: corridors.json", "Wingman: broker_emails.json", "Atlas: trading_v1"]
-
-    return {
-        "subgraph": {"nodes": nodes[:30], "edges": edges[:30]},
-        "narrative": narrative,
-        "citations": citations,
-        "method": "deterministic subgraph synthesis over wingman ontology",
-    }
 
 
 def _is_empty_or_unavailable(answer: dict[str, Any]) -> bool:
@@ -1738,7 +1724,13 @@ async def graph_query(body: dict[str, Any]) -> dict[str, Any]:
         parsed = {}
 
     if _is_empty_or_unavailable(parsed):
-        parsed = _synthesize_graph_answer(question)
+        parsed = {
+            "narrative": "Graph query agent did not return a load-bearing answer. Retry the query, or refine the question.",
+            "nodes": [],
+            "edges": [],
+            "citations": [],
+            "data_quality": "agent_unavailable",
+        }
 
     return {
         "data": {

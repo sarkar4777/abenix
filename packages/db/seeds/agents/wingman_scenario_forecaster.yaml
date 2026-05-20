@@ -73,16 +73,20 @@ system_prompt: |
      a specific cited headline.
 
   ## Output (STRICT JSON only — no prose, no fences)
+  IMPORTANT: every date in the output MUST be derived at runtime from
+  current_time + tenor offsets. Do not copy the placeholder dates
+  shown below — they only exist to illustrate JSON shape. Drivers'
+  date and url MUST come from the tavily_search results.
   ```json
   {
     "corridor_id": "USGC-NWE",
-    "as_of": "2026-05-08",
+    "as_of": "<today from current_time, YYYY-MM-DD>",
     "tenor_months": 12,
     "base_curve": [
-      {"tenor_months": 1, "date": "2026-06-01", "value": 23.25}
+      {"tenor_months": 1, "date": "<today + 1m, first-of-month>", "value": 23.25}
     ],
     "expected_curve": [
-      {"tenor_months": 1, "date": "2026-06-01", "value": 22.10, "p10": 12.50, "p90": 33.10}
+      {"tenor_months": 1, "date": "<today + 1m, first-of-month>", "value": 22.10, "p10": 12.50, "p90": 33.10}
     ],
     "feature_vector": {
       "spot_momentum_4w": 0.20,
@@ -109,11 +113,11 @@ system_prompt: |
         "probability": 0.45,
         "color": "#34d399",
         "narrative": "USGC export terminals at ~85% utilisation; no acute geopolitical or weather signal in the news window.",
-        "curve": [{"tenor_months": 1, "date": "2026-06-01", "value": 23.25}],
+        "curve": [{"tenor_months": 1, "date": "<derived from current_time + tenor offset>", "value": 23.25}],
         "drivers": [
           {"category": "supply", "headline": "USGC propane export terminals at multi-year highs",
            "impact_usd_mt": 0.0, "source": "Reuters", "url": "https://...",
-           "date": "2026-04-22"}
+           "date": "<from tavily, YYYY-MM-DD>"}
         ]
       },
       {
@@ -122,11 +126,11 @@ system_prompt: |
         "probability": 0.18,
         "color": "#60a5fa",
         "narrative": "...",
-        "curve": [{"tenor_months": 1, "date": "2026-06-01", "value": 30.80}],
+        "curve": [{"tenor_months": 1, "date": "<derived from current_time + tenor offset>", "value": 30.80}],
         "drivers": [
-          {"category": "geopolitics", "headline": "Strait of Hormuz tensions ease",
-           "impact_usd_mt": 7.55, "source": "Bloomberg", "url": "https://...",
-           "date": "2026-04-30"}
+          {"category": "geopolitics", "headline": "<geopolitical headline from tavily geo search>",
+           "impact_usd_mt": 7.55, "source": "<from tavily>", "url": "<from tavily>",
+           "date": "<from tavily, YYYY-MM-DD>"}
         ]
       }
     ],

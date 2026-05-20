@@ -93,7 +93,7 @@ test.describe('Wingman — full browser UAT', () => {
     await gotoOk(page, '/');
     expect(page.url()).toMatch(/\/(home|workbench)$/);
     for (const label of [
-      'Home', 'Arbitrage Workbench', 'Mispricing Lens', 'Forward Scenarios', 'Broker Inbox',
+      'Home', 'Arbitrage Workbench', 'Price at Risk Lens', 'Forward Scenarios', 'Broker Inbox',
       'Approvals', 'Operations Watch', 'Strategy Lab', 'Knowledge Graph',
     ]) {
       await expect(page.getByText(label).first()).toBeVisible({ timeout: 10_000 });

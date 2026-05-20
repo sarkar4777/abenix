@@ -23,6 +23,15 @@ const SAMPLE_QUESTIONS = [
   'List all VLGCs currently in the Atlantic that have ever called at Antwerp with cargo > 40kt.',
 ];
 
+const SAMPLE_QUERY_CARDS = [
+  { category: 'Counterparty risk', q: 'Which corridors share a counterparty currently flagged as credit-watch?', what: 'Pulls counterparty nodes with credit_status=watch, traverses to corridor edges' },
+  { category: 'Vessel ops', q: 'List all VLGCs currently in the Atlantic that have ever called at Antwerp with cargo > 40kt.', what: 'Vessels filtered by class + position + historical port-call edges' },
+  { category: 'Trade lineage', q: 'Trace the lineage of the Aug-15 USGC->NWE strategy from the originating broker email through the matched position to the approved hedge.', what: 'End-to-end edge walk: email → strategy → position → hedge → approval' },
+  { category: 'Cross-cutting', q: 'Show every offer from a counterparty involved in any vessel disruption in the last 90 days.', what: 'Joins broker offers with vessel disruption news in a time window' },
+  { category: 'Corridor map', q: 'Show all active corridors and which counterparties currently have open offers on each.', what: 'Active-corridor projection with offer-edge fan-out' },
+  { category: 'News impact', q: 'Find all news events tagged "Strait of Hormuz" in the last 30 days and the cargoes they touched.', what: 'News→event→cargo graph traversal with date filter' },
+];
+
 const HISTORY_KEY = 'wingman.graph.history.v1';
 
 interface GraphNode { id?: string; type?: string; label?: string; name?: string; [k: string]: any }
@@ -275,9 +284,32 @@ export default function GraphPage() {
           {active ? (
             <ActiveAnswerView q={active} />
           ) : (
-            <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/20 p-8 text-center text-sm text-slate-500">
-              ask a question to begin — every answer saves to the history sidebar
-            </div>
+            <section className="rounded-xl border border-slate-800 bg-slate-900/30 p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Network className="w-4 h-4 text-cyan-300" />
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-cyan-300 font-bold">Sample queries</div>
+                  <div className="text-sm font-semibold text-white">Pick one to see the Atlas in action — or type your own above</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {SAMPLE_QUERY_CARDS.map((c, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setQuestion(c.q)}
+                    className="text-left rounded-lg border border-slate-800 bg-slate-950/40 hover:border-cyan-500/40 hover:bg-cyan-500/[0.04] p-3 transition-colors group"
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">{c.category}</span>
+                    </div>
+                    <div className="text-[12px] text-slate-200 leading-snug mb-2">{c.q}</div>
+                    <div className="text-[10px] text-slate-500 italic leading-snug border-t border-slate-800 pt-2">
+                      <span className="text-slate-400">What it does: </span>{c.what}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
         </div>
       </div>

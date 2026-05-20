@@ -96,72 +96,111 @@ FEATURE_NAMES = [
     "route_vessel_size_norm",
 ]
 
+# v1.3 regimes: rebalanced to cover the 2026 post-Hormuz regime where
+# VLGC freight at record highs can push the per-MT arb residual deeply
+# negative (closed arb) on the transatlantic leg, even while east-of-Suez
+# corridors stay rich on Asian premium. v1.2's three "modest mid-20s
+# arb" regimes never produced a negative spread in training, which made
+# the model anchor any negative-arb feature vector back toward $+22 — the
+# bug the user's google-cross-check surfaced.
 REGIMES = [
     {
-        "name": "calm_balance",
-        "n": 380,
+        # USGC->NWE-type closed arb: similar basin prices + high freight
+        # eats the differential. Common in 2026 with BLPG2 at ~$95/MT.
+        "name": "closed_atlantic_arb",
+        "n": 260,
         "weights": dict(
-            origin_spot_z=0.0,
+            origin_spot_z=0.5,
             dest_spot_z=0.0,
-            freight_per_mt_z=0.0,
+            freight_per_mt_z=1.4,
+            inventory_z=-0.2,
+            exports_4w_pct=0.6,
+            fx_eur_usd_z=-0.2,
+            weather_dest_gust_z=0.0,
+            crude_iv_atm_z=0.6,
+            crude_risk_reversal=0.04,
+            nat_gas_iv_atm_z=0.3,
+            oil_put_call_ratio=0.9,
+            freight_baltic_z=1.6,
+            freight_ws_per_mt_z=0.4,
+            route_vessel_size_norm=0.88,
+        ),
+        "spread_mean": -55.0,
+        "spread_std": 14.0,
+    },
+    {
+        # Pacific dislocation: USGC->FE / MEG->FE on record BLPG3
+        # ($290) or BLPG1 ($151). Dest leg is rich on AFEI premium,
+        # freight is even richer, residual can be small-positive to
+        # mid-negative.
+        "name": "pacific_freight_blowout",
+        "n": 240,
+        "weights": dict(
+            origin_spot_z=0.3,
+            dest_spot_z=1.2,
+            freight_per_mt_z=2.0,
+            inventory_z=-0.6,
+            exports_4w_pct=1.1,
+            fx_eur_usd_z=0.0,
+            weather_dest_gust_z=0.1,
+            crude_iv_atm_z=0.5,
+            crude_risk_reversal=0.05,
+            nat_gas_iv_atm_z=0.2,
+            oil_put_call_ratio=0.95,
+            freight_baltic_z=2.2,
+            freight_ws_per_mt_z=0.4,
+            route_vessel_size_norm=0.88,
+        ),
+        "spread_mean": 25.0,
+        "spread_std": 18.0,
+    },
+    {
+        # Brief open Atlantic arb (regime occasionally flips when CIF
+        # ARA spikes faster than Mont Belvieu).
+        "name": "open_atlantic_arb",
+        "n": 90,
+        "weights": dict(
+            origin_spot_z=-0.4,
+            dest_spot_z=0.8,
+            freight_per_mt_z=0.6,
+            inventory_z=0.5,
+            exports_4w_pct=-0.2,
+            fx_eur_usd_z=0.1,
+            weather_dest_gust_z=0.5,
+            crude_iv_atm_z=0.2,
+            crude_risk_reversal=0.0,
+            nat_gas_iv_atm_z=0.0,
+            oil_put_call_ratio=1.0,
+            freight_baltic_z=0.6,
+            freight_ws_per_mt_z=0.1,
+            route_vessel_size_norm=0.88,
+        ),
+        "spread_mean": 28.0,
+        "spread_std": 9.0,
+    },
+    {
+        # Short-haul LATAM (USGC->Cartagena MGC). Tight arb on small
+        # cargo, low freight in absolute terms.
+        "name": "short_haul_latam",
+        "n": 90,
+        "weights": dict(
+            origin_spot_z=0.1,
+            dest_spot_z=0.2,
+            freight_per_mt_z=-0.4,
             inventory_z=0.0,
-            exports_4w_pct=0.0,
+            exports_4w_pct=0.3,
             fx_eur_usd_z=0.0,
             weather_dest_gust_z=0.0,
             crude_iv_atm_z=0.0,
             crude_risk_reversal=0.0,
             nat_gas_iv_atm_z=0.0,
-            oil_put_call_ratio=0.9,
-            freight_baltic_z=0.0,
+            oil_put_call_ratio=0.95,
+            freight_baltic_z=-0.4,
             freight_ws_per_mt_z=0.0,
-            route_vessel_size_norm=0.88,
+            route_vessel_size_norm=0.44,  # MGC, ~22kt
         ),
-        "spread_mean": 22.0,
-        "spread_std": 3.5,
-    },
-    {
-        "name": "usgc_export_surge",
-        "n": 140,
-        "weights": dict(
-            origin_spot_z=-0.6,
-            dest_spot_z=0.4,
-            freight_per_mt_z=0.3,
-            inventory_z=-1.1,
-            exports_4w_pct=1.4,
-            fx_eur_usd_z=0.0,
-            weather_dest_gust_z=0.0,
-            crude_iv_atm_z=0.7,
-            crude_risk_reversal=0.06,
-            nat_gas_iv_atm_z=0.3,
-            oil_put_call_ratio=0.7,
-            freight_baltic_z=1.1,
-            freight_ws_per_mt_z=0.3,
-            route_vessel_size_norm=0.88,
-        ),
-        "spread_mean": 42.0,
-        "spread_std": 6.0,
-    },
-    {
-        "name": "nwe_demand_soft",
-        "n": 100,
-        "weights": dict(
-            origin_spot_z=0.1,
-            dest_spot_z=-0.9,
-            freight_per_mt_z=-0.2,
-            inventory_z=0.2,
-            exports_4w_pct=-0.3,
-            fx_eur_usd_z=-0.4,
-            weather_dest_gust_z=-0.6,
-            crude_iv_atm_z=0.4,
-            crude_risk_reversal=-0.05,
-            nat_gas_iv_atm_z=0.2,
-            oil_put_call_ratio=1.3,
-            freight_baltic_z=-0.6,
-            freight_ws_per_mt_z=-0.2,
-            route_vessel_size_norm=0.88,
-        ),
-        "spread_mean": 11.0,
-        "spread_std": 4.0,
+        "spread_mean": 12.0,
+        "spread_std": 5.0,
     },
 ]
 
@@ -184,22 +223,26 @@ def _make_row(
     feats[13] = rng.normal(weights.get("freight_ws_per_mt_z", 0.0), 1.0)
     feats[14] = max(0.1, rng.normal(weights.get("route_vessel_size_norm", 0.88), 0.05))
 
+    # Coefficients are in $/MT per stddev. Calibrated so a 1-sigma move
+    # in origin/destination price moves the arb ~$25-30/MT and a 1-sigma
+    # move in Baltic freight moves it ~$30/MT — the freight dominance
+    # the v1.2 model was missing.
     base = spread_mean
     contrib = (
-        -3.5 * feats[0]
-        + 4.0 * feats[1]
-        - 2.0 * feats[2]
-        - 1.0 * feats[3]
-        + 1.8 * feats[4]
-        + 0.6 * feats[5]
-        + 0.4 * feats[6]
-        + 1.4 * feats[8]
-        - 24.0 * feats[9]
-        + 0.9 * feats[10]
-        + 4.5 * (feats[11] - 0.9)
-        - 2.8 * feats[12]
-        - 1.6 * feats[13]
-        + 5.5 * (feats[14] - 0.88)
+        -28.0 * feats[0]                          # origin_spot_z: high MB → less arb
+        + 25.0 * feats[1]                         # dest_spot_z: high CIF ARA / AFEI → more arb
+        - 18.0 * feats[2]                         # freight_per_mt_z (bunker proxy)
+        - 1.5 * feats[3]                          # inventory_z
+        + 3.0 * feats[4]                          # exports_4w_pct
+        + 0.8 * feats[5]                          # fx_eur_usd_z
+        + 0.4 * feats[6]                          # weather
+        + 1.4 * feats[8]                          # crude_iv_atm_z
+        - 24.0 * feats[9]                         # crude_risk_reversal
+        + 0.9 * feats[10]                         # nat_gas_iv_atm_z
+        + 4.5 * (feats[11] - 0.9)                 # put_call ratio
+        - 32.0 * feats[12]                        # freight_baltic_z: PRIMARY freight signal
+        - 6.0 * feats[13]                         # freight_ws_per_mt_z (CPP, small for LPG)
+        + 5.5 * (feats[14] - 0.88)                # vessel size economics
     )
     season_lift = {1: 2.5, 2: 0.0, 3: -2.0, 4: 2.0}[int(feats[7])]
     y = base + contrib + season_lift + rng.normal(0, spread_std)
@@ -263,17 +306,21 @@ def train_and_save() -> None:
 
     meta = {
         "name": "wingman-mispricing-fairvalue",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "framework": "sklearn",
         "description": (
             "Bayesian Ridge regression of LPG/CPP corridor fair-value "
-            "spread ($/MT) on a 15-feature vector. v1.2 adds three "
-            "freight-quality features (Baltic BLPG z-score, Worldscale-"
-            "anchored CPP freight z-score, normalised vessel size) on top "
-            "of the v1.1 options-aware 12. Returns posterior mean + std "
-            "so the mispricing engine can compute a residual z-score and "
-            "credible interval. Trained synthetic regime-conditional; "
-            "re-train on real desk-labelled history in production."
+            "spread ($/MT) on a 15-feature vector. v1.3 rebalances the "
+            "training regimes to cover the 2026 post-Hormuz market: "
+            "closed-atlantic-arb (negative spread on $95/MT BLPG2), "
+            "pacific-freight-blowout (USGC->FE, MEG->FE with record "
+            "BLPG3 freight), open-atlantic-arb (occasional flip), and "
+            "short-haul-latam (MGC carrier economics). Coefficients on "
+            "origin/destination price and Baltic freight z-scores were "
+            "scaled up so a 1-sigma move maps to ~$25-30/MT — the v1.2 "
+            "model was undershooting freight by 5-10x, anchoring every "
+            "scan toward a $+22/MT baseline. Re-train monthly on real "
+            "desk-labelled history when the data pipe is wired."
         ),
         "input_schema": {
             "features": FEATURE_NAMES,

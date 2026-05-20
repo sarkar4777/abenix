@@ -11,8 +11,12 @@ BALTIC_API_URL env vars on the runtime pod.
   BLPG3   Houston -> Chiba (via Panama)  VLGC, ~44kt propane
 
 The numbers are routinely published in OPEC monthly oil reports and on
-the Baltic Exchange daily fixings page, so the curated levels here are
-calibrated to the public-domain Q1-2026 averages.
+the Baltic Exchange daily fixings page; the curated levels here are
+calibrated to those public-domain published values. There is also a
+free-tier override: drop a JSON file at BLPG_CURATED_PATH (defaults to
+/data/blpg_curated.json) with the same {BLPG1:{mid_usd_mt:...}} shape
+and the tool will pick that up without a redeploy. Operations updates
+the JSON monthly from OPEC MOMR + RBN/Clarksons publications.
 
 The tool is intentionally generic — anything calling LPG freight math
 can use it (Wingman, the example app chartering desk, the Industrial-IoT
@@ -21,24 +25,28 @@ shipping module, future tankers app).
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from engine.tools.base import BaseTool, ToolResult
 
-# Q1-2026 indicative levels in $/MT propane for a VLGC voyage. These
-# match OPEC MOMR-quoted spot levels within +/- $4 typically.
-_BLPG_CURATED_USD_MT: dict[str, dict[str, Any]] = {
+# Indicative levels in $/MT propane for a VLGC voyage. Operations
+# refreshes this from OPEC MOMR + RBN + Clarksons publications.
+# These are the latest published mids — a JSON file at
+# BLPG_CURATED_PATH overrides without a redeploy.
+_BLPG_CURATED_DEFAULTS: dict[str, dict[str, Any]] = {
     "BLPG1": {
         "origin": "Ras Tanura",
         "destination": "Chiba",
         "vessel_class": "VLGC",
         "cargo_mt": 44_000,
-        "mid_usd_mt": 71.50,
-        "low_usd_mt": 64.00,
-        "high_usd_mt": 79.00,
+        "mid_usd_mt": 151.00,
+        "low_usd_mt": 135.00,
+        "high_usd_mt": 168.00,
         "label": "Ras Tanura -> Chiba (Persian Gulf -> Japan)",
     },
     "BLPG2": {
@@ -46,9 +54,9 @@ _BLPG_CURATED_USD_MT: dict[str, dict[str, Any]] = {
         "destination": "Flushing",
         "vessel_class": "VLGC",
         "cargo_mt": 44_000,
-        "mid_usd_mt": 49.20,
-        "low_usd_mt": 43.50,
-        "high_usd_mt": 56.00,
+        "mid_usd_mt": 95.00,
+        "low_usd_mt": 84.00,
+        "high_usd_mt": 108.00,
         "label": "Houston -> Flushing (US Gulf -> NW Europe)",
     },
     "BLPG3": {
@@ -56,12 +64,32 @@ _BLPG_CURATED_USD_MT: dict[str, dict[str, Any]] = {
         "destination": "Chiba",
         "vessel_class": "VLGC",
         "cargo_mt": 44_000,
-        "mid_usd_mt": 132.00,
-        "low_usd_mt": 118.00,
-        "high_usd_mt": 148.00,
+        "mid_usd_mt": 290.00,
+        "low_usd_mt": 255.00,
+        "high_usd_mt": 320.00,
         "label": "Houston -> Chiba via Panama (US Gulf -> Japan)",
     },
 }
+
+
+def _load_curated() -> dict[str, dict[str, Any]]:
+    """Merge defaults with any operator-supplied JSON override.
+
+    The override file is the production refresh path: rather than rebuild
+    the runtime image to roll a freight curve, ops drops the latest
+    public-domain levels into /data/blpg_curated.json and the next agent
+    call picks them up."""
+    override_path = Path(os.environ.get("BLPG_CURATED_PATH", "/data/blpg_curated.json"))
+    merged = {k: dict(v) for k, v in _BLPG_CURATED_DEFAULTS.items()}
+    try:
+        if override_path.is_file():
+            data = json.loads(override_path.read_text())
+            for code, row in (data or {}).items():
+                if code in merged and isinstance(row, dict):
+                    merged[code].update(row)
+    except Exception:
+        pass
+    return merged
 
 
 class FreightBalticBlpgTool(BaseTool):
@@ -123,18 +151,22 @@ class FreightBalticBlpgTool(BaseTool):
         return None
 
     async def _route(self, route_code: str) -> ToolResult:
-        row = _BLPG_CURATED_USD_MT.get(route_code)
+        row = _load_curated().get(route_code)
         if not row:
             return ToolResult(
                 content=f"Unknown BLPG route '{route_code}'. Supported: BLPG1, BLPG2, BLPG3",
                 is_error=True,
             )
         live = await self._fetch_live(route_code)
-        source = (
-            "Baltic subscription feed"
-            if live
-            else "Curated Q1-2026 public-domain levels"
-        )
+        override = Path(
+            os.environ.get("BLPG_CURATED_PATH", "/data/blpg_curated.json")
+        ).is_file()
+        if live:
+            source = "Baltic subscription feed (live)"
+        elif override:
+            source = "Operator-supplied public-domain refresh (/data/blpg_curated.json)"
+        else:
+            source = "Curated public-domain levels (built-in defaults)"
         merged = {**row, **(live or {})}
         mid = float(merged["mid_usd_mt"])
         low = float(merged.get("low_usd_mt") or mid * 0.9)
@@ -159,7 +191,7 @@ class FreightBalticBlpgTool(BaseTool):
     async def _all(self) -> ToolResult:
         rows: list[dict[str, Any]] = []
         lines = ["Baltic BLPG indices ($/MT propane VLGC):"]
-        for code, row in _BLPG_CURATED_USD_MT.items():
+        for code, row in _load_curated().items():
             live = await self._fetch_live(code)
             mid = float((live or {}).get("mid_usd_mt") or row["mid_usd_mt"])
             lines.append(f"  {code}  ${mid:>6.2f}/MT   {row['label']}")

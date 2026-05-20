@@ -1,4 +1,4 @@
-"""Knowledge base CRUD and document upload endpoints."""
+﻿"""Knowledge base CRUD and document upload endpoints."""
 
 from __future__ import annotations
 
@@ -127,7 +127,7 @@ async def list_knowledge_bases(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    # User-level scoping — tenant admins see the whole tenant; everyone
+    # User-level scoping â€” tenant admins see the whole tenant; everyone
     # else only sees collections whose visibility lets them in (tenant /
     # project-member / explicit grant).
     allowed_ids = await accessible_collection_ids(
@@ -271,7 +271,7 @@ async def create_knowledge_base(
         agent_id=agent_uuid,
         chunk_size=body.chunk_size,
         chunk_overlap=body.chunk_overlap,
-        # Default to pgvector — self-contained, scales with Postgres, no
+        # Default to pgvector â€” self-contained, scales with Postgres, no
         # external SaaS dependency or index-provisioning step. Callers
         # can still opt into Pinecone by passing vector_backend="pinecone".
         vector_backend=body.vector_backend or "pgvector",
@@ -473,7 +473,7 @@ async def upload_document(
         chunk_overlap=kb.chunk_overlap,
     )
 
-    # KB v2: invalidate the search cache for this tenant — a new doc
+    # KB v2: invalidate the search cache for this tenant â€” a new doc
     # could change top results within the 5-min cache window. Cheap
     # SCAN + DEL; failure is silent (cache layer is best-effort).
     try:
@@ -602,7 +602,7 @@ def _delete_file(storage_url: str) -> None:
 
 def _delete_pinecone_vectors(kb_id: str, doc_id: str) -> None:
     api_key = os.environ.get("PINECONE_API_KEY", "")
-    index_name = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+    index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
     if not api_key:
         return
     try:
@@ -620,7 +620,7 @@ def _delete_pinecone_vectors(kb_id: str, doc_id: str) -> None:
 
 def _delete_pinecone_namespace(kb_id: str) -> None:
     api_key = os.environ.get("PINECONE_API_KEY", "")
-    index_name = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+    index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
     if not api_key:
         return
     try:

@@ -7,7 +7,7 @@ import HowItWorks from '@/components/landing/HowItWorks';
 import Footer from '@/components/layout/Footer';
 
 export const metadata: Metadata = {
-  title: 'Abenix — The open-source AI agent platform',
+  title: 'Bodhi — The open-source AI agent platform',
   description:
     'Open-source AI agent platform that thinks in graphs. Atlas ontology canvas, knowledge engine, multimodal pipelines, 100+ built-in tools, sandboxed code execution, MCP, observability, RBAC, and autoscaling runtime pools.',
 };

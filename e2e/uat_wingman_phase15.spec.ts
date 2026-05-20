@@ -27,10 +27,10 @@ test.describe.serial('Wingman Phase 1-5 + Home', () => {
   test('home page renders with hero, pillars, ML cards, toolbox', async ({ page }) => {
     await page.goto(`${BASE}/home`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('Energy arbitrage you can actually trust')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole('link', { name: /Open Arb Workbench/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Arbitrage Workbench/i }).first()).toBeVisible();
     // Pillar cards (in main, not sidebar)
     await expect(page.getByRole('main').getByText('Arbitrage Workbench').first()).toBeVisible();
-    await expect(page.getByRole('main').getByText('Mispricing Lens').first()).toBeVisible();
+    await expect(page.getByRole('main').getByText('Price at Risk Lens').first()).toBeVisible();
     // ML model + toolbox content
     await expect(page.getByText('wingman-mispricing-fairvalue').first()).toBeVisible();
     await expect(page.getByText('vessel_specs').first()).toBeVisible();

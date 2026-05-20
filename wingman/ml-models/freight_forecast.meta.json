@@ -1,0 +1,90 @@
+{
+  "name": "wingman-freight-forecast",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Gradient-boosted regressor predicting next-week Baltic BLPG mid in $/MT propane VLGC from inventory, orderbook, utilisation, Hormuz flag, Panama wait, season, and destination-port AIS density.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "origin_inventory_z": {
+        "type": "number"
+      },
+      "dest_inventory_z": {
+        "type": "number"
+      },
+      "vlgc_orderbook_pct": {
+        "type": "number"
+      },
+      "vlgc_utilisation_pct": {
+        "type": "number"
+      },
+      "panama_wait_days": {
+        "type": "number"
+      },
+      "season_q": {
+        "type": "number"
+      },
+      "hormuz_disruption": {
+        "type": "number"
+      },
+      "ais_density_z": {
+        "type": "number"
+      }
+    },
+    "feature_names": [
+      "origin_inventory_z",
+      "dest_inventory_z",
+      "vlgc_orderbook_pct",
+      "vlgc_utilisation_pct",
+      "panama_wait_days",
+      "season_q",
+      "hormuz_disruption",
+      "ais_density_z"
+    ],
+    "required": [
+      "origin_inventory_z",
+      "dest_inventory_z",
+      "vlgc_orderbook_pct",
+      "vlgc_utilisation_pct",
+      "panama_wait_days",
+      "season_q",
+      "hormuz_disruption",
+      "ais_density_z"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "predictions": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Next-week BLPG mid forecast, $/MT"
+      }
+    }
+  },
+  "training_metrics": {
+    "samples": 3400,
+    "validation_samples": 600,
+    "mae_usd_mt": 6.57,
+    "r2": 0.9438
+  },
+  "tags": [
+    "wingman",
+    "freight",
+    "blpg",
+    "regression",
+    "gradient_boosting"
+  ],
+  "feature_importances": {
+    "origin_inventory_z": 8.963263604176109e-05,
+    "dest_inventory_z": 0.010979770765256032,
+    "vlgc_orderbook_pct": 0.016830371280360773,
+    "vlgc_utilisation_pct": 0.009799679472554477,
+    "panama_wait_days": 0.1868581595087697,
+    "season_q": 3.226914383778623e-05,
+    "hormuz_disruption": 0.7729715277015289,
+    "ais_density_z": 0.002438589491650596
+  }
+}

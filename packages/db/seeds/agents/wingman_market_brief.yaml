@@ -35,19 +35,23 @@ system_prompt: |
   4. Output the structured envelope below.
 
   ## Output (STRICT JSON, never prose)
+  IMPORTANT: every `as_of`, `date`, and `latest` value below is
+  illustrative shape only. Derive every date from current_time and
+  every numeric from the tool output (eia_open_data, yahoo_finance,
+  ais_stream, etc.). Do not copy the example numbers.
   ```json
   {
     "indicators": [
       {
         "label": "Mont Belvieu propane",
         "unit": "$/gal",
-        "latest": 0.875,
-        "wow_change_pct": -1.41,
-        "as_of": "2026-04-30",
+        "latest": "<latest value from eia_open_data series>",
+        "wow_change_pct": "<computed from history>",
+        "as_of": "<latest series date from eia_open_data, YYYY-MM-DD>",
         "source": "EIA: PROPANE_USGC_MB",
         "history": [
-          {"date": "2026-02-13", "value": 0.91},
-          {"date": "2026-02-20", "value": 0.93}
+          {"date": "<series date>", "value": "<series value>"},
+          {"date": "<series date>", "value": "<series value>"}
         ]
       },
       {

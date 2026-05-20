@@ -31,6 +31,10 @@ livekit-api>=0.7.0
 paho-mqtt>=2.0.0
 # Wingman / commodities tooling — AISStream.io WebSocket client (ais_stream tool)
 websockets>=12.0
+# Wingman — yahoo_finance + options_data tools (futures curves, IV, skew).
+# Without this, options_data + yahoo_finance fall back to "package not
+# installed" and the IV-overlay + forward-curve widgets stay empty.
+yfinance>=0.2.50
 # v1.5.0 distributed tracing — OpenTelemetry SDK + OTLP gRPC exporter
 opentelemetry-api>=1.27.0
 opentelemetry-sdk>=1.27.0

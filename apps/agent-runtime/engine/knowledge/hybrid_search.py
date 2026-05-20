@@ -1,4 +1,4 @@
-"""Hybrid Search Engine — combines vector similarity with knowledge graph traversal"""
+﻿"""Hybrid Search Engine â€” combines vector similarity with knowledge graph traversal"""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ async def hybrid_search(
                 )
                 return resp
             except Exception:
-                # Schema drift on cached blob — ignore and recompute.
+                # Schema drift on cached blob â€” ignore and recompute.
                 pass
 
     response = HybridSearchResponse(results=[], mode_used=mode.value)
@@ -167,7 +167,7 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
         if db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
             db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         # Filter out non-UUID strings (legacy subject-namespace hack)
-        # — those can't be in knowledge_collections anyway.
+        # â€” those can't be in knowledge_collections anyway.
         uuid_inputs: list[_uuid.UUID] = []
         passthrough: list[str] = []
         for s in kb_ids:
@@ -281,7 +281,7 @@ async def _vector_search(
 
         api_key = os.environ.get("OPENAI_API_KEY", "")
         pinecone_key = os.environ.get("PINECONE_API_KEY", "")
-        index_name = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+        index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
 
         if not api_key or not pinecone_key:
             return pgv_results
@@ -451,7 +451,7 @@ async def _graph_search(
                 continue
 
             # Traverse graph N hops from matched entities
-            # Depth is validated to 1-4 range — safe to interpolate as integer
+            # Depth is validated to 1-4 range â€” safe to interpolate as integer
             safe_depth = max(1, min(4, int(depth)))
             traversal = await session.run(
                 f"""
@@ -477,7 +477,7 @@ async def _graph_search(
                 # Score decreases with hops
                 hop_penalty = 1.0 / (1 + record["hops"] * 0.3)
                 rel_chain = (
-                    " → ".join(record["rel_types"]) if record["rel_types"] else ""
+                    " â†’ ".join(record["rel_types"]) if record["rel_types"] else ""
                 )
 
                 results.append(
@@ -513,9 +513,9 @@ async def _graph_search(
                 weight = record["weight"] or 1.0
                 results.append(
                     SearchResult(
-                        content=f"{record['source']} —[{record['rel_type']}]→ {record['target']}: {record['description'] or ''}",
+                        content=f"{record['source']} â€”[{record['rel_type']}]â†’ {record['target']}: {record['description'] or ''}",
                         score=0.75 * min(1.0, weight),
-                        source=f"{record['source']}→{record['target']}",
+                        source=f"{record['source']}â†’{record['target']}",
                         source_type="relationship",
                         metadata={
                             "kb_id": kb_id,

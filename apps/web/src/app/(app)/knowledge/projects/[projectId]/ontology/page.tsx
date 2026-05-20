@@ -135,6 +135,41 @@ function SchemaEditor({
 
   return (
     <div className="space-y-6">
+      {!active && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-5">
+          <div className="flex items-start gap-3">
+            <Sparkles className="w-5 h-5 text-emerald-300 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-emerald-200 mb-1">No ontology yet — let's create v1</div>
+              <p className="text-xs text-slate-300 leading-relaxed mb-3">
+                An ontology defines the <em>entities</em> (people, contracts, vessels, regulators) and the <em>relationships</em> between them.
+                Once saved, agents can walk your KB documents as a graph instead of just searching flat text — which makes the Compliance Lens and Atlas surfaces light up.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEntities([
+                      { name: 'Counterparty', description: 'A trading partner, broker, or shipper', synonyms: ['broker', 'shipper'] },
+                      { name: 'Corridor',     description: 'An origin → destination shipping route', synonyms: ['route', 'lane'] },
+                      { name: 'Regulation',   description: 'A binding rule or sanctions framework', synonyms: ['rule', 'mandate'] },
+                    ]);
+                    setRelationships([
+                      { name: 'OPERATES_IN',      description: 'Counterparty operates in Corridor', source_types: ['Counterparty'], target_types: ['Corridor'] },
+                      { name: 'GOVERNED_BY',      description: 'Corridor governed by Regulation',   source_types: ['Corridor'],    target_types: ['Regulation'] },
+                    ]);
+                  }}
+                  className="text-xs px-3 py-1.5 rounded bg-emerald-500/10 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/20 inline-flex items-center gap-1.5"
+                >
+                  <Plus className="w-3 h-3" /> Insert starter (Counterparty + Corridor + Regulation)
+                </button>
+                <span className="text-[11px] text-slate-500 self-center">…or scroll down and add your own</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Metadata */}
       <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5 space-y-3">
         <div>

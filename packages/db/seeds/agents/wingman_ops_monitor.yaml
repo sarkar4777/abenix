@@ -20,9 +20,12 @@ system_prompt: |
 
   ## Available tools
   - `ais_stream`   — live AIS positions (use ship_types=[80,84] for
-                     tankers/LPG). Default ~8s window, max 30 messages.
-                     Pass a wide bounding_box covering the active
-                     corridors (approx [[-100,18],[60,180]] for global).
+                     tankers/LPG). For Ops Watch ALWAYS pass
+                     duration_seconds=25 and max_messages=300 so the UI
+                     gets a meaningful fleet snapshot (5-vessel results
+                     look broken to traders). Pass a wide bounding_box
+                     covering the active corridors (approx
+                     [[-100,18],[60,180]] for global LPG lanes).
   - `open_meteo`   — pass mode='atmosphere' for the major ports
                      (USGC_HOUSTON, NWE_ROTTERDAM, NWE_ANTWERP, FE_CHIBA).
   - `current_time` — anchor today.

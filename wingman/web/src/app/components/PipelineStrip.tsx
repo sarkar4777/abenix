@@ -56,14 +56,24 @@ export default function PipelineStrip({
     }
 
     function sweepRunningToTerminal(overall: string) {
-      const next: NodeStatus = (overall === 'completed' || overall === 'succeeded') ? 'done'
-        : (overall === 'failed' || overall === 'error' || overall === 'cancelled') ? 'failed'
-        : 'done';
+      const successDone: NodeStatus = (overall === 'completed' || overall === 'succeeded') ? 'done' : 'failed';
+      const stillRunningNext: NodeStatus = (overall === 'failed' || overall === 'error' || overall === 'cancelled') ? 'failed' : 'done';
       setStatus((p) => {
         const out: Record<string, NodeStatus> = { ...p };
         let changed = false;
+        // 1. Flip any RUNNING chip to its terminal state.
         for (const k of Object.keys(out)) {
-          if (out[k] === 'running') { out[k] = next; changed = true; }
+          if (out[k] === 'running') { out[k] = stillRunningNext; changed = true; }
+        }
+        // 2. On overall success, mark every PIPELINE NODE (passed in via
+        // the `nodes` prop) that has no status yet as done — many tools
+        // complete so fast they never get a 'running' chip, so they'd
+        // otherwise stay grey. On overall failure, leave them idle so
+        // it's clear which chips never fired.
+        if (overall === 'completed' || overall === 'succeeded') {
+          for (const n of nodes) {
+            if (!out[n.id]) { out[n.id] = successDone; changed = true; }
+          }
         }
         return changed ? out : p;
       });

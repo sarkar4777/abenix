@@ -34,7 +34,7 @@ interface Props {
 
 const SPECIALIST_LABEL: Record<string, string> = {
   'wingman-arb-analyzer': 'Arb Analyzer',
-  'wingman-mispricing-extractor': 'Mispricing Lens',
+  'wingman-mispricing-extractor': 'Price at Risk Lens',
   'wingman-scenario-forecaster': 'Forward Scenarios',
   'wingman-ops-monitor': 'Ops Monitor',
   'wingman-graph-query': 'Knowledge Graph',
@@ -78,7 +78,7 @@ export default function DeskNetworkCanvas({ rootExecutionId, events, height = 36
     const cx = size.w / 2;
     const cy = size.h / 2;
     nodesRef.current.set('root', {
-      id: 'root', label: 'Desk Copilot', kind: 'meta',
+      id: 'root', label: 'Wingman Copilot', kind: 'meta',
       status: 'running', x: cx, y: cy, vx: 0, vy: 0, spawnedAt: performance.now(),
       pulseUntil: performance.now() + 1200,
     });

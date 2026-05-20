@@ -90,7 +90,7 @@ export default function HeroBar({
                 <span className="text-slate-500">{t.label.replace(/^Live LPG\/tanker AIS$/, 'LPG vessels')}</span>
                 <span className="text-white font-mono font-semibold">
                   {t.latest != null
-                    ? Number(t.latest).toFixed(t.unit === '$/gal' ? 3 : t.unit === 'vessels' ? 0 : 2)
+                    ? Number(t.latest).toFixed(t.unit === 'vessels' ? 0 : 2)
                     : '—'}
                 </span>
                 <span className="text-slate-600">{t.unit}</span>

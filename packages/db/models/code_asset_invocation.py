@@ -33,10 +33,16 @@ class CodeAssetInvocation(Base, UUIDMixin, TenantMixin, TimestampMixin):
     is_error: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
-    schema_validated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    schema_validated: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     image_tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
     caller_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
 

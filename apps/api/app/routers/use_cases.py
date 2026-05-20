@@ -93,6 +93,16 @@ CATALOG = [
         "local_port": 3005,
         "env_var": "CLAIMSIQ_PUBLIC_URL",
     },
+    {
+        "key": "wingman",
+        "label": "Wingman",
+        "description": "Energy / commodity trading desk — Mispricing Lens, Forward Scenarios, Compliance Lens, Ops Watch, Desk Copilot. Bayesian + IsoForest + 18 trader-grade agents.",
+        "icon": "zap",
+        "color": "cyan",
+        "host_subdomain": "wm",
+        "local_port": 3006,
+        "env_var": "WINGMAN_PUBLIC_URL",
+    },
 ]
 
 

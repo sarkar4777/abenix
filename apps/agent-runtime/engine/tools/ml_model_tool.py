@@ -31,21 +31,32 @@ class MLModelTool(BaseTool):
     name = "ml_model"
     description = (
         "Run inference on registered ML models (sklearn, PyTorch, ONNX, XGBoost). "
-        "Use 'list_models' to see available models with their frameworks and status. "
-        "Use 'predict' with a model_name and input_data to get predictions. "
-        "Use 'get_model_info' to see a model's input/output schemas and deployment status."
+        "Operations: 'list_models' (catalog), 'predict' (single inference), "
+        "'predict_proba' (classifier probabilities), 'batch_predict' (vectorised inference "
+        "on N rows), 'get_model_info' (schemas + metrics), 'get_metrics' (just training "
+        "metrics), 'explain' (feature importance / linear coefficients), 'health_check' "
+        "(verify a model is reachable + warm)."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["list_models", "predict", "get_model_info"],
+                "enum": [
+                    "list_models",
+                    "predict",
+                    "predict_proba",
+                    "batch_predict",
+                    "get_model_info",
+                    "get_metrics",
+                    "explain",
+                    "health_check",
+                ],
                 "description": "Which operation to perform",
             },
             "model_name": {
                 "type": "string",
-                "description": "Name of the model (for predict and get_model_info)",
+                "description": "Name of the model (required for everything except list_models)",
             },
             "model_version": {
                 "type": "string",
@@ -54,7 +65,7 @@ class MLModelTool(BaseTool):
             },
             "input_data": {
                 "type": "object",
-                "description": "Input features for prediction. Usually {features: [1.0, 2.0, ...]} or {col1: val1, col2: val2}",
+                "description": "Input features for prediction. Usually {features: [1.0, 2.0, ...]} or {col1: val1, col2: val2}. For batch_predict pass {batch: [[...], [...], ...]} or {rows: [{...}, {...}]}",
             },
         },
         "required": ["operation"],
@@ -100,15 +111,25 @@ class MLModelTool(BaseTool):
                 result = await self._list_models()
             elif op == "predict":
                 result = await self._predict(arguments)
+            elif op == "predict_proba":
+                result = await self._predict(arguments, probabilities_only=True)
+            elif op == "batch_predict":
+                result = await self._predict(arguments, batch=True)
             elif op == "get_model_info":
                 result = await self._get_model_info(arguments)
+            elif op == "get_metrics":
+                result = await self._get_metrics(arguments)
+            elif op == "explain":
+                result = await self._explain(arguments)
+            elif op == "health_check":
+                result = await self._health_check(arguments)
             else:
                 result = ToolResult(content=f"Unknown operation: {op}", is_error=True)
         except Exception as e:
             logger.error("MLModelTool error: %s", e)
             result = ToolResult(content=f"ML model error: {e}", is_error=True)
         _duration_ms = int((_time.monotonic() - _t0) * 1000)
-        if op == "predict":
+        if op in ("predict", "predict_proba", "batch_predict"):
             try:
                 from engine import invocation_log
 
@@ -185,7 +206,9 @@ class MLModelTool(BaseTool):
         finally:
             await conn.close()
 
-    async def _predict(self, args: dict) -> ToolResult:
+    async def _predict(
+        self, args: dict, *, probabilities_only: bool = False, batch: bool = False
+    ) -> ToolResult:
         model_name = args.get("model_name", "")
         input_data = args.get("input_data")
         if not model_name:
@@ -196,6 +219,12 @@ class MLModelTool(BaseTool):
             return ToolResult(
                 content="Error: input_data is required for predict", is_error=True
             )
+        # batch_predict accepts {batch: [[...], [...]]} or {rows: [{...}, {...}]}
+        if batch and isinstance(input_data, dict):
+            if "batch" in input_data:
+                input_data = input_data["batch"]
+            elif "rows" in input_data:
+                input_data = input_data["rows"]
 
         conn = await self._get_conn()
         try:
@@ -259,9 +288,27 @@ class MLModelTool(BaseTool):
                 )
                 source = "local"
 
-            # Format output for the agent
+            # predict_proba: strip the deterministic predictions and surface
+            # only the probability matrix (classifiers only).
+            if probabilities_only:
+                if isinstance(predictions, dict) and "probabilities" in predictions:
+                    predictions = {
+                        "probabilities": predictions["probabilities"],
+                        "classes": predictions.get("classes"),
+                    }
+                else:
+                    return ToolResult(
+                        content=f"Model '{row['name']}' does not expose probabilities (not a classifier).",
+                        is_error=True,
+                    )
+
+            op_label = (
+                "batch prediction"
+                if batch
+                else ("probability inference" if probabilities_only else "prediction")
+            )
             result_text = (
-                f"Prediction from model '{row['name']}' v{row['version']} ({source} inference):\n\n"
+                f"{op_label.title()} from model '{row['name']}' v{row['version']} ({source} inference):\n\n"
                 f"{json.dumps(predictions, indent=2)}"
             )
             return ToolResult(
@@ -273,6 +320,8 @@ class MLModelTool(BaseTool):
                     "source": source,
                     "ml_model_id": str(row.get("id") or ""),
                     "deployment_type": source,
+                    "batch": batch,
+                    "probabilities_only": probabilities_only,
                 },
             )
         finally:
@@ -367,6 +416,209 @@ class MLModelTool(BaseTool):
                 return {"predictions": output.numpy().tolist()}
         else:
             raise ValueError(f"Unsupported framework: {framework}")
+
+    async def _get_metrics(self, args: dict) -> ToolResult:
+        """Just the training_metrics blob — handy when an agent wants to
+        compare candidate models without pulling the full schema."""
+        model_name = args.get("model_name", "")
+        if not model_name:
+            return ToolResult(content="Error: model_name is required", is_error=True)
+        conn = await self._get_conn()
+        try:
+            row = await conn.fetchrow(
+                """
+                SELECT name, version, framework, training_metrics
+                FROM ml_models
+                WHERE tenant_id = $1::uuid AND name = $2 AND status != 'deleted'
+                ORDER BY is_active DESC, updated_at DESC LIMIT 1
+                """,
+                self.tenant_id,
+                model_name,
+            )
+            if not row:
+                return ToolResult(
+                    content=f"Model '{model_name}' not found.", is_error=True
+                )
+            metrics = row["training_metrics"]
+            if isinstance(metrics, str):
+                try:
+                    metrics = json.loads(metrics)
+                except Exception:
+                    metrics = {"raw": metrics}
+            return ToolResult(
+                content=(
+                    f"Training metrics for '{row['name']}' v{row['version']} ({row['framework']}):\n\n"
+                    f"{json.dumps(metrics or {}, indent=2, default=str)}"
+                ),
+                metadata={
+                    "model_name": row["name"],
+                    "model_version": row["version"],
+                    "framework": row["framework"],
+                    "metrics": metrics or {},
+                },
+            )
+        finally:
+            await conn.close()
+
+    async def _explain(self, args: dict) -> ToolResult:
+        """Feature importance for tree models, coefficients for linear models.
+
+        Doesn't run SHAP (too heavy for a tool call); returns the model's
+        built-in attributions so an agent can rank features."""
+        model_name = args.get("model_name", "")
+        if not model_name:
+            return ToolResult(content="Error: model_name is required", is_error=True)
+        conn = await self._get_conn()
+        try:
+            row = await conn.fetchrow(
+                """
+                SELECT file_uri, framework, name, version, input_schema
+                FROM ml_models
+                WHERE tenant_id = $1::uuid AND name = $2 AND status = 'ready'
+                ORDER BY is_active DESC, updated_at DESC LIMIT 1
+                """,
+                self.tenant_id,
+                model_name,
+            )
+            if not row:
+                return ToolResult(
+                    content=f"Model '{model_name}' not ready.", is_error=True
+                )
+            framework = row["framework"]
+            if framework not in ("sklearn", "xgboost"):
+                return ToolResult(
+                    content=f"explain only supports sklearn/xgboost; '{model_name}' is {framework}.",
+                    is_error=True,
+                )
+            import joblib
+
+            cache_key = f"{row['file_uri']}:{framework}"
+            if cache_key not in _MODEL_CACHE:
+                if len(_MODEL_CACHE) >= _MAX_CACHE:
+                    del _MODEL_CACHE[next(iter(_MODEL_CACHE))]
+                _MODEL_CACHE[cache_key] = joblib.load(row["file_uri"])
+            model = _MODEL_CACHE[cache_key]
+            schema = row["input_schema"]
+            if isinstance(schema, str):
+                try:
+                    schema = json.loads(schema)
+                except Exception:
+                    schema = {}
+            feature_names = (schema or {}).get("feature_names") or list(
+                (schema or {}).get("properties", {}).keys()
+            )
+            attrs: dict[str, Any] = {"model_name": row["name"], "framework": framework}
+            if hasattr(model, "feature_importances_"):
+                imps = list(model.feature_importances_)
+                pairs = sorted(
+                    zip(feature_names or [f"f{i}" for i in range(len(imps))], imps),
+                    key=lambda kv: -float(kv[1]),
+                )
+                attrs["method"] = "feature_importances_"
+                attrs["ranked_features"] = [
+                    {"name": n, "importance": float(v)} for n, v in pairs[:20]
+                ]
+            elif hasattr(model, "coef_"):
+                import numpy as np
+
+                coef = np.atleast_1d(np.asarray(model.coef_)).ravel()
+                pairs = sorted(
+                    zip(feature_names or [f"f{i}" for i in range(len(coef))], coef),
+                    key=lambda kv: -abs(float(kv[1])),
+                )
+                attrs["method"] = "linear_coefficients"
+                attrs["ranked_features"] = [
+                    {"name": n, "coefficient": float(v)} for n, v in pairs[:20]
+                ]
+                if hasattr(model, "intercept_"):
+                    inter = model.intercept_
+                    attrs["intercept"] = (
+                        float(inter[0]) if hasattr(inter, "__len__") else float(inter)
+                    )
+            else:
+                return ToolResult(
+                    content=f"Model '{model_name}' exposes no importances/coefficients to explain.",
+                    is_error=True,
+                )
+            return ToolResult(
+                content=f"Feature attributions for '{row['name']}':\n\n{json.dumps(attrs, indent=2)}",
+                metadata=attrs,
+            )
+        finally:
+            await conn.close()
+
+    async def _health_check(self, args: dict) -> ToolResult:
+        """Confirm a model is registered, ready, and (if deployed) its k8s
+        endpoint responds. Returns a structured status so a supervisor agent
+        can pre-flight before a long inference run."""
+        model_name = args.get("model_name", "")
+        if not model_name:
+            return ToolResult(content="Error: model_name is required", is_error=True)
+        conn = await self._get_conn()
+        try:
+            row = await conn.fetchrow(
+                """
+                SELECT id, name, version, framework, status, file_uri, is_active
+                FROM ml_models
+                WHERE tenant_id = $1::uuid AND name = $2 AND status != 'deleted'
+                ORDER BY is_active DESC, updated_at DESC LIMIT 1
+                """,
+                self.tenant_id,
+                model_name,
+            )
+            if not row:
+                return ToolResult(
+                    content=json.dumps({"healthy": False, "reason": "model not found"}),
+                    is_error=True,
+                )
+            dep_row = await conn.fetchrow(
+                """
+                SELECT endpoint_url, deployment_type, status
+                FROM ml_model_deployments
+                WHERE model_id = $1::uuid AND endpoint_url IS NOT NULL
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                row["id"],
+            )
+            checks: dict[str, Any] = {
+                "model_name": row["name"],
+                "model_version": row["version"],
+                "framework": row["framework"],
+                "registry_status": row["status"],
+                "is_active": bool(row["is_active"]),
+                "file_present": False,
+                "k8s_endpoint": None,
+                "k8s_endpoint_ok": None,
+            }
+            try:
+                checks["file_present"] = bool(row["file_uri"]) and os.path.exists(
+                    row["file_uri"]
+                )
+            except Exception:
+                checks["file_present"] = False
+            if dep_row and dep_row["endpoint_url"]:
+                checks["k8s_endpoint"] = dep_row["endpoint_url"]
+                try:
+                    import httpx
+
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        r = await client.get(
+                            dep_row["endpoint_url"].rstrip("/") + "/health"
+                        )
+                        checks["k8s_endpoint_ok"] = r.status_code == 200
+                except Exception:
+                    checks["k8s_endpoint_ok"] = False
+            healthy = row["status"] == "ready" and (
+                checks["file_present"] or checks["k8s_endpoint_ok"]
+            )
+            checks["healthy"] = bool(healthy)
+            return ToolResult(
+                content=f"Health for '{row['name']}':\n\n{json.dumps(checks, indent=2)}",
+                metadata=checks,
+                is_error=not healthy,
+            )
+        finally:
+            await conn.close()
 
     async def _get_model_info(self, args: dict) -> ToolResult:
         model_name = args.get("model_name", "")

@@ -5,7 +5,7 @@ import { WingmanExecutionsProvider } from './components/WingmanExecutionsProvide
 
 export const metadata = {
   title: 'Wingman — Trading Workbench',
-  description: 'Energy commodities trading workspace powered by Bodhi.',
+  description: 'Energy commodities trading workspace powered by Abenix.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

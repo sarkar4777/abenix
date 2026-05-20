@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -459,12 +460,28 @@ export default function KnowledgePage() {
     }
   };
 
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const queryId = searchParams?.get('id') || null;
+
+  useEffect(() => {
+    if (!queryId || selectedKB?.id === queryId) return;
+    void openDetail(queryId);
+  // openDetail closes over apiFetch and setState only; queryId is the trigger
+  }, [queryId, selectedKB?.id]);
+
+  const closeDetail = () => {
+    setSelectedKB(null);
+    if (queryId) router.replace('/knowledge');
+  };
+
   const handleCreated = () => {
     mutateKBs();
   };
 
   const handleKBDeleted = () => {
     setSelectedKB(null);
+    if (queryId) router.replace('/knowledge');
     mutateKBs();
   };
 
@@ -477,11 +494,15 @@ export default function KnowledgePage() {
       <div className="max-w-[900px]">
         <KBDetailView
           kb={selectedKB}
-          onBack={() => setSelectedKB(null)}
+          onBack={closeDetail}
           onDeleted={handleKBDeleted}
         />
       </div>
     );
+  }
+
+  if (queryId && loadingDetail) {
+    return <KnowledgeSkeleton />;
   }
 
   return (

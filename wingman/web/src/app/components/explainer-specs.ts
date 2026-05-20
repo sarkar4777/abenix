@@ -4,36 +4,54 @@ export const WORKBENCH_EXPLAINER: ExplainerSpec = {
   pageKey: 'workbench',
   what:
     'The Arbitrage Workbench scores every active LPG propane corridor on demand. ' +
-    'For each route it pulls live spot prices, freight rates, weather, and news, ' +
-    'computes a net-arb $/MT, and surfaces a high/medium/low conviction call with ' +
-    'a sourced narrative the trader can act on.',
+    'For each route it pulls live spot prices, freight rates, options chains, vessel + ' +
+    'freight specs, weather and news, computes a net-arb $/MT, and surfaces a ' +
+    'high/medium/low conviction call PLUS six trader-grade widgets a real desk reads ' +
+    'before pressing trade.',
   how:
-    'A single OOB agent (wingman-arb-analyzer, Haiku 4.5) is fired per corridor click. ' +
-    'It calls six real tools in parallel, runs the financial calculator on the result, ' +
-    'and emits a structured JSON envelope the page renders. Live tool-call events are ' +
-    'streamed through the SDK to the DAG drawer on the right.',
+    'A single OOB agent (wingman-arb-analyzer v1.1, Haiku 4.5) fires per corridor click. ' +
+    'It calls ten real tools in parallel — including options_data (Brent + HH IV), ' +
+    'vessel_specs (VLGC/LGC/MGC/SGC density), freight_baltic_blpg, and the financial ' +
+    'calculator (for real 90-day correlations). Every widget number comes from a real ' +
+    'tool output or a cited industry-standard rate; no widget renders a value the agent ' +
+    'did not actually compute. Live tool-call events stream to the DAG drawer.',
   tools: [
     'current_time', 'eia_open_data', 'yahoo_finance', 'bunker_fuel',
     'open_meteo', 'tavily_search', 'financial_calculator',
+    'options_data', 'vessel_specs', 'freight_baltic_blpg', 'freight_worldscale',
   ],
   models: [
-    { name: 'Haiku 4.5', role: 'agent LLM — assembles arb math + narrative' },
+    { name: 'Haiku 4.5', role: 'agent LLM — assembles arb math + narrative + 6 trader widgets' },
   ],
   inputs: [
     'A corridor pair (origin port + destination port)',
     'Live market data pulled by tools at click time (no caching)',
   ],
   outputs: [
-    'Net-arb spread in $/MT with cost components broken out',
-    'High / medium / low conviction call with a written narrative',
-    'Forward curve, vessel scatter, top news drivers',
+    'Net-arb spread in $/MT with full cost stack (FOB + freight + canal + demurrage + heating loss + port fees)',
+    'High / medium / low conviction call with a written narrative + cited drivers',
+    'Forward curve with contango/backwardation badge and annualized roll yield',
+    'Composite hedge recipe (Brent + Gasoil + HH) with 90-day correlations, ratios, contracts per 25kt',
+    'Cargo-size optimizer table across VLGC/LGC/MGC/SGC',
+    'Implied-vol overlay on the risk band using real Brent option chain (ATM IV + 25Δ skew + regime)',
+    'Storage-carry verdict (calendar spread vs $0.50/MT-month LPG terminal cost)',
+  ],
+  extras: [
+    {
+      title: 'Real data only — no simulated values',
+      body: [
+        'Every number in every widget is either: (1) an output from a real tool call (eia_open_data, yahoo_finance, options_data, vessel_specs, etc.), or (2) a cited industry-standard rate (Panama / Suez Canal Authority tolls, Baltic published 2025 demurrage, LPG industry heating-loss 0.25%/day, LPG terminal storage ~$0.50/MT-month).',
+        'When a widget value is unavailable from the agent\'s real tool output, the cell shows "—". When an entire widget block is missing, the widget hides. There are no UI-side synthetic fallbacks.',
+        'The Method line under every widget cites the source and formula so a trader can audit every number.',
+      ],
+    },
   ],
 };
 
 export const MISPRICING_EXPLAINER: ExplainerSpec = {
   pageKey: 'mispricing',
   what:
-    'The Mispricing Lens scores each corridor against a Bayesian fair-value model and ' +
+    'The Price at Risk Lens scores each corridor against a Bayesian fair-value model and ' +
     'an Isolation Forest regime-break detector. The residual z-score (sigma) tells ' +
     'a trader whether today’s observed spread is aligned, stretched, or ' +
     'dislocated relative to fundamentals + the options market.',
@@ -42,7 +60,7 @@ export const MISPRICING_EXPLAINER: ExplainerSpec = {
     'weather, season), pull 4 forward-looking options features (Brent IV, Brent 25-delta ' +
     'risk reversal, HH natgas IV, crude put/call OI ratio), call the BayesianRidge ' +
     'fair-value model (returns mean + std), call the Isolation Forest (returns inlier/anomaly), ' +
-    'compute residual_sigma = (observed - fair) / std, classify the verdict, draft a thesis ' +
+    'compute residual_sigma = (observed - fair) / std, classify the verdict, draft a hypothesis ' +
     'with cited news, and route the trade card through the /approvals HITL gate.',
   tools: [
     'current_time', 'eia_open_data', 'yahoo_finance', 'bunker_fuel',
@@ -60,7 +78,7 @@ export const MISPRICING_EXPLAINER: ExplainerSpec = {
     },
     {
       name: 'Haiku 4.5',
-      role: 'agent LLM — drafts the 2–3 sentence thesis citing real Tavily headlines.',
+      role: 'agent LLM — drafts the 2–3 sentence hypothesis citing real Tavily headlines.',
     },
   ],
   inputs: [
@@ -213,7 +231,7 @@ export const APPROVALS_EXPLAINER: ExplainerSpec = {
   what:
     'The Approvals page is the single human-in-the-loop gate the entire Wingman ' +
     'platform routes through. Broker acknowledgements, strategy activations, and ' +
-    'mispricing trade cards all land here, where the desk reviews and signs off.',
+    'price-at-risk trade cards all land here, where the desk reviews and signs off.',
   how:
     'Every gate goes through the SDK: forge.approvals.create(...) on the agent ' +
     'side, forge.approvals.signoff()/.deny() on the human side. The Wingman API ' +
@@ -225,7 +243,7 @@ export const APPROVALS_EXPLAINER: ExplainerSpec = {
     {
       title: 'Gate kinds in use',
       body: [
-        'trade.execute — mispricing trade cards. Required signoff: 1 desk lead.',
+        'trade.execute — price-at-risk trade cards. Required signoff: 1 desk lead.',
         'broker.ack — broker-offer acknowledgements. Required signoff: 1 trader.',
         'strategy.activate — backtested strategies before they go live. Required signoff: 1 lead.',
       ],

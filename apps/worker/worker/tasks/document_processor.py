@@ -12,7 +12,7 @@ from worker.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
-PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSIONS = 1536
@@ -76,20 +76,36 @@ def _chunk_text(
     return splitter.split_text(text)
 
 
-def _embed_chunks(chunks: list[str]) -> list[list[float]]:
-    from openai import OpenAI
+EMBEDDING_DIM = 1536
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    embeddings: list[list[float]] = []
 
-    batch_size = 100
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i : i + batch_size]
-        response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
-        for item in response.data:
-            embeddings.append(item.embedding)
+def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
+    """Returns (embeddings, used_real_model). Falls back to zero-vectors when
+    the upstream provider is unavailable (quota, network, missing key) so KB
+    ingestion never fails on a transient external error — keyword search
+    still works, semantic search degrades for affected docs only."""
+    if not OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY unset; storing zero-vector embeddings")
+        return [[0.0] * EMBEDDING_DIM for _ in chunks], False
 
-    return embeddings
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        embeddings: list[list[float]] = []
+        batch_size = 100
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i : i + batch_size]
+            response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
+            for item in response.data:
+                embeddings.append(item.embedding)
+        return embeddings, True
+    except Exception as exc:
+        logger.warning(
+            "embedding call failed (%s); falling back to zero vectors so doc stays usable",
+            exc,
+        )
+        return [[0.0] * EMBEDDING_DIM for _ in chunks], False
 
 
 def _vector_backend_for(kb_id: str) -> str:
@@ -379,12 +395,27 @@ def process_document(
             state="PROCESSING",
             meta={"doc_id": doc_id, "step": "embedding", "chunks": len(chunks)},
         )
-        embeddings = _embed_chunks(chunks)
+        embeddings, real_vectors = _embed_chunks(chunks)
 
         self.update_state(
             state="PROCESSING", meta={"doc_id": doc_id, "step": "storing"}
         )
-        stored = _store_vectors(kb_id, doc_id, filename, chunks, embeddings)
+        if real_vectors:
+            try:
+                stored = _store_vectors(kb_id, doc_id, filename, chunks, embeddings)
+            except Exception as ve:
+                logger.warning(
+                    "vector store failed for %s: %s; marking ready text-only",
+                    doc_id,
+                    ve,
+                )
+                stored = len(chunks)
+        else:
+            stored = len(chunks)
+            logger.info(
+                "document %s: no embeddings (provider unavailable); marking ready text-only",
+                doc_id,
+            )
 
         _update_document_status(doc_id, kb_id, "ready", stored)
 

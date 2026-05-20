@@ -1,4 +1,4 @@
-"""Persona-scoped retrieval."""
+﻿"""Persona-scoped retrieval."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class PersonaRagTool(BaseTool):
         "action items, personal context). The agent can only access scopes "
         "explicitly authorized for the current meeting; any request for an "
         "unauthorized scope is denied. Returns text chunks with source "
-        "citations — never unfiltered persona data."
+        "citations â€” never unfiltered persona data."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -45,7 +45,7 @@ class PersonaRagTool(BaseTool):
             "meeting_id": {
                 "type": "string",
                 "description": (
-                    "Optional — if set, the request must fit within this meeting's "
+                    "Optional â€” if set, the request must fit within this meeting's "
                     "authorized scopes."
                 ),
             },
@@ -75,7 +75,7 @@ class PersonaRagTool(BaseTool):
         top_k = int(arguments.get("top_k", 5))
         meeting_id = (arguments.get("meeting_id") or "").strip()
 
-        # Scope check — must be in the meeting's authorized list if meeting_id provided
+        # Scope check â€” must be in the meeting's authorized list if meeting_id provided
         if meeting_id:
             sess = sessmod.get(self.execution_id)
             allowed = (sess.persona_scopes if sess else []) or []
@@ -135,7 +135,7 @@ async def _persona_vector_search(
     scope: str,
     top_k: int,
 ) -> list[dict[str, Any]]:
-    """Pinecone query with hard metadata filter — tenant + user + persona scope."""
+    """Pinecone query with hard metadata filter â€” tenant + user + persona scope."""
     try:
         from openai import AsyncOpenAI
         from pinecone import Pinecone
@@ -143,7 +143,7 @@ async def _persona_vector_search(
         return []
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     pinecone_key = os.environ.get("PINECONE_API_KEY", "").strip()
-    index_name = os.environ.get("PINECONE_INDEX_NAME", "abenix-knowledge")
+    index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
     if not (api_key and pinecone_key):
         return []
 
@@ -160,7 +160,7 @@ async def _persona_vector_search(
     pc = Pinecone(api_key=pinecone_key)
     index = pc.Index(index_name)
 
-    # Hard filter — if Pinecone doesn't receive all required fields the
+    # Hard filter â€” if Pinecone doesn't receive all required fields the
     # chunk cannot match, which is exactly what we want for ring-fencing.
     flt: dict[str, Any] = {
         "persona_scope": {"$eq": scope},

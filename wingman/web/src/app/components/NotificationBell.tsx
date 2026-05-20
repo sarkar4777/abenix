@@ -6,9 +6,9 @@ import { Bell, CheckCircle2, XCircle, Clock, Activity, Trash2 } from 'lucide-rea
 import { useWingmanExecutions, WingmanNotification } from './WingmanExecutionsProvider';
 
 const PAGE_LABEL: Record<string, string> = {
-  desk: 'Desk Copilot',
+  desk: 'Wingman Copilot',
   arbitrage: 'Arbitrage Workbench',
-  mispricing: 'Mispricing Lens',
+  mispricing: 'Price at Risk Lens',
   scenarios: 'Forward Scenarios',
   graph: 'Knowledge Graph',
   operations: 'Operations Watch',
@@ -59,23 +59,32 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-[380px] rounded-xl border border-slate-800 bg-slate-950/95 backdrop-blur-xl shadow-2xl z-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+        <div className="absolute left-full top-0 ml-3 w-[400px] rounded-xl border border-cyan-500/30 bg-slate-950/95 backdrop-blur-xl shadow-2xl z-50 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/80 bg-slate-900/40">
             <div>
-              <div className="text-xs font-semibold text-white">Notifications</div>
-              <div className="text-[10px] text-slate-500">
-                {active.length} running · {notifications.length} completed
+              <div className="text-sm font-semibold text-white">Wingman activity</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">
+                {active.length} running · {notifications.length} recent
               </div>
             </div>
-            {notifications.length > 0 && (
+            <div className="flex items-center gap-2">
+              {notifications.length > 0 && (
+                <button
+                  onClick={clearAllNotifications}
+                  className="text-[10px] text-slate-400 hover:text-rose-300 inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-800 hover:border-rose-500/40"
+                  title="Clear all"
+                >
+                  <Trash2 className="w-3 h-3" /> Clear
+                </button>
+              )}
               <button
-                onClick={clearAllNotifications}
-                className="text-[10px] text-slate-400 hover:text-rose-300 flex items-center gap-1"
-                title="Clear all"
+                onClick={() => setOpen(false)}
+                className="text-slate-500 hover:text-white text-[11px] w-6 h-6 rounded hover:bg-slate-800/60 flex items-center justify-center"
+                title="Close"
               >
-                <Trash2 className="w-3 h-3" /> clear
+                ✕
               </button>
-            )}
+            </div>
           </div>
 
           {/* Running */}

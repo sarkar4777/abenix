@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.5.2 — 2026-05-20
+
+### Added
+- wingman-freight-forecast — GradientBoostingRegressor on 8 features (inventory, orderbook, utilisation, Hormuz flag, Panama wait, season, AIS density); R^2 0.94 / MAE $6.57. First Wingman model that exercises the explain.feature_importances_ branch of the ml_model tool.
+- ml_model tool surface extended from 3 to 8 operations: list_models, predict, predict_proba, batch_predict, get_model_info, get_metrics, explain (feature_importances_ for tree models, coefficients for linear), health_check (registry row + k8s endpoint reachability).
+- Observability Hub at `/observability` — single page tying together the four telemetry layers (activity log, live updates, alerts, distributed tracing) with deep-links to each surface.
+- Cluster Health page at `/admin/cluster` — node CPU/memory, persistent volume claims, pod counts by phase, top-N database tables; works on minikube and AKS via the in-cluster Kubernetes API (no metrics-server required).
+- Spotlight global search (`⌘K` / `Ctrl+K`) — searches pages, agents, pipelines, knowledge bases, ML models, code assets, and execution IDs; live results stream in via `/api/search`.
+- New `ClusterRole` `abenix-cluster-reader` grants the api `ServiceAccount` read on nodes/pods/PVCs; applied idempotently by `deploy-azure.sh`.
+- OpenTelemetry distributed tracing — every agent execution emits an `agent.execute` span plus `tool.<name>` child spans; `trace_id` stored on the executions row; a "View Trace" chip on the execution detail page deep-links to Grafana Tempo Explore with the trace pre-loaded.
+- Tempo deployment (`grafana/tempo:2.6.0`) with OTLP gRPC ingest on `:4317`; emptyDir storage for v1, S3 backend documented for production.
+- Shared `abenix_sdk.tracing` helper auto-instruments FastAPI + HTTPx on every standalone app so cross-service requests produce one connected trace.
+- PII redactor: a `SpanProcessor` masks `llm.prompt`, `tool.args`, `agent.system_prompt` and similar fields with `sha256+length` before export.
+- Ingress hosts `grafana.<host>`, `tempo.<host>`, `prom.<host>` so the in-app "View Trace" deep-link resolves cleanly on minikube and AKS.
+- Grafana datasource UID pinning (`uid=tempo`, `uid=prometheus`) so deep-link templates stay stable across cluster rebuilds.
+- `portforward-azure.sh` forwards Grafana (`3010`), Tempo (`3200`), Prometheus (`9090`) alongside the apps.
+- `/help` page: end-user OpenTelemetry walkthrough.
+
+### Changed
+- Retrain wingman-mispricing-fairvalue BayesianRidge to v1.3.0 on rebalanced regimes (closed_atlantic_arb, pacific_freight_blowout, open_atlantic_arb, short_haul_latam); origin/dest/freight coefficients scaled so a 1-sigma move maps to $25-32/MT in spread. Holdout R^2 0.86, RMSE $31.8/MT.
+- freight_baltic_blpg tool: refresh built-in curated levels (BLPG1 $151, BLPG2 $95, BLPG3 $290 $/MT) and add operator JSON override at $BLPG_CURATED_PATH for monthly refresh without rebuilds; live Baltic subscription via $BALTIC_API_URL still takes priority.
+- Wingman corridor mispricing now flows strictly through the Abenix agent + real-service tools (eia_open_data, yahoo_finance, freight_baltic_blpg, options_data, vessel_specs, tavily_search) — wingman-api carries no anchors, synthesis, or pinned dates; on agent failure the UI shows 'No recent scan' instead of a fabricated value.
+- `apps/web/Dockerfile` accepts `NEXT_PUBLIC_GRAFANA_URL` and `NEXT_PUBLIC_TEMPO_URL` as build args so the View Trace URL is baked into the client bundle (Next.js inlines `NEXT_PUBLIC_*` at build time).
+- Default trace sampler ratio set to `1.0` while volume is low; can be dialled down via `OTEL_TRACES_SAMPLER_ARG` when needed.
+
+### Fixed
+- wingman-api validator no longer rejected negative arb residuals as 'not load-bearing' — a closed/negative arb is a real market signal and now gets cached.
+- `industrial-iot/api/main.py`: pre-existing `f`-string with no placeholders + undefined `target` variable in an exception handler.
+
 ## v1.5.1 — 2026-05-17
 
 ### Added
