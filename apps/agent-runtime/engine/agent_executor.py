@@ -999,6 +999,17 @@ _TOOL_CLASSES: dict[str, type] = {}
 _CONTEXT_TOOL_FACTORIES: dict[str, Any] = {}
 
 
+def get_tool_class(slug: str) -> type | None:
+    """Public registry lookup. Used by the direct-execute API."""
+    _ensure_tool_classes()
+    return _TOOL_CLASSES.get(slug)
+
+
+def list_tool_classes() -> list[str]:
+    _ensure_tool_classes()
+    return sorted(_TOOL_CLASSES.keys())
+
+
 def _ensure_tool_classes() -> None:
     """Import all tool classes once and cache them at module level."""
     global _TOOL_CLASSES_LOADED, _TOOL_CLASSES

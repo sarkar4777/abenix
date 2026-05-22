@@ -156,9 +156,18 @@ class ExecutionsClient:
 
 
 class ToolsClient:
-    """Read-only catalog of tools registered on the platform — used by
-    standalone apps to populate AI-Builder palettes without each app
-    duplicating the /api/tools call."""
+    """Tool catalogue + direct execution surface.
+
+    `list()` enumerates the registered tools so AI-Builder palettes and
+    standalone apps can render them without each duplicating the
+    /api/tools fetch.
+
+    `execute(slug, arguments, config=None)` runs a tool directly — bypasses
+    the agent loop. Use this when an app needs the structured tool output
+    without paying for an LLM round-trip (lookups, deterministic calcs,
+    market data fetches). Each direct execute still runs through the
+    sandbox and audit log.
+    """
 
     def __init__(self, client: "Abenix"):
         self._client = client
@@ -170,6 +179,27 @@ class ToolsClient:
         if isinstance(data, dict):
             return data.get("data") or data.get("tools") or []
         return []
+
+    async def catalog(self) -> list[dict[str, Any]]:
+        return await self.list()
+
+    async def execute(
+        self,
+        slug: str,
+        arguments: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        body = {"arguments": arguments or {}, "config": config or {}}
+        res = await self._client._http.post(
+            f"/api/tools/{slug}/execute",
+            json=body,
+            headers=self._client._subject_headers(),
+            timeout=timeout or self._client.timeout,
+        )
+        res.raise_for_status()
+        return (res.json() or {}).get("data") or {}
 
 
 class ApprovalsClient:

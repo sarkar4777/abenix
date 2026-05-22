@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user
-from app.core.responses import success
+from app.core.deps import get_current_user, get_db
+from app.core.responses import error, success
 
 from models.user import User
 
@@ -898,13 +899,164 @@ async def list_tools(
     out: list[dict[str, Any]] = []
     for entry in TOOL_CATALOG:
         merged = dict(entry)
-        # Catalogue-declared schemas (e.g. open_meteo, ais_stream) take
-        # precedence so we can publish a richer LLM-facing description than
-        # the runtime ships. Otherwise fall back to the schema declared on
-        # the tool class itself — the source of truth.
         if not merged.get("input_schema"):
             schema = runtime_schemas.get(merged["id"])
             if schema:
                 merged["input_schema"] = schema
         out.append(merged)
     return success(out, meta={"count": len(out)})
+
+
+@router.post("/{tool_slug}/execute")
+async def execute_tool(
+    tool_slug: str,
+    body: dict | None = None,
+    request: Request = None,  # type: ignore[assignment]
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Direct tool execution. Bypasses the agent loop.
+
+    Every call is logged in `tool_invocations` for debug + analytics so
+    the same tool being called by 50 agents and 50 SDK clients in
+    parallel is fully traceable. Tools are instantiated per-call (no
+    shared state) so direct calls do not lock or contend with agent
+    runs. CPU-heavy tools should be moved to the dedicated runtime pool
+    by `agent_runtime` — this endpoint runs inline on the api pod and is
+    appropriate for I/O-bound or sub-second tools only.
+    """
+    import time
+    from models.tool_invocation import ToolInvocation, ToolInvocationStatus
+
+    started = time.time()
+
+    try:
+        from engine.agent_executor import get_tool_class
+
+        cls = get_tool_class(tool_slug)
+    except Exception as e:
+        logger.exception("registry lookup failed: %s", e)
+        return error(f"registry lookup failed: {e}", 500)
+    if cls is None:
+        _log_invocation(
+            db,
+            user,
+            tool_slug,
+            body,
+            None,
+            started,
+            status="error",
+            error_message=f"unknown tool: {tool_slug}",
+        )
+        return error(f"unknown tool: {tool_slug}", 404)
+
+    arguments = (body or {}).get("arguments") or {}
+    config = (body or {}).get("config") or {}
+
+    try:
+        tool = cls(
+            tenant_id=str(user.tenant_id),
+            execution_id="",
+            api_key="",
+            api_base="",
+            **config,
+        )
+    except TypeError:
+        tool = cls()
+
+    try:
+        result = await tool.execute(arguments)
+        await _log_invocation(db, user, tool_slug, body, result, started, status="ok")
+    except Exception as e:
+        logger.exception("direct tool execute failed: %s", tool_slug)
+        await _log_invocation(
+            db,
+            user,
+            tool_slug,
+            body,
+            None,
+            started,
+            status="error",
+            error_message=str(e),
+        )
+        return error(f"tool {tool_slug} failed: {e}", 500)
+
+    return success(
+        {
+            "tool_slug": tool_slug,
+            "content": getattr(result, "content", None),
+            "metadata": getattr(result, "metadata", None),
+            "is_error": getattr(result, "is_error", False),
+        }
+    )
+
+
+async def _log_invocation(
+    db,
+    user,
+    tool_slug,
+    body,
+    result,
+    started_at: float,
+    *,
+    status: str,
+    error_message: str | None = None,
+):
+    import time
+    from models.tool_invocation import ToolInvocation, ToolInvocationStatus
+
+    try:
+        row = ToolInvocation(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            via="direct",
+            tool_slug=tool_slug,
+            arguments=(body or {}).get("arguments"),
+            config=(body or {}).get("config"),
+            status=ToolInvocationStatus(
+                status if status in {"ok", "error", "timeout"} else "error"
+            ),
+            output=getattr(result, "content", None) if result else None,
+            output_metadata=getattr(result, "metadata", None) if result else None,
+            is_error=getattr(result, "is_error", False) if result else True,
+            error_message=error_message,
+            duration_ms=int((time.time() - started_at) * 1000),
+            requested_via="http",
+        )
+        db.add(row)
+        await db.commit()
+    except Exception as _e:
+        logger.warning("could not log tool invocation: %s", _e)
+
+
+@router.get("/invocations")
+async def list_invocations(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    tool_slug: str | None = None,
+    limit: int = 100,
+) -> JSONResponse:
+    from sqlalchemy import desc, select
+    from models.tool_invocation import ToolInvocation
+
+    q = select(ToolInvocation).where(ToolInvocation.tenant_id == user.tenant_id)
+    if tool_slug:
+        q = q.where(ToolInvocation.tool_slug == tool_slug)
+    q = q.order_by(desc(ToolInvocation.created_at)).limit(min(limit, 500))
+    rows = (await db.execute(q)).scalars().all()
+    return success(
+        [
+            {
+                "id": str(r.id),
+                "tool_slug": r.tool_slug,
+                "via": r.via,
+                "status": (
+                    r.status.value if hasattr(r.status, "value") else str(r.status)
+                ),
+                "is_error": r.is_error,
+                "duration_ms": r.duration_ms,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    )

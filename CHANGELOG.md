@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.8.0 — 2026-05-22
+
+### Added
+
+- **Polymorphic contract platform** — one example contract app for PPA, gas, tolling, VPPA, and precious metals contracts. New contract-type enum value, new asset_class + pricing_pattern columns, type-aware extraction schemas, and 7 power-biased agent prompts now branch on contract_type so the same UI behaves correctly across all five families.
+- **Market data adapter framework** — 11 configurable adapters (LBMA gold/silver, LPPM platinum/palladium, COMEX metals settlement, Shanghai Gold Benchmark, gold lease rate, metals ETF flows, LBMA Responsible Gold list, TTF settlement, NBP/HH/JKM). Generic registry; other apps can drop in their own adapters. UI-managed at /admin/market-sources.
+- **Market risk core** — pure-numpy risk modules: VaR (parametric / historical / filtered-historical simulation with EWMA rescaling), CVaR / Expected Shortfall, forward curve bootstrap with log-linear interp, EWMA-weighted correlation matrix (lambda=0.94), implied-vol surface poly-fit. Exposed at the example-app /risk REST surface plus a dashboard page with 5 presets and a correlation heatmap.
+- **What-if analysis per contract type** — 30+ pre-built scenarios across the five families. Each run returns base value, scenario value, dollar delta, and a per-driver decomposition with rationale. Saved with a SHA-256 calculation signature for byte-reproducible audit. New per-contract what-if page + button on the contract detail header.
+- **6-persona RBAC** — contract officer, trader, operations, credit risk, market risk, SME rule owner, plus admin. Permissions matrix per capability. Four-eyes approval enforced server-side for rule approval (author cannot approve). Admin UI for role assignment.
+- **Rule library** — typed, versioned, effective-dated rules. Status flow draft to active to retired. Source-traceable to clauses. Test corpus per rule.
+- **Immutable audit log** — every rule change, role grant, what-if run, risk computation recorded with before/after state and a calc-signature. Filter-able by event kind.
+- **Direct tool-execute via the SDK** — the SDK gained `tools.execute(slug, arguments, config)` so apps can invoke any registered platform tool without the agent loop. Catalogued by `tools.list()`. Logged to a new `tool_invocations` table with via=direct|agent|pipeline. Tools instantiate per-call (no shared state) so parallel direct calls do not contend with parallel agent runs.
+- **New what-if-analyzer agent** — type-aware engine with explicit branching on PPA / gas / metals driver baskets.
+
+### Changed
+
+- The example contract app's help page rewritten with seven new sections covering personas, what-if per type, market risk, market data sources, RBAC, rule library, audit log, and SDK direct execute.
+- The example contract app's sidebar gains Risk + Admin sections plus a What-If link on every contract detail page.
+- The SDK's tools client now exposes both `list()` and `execute()` — catalogue plus direct execution. Synced to all six vendored SDK copies via scripts/sync-sdks.sh.
+
+### Fixed
+
+- Direct-execute tool calls and agent-loop tool calls no longer contend (each instantiation is independent). Both forms are logged to the same `tool_invocations` table so a tool being used by many parallel callers is fully traceable.
+
 ## v1.7.0 — 2026-05-22
 
 ### Added

@@ -3,6 +3,7 @@ from models.tenant import Tenant, TenantPlan
 from models.user import User, UserRole
 from models.agent import Agent, AgentStatus, AgentType
 from models.execution import Execution, ExecutionStatus
+from models.tool_invocation import ToolInvocation, ToolInvocationStatus
 from models.knowledge_project import CollectionVisibility, KnowledgeProject
 from models.project_member import (
     PROJECT_ROLE_RANK,
