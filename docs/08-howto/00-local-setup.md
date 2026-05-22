@@ -48,7 +48,7 @@ When it's done, hosts wired in your `/etc/hosts`:
 127.0.0.1   api.localhost
 127.0.0.1   web.localhost
 127.0.0.1   wingman.localhost
-127.0.0.1   example_app.localhost
+127.0.0.1   contractiq.localhost
 ...
 ```
 

@@ -3,7 +3,7 @@
 Three stages, each reported separately:
 
   Stage A — retired slugs are absent / archived in the catalog
-  Stage B — protected domains (OracleNet, the example app, Saudi Tourism)
+  Stage B — protected domains (OracleNet, ContractIQ, Saudi Tourism)
             + every surviving seeded agent smoke-runs (create agent,
             don't execute — executing 70 agents would cost real $$).
   Stage C — the full Industrial IoT flow:
@@ -57,8 +57,8 @@ PROTECTED_SLUGS = {
     "oraclenet-pipeline", "oraclenet-current-state", "oraclenet-contrarian",
     "oraclenet-historian", "oraclenet-second-order", "oraclenet-synthesizer",
     "oraclenet-provenance", "oraclenet-stakeholder-sim",
-    # the example app (subset — spot check, not all 17)
-    "example_app-chat", "example_app-pipeline", "example_app-clause-benchmarker",
+    # ContractIQ (subset — spot check, not all 17)
+    "contractiq-chat", "contractiq-pipeline", "contractiq-clause-benchmarker",
     # Saudi Tourism (5)
     "st-chat", "st-analytics", "st-data-extractor", "st-report-generator", "st-simulator",
 }

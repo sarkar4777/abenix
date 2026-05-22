@@ -21,7 +21,7 @@ KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
 _default_acr_name() {
   local sub_id
   sub_id=$(az account show --query id -o tsv 2>/dev/null || echo "")
-  if [ -z "${sub_id}" ]; then echo "abenixacr00000"; return; fi
+  if [ -z "${sub_id}" ]; then echo "your-acr-placeholder"; return; fi
   local suf
   suf=$(printf '%s|%s' "${sub_id}" "${AZ_RESOURCE_GROUP}" | md5sum 2>/dev/null | cut -c1-5)
   # md5sum may not exist on macOS — fall back to shasum
@@ -83,7 +83,7 @@ Usage: $(basename "$0") <command> [flags]
 Commands:
   provision         Create RG + AKS + ACR; attach ACR to AKS; get kubectl creds.
   build             Build all Docker images and push to ACR. --only=... supported.
-  deploy            Helm-install Abenix + standalone apps (the example app, Saudi Tourism).
+  deploy            Helm-install Abenix + standalone apps (ContractIQ, Saudi Tourism).
                     Incremental — safe to re-run. --only=... supported.
   redeploy          Alias: build (per --only) + rollout restart (per --only).
   seed              Re-run agent / portfolio / ML model seed scripts, then
@@ -91,7 +91,7 @@ Commands:
   seed-keys         Reconcile only the standalone ABENIX_API_KEYs (idempotent).
                     Mints any missing keys + patches secrets + restarts pods.
   test              Run all Playwright E2E suites against the AKS endpoints.
-                    E2E_PROJECT=abenix|example_app|sauditourism to scope.
+                    E2E_PROJECT=abenix|contractiq|sauditourism to scope.
                     E2E_ONLY=test1.spec.ts,test2.spec.ts to run specific files.
   status            Report cluster, pods, services, ingress, and health endpoints.
   destroy           Uninstall helm + namespace. With KEEP_CLUSTER=false (default) also
@@ -100,9 +100,9 @@ Commands:
 
 Flags:
   --only=<list>     Comma-separated list of groups/services to act on.
-                    Groups: abenix, example_app, sauditourism, observability, livekit
+                    Groups: abenix, contractiq, sauditourism, observability, livekit
                     Services: api, web, worker, agent-runtime, cognify-worker,
-                              example_app-api, example_app-web,
+                              contractiq-api, contractiq-web,
                               sauditourism-api, sauditourism-web
   --keep-cluster    On destroy: keep AKS + RG, only remove helm + namespace.
   --skip-build      On deploy: don't rebuild images (use whatever is in ACR).
@@ -162,7 +162,7 @@ _expand_only() {
   local token="$1"
   case "${token}" in
     abenix)     echo "api web worker agent-runtime cognify-worker" ;;
-    example_app)     echo "example_app-api example_app-web" ;;
+    contractiq)     echo "contractiq-api contractiq-web" ;;
     sauditourism)   echo "sauditourism-api sauditourism-web" ;;
     industrial-iot) echo "industrial-iot-api industrial-iot-web" ;;
     resolveai)      echo "resolveai-api resolveai-web" ;;
@@ -215,7 +215,7 @@ _build_secrets_flags() {
   [ -n "${MEDIASTACK_API_KEY:-}" ]       && flags="${flags} --set secrets.mediastackApiKey=${MEDIASTACK_API_KEY}"
   [ -n "${ENTSOE_API_KEY:-}" ]           && flags="${flags} --set secrets.entsoeApiKey=${ENTSOE_API_KEY}"
   [ -n "${EIA_API_KEY:-}" ]              && flags="${flags} --set secrets.eiaApiKey=${EIA_API_KEY}"
-  [ -n "${EXAMPLE_APP_JWT_SECRET:-}" ]    && flags="${flags} --set secrets.example_appJwtSecret=${EXAMPLE_APP_JWT_SECRET}"
+  [ -n "${CONTRACTIQ_JWT_SECRET:-}" ]    && flags="${flags} --set secrets.contractiqJwtSecret=${CONTRACTIQ_JWT_SECRET}"
   echo "${flags}"
 }
 
@@ -353,8 +353,8 @@ declare -A DOCKERFILES=(
   [web]="docker/Dockerfile.web"
   [worker]="docker/Dockerfile.worker"
   [agent-runtime]="docker/Dockerfile.agent-runtime"
-  [example_app-api]="example_app/api/Dockerfile"
-  [example_app-web]="example_app/web/Dockerfile"
+  [contractiq-api]="contractiq/api/Dockerfile"
+  [contractiq-web]="contractiq/web/Dockerfile"
   [sauditourism-api]="sauditourism/api/Dockerfile"
   [sauditourism-web]="sauditourism/web/Dockerfile"
   [industrial-iot-api]="industrial-iot/api/Dockerfile"
@@ -376,8 +376,8 @@ declare -A BUILD_CONTEXTS=(
   [worker]="${ROOT_DIR}"
   [agent-runtime]="${ROOT_DIR}"
   [cognify-worker]="${ROOT_DIR}"
-  [example_app-api]="${ROOT_DIR}/example_app/api"
-  [example_app-web]="${ROOT_DIR}/example_app/web"
+  [contractiq-api]="${ROOT_DIR}/contractiq/api"
+  [contractiq-web]="${ROOT_DIR}/contractiq/web"
   # sauditourism-api: build context must include test-data/ for the seed endpoint,
   # so we use the sauditourism/ directory rather than sauditourism/api/.
   [sauditourism-api]="${ROOT_DIR}/sauditourism"
@@ -441,7 +441,7 @@ build_and_push() {
   # cognify-worker reuses the worker image — don't build it separately
   local all_svcs=(
     api web worker agent-runtime
-    example_app-api example_app-web
+    contractiq-api contractiq-web
     sauditourism-api sauditourism-web
     industrial-iot-api industrial-iot-web
     resolveai-api resolveai-web
@@ -924,16 +924,16 @@ _verify_standalone_envfrom() {
   ok "  ${deploy}: envFrom secretRef=${expected_secret} configMapRef=${expected_config}"
 }
 
-deploy_example_app() {
-  if [ -n "${ONLY_CSV}" ] && ! _should_do "example_app-api" && ! _should_do "example_app-web"; then return 0; fi
-  local manifest="${ROOT_DIR}/example_app/k8s/example_app.yaml"
-  if [ ! -f "${manifest}" ]; then warn "the example app manifest missing — skip"; return; fi
+deploy_contractiq() {
+  if [ -n "${ONLY_CSV}" ] && ! _should_do "contractiq-api" && ! _should_do "contractiq-web"; then return 0; fi
+  local manifest="${ROOT_DIR}/contractiq/k8s/contractiq.yaml"
+  if [ ! -f "${manifest}" ]; then warn "ContractIQ manifest missing — skip"; return; fi
 
-  step "Deploying the example app"
-  local ciq_key="${EXAMPLE_APP_ABENIX_API_KEY:-}"
+  step "Deploying ContractIQ"
+  local ciq_key="${CONTRACTIQ_ABENIX_API_KEY:-}"
   # If caller key is empty OR this is a fresh Abenix DB, mint a new key.
   if [ -z "${ciq_key}" ]; then
-    log "  Minting a fresh Abenix API key for the example app..."
+    log "  Minting a fresh Abenix API key for ContractIQ..."
     ciq_key=$(_generate_abenix_api_key || echo "")
     if [ -n "${ciq_key}" ]; then
       ok "  Key minted (prefix ${ciq_key:0:10}...)"
@@ -942,16 +942,16 @@ deploy_example_app() {
       ciq_key="PLACEHOLDER_CHANGE_ME"
     fi
   fi
-  local ciq_jwt="${EXAMPLE_APP_JWT_SECRET:-example_app-dev-secret-please-change}"
+  local ciq_jwt="${CONTRACTIQ_JWT_SECRET:-contractiq-dev-secret-please-change}"
   local anth_key="${ANTHROPIC_API_KEY:-}"
 
   # Apply the secret with real values FIRST so any pod created by the
   # subsequent manifest apply picks up the live key, not the manifest's
   # REPLACE_AT_DEPLOY_TIME placeholder.
-  kubectl create secret generic example_app-secrets \
+  kubectl create secret generic contractiq-secrets \
     --namespace="${NAMESPACE}" \
-    --from-literal=EXAMPLE_APP_ABENIX_API_KEY="${ciq_key}" \
-    --from-literal=EXAMPLE_APP_JWT_SECRET="${ciq_jwt}" \
+    --from-literal=CONTRACTIQ_ABENIX_API_KEY="${ciq_key}" \
+    --from-literal=CONTRACTIQ_JWT_SECRET="${ciq_jwt}" \
     --from-literal=ANTHROPIC_API_KEY="${anth_key}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -2
 
@@ -959,8 +959,8 @@ deploy_example_app() {
   # overwrite the live secret we just applied. Buffer each YAML
   # document between `---` separators; flush only the non-Secret ones.
   sed \
-    -e "s|localhost:5000/abenix/example_app-api:latest|${ACR_LOGIN_SERVER}/example_app-api:${IMAGE_TAG}|g" \
-    -e "s|localhost:5000/abenix/example_app-web:latest|${ACR_LOGIN_SERVER}/example_app-web:${IMAGE_TAG}|g" \
+    -e "s|localhost:5000/abenix/contractiq-api:latest|${ACR_LOGIN_SERVER}/contractiq-api:${IMAGE_TAG}|g" \
+    -e "s|localhost:5000/abenix/contractiq-web:latest|${ACR_LOGIN_SERVER}/contractiq-web:${IMAGE_TAG}|g" \
     -e "s|imagePullPolicy: IfNotPresent|imagePullPolicy: Always|g" \
     "${manifest}" | python -c "
 import sys, yaml
@@ -971,15 +971,15 @@ print(yaml.safe_dump_all(out))
 
   # Force a rollout so pods pick up the freshly-applied secret keys
   # even when the manifest apply was a no-op.
-  kubectl -n "${NAMESPACE}" rollout restart deploy/example_app-api 2>&1 | tail -1 || true
-  kubectl -n "${NAMESPACE}" rollout restart deploy/example_app-web 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/contractiq-api 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/contractiq-web 2>&1 | tail -1 || true
 
-  kubectl -n "${NAMESPACE}" rollout status deploy/example_app-api --timeout=180s 2>&1 | tail -1 || true
-  kubectl -n "${NAMESPACE}" rollout status deploy/example_app-web --timeout=180s 2>&1 | tail -1 || true
-  _verify_standalone_envfrom example_app-api example_app-secrets example_app-config || exit 7
+  kubectl -n "${NAMESPACE}" rollout status deploy/contractiq-api --timeout=180s 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout status deploy/contractiq-web --timeout=180s 2>&1 | tail -1 || true
+  _verify_standalone_envfrom contractiq-api contractiq-secrets contractiq-config || exit 7
   # -web is a Next.js frontend with only inline env (INTERNAL_URL +
   # NODE_ENV). It doesn't need envFrom — the api container does. Skip.
-  ok "the example app deployed"
+  ok "ContractIQ deployed"
 }
 
 deploy_sauditourism() {
@@ -990,10 +990,10 @@ deploy_sauditourism() {
   step "Deploying Saudi Tourism"
   local st_key="${SAUDITOURISM_ABENIX_API_KEY:-}"
   if [ -z "${st_key}" ]; then
-    # Reuse the the example app key if it was just minted (same tenant, same Abenix),
+    # Reuse the ContractIQ key if it was just minted (same tenant, same Abenix),
     # otherwise mint a fresh one for SauditTourism.
-    st_key=$(kubectl get secret example_app-secrets -n "${NAMESPACE}" \
-      -o jsonpath='{.data.EXAMPLE_APP_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
+    st_key=$(kubectl get secret contractiq-secrets -n "${NAMESPACE}" \
+      -o jsonpath='{.data.CONTRACTIQ_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
     if [ -z "${st_key}" ] || [ "${st_key}" = "PLACEHOLDER_CHANGE_ME" ]; then
       log "  Minting Abenix API key for Saudi Tourism..."
       st_key=$(_generate_abenix_api_key || echo "PLACEHOLDER_CHANGE_ME")
@@ -1033,8 +1033,8 @@ deploy_industrial_iot() {
   local iot_key="${INDUSTRIALIOT_ABENIX_API_KEY:-}"
   if [ -z "${iot_key}" ]; then
     # Reuse an existing tenant key if one's already minted; else mint fresh.
-    iot_key=$(kubectl get secret example_app-secrets -n "${NAMESPACE}" \
-      -o jsonpath='{.data.EXAMPLE_APP_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
+    iot_key=$(kubectl get secret contractiq-secrets -n "${NAMESPACE}" \
+      -o jsonpath='{.data.CONTRACTIQ_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
     if [ -z "${iot_key}" ] || [ "${iot_key}" = "PLACEHOLDER_CHANGE_ME" ]; then
       log "  Minting Abenix API key for Industrial-IoT..."
       iot_key=$(_generate_abenix_api_key || echo "PLACEHOLDER_CHANGE_ME")
@@ -1063,7 +1063,7 @@ deploy_industrial_iot() {
   # industrial-iot-web is a Next.js frontend that proxies through
   # industrial-iot-api; it intentionally has no envFrom (only inline
   # INTERNAL_URL + NODE_ENV in the manifest). Skip the envFrom verifier
-  # — same shape as example_app-web / resolveai-web / sauditourism-web.
+  # — same shape as contractiq-web / resolveai-web / sauditourism-web.
   ok "Industrial-IoT deployed"
 }
 
@@ -1077,8 +1077,8 @@ deploy_wingman() {
   if [ -z "${wm_key}" ]; then
     # Reuse an existing tenant key if minted (any of the standalone secrets);
     # else mint fresh.
-    wm_key=$(kubectl get secret example_app-secrets -n "${NAMESPACE}" \
-      -o jsonpath='{.data.EXAMPLE_APP_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
+    wm_key=$(kubectl get secret contractiq-secrets -n "${NAMESPACE}" \
+      -o jsonpath='{.data.CONTRACTIQ_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
     if [ -z "${wm_key}" ] || [ "${wm_key}" = "PLACEHOLDER_CHANGE_ME" ]; then
       log "  Minting Abenix API key for Wingman..."
       wm_key=$(_generate_abenix_api_key || echo "PLACEHOLDER_CHANGE_ME")
@@ -1140,8 +1140,8 @@ deploy_resolveai() {
   step "Deploying ResolveAI"
   local ra_key="${RESOLVEAI_ABENIX_API_KEY:-}"
   if [ -z "${ra_key}" ]; then
-    ra_key=$(kubectl get secret example_app-secrets -n "${NAMESPACE}" \
-      -o jsonpath='{.data.EXAMPLE_APP_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
+    ra_key=$(kubectl get secret contractiq-secrets -n "${NAMESPACE}" \
+      -o jsonpath='{.data.CONTRACTIQ_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
     if [ -z "${ra_key}" ] || [ "${ra_key}" = "PLACEHOLDER_CHANGE_ME" ]; then
       log "  Minting Abenix API key for ResolveAI..."
       ra_key=$(_generate_abenix_api_key || echo "PLACEHOLDER_CHANGE_ME")
@@ -1179,8 +1179,8 @@ deploy_claimsiq() {
   local cq_key="${CLAIMSIQ_ABENIX_API_KEY:-}"
   if [ -z "${cq_key}" ]; then
     # Reuse an existing tenant key if one's already minted; else mint fresh.
-    cq_key=$(kubectl get secret example_app-secrets -n "${NAMESPACE}" \
-      -o jsonpath='{.data.EXAMPLE_APP_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
+    cq_key=$(kubectl get secret contractiq-secrets -n "${NAMESPACE}" \
+      -o jsonpath='{.data.CONTRACTIQ_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
     if [ -z "${cq_key}" ] || [ "${cq_key}" = "PLACEHOLDER_CHANGE_ME" ]; then
       log "  Minting Abenix API key for ClaimsIQ..."
       cq_key=$(_generate_abenix_api_key || echo "PLACEHOLDER_CHANGE_ME")
@@ -1281,7 +1281,7 @@ spec:
         paths:
           - path: /
             pathType: Prefix
-            backend: { service: { name: example_app-web, port: { number: 3001 } } }
+            backend: { service: { name: contractiq-web, port: { number: 3001 } } }
     - host: tourism.${host}
       http:
         paths:
@@ -1317,7 +1317,7 @@ spec:
         paths:
           - path: /
             pathType: Prefix
-            backend: { service: { name: example_app-api, port: { number: 8001 } } }
+            backend: { service: { name: contractiq-api, port: { number: 8001 } } }
     - host: tourism-api.${host}
       http:
         paths:
@@ -1350,7 +1350,7 @@ EOF
   # cross-app links ("/executions", "/code-runner") point at the abenix
   # web ingress rather than 404'ing on the standalone origin.
   local abenix_web_url="http://${host}"
-  for dep in industrial-iot-web example_app-web sauditourism-web resolveai-web claimsiq; do
+  for dep in industrial-iot-web contractiq-web sauditourism-web resolveai-web claimsiq; do
     if kubectl -n "${NAMESPACE}" get deploy "${dep}" >/dev/null 2>&1; then
       kubectl -n "${NAMESPACE}" set env deploy/"${dep}" \
         NEXT_PUBLIC_ABENIX_WEB_URL="${abenix_web_url}" 2>&1 | tail -1 || true
@@ -1393,7 +1393,7 @@ deploy_all() {
   seed_agents || true
   _wire_abenix_platform_key || true
   deploy_livekit || warn "LiveKit deploy failed (non-fatal)"
-  deploy_example_app || warn "the example app deploy failed (non-fatal)"
+  deploy_contractiq || warn "ContractIQ deploy failed (non-fatal)"
   deploy_sauditourism || warn "Saudi Tourism deploy failed (non-fatal)"
   deploy_industrial_iot || warn "Industrial-IoT deploy failed (non-fatal)"
   deploy_resolveai || warn "ResolveAI deploy failed (non-fatal)"
@@ -1419,7 +1419,7 @@ seed_standalone_keys() {
     # When --only is set, only run the reseed if the user is touching
     # standalone-related groups.
     case "${ONLY_CSV}" in
-      *example_app*|*sauditourism*|*industrial-iot*|*resolveai*|*claimsiq*) ;;
+      *contractiq*|*sauditourism*|*industrial-iot*|*resolveai*|*claimsiq*) ;;
       *) return 0 ;;
     esac
   fi
@@ -1460,11 +1460,11 @@ deploy_status() {
 
   echo -e "\n${BOLD}Public URLs:${NC}"
   echo -e "  ${CYAN}Abenix Web${NC}    http://${host}"
-  echo -e "  ${CYAN}the example app Web${NC}    http://ciq.${host}"
+  echo -e "  ${CYAN}ContractIQ Web${NC}    http://ciq.${host}"
   echo -e "  ${CYAN}Saudi Tourism${NC}     http://tourism.${host}"
   echo -e "  ${CYAN}ClaimsIQ${NC}          http://claims.${host}"
   echo -e "  ${CYAN}Abenix API${NC}    http://api.${host}/api/health"
-  echo -e "  ${CYAN}the example app API${NC}    http://ciq-api.${host}/api/health"
+  echo -e "  ${CYAN}ContractIQ API${NC}    http://ciq-api.${host}/api/health"
   echo -e "  ${CYAN}Saudi Tourism API${NC} http://tourism-api.${host}/api/health"
   echo -e "  ${CYAN}ClaimsIQ Health${NC}   http://claims.${host}/actuator/health"
 
@@ -1515,11 +1515,11 @@ deploy_test() {
     popd >/dev/null
   }
 
-  if [ "${project}" = "all" ] || [ "${project}" = "example_app" ]; then
-    run_suite "example_app-wave1" "${ROOT_DIR}/example_app" \
+  if [ "${project}" = "all" ] || [ "${project}" = "contractiq" ]; then
+    run_suite "contractiq-wave1" "${ROOT_DIR}/contractiq" \
       BASE_URL="${ciq_base}" API_URL="${ciq_api}" \
       -- --grep "^Wave 1" || true
-    run_suite "example_app-wave2" "${ROOT_DIR}/example_app" \
+    run_suite "contractiq-wave2" "${ROOT_DIR}/contractiq" \
       BASE_URL="${ciq_base}" API_URL="${ciq_api}" \
       -- --grep "^Wave 2" || true
   fi
@@ -1567,8 +1567,8 @@ deploy_destroy() {
     if helm status "${RELEASE_NAME}" -n "${NAMESPACE}" &>/dev/null; then
       helm uninstall "${RELEASE_NAME}" -n "${NAMESPACE}" --wait 2>&1 | tail -2 || true
     fi
-    kubectl delete -n "${NAMESPACE}" deploy/example_app-api deploy/example_app-web deploy/sauditourism-api deploy/sauditourism-web deploy/claimsiq 2>/dev/null || true
-    kubectl delete -n "${NAMESPACE}" svc/example_app-api svc/example_app-web svc/sauditourism-api svc/sauditourism-web svc/claimsiq 2>/dev/null || true
+    kubectl delete -n "${NAMESPACE}" deploy/contractiq-api deploy/contractiq-web deploy/sauditourism-api deploy/sauditourism-web deploy/claimsiq 2>/dev/null || true
+    kubectl delete -n "${NAMESPACE}" svc/contractiq-api svc/contractiq-web svc/sauditourism-api svc/sauditourism-web svc/claimsiq 2>/dev/null || true
     kubectl delete pvc --all -n "${NAMESPACE}" 2>/dev/null || true
     kubectl delete namespace "${NAMESPACE}" --timeout=120s 2>/dev/null || true
     ok "Namespace ${NAMESPACE} deleted"

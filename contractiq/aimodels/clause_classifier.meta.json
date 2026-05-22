@@ -1,0 +1,97 @@
+{
+  "name": "contractiq-clause-classifier",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Classifies a contract clause into one of ~30 ETRM clause types (term, delivery_point, pricing_formula, indexation, force_majeure, credit_support, tax, settlement, ...) using TF-IDF + multinomial logistic regression. Used by the ContractIQ extractor pipeline as a fast pre-filter before the deep LLM extraction pass. When the top class probability is below 0.55 the pipeline falls back to a full LLM read.",
+  "input_schema": {
+    "features": [
+      "text"
+    ],
+    "types": [
+      "string"
+    ],
+    "example": [
+      "either party may terminate this agreement upon written notice of material breach"
+    ]
+  },
+  "output_schema": {
+    "type": "classification",
+    "classes": [
+      "assignment",
+      "audit_rights",
+      "change_of_law",
+      "confidentiality",
+      "credit_support",
+      "decommissioning",
+      "delivery_obligations",
+      "delivery_point",
+      "dispute_resolution",
+      "entire_agreement",
+      "environmental",
+      "force_majeure",
+      "governing_law",
+      "indemnity",
+      "indexation",
+      "insurance",
+      "ip_rights",
+      "liability_cap",
+      "metering",
+      "minimum_quantity",
+      "notices",
+      "pricing_formula",
+      "regulatory_compliance",
+      "settlement",
+      "step_in_rights",
+      "take_or_pay",
+      "tax",
+      "term_and_termination",
+      "tolerance_band",
+      "warranties"
+    ],
+    "returns": "clause type label + per-class probabilities"
+  },
+  "tags": [
+    "contractiq",
+    "extraction",
+    "clause-classification",
+    "pre-filter"
+  ],
+  "training": {
+    "samples": 2400,
+    "algorithm": "TF-IDF (1-2 grams) + Multinomial Logistic Regression",
+    "synthetic": true,
+    "holdout_accuracy": 1.0,
+    "classes": [
+      "assignment",
+      "audit_rights",
+      "change_of_law",
+      "confidentiality",
+      "credit_support",
+      "decommissioning",
+      "delivery_obligations",
+      "delivery_point",
+      "dispute_resolution",
+      "entire_agreement",
+      "environmental",
+      "force_majeure",
+      "governing_law",
+      "indemnity",
+      "indexation",
+      "insurance",
+      "ip_rights",
+      "liability_cap",
+      "metering",
+      "minimum_quantity",
+      "notices",
+      "pricing_formula",
+      "regulatory_compliance",
+      "settlement",
+      "step_in_rights",
+      "take_or_pay",
+      "tax",
+      "term_and_termination",
+      "tolerance_band",
+      "warranties"
+    ]
+  }
+}

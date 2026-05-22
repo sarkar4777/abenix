@@ -284,25 +284,25 @@ async def list_policy_templates() -> JSONResponse:
     """Return common policy templates that admins can apply."""
     templates = [
         {
-            "id": "example_app_user_isolated",
-            "name": "the example app User-Isolated",
-            "description": "Each the example app user can only access their own contracts and KB namespace",
-            "subject_type": "example_app",
+            "id": "contractiq_user_isolated",
+            "name": "ContractIQ User-Isolated",
+            "description": "Each ContractIQ user can only access their own contracts and KB namespace",
+            "subject_type": "contractiq",
             "rules": {
                 "agents": {
                     "mode": "allowlist",
-                    "slugs": ["example_app-chat", "example_app-pipeline"],
+                    "slugs": ["contractiq-chat", "contractiq-pipeline"],
                 },
                 "knowledge_bases": [
                     {
                         "kb_id": "*",
                         "access_mode": "namespace",
-                        "namespace_pattern": "example_app-{subject_id}",
+                        "namespace_pattern": "contractiq-{subject_id}",
                         "allowed_actions": ["read", "search"],
                     }
                 ],
                 "data_scopes": {
-                    "example_app.contracts.user_id": "{subject_id}",
+                    "contractiq.contracts.user_id": "{subject_id}",
                 },
                 "denied_actions": ["delete", "admin"],
             },
@@ -311,14 +311,14 @@ async def list_policy_templates() -> JSONResponse:
             "id": "team_lead_cross_user",
             "name": "Team Lead (Cross-User Read)",
             "description": "Team lead can read contracts from team members",
-            "subject_type": "example_app",
+            "subject_type": "contractiq",
             "rules": {
-                "agents": {"mode": "allowlist", "slugs": ["example_app-chat"]},
+                "agents": {"mode": "allowlist", "slugs": ["contractiq-chat"]},
                 "knowledge_bases": [
                     {
                         "kb_id": "*",
                         "access_mode": "namespace",
-                        "namespace_pattern": "example_app-team-{subject_id}",
+                        "namespace_pattern": "contractiq-team-{subject_id}",
                         "allowed_actions": ["read", "search"],
                     }
                 ],
@@ -374,7 +374,7 @@ async def test_policy(
     subject_type = body.get("subject_type", "")
     subject_id = body.get("subject_id", "")
     api_key_id = body.get("api_key_id", "")
-    test_resource = body.get("test_resource", "")  # e.g., "agent:example_app-chat"
+    test_resource = body.get("test_resource", "")  # e.g., "agent:contractiq-chat"
 
     if not all([subject_type, subject_id, api_key_id, test_resource]):
         return error("Missing required fields", 400)

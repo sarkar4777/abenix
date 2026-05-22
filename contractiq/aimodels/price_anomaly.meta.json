@@ -1,0 +1,55 @@
+{
+  "name": "contractiq-price-anomaly",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "IsolationForest anomaly detector for contract prices. Trains on the joint distribution of 8 features (log notional, tenor, price residual vs implied fair value, curve slope, realised vol z-score, counterparty rating, indexation strength, take-or-pay flag) with 10% planted outliers. The valuator agent calls this after computing the analytical fair value: if the score is anomalous AND the residual sign is unfavourable, the result card lights up red and a hedge_advisor follow-up is queued.",
+  "input_schema": {
+    "features": [
+      "log_notional",
+      "tenor_years",
+      "price_residual_pct",
+      "forward_curve_slope",
+      "vol_z",
+      "counterparty_rating_num",
+      "indexation_strength",
+      "has_take_or_pay"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [
+      16.5,
+      5.0,
+      0.02,
+      0.03,
+      0.5,
+      3,
+      0.4,
+      1.0
+    ]
+  },
+  "output_schema": {
+    "type": "anomaly",
+    "returns": "score (higher = more typical), is_anomaly bool (score < threshold)"
+  },
+  "tags": [
+    "contractiq",
+    "valuation",
+    "anomaly",
+    "price-deviation"
+  ],
+  "training": {
+    "samples": 3000,
+    "algorithm": "IsolationForest (200 trees, contamination=0.10)",
+    "synthetic": true,
+    "planted_outlier_recall": 1.0,
+    "threshold_at_median": -0.4286
+  }
+}

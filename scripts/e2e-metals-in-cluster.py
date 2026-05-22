@@ -58,11 +58,11 @@ def get(path, token):
 
 
 def main():
-    print("=== the example app Precious Metals E2E ===")
+    print("=== ContractIQ Precious Metals E2E ===")
 
     email = f"metals-e2e-{int(time.time())}@test.com"
     print(f"\n[1] register {email}")
-    s, body = post("/api/example_app/auth/register", {
+    s, body = post("/api/contractiq/auth/register", {
         "email": email,
         "password": "MetalsE2E!",
         "full_name": "Metals E2E",
@@ -75,7 +75,7 @@ def main():
 
     print("\n[2] upload dore intake contract")
     text = open("/tmp/metals.txt", "rb").read()
-    s, body = post("/api/example_app/contracts/upload",
+    s, body = post("/api/contractiq/contracts/upload",
         body={
             "title": "Dore Intake and Refining Agreement",
             "contract_type": "ppa",
@@ -95,7 +95,7 @@ def main():
     # Extract endpoint streams SSE — just fire and drain a few lines
     try:
         req = urllib.request.Request(
-            f"{BASE}/api/example_app/contracts/{contract_id}/extract",
+            f"{BASE}/api/contractiq/contracts/{contract_id}/extract",
             data=b"{}",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             method="POST",
@@ -107,7 +107,7 @@ def main():
     deadline = time.time() + 180
     while time.time() < deadline:
         time.sleep(4)
-        _, body = get(f"/api/example_app/contracts/{contract_id}", token)
+        _, body = get(f"/api/contractiq/contracts/{contract_id}", token)
         st = body.get("data", {}).get("status")
         print(f"    contract.status={st}")
         if st in {"analyzed", "error"}:
@@ -117,7 +117,7 @@ def main():
         return 2
 
     print("\n[4] metals extractor")
-    s, body = post(f"/api/example_app/metals/contracts/{contract_id}/extract", {}, token=token)
+    s, body = post(f"/api/contractiq/metals/contracts/{contract_id}/extract", {}, token=token)
     print(f"    status={s}")
     if s == 200:
         d = body["data"]
@@ -130,7 +130,7 @@ def main():
         return 3
 
     print("\n[5] metals compliance audit")
-    s, body = post(f"/api/example_app/metals/contracts/{contract_id}/compliance-audit", {}, token=token)
+    s, body = post(f"/api/contractiq/metals/contracts/{contract_id}/compliance-audit", {}, token=token)
     print(f"    status={s}")
     if s == 200:
         d = body["data"]
@@ -140,7 +140,7 @@ def main():
         print(f"    error: {body}")
 
     print("\n[6] dispute risk scorer")
-    s, body = post(f"/api/example_app/metals/contracts/{contract_id}/dispute-risk", {}, token=token)
+    s, body = post(f"/api/contractiq/metals/contracts/{contract_id}/dispute-risk", {}, token=token)
     print(f"    status={s}")
     if s == 200:
         d = body["data"]
@@ -148,7 +148,7 @@ def main():
         print(f"    dimensions={len(d.get('dimensions') or [])}")
 
     print("\n[7] overview check")
-    s, body = get("/api/example_app/metals/overview", token)
+    s, body = get("/api/contractiq/metals/overview", token)
     print(f"    {json.dumps(body['data'], indent=2)}")
 
     print("\n=== ALL CHECKS PASSED ===")

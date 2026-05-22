@@ -1,0 +1,1904 @@
+================================================================================
+                     POWER PURCHASE AGREEMENT
+================================================================================
+
+                         BETWEEN
+
+          AL DHAFRA SOLAR ENERGY LLC
+          (as Seller)
+
+                           AND
+
+          ABU DHABI DISTRIBUTION COMPANY (ADDC)
+          (as Buyer)
+
+================================================================================
+
+          PROJECT: AL DHAFRA 250 MW SOLAR PHOTOVOLTAIC
+                   INDEPENDENT POWER PROJECT
+
+          EXECUTION DATE: March 15, 2024
+          EFFECTIVE DATE: April 1, 2024
+          TERM: Twenty-Five (25) Years from the Commercial Operation Date
+
+          CONTRACT REFERENCE: ADDC-PPA-2024-0315-SOLAR
+
+================================================================================
+
+THIS POWER PURCHASE AGREEMENT (hereinafter referred to as the "Agreement") is
+entered into on the 15th day of March, 2024 (the "Execution Date"),
+
+BETWEEN:
+
+(1) AL DHAFRA SOLAR ENERGY LLC, a limited liability company incorporated and
+    existing under the laws of the Emirate of Abu Dhabi, United Arab Emirates,
+    having its registered office at Plot C-42, Al Dhafra Industrial Zone,
+    Abu Dhabi, United Arab Emirates, P.O. Box 94837, and registered with the
+    Abu Dhabi Department of Economic Development under Commercial License
+    No. CN-3489271 (hereinafter referred to as the "Seller"); and
+
+(2) ABU DHABI DISTRIBUTION COMPANY (ADDC), a public joint stock company
+    incorporated and existing under the laws of the Emirate of Abu Dhabi,
+    United Arab Emirates, having its registered office at Khalifa Business
+    Park, Abu Dhabi, United Arab Emirates, P.O. Box 219, and regulated by
+    the Department of Energy (DoE) of Abu Dhabi under License
+    No. DoE/DL/2023/0084 (hereinafter referred to as the "Buyer").
+
+The Seller and the Buyer are hereinafter collectively referred to as the
+"Parties" and individually as a "Party".
+
+RECITALS
+
+WHEREAS, the Government of Abu Dhabi, through the Abu Dhabi Department of
+Energy ("DoE"), has established a regulatory framework to promote the
+development of renewable energy generation capacity within the Emirate of
+Abu Dhabi, consistent with the UAE Energy Strategy 2050 and Abu Dhabi's
+commitment to achieving net-zero carbon emissions by 2050;
+
+WHEREAS, the Seller has been selected through a competitive international
+tender process conducted by the Emirates Water and Electricity Company
+(EWEC) and the Abu Dhabi Department of Energy to develop, finance, construct,
+own, and operate a 250 MW (AC) solar photovoltaic power generation facility
+(the "Facility") located in the Al Dhafra region of the Emirate of Abu Dhabi;
+
+WHEREAS, the Seller has secured all necessary development rights, land use
+agreements, and preliminary approvals from the relevant governmental
+authorities for the development and operation of the Facility;
+
+WHEREAS, the Buyer is a licensed electricity distribution company in the
+Emirate of Abu Dhabi, authorized to purchase electricity from independent
+power producers and distribute the same to end consumers within its licensed
+distribution area;
+
+WHEREAS, the Buyer desires to purchase, and the Seller desires to sell, the
+entire net electrical output of the Facility on the terms and conditions set
+forth in this Agreement;
+
+NOW, THEREFORE, in consideration of the mutual covenants, representations,
+warranties, and agreements contained herein, and for other good and valuable
+consideration, the receipt and sufficiency of which are hereby acknowledged,
+the Parties agree as follows:
+
+
+================================================================================
+                    ARTICLE 1: DEFINITIONS AND INTERPRETATION
+================================================================================
+
+1.1 DEFINITIONS
+
+In this Agreement, unless the context otherwise requires, the following
+capitalized terms shall have the meanings ascribed to them below:
+
+"Actual Output" means the actual net electrical energy (expressed in MWh)
+delivered by the Seller to the Delivery Point during any given period, as
+measured by the Revenue Meters, net of all Station Service Loads and
+transformation losses within the Facility.
+
+"Adjusted Metered Output" means the Actual Output as adjusted for any
+Deemed Generation amounts, metering errors, or other corrections as
+provided for in this Agreement.
+
+"Affiliate" means, with respect to any Person, any other Person that
+directly or indirectly controls, is controlled by, or is under common
+control with, such Person. For purposes of this definition, "control"
+means the possession, directly or indirectly, of the power to direct or
+cause the direction of the management and policies of a Person, whether
+through ownership of voting securities, by contract, or otherwise; and
+the terms "controlled by" and "under common control with" shall be
+construed accordingly.
+
+"Annual Contract Quantity" or "ACQ" means the expected annual net electrical
+energy output of the Facility, equal to four hundred and seventy-five
+gigawatt-hours (475 GWh) per Contract Year, subject to adjustment for
+Degradation in accordance with Schedule 1 and the terms of this Agreement.
+
+"Applicable Law" means all laws, statutes, regulations, rules, orders,
+decrees, judgments, permits, licenses, authorizations, directions, and
+requirements of any Governmental Authority having jurisdiction over the
+Parties, the Facility, or the performance of obligations under this
+Agreement, as in effect from time to time.
+
+"Availability" means, for any period, the ratio (expressed as a percentage)
+of (a) the number of hours during such period in which the Facility is
+capable of generating and delivering electrical energy to the Delivery Point
+(whether or not the Facility actually generates or delivers electrical energy
+during such hours) to (b) the total number of hours in such period, excluding
+Excused Hours.
+
+"Availability Guarantee" shall have the meaning set forth in Article 6.1.
+
+"Base Tariff" means the price per kilowatt-hour payable by the Buyer to the
+Seller for Net Electrical Output delivered at the Delivery Point, as set
+forth in Article 4.1 and Schedule 4 hereto.
+
+"Billing Period" means each calendar month during the Term, or, for the
+first and last Billing Periods, the portion of a calendar month from the
+Commercial Operation Date or to the expiration or termination date, as
+applicable.
+
+"Business Day" means any day other than a Friday, Saturday, or a public
+holiday in the Emirate of Abu Dhabi, United Arab Emirates.
+
+"Buyer Default" shall have the meaning set forth in Article 13.2.
+
+"Capacity" means the nominal net alternating current (AC) generating capacity
+of the Facility, equal to two hundred and fifty megawatts (250 MW AC), as
+measured at the Delivery Point.
+
+"Capacity Factor" means, for any period, the ratio of the Actual Output
+during such period to the product of the Capacity multiplied by the number
+of hours in such period.
+
+"Change of Law" means the enactment, promulgation, amendment, repeal, or
+modification of any Applicable Law, or the imposition of any new Applicable
+Law, or any change in the official interpretation or application of any
+Applicable Law by any Governmental Authority, in each case after the
+Execution Date, that directly and materially affects the Seller's costs of
+developing, financing, constructing, owning, operating, or maintaining the
+Facility, or the Seller's ability to perform its obligations under this
+Agreement.
+
+"Closing Date" means the date upon which all Conditions Precedent set forth
+in Article 2.3 have been satisfied or waived in accordance with this
+Agreement.
+
+"Commercial Operation" means the status achieved by the Facility when all of
+the conditions for the achievement of Commercial Operation as specified in
+Article 2.5 have been satisfied.
+
+"Commercial Operation Date" or "COD" means the date on which the Facility
+achieves Commercial Operation, as certified by the Independent Engineer and
+acknowledged by both Parties, which shall be no later than the Long-Stop
+Date unless extended in accordance with this Agreement.
+
+"Conditions Precedent" shall have the meaning set forth in Article 2.3.
+
+"Confidential Information" shall have the meaning set forth in Article 18.1.
+
+"Construction All Risks Insurance" shall have the meaning set forth in
+Article 10.1(a).
+
+"Contract Year" means each period of twelve (12) consecutive calendar months
+commencing on the Commercial Operation Date or any anniversary thereof during
+the Term. The first Contract Year shall commence on the Commercial Operation
+Date.
+
+"Contracted Capacity" means two hundred and fifty megawatts (250 MW AC).
+
+"CPI" means the Consumer Price Index (All Items) for the United States, as
+published by the U.S. Bureau of Labor Statistics, or any successor index
+thereto. If such index is discontinued or materially modified, the Parties
+shall agree upon a replacement index that most closely approximates the
+original index.
+
+"Cure Period" shall have the meaning set forth in Article 13.4.
+
+"Curtailment" means any reduction, interruption, or cessation of the Seller's
+delivery of Net Electrical Output to the Delivery Point due to actions or
+instructions by the Buyer, the Grid Operator, or any Governmental Authority,
+other than reductions caused by a Seller Default, Seller's failure to comply
+with the Grid Code, or Force Majeure.
+
+"Curtailment Energy" means the electrical energy (in MWh) that the Facility
+would have generated and delivered to the Delivery Point but for Curtailment,
+as calculated in accordance with Article 7.
+
+"Deemed Generation" means the quantity of electrical energy (in MWh) that the
+Facility would have generated and delivered to the Delivery Point during a
+period of Compensable Curtailment, Force Majeure affecting the Buyer or the
+Grid, or other excused events as specified in this Agreement, calculated
+using the methodology set forth in Article 7.2.
+
+"Default Interest Rate" means a rate per annum equal to the Secured Overnight
+Financing Rate (SOFR) as published by the Federal Reserve Bank of New York
+(or any successor administrator) plus two percent (2%), calculated on a
+daily compounding basis for each day of delay.
+
+"Degradation Rate" means the expected annual reduction in the Facility's
+energy output capability due to the natural aging and wear of the solar
+modules and other equipment, as specified in Schedule 1 (Section S1.6).
+
+"Delivery Point" means the point of interconnection between the Facility's
+step-up substation and the Buyer's 132 kV transmission network at the Al
+Dhafra 132 kV Substation, as more particularly described in Article 9 and
+Schedule 2.
+
+"Dispatch Instructions" means any instruction, direction, or order issued by
+the Buyer or the Grid Operator to the Seller to increase, decrease, or cease
+the generation or delivery of electrical energy from the Facility.
+
+"Effective Date" means April 1, 2024.
+
+"Electrical Interconnection Facilities" means the electrical equipment,
+lines, cables, transformers, switchgear, protection systems, metering
+equipment, and other facilities required to interconnect the Facility with
+the Buyer's transmission network at the Delivery Point.
+
+"Emergency" means any condition or situation that, in the reasonable judgment
+of the Grid Operator or the Buyer, constitutes an imminent threat to the
+safety of persons, damage to property, or the security, integrity, or
+reliability of the electrical grid.
+
+"Environmental Approval" means any approval, permit, license, consent,
+clearance, or authorization required under any Applicable Law relating to
+the protection of the environment, including without limitation approvals
+related to environmental impact assessments, waste management, water use,
+air quality, and habitat protection.
+
+"Excused Hours" means hours during which the Facility is unable to generate
+or deliver electrical energy due to: (a) Force Majeure; (b) Compensable
+Curtailment; (c) Scheduled Maintenance approved by the Buyer; or (d) Grid
+unavailability not caused by the Seller.
+
+"Facility" means the 250 MW AC solar photovoltaic power generation facility,
+including all solar modules, inverters, trackers, electrical collection
+systems, step-up substation, and all associated balance-of-plant equipment
+and infrastructure located at the Site, as more particularly described in
+Schedule 1.
+
+"Financial Close" means the date on which all conditions precedent to the
+initial drawdown under the Seller's financing arrangements for the Facility
+have been satisfied or waived, and the initial funding under such financing
+arrangements has occurred.
+
+"Force Majeure" or "Force Majeure Event" shall have the meaning set forth in
+Article 11.1.
+
+"Good Utility Practice" means the practices, methods, standards, and acts
+that would be employed by a reasonably prudent operator of solar photovoltaic
+power generation facilities of the type, size, and nature similar to the
+Facility, acting in accordance with Applicable Law, applicable reliability
+standards, the Grid Code, and equipment manufacturers' recommendations and
+guidelines.
+
+"Governmental Authority" means any federal, national, emirate, local, or
+municipal government, any political subdivision thereof, any governmental
+department, commission, board, bureau, agency, regulatory authority,
+instrumentality, or judicial body, in each case having jurisdiction over the
+relevant Party, the Facility, or the performance of obligations under this
+Agreement.
+
+"Grid Code" means the grid code, distribution code, and all associated
+technical standards, rules, procedures, and guidelines issued by EWEC, ADDC,
+TRANSCO, or any successor grid operator, as in effect from time to time, that
+govern the connection to and operation of the electrical grid in the Emirate
+of Abu Dhabi.
+
+"Grid Operator" means TRANSCO (Abu Dhabi Transmission and Despatch Company)
+or any successor entity responsible for the operation and dispatch of the
+electrical transmission grid in the Emirate of Abu Dhabi.
+
+"Guaranteed Availability" means an annual Availability of not less than
+ninety-eight percent (98%), as measured over each Contract Year.
+
+"Independent Engineer" means a reputable, independent engineering firm
+appointed by agreement of the Parties (or, failing agreement, by the
+appointing authority specified in Article 16) to perform the functions
+assigned to the Independent Engineer under this Agreement.
+
+"Insurance Proceeds" means any and all amounts paid or payable to or for
+the benefit of the Seller under any insurance policy maintained in
+accordance with Article 10.
+
+"Intellectual Property Rights" means all patents, trademarks, service marks,
+trade names, copyrights, trade secrets, know-how, and other proprietary
+rights.
+
+"Lender" means any bank, financial institution, or other Person that
+provides debt financing or refinancing for the development, construction,
+or operation of the Facility, including bondholders or noteholders.
+
+"Letter of Credit" or "LC" shall have the meaning set forth in Article 14.1.
+
+"Liquidated Damages" shall have the meaning set forth in Article 6.
+
+"Long-Stop Date" means December 31, 2026, as may be extended pursuant to
+the terms of this Agreement, by which date the Facility must achieve
+Commercial Operation.
+
+"Material Adverse Effect" means any event, condition, or circumstance that,
+individually or in the aggregate, has or would reasonably be expected to
+have a material adverse effect on: (a) the financial condition, business,
+or operations of a Party; (b) the ability of a Party to perform its
+material obligations under this Agreement; or (c) the validity or
+enforceability of this Agreement or the rights or remedies of the other
+Party hereunder.
+
+"Metering Equipment" shall have the meaning set forth in Article 5.
+
+"Minimum Annual Delivery" means the minimum annual net electrical energy
+that the Seller is required to deliver to the Delivery Point, equal to
+four hundred and seventy-five gigawatt-hours (475 GWh) per Contract Year,
+subject to adjustment for Degradation as set out in Schedule 1.
+
+"MW" means megawatt of alternating current capacity unless otherwise
+specified.
+
+"MWh" means megawatt-hour of electrical energy.
+
+"Net Electrical Output" means the gross electrical energy generated by the
+Facility, less the Station Service Loads, auxiliary consumption, and
+transformation losses within the Facility, as measured at the Delivery Point
+by the Revenue Meters.
+
+"Operating Period" means the period commencing on the Commercial Operation
+Date and ending on the expiration or earlier termination of this Agreement.
+
+"Parent Company Guarantee" shall have the meaning set forth in Article 14.3.
+
+"Performance Ratio" means the ratio of the Actual Output to the theoretical
+energy output that the Facility would produce if all modules operated at
+their nominal rated capacity under the actual irradiance conditions received
+during the measurement period, as measured and calculated in accordance with
+IEC 61724.
+
+"Performance Ratio Guarantee" shall have the meaning set forth in Article 6.2.
+
+"Permitted Transfer" shall have the meaning set forth in Article 15.2.
+
+"Person" means any individual, corporation, company, partnership, limited
+liability company, joint venture, trust, unincorporated association, or
+other entity, including any Governmental Authority.
+
+"Prudent Utility Practice" has the same meaning as Good Utility Practice.
+
+"Revenue Meters" shall have the meaning set forth in Article 5.1.
+
+"Scheduled Maintenance" means the planned maintenance of the Facility or
+any component thereof, carried out in accordance with the annual maintenance
+schedule submitted by the Seller and approved by the Buyer in accordance
+with Article 6.5.
+
+"Seller Default" shall have the meaning set forth in Article 13.1.
+
+"Site" means the plot of land on which the Facility is located, as described
+in Schedule 2.
+
+"SOFR" means the Secured Overnight Financing Rate as published by the
+Federal Reserve Bank of New York (or any successor administrator thereof).
+
+"Solar Resource" means the global horizontal irradiance (GHI) and direct
+normal irradiance (DNI) measured at the Site.
+
+"Station Service Loads" means the electrical energy consumed within the
+Facility for its own operation, including energy consumed by inverters,
+tracking systems, SCADA systems, lighting, HVAC, and other auxiliary
+equipment.
+
+"TAQA" means Abu Dhabi National Energy Company PJSC, the parent company
+of the Seller or its principal shareholder.
+
+"Term" shall have the meaning set forth in Article 2.1.
+
+"Termination Payment" shall have the meaning set forth in Article 13.5.
+
+"Testing" means the commissioning tests, performance tests, reliability
+tests, and other tests required to be completed prior to the achievement
+of Commercial Operation, as specified in Schedule 1.
+
+1.2 INTERPRETATION
+
+(a) Unless the context otherwise requires, words importing the singular
+include the plural and vice versa, words importing a gender include all
+genders, and references to any Party include that Party's successors and
+permitted assigns.
+
+(b) The headings in this Agreement are for convenience of reference only and
+shall not affect its interpretation.
+
+(c) References to "Articles," "Sections," "Schedules," and "Annexes" are
+references to articles, sections, schedules, and annexes of this Agreement,
+unless otherwise specified.
+
+(d) The Schedules and Annexes attached hereto form an integral part of this
+Agreement and are incorporated herein by reference.
+
+(e) In the event of any conflict or inconsistency between the main body of
+this Agreement and any Schedule or Annex, the main body of this Agreement
+shall prevail unless the Schedule or Annex expressly states otherwise.
+
+(f) The words "include," "includes," and "including" shall be deemed to be
+followed by the phrase "without limitation."
+
+(g) All monetary amounts expressed in this Agreement are in United States
+Dollars (USD) unless otherwise specified.
+
+
+================================================================================
+                    ARTICLE 2: TERM AND CONDITIONS PRECEDENT
+================================================================================
+
+2.1 TERM
+
+This Agreement shall become effective on the Effective Date and, unless
+earlier terminated in accordance with its terms, shall remain in full force
+and effect for a period of twenty-five (25) years from the Commercial
+Operation Date (the "Term"). Notwithstanding the foregoing, the obligations
+of the Parties set forth in Articles 1 through 5 of this Agreement (to the
+extent applicable to the pre-COD period), and all other provisions that by
+their nature are intended to apply prior to the Commercial Operation Date,
+shall become effective on the Effective Date.
+
+2.2 LONG-STOP DATE
+
+(a) The Facility shall achieve Commercial Operation no later than
+December 31, 2026 (the "Long-Stop Date"). If the Facility fails to achieve
+Commercial Operation by the Long-Stop Date, except to the extent caused by
+Force Majeure, Buyer Default, or Change of Law, the Buyer shall have the
+right to terminate this Agreement by giving not less than thirty (30)
+Business Days' written notice to the Seller.
+
+(b) The Long-Stop Date shall be extended day-for-day for any delay caused
+by: (i) Force Majeure; (ii) Buyer Default; (iii) Change of Law;
+(iv) failure by the Grid Operator to complete its interconnection obligations
+within the timeframe specified in Article 9; or (v) any other event or
+circumstance expressly stated in this Agreement to entitle the Seller to an
+extension of the Long-Stop Date; provided, however, that the aggregate
+extension of the Long-Stop Date pursuant to this Section 2.2(b) shall not
+exceed twenty-four (24) months.
+
+2.3 CONDITIONS PRECEDENT
+
+The obligations of the Parties under this Agreement (other than those that
+are expressly stated to take effect on the Execution Date or the Effective
+Date) shall be subject to the satisfaction or waiver of the following
+conditions precedent (the "Conditions Precedent") on or before the Closing
+Date:
+
+(a) Governmental Approvals: The Seller shall have obtained all material
+governmental approvals, permits, licenses, and authorizations required for
+the development, construction, and operation of the Facility, including
+without limitation:
+    (i) the generation license from the Department of Energy of Abu Dhabi;
+    (ii) the environmental clearance from the Environment Agency Abu Dhabi (EAD);
+    (iii) the building permits from the Abu Dhabi Municipality;
+    (iv) the water and wastewater discharge permits;
+    (v) the aviation safety clearance from the General Civil Aviation Authority; and
+    (vi) any other permits required under Applicable Law.
+
+(b) Land Rights: The Seller shall have executed a land lease agreement or
+usufruct right with the relevant Governmental Authority for the Site,
+granting the Seller exclusive use and possession of the Site for a period
+not less than the Term plus five (5) years.
+
+(c) Interconnection Agreement: The Seller and the Grid Operator shall have
+executed a grid connection agreement on terms reasonably acceptable to the
+Buyer, providing for the interconnection of the Facility to the Grid at the
+Delivery Point.
+
+(d) Insurance: The Seller shall have obtained and delivered to the Buyer
+evidence of all insurance policies required under Article 10, in form and
+substance satisfactory to the Buyer.
+
+(e) Credit Support: The Seller shall have delivered to the Buyer the Letter
+of Credit and the Parent Company Guarantee in accordance with Article 14.
+
+(f) Financing: The Seller shall have achieved Financial Close with respect
+to the financing of the Facility.
+
+(g) EPC Contract: The Seller shall have executed an engineering, procurement,
+and construction ("EPC") contract for the Facility with a reputable EPC
+contractor.
+
+(h) O&M Arrangements: The Seller shall have entered into, or shall have
+demonstrated it has the capability to perform, all necessary operation and
+maintenance arrangements for the Facility.
+
+2.4 WAIVER OF CONDITIONS PRECEDENT
+
+Any Condition Precedent may be waived in whole or in part by written
+agreement of the Parties. Such waiver shall not prejudice any other right or
+remedy of the waiving Party under this Agreement.
+
+2.5 COMMERCIAL OPERATION DATE
+
+The Facility shall be deemed to have achieved Commercial Operation when the
+following conditions have been satisfied:
+
+(a) The Facility has been constructed and commissioned in accordance with
+the Technical Specifications set forth in Schedule 1;
+
+(b) The Facility has successfully completed all Testing required under
+Schedule 1, as certified by the Independent Engineer;
+
+(c) The Revenue Meters have been installed, tested, and calibrated in
+accordance with Article 5;
+
+(d) All interconnection facilities have been completed and energized, and
+the Facility is connected to the Grid at the Delivery Point;
+
+(e) The Seller has obtained all governmental approvals, permits, and licenses
+required for the commercial operation of the Facility;
+
+(f) The Independent Engineer has issued a certificate confirming that the
+Facility has achieved a Capacity of not less than ninety-five percent (95%)
+of the Contracted Capacity; and
+
+(g) The Facility has operated continuously for a period of not less than
+seventy-two (72) hours at a minimum of eighty percent (80%) of the
+Contracted Capacity during daylight hours.
+
+
+================================================================================
+                 ARTICLE 3: SALE AND PURCHASE OF ENERGY
+================================================================================
+
+3.1 OBLIGATION TO SELL AND PURCHASE
+
+(a) Subject to the terms and conditions of this Agreement, the Seller shall
+sell and deliver, and the Buyer shall purchase and accept, all Net Electrical
+Output generated by the Facility and delivered to the Delivery Point during
+the Term.
+
+(b) The Buyer shall be obligated to purchase one hundred percent (100%) of
+the Net Electrical Output delivered by the Seller to the Delivery Point,
+subject only to Curtailment in accordance with Article 7 and Force Majeure
+events.
+
+3.2 CONTRACTED CAPACITY
+
+The Contracted Capacity of the Facility shall be two hundred and fifty
+megawatts (250 MW AC). The Seller shall not increase the Contracted Capacity
+of the Facility without the prior written consent of the Buyer.
+
+3.3 MINIMUM ANNUAL DELIVERY
+
+(a) The Seller shall use commercially reasonable efforts to generate and
+deliver to the Delivery Point in each Contract Year a Net Electrical Output
+of not less than four hundred and seventy-five gigawatt-hours (475 GWh) (the
+"Minimum Annual Delivery"), subject to adjustment for Degradation as provided
+in Schedule 1.
+
+(b) For the avoidance of doubt, the Minimum Annual Delivery shall be reduced
+proportionally for any partial Contract Year and shall be adjusted downward
+for: (i) periods of Compensable Curtailment; (ii) Force Majeure events;
+(iii) Scheduled Maintenance approved by the Buyer; and (iv) any other
+events expressly excused under this Agreement.
+
+3.4 SHAPE OF DELIVERY
+
+The Seller acknowledges that the Facility's energy output will be
+intermittent and variable in nature, dependent upon the Solar Resource at
+the Site. The Buyer shall accept the Net Electrical Output in whatever
+temporal pattern it is naturally produced by the Facility, and there shall
+be no obligation on the Seller to deliver energy in any particular hourly,
+daily, weekly, or seasonal profile or shape.
+
+3.5 EXCLUSIVITY
+
+During the Term, the Seller shall not sell, deliver, or commit to sell or
+deliver the Net Electrical Output or any portion thereof to any Person other
+than the Buyer, except with the prior written consent of the Buyer or as
+otherwise expressly permitted under this Agreement.
+
+
+================================================================================
+               ARTICLE 4: TARIFF AND PAYMENT
+================================================================================
+
+4.1 BASE TARIFF
+
+(a) The Buyer shall pay to the Seller, for each MWh of Net Electrical Output
+delivered at the Delivery Point and recorded by the Revenue Meters, the Base
+Tariff, which for Contract Years 1 through 5 shall be equal to seventeen
+United States Dollars and eighty-six cents per megawatt-hour (USD 17.86/MWh),
+equivalent to one point seven eight six United States cents per kilowatt-hour
+(USD 0.01786/kWh).
+
+(b) This Base Tariff represents the levelized cost-of-energy bid submitted
+by the Seller and accepted by the Buyer in the competitive tender process
+and reflects all costs of developing, financing, constructing, owning,
+operating, maintaining, and decommissioning the Facility over the Term.
+
+4.2 TARIFF ESCALATION
+
+(a) Commencing from Contract Year 6 and for each Contract Year thereafter
+during the Term, the Base Tariff shall be escalated annually at a fixed rate
+of two percent (2%) per annum, compounded annually (the "Escalation Rate").
+
+(b) The escalated tariff for any Contract Year n (where n > 5) shall be
+calculated as follows:
+
+    Tariff(n) = Base Tariff x (1 + 0.02)^(n-5)
+
+(c) The year-by-year tariff schedule is set forth in Schedule 4 attached
+hereto.
+
+4.3 INVOICING
+
+(a) Within ten (10) Business Days after the end of each Billing Period, the
+Seller shall submit to the Buyer a monthly invoice (each, an "Invoice")
+specifying:
+    (i) the Billing Period to which the Invoice relates;
+    (ii) the total Net Electrical Output delivered to the Delivery Point
+         during the Billing Period, as recorded by the Revenue Meters;
+    (iii) the applicable tariff rate for the relevant Contract Year;
+    (iv) the total amount payable by the Buyer for such Billing Period;
+    (v) any adjustments for Deemed Generation, Curtailment Energy, or
+         metering corrections;
+    (vi) any amounts previously disputed and subsequently resolved;
+    (vii) any Liquidated Damages payable or creditable; and
+    (viii) the net amount payable.
+
+(b) Each Invoice shall be accompanied by:
+    (i) Revenue Meter data in electronic format;
+    (ii) meteorological data (irradiance, ambient temperature, wind speed)
+         from the Facility's weather stations;
+    (iii) availability reports;
+    (iv) Curtailment reports, if applicable; and
+    (v) such other supporting documentation as reasonably requested by the
+         Buyer.
+
+4.4 PAYMENT
+
+(a) The Buyer shall pay each Invoice within thirty (30) days after receipt
+of a complete and properly rendered Invoice (the "Payment Due Date").
+Payments shall be made by wire transfer of immediately available funds in
+United States Dollars to the Seller's designated bank account as notified
+by the Seller in writing.
+
+(b) If the Buyer disputes any amount in an Invoice in good faith, the Buyer
+shall pay the undisputed portion of the Invoice on or before the Payment Due
+Date and shall notify the Seller in writing of the disputed amount and the
+basis for the dispute within fifteen (15) Business Days of receipt of the
+Invoice.
+
+(c) Any disputed amounts that are subsequently resolved in favor of the
+Seller shall bear interest at the Default Interest Rate from the original
+Payment Due Date until the date of actual payment.
+
+4.5 LATE PAYMENT INTEREST
+
+If the Buyer fails to pay any undisputed amount on or before the Payment
+Due Date, the unpaid amount shall bear interest from the Payment Due Date
+until the date of actual payment at the Default Interest Rate (SOFR plus
+two percent (2%) per annum), calculated on a daily compounding basis. Late
+payment interest shall be payable in addition to, and not in substitution
+for, any other right or remedy of the Seller under this Agreement or at
+law.
+
+4.6 TAXES
+
+(a) The Base Tariff is exclusive of any value added tax ("VAT") or similar
+indirect tax that may be imposed by any Governmental Authority on the sale
+and purchase of electrical energy. Any such VAT or similar tax shall be added
+to the Invoice and paid by the Buyer.
+
+(b) Each Party shall be responsible for its own income taxes, corporate
+taxes, and similar direct taxes arising from or in connection with this
+Agreement.
+
+(c) Any withholding taxes required to be deducted from payments under this
+Agreement shall be borne by the paying Party unless otherwise required by
+Applicable Law, in which case the paying Party shall gross up the payment
+such that the receiving Party receives the full amount that would have been
+received absent such withholding.
+
+
+================================================================================
+               ARTICLE 5: METERING AND SETTLEMENT
+================================================================================
+
+5.1 REVENUE METERS
+
+(a) The Seller shall install, own, and maintain a primary set of revenue-
+grade energy meters (the "Revenue Meters") at the Delivery Point for the
+purpose of measuring the Net Electrical Output delivered by the Facility
+to the Buyer's network.
+
+(b) The Revenue Meters shall comply with IEC 62053-22 (Class 0.2S accuracy)
+or equivalent standard, and shall measure active energy (kWh), reactive
+energy (kVArh), power factor, voltage, and current at fifteen (15) minute
+intervals.
+
+(c) The Buyer shall have the right, at its own cost, to install a set of
+check meters (the "Check Meters") at or near the Delivery Point. The Check
+Meters shall be used for verification purposes only and shall not be used
+for billing unless the Revenue Meters are found to be inaccurate.
+
+5.2 METER READING AND DATA
+
+(a) The Revenue Meters shall be equipped with automated data logging and
+remote communication capabilities, allowing both Parties to access real-time
+and historical metering data.
+
+(b) The Seller shall provide the Buyer with electronic access to all Revenue
+Meter data on a continuous, real-time basis through a secure data link.
+
+(c) Monthly meter readings shall be taken on the last day of each Billing
+Period (or the next Business Day if the last day falls on a non-Business Day)
+and shall be used as the basis for invoicing.
+
+5.3 METER TESTING AND CALIBRATION
+
+(a) The Revenue Meters shall be tested and calibrated at least once every
+twelve (12) months, or more frequently if requested by either Party, by an
+independent, accredited testing laboratory at the Seller's cost.
+
+(b) If any test reveals that a Revenue Meter has an error exceeding plus or
+minus 0.5%, the Seller shall promptly recalibrate or replace the meter at
+its own cost, and the Parties shall agree on an adjustment to the metered
+data for the period from the last satisfactory test to the date of
+correction.
+
+(c) If the Revenue Meters fail or cease to register, the Parties shall use
+the Check Meter data, and in the absence of Check Meter data, shall estimate
+the Net Electrical Output based on the Facility's generation profile during
+comparable periods, meteorological data, and other relevant factors.
+
+5.4 METER DISPUTES
+
+Any dispute regarding metering data, meter accuracy, or adjustments to
+metered data shall be resolved in accordance with the dispute resolution
+procedures set forth in Article 16.
+
+
+================================================================================
+               ARTICLE 6: PERFORMANCE GUARANTEES
+================================================================================
+
+6.1 AVAILABILITY GUARANTEE
+
+(a) The Seller guarantees that the Facility shall achieve an Availability of
+not less than ninety-eight percent (98%) in each Contract Year (the
+"Guaranteed Availability").
+
+(b) If the Facility's Availability in any Contract Year falls below the
+Guaranteed Availability, the Seller shall pay to the Buyer Liquidated
+Damages in an amount equal to: (i) the product of (A) the shortfall
+in Availability (expressed as a percentage) multiplied by (B) the Annual
+Contract Quantity for such Contract Year multiplied by (C) the applicable
+Base Tariff for such Contract Year.
+
+(c) For the avoidance of doubt, Excused Hours shall be excluded from the
+calculation of Availability.
+
+6.2 PERFORMANCE RATIO GUARANTEE
+
+(a) The Seller guarantees that the Performance Ratio of the Facility, as
+measured and calculated in accordance with IEC 61724, shall be not less than
+eighty percent (80%) over each Contract Year (the "Performance Ratio
+Guarantee"), after adjustment for Degradation.
+
+(b) If the Facility's Performance Ratio in any Contract Year falls below the
+Performance Ratio Guarantee, the Seller shall pay to the Buyer Liquidated
+Damages equal to: (i) fifty United States Dollars per megawatt-hour
+(USD 50/MWh) multiplied by the shortfall in energy output (in MWh)
+attributable to the Performance Ratio deficiency, where such shortfall
+shall be calculated as the difference between the actual energy output and
+the energy output that would have been achieved had the Performance Ratio
+been equal to the Performance Ratio Guarantee, given the actual Solar
+Resource conditions during such Contract Year.
+
+6.3 CAP ON LIQUIDATED DAMAGES
+
+The aggregate Liquidated Damages payable by the Seller under Sections 6.1
+and 6.2 in any Contract Year shall not exceed fifteen percent (15%) of the
+Seller's total tariff revenue for such Contract Year (the "LD Cap"). The
+Parties agree and acknowledge that the Liquidated Damages amounts specified
+herein represent a reasonable pre-estimate of the Buyer's likely loss and
+are not penalties.
+
+6.4 MEASUREMENT PERIOD
+
+Performance shall be assessed annually, based on each Contract Year. The
+Seller shall provide the Buyer with quarterly performance reports indicating
+the Facility's Availability, Performance Ratio, energy output, and
+comparison with expectations.
+
+6.5 SCHEDULED MAINTENANCE
+
+(a) Not less than sixty (60) days prior to the start of each Contract Year,
+the Seller shall submit to the Buyer a proposed annual maintenance schedule
+identifying all planned maintenance activities and their expected duration.
+
+(b) The Buyer shall review the proposed schedule and may request reasonable
+modifications to minimize the impact on energy delivery, and the Seller
+shall use commercially reasonable efforts to accommodate such requests.
+
+(c) Scheduled Maintenance shall be planned during periods of lower solar
+irradiance (where commercially feasible) and shall not exceed a cumulative
+total of one hundred and seventy-five (175) hours per Contract Year without
+the Buyer's prior written consent.
+
+
+================================================================================
+               ARTICLE 7: CURTAILMENT
+================================================================================
+
+7.1 TYPES OF CURTAILMENT
+
+(a) Grid Curtailment: Any Curtailment directed by the Grid Operator or the
+Buyer due to grid congestion, grid security concerns, system balancing
+requirements, or Emergency conditions ("Grid Curtailment"). Grid Curtailment
+shall be a Compensable Curtailment.
+
+(b) Economic Curtailment: Any Curtailment directed by the Buyer for economic
+reasons, including without limitation merit-order dispatch decisions or to
+manage oversupply conditions ("Economic Curtailment"). Economic Curtailment
+shall be a Compensable Curtailment.
+
+(c) Force Majeure Curtailment: Any Curtailment resulting from a Force Majeure
+Event ("Force Majeure Curtailment"). Force Majeure Curtailment shall not be
+a Compensable Curtailment, and neither Party shall be liable for any loss
+or damage arising therefrom, subject to Article 11.
+
+7.2 DEEMED GENERATION CALCULATION
+
+For purposes of calculating compensation for Compensable Curtailment, the
+Deemed Generation during the curtailed period shall be calculated as follows:
+
+Deemed Generation (MWh) = Facility Capacity (MW) x PR x GHI_actual /
+GHI_STC x Hours of Curtailment x (1 - Degradation Factor)
+
+Where:
+- PR = the average Performance Ratio of the Facility during the most recent
+  twelve (12) month period;
+- GHI_actual = the actual Global Horizontal Irradiance measured at the
+  Facility's weather stations during the curtailed period;
+- GHI_STC = 1,000 W/m2 (Standard Test Conditions);
+- Degradation Factor = the cumulative degradation factor applicable to the
+  relevant Contract Year as specified in Schedule 1.
+
+7.3 COMPENSATION FOR GRID CURTAILMENT
+
+For Grid Curtailment, the Buyer shall pay the Seller an amount equal to
+ninety percent (90%) of the product of the Deemed Generation and the
+applicable Base Tariff for the relevant Contract Year.
+
+7.4 COMPENSATION FOR ECONOMIC CURTAILMENT
+
+For Economic Curtailment, the Buyer shall pay the Seller an amount equal to
+one hundred percent (100%) of the product of the Deemed Generation and the
+applicable Base Tariff for the relevant Contract Year.
+
+7.5 CURTAILMENT LIMITS
+
+(a) The aggregate Compensable Curtailment in any Contract Year shall not
+exceed five hundred (500) hours. If the aggregate Compensable Curtailment
+exceeds five hundred (500) hours, the Seller shall have the right to
+terminate this Agreement upon one hundred eighty (180) days' written notice,
+subject to payment of the Termination Payment by the Buyer.
+
+(b) The Seller shall comply with all Dispatch Instructions issued by the
+Grid Operator or the Buyer promptly and in accordance with the Grid Code,
+regardless of whether such Dispatch Instructions constitute Compensable
+Curtailment or Force Majeure Curtailment.
+
+
+================================================================================
+               ARTICLE 8: TECHNICAL SPECIFICATIONS
+================================================================================
+
+8.1 GENERAL
+
+The Facility shall be designed, engineered, constructed, and commissioned
+in accordance with the Technical Specifications set forth in Schedule 1 and
+all Applicable Laws, the Grid Code, and Good Utility Practice.
+
+8.2 SOLAR MODULES
+
+The Facility shall utilize monocrystalline bifacial solar photovoltaic
+modules with the following minimum specifications:
+(a) Module rated power: not less than 625 Wp per module;
+(b) Module efficiency: not less than 21.5% under Standard Test Conditions;
+(c) Bifaciality factor: not less than 70%;
+(d) Temperature coefficient of power: not worse than -0.34%/degC;
+(e) Module warranty: 12 years product warranty, 30 years linear power output
+    warranty (minimum 87.4% at year 25);
+(f) Certification: IEC 61215, IEC 61730, UL 61730.
+
+8.3 INVERTERS
+
+The Facility shall utilize string inverters with the following minimum
+specifications:
+(a) Rated AC output power: 3.2 MW per inverter;
+(b) Maximum efficiency: not less than 99.0%;
+(c) Euro-weighted efficiency: not less than 98.5%;
+(d) Power factor control range: 0.9 leading to 0.9 lagging;
+(e) Grid support functions: frequency response, voltage regulation, reactive
+    power control, fault ride-through capability;
+(f) Communication: MODBUS TCP/IP, IEC 61850 compatible.
+
+8.4 TRACKING SYSTEM
+
+The Facility shall utilize single-axis horizontal tracking systems with the
+following minimum specifications:
+(a) Tracking range: +/- 60 degrees from horizontal;
+(b) Tracking algorithm: astronomical with backtracking and terrain-following;
+(c) Wind stow position: 0 degrees (horizontal) at wind speeds exceeding
+    22 m/s;
+(d) Motor type: brushless DC or AC servo;
+(e) Design wind speed: 150 km/h (3-second gust).
+
+8.5 ELECTRICAL COLLECTION AND TRANSMISSION
+
+(a) The Facility shall have a 33 kV medium-voltage collection system
+connecting the inverter stations to the main step-up substation.
+(b) The step-up substation shall include two (2) 33/132 kV power
+transformers, each rated at not less than 140 MVA (ONAN/ONAF), with
+appropriate switchgear, protection, and control systems.
+(c) The 132 kV connection from the step-up substation to the Delivery Point
+at the Al Dhafra 132 kV Substation shall be via underground cable or
+overhead line as determined by the Grid Operator and approved by the Buyer.
+
+
+================================================================================
+               ARTICLE 9: INTERCONNECTION
+================================================================================
+
+9.1 DELIVERY POINT
+
+The Delivery Point shall be at the 132 kV bus of the Al Dhafra 132 kV
+Substation owned and operated by TRANSCO, as more particularly described
+in the Grid Connection Agreement.
+
+9.2 SELLER'S INTERCONNECTION OBLIGATIONS
+
+The Seller shall, at its own cost:
+(a) Design, engineer, procure, construct, and commission all Electrical
+Interconnection Facilities from the Facility's step-up substation to the
+Delivery Point;
+(b) Obtain all necessary approvals and permits for the interconnection
+works;
+(c) Comply with all requirements of the Grid Code relating to the
+connection of generating facilities to the transmission network;
+(d) Install and commission all protection, control, and metering equipment
+required at the Delivery Point;
+(e) Provide reactive power compensation sufficient to maintain a power
+factor at the Delivery Point within the range of 0.95 leading to 0.95
+lagging, as directed by the Grid Operator.
+
+9.3 GRID CODE COMPLIANCE
+
+(a) The Facility shall comply with all requirements of the Grid Code,
+including without limitation:
+    (i) frequency response: the Facility shall be capable of reducing output
+        at a rate of at least 10% of Contracted Capacity per minute in
+        response to over-frequency events;
+    (ii) fault ride-through: the Facility shall remain connected and
+         continue to operate through voltage dips to 0% of nominal voltage
+         for up to 150 milliseconds and voltage recovery as specified in
+         the Grid Code;
+    (iii) power quality: the Facility shall comply with IEC 61000 standards
+          for harmonic distortion, voltage flicker, and other power quality
+          parameters; and
+    (iv) communication: the Facility shall maintain real-time SCADA
+         communication with the Grid Operator's control center.
+
+
+================================================================================
+               ARTICLE 10: INSURANCE
+================================================================================
+
+10.1 REQUIRED INSURANCE
+
+The Seller shall obtain and maintain, at its own cost, the following
+insurance coverage during the periods specified:
+
+(a) Construction All Risks Insurance: From the commencement of construction
+until the Commercial Operation Date, covering physical loss or damage to the
+Facility during construction, including testing and commissioning, for an
+insured amount not less than the full replacement value of the Facility.
+
+(b) Operational All Risks Insurance: From the Commercial Operation Date
+throughout the Operating Period, covering physical loss or damage to the
+Facility during operation, for an insured amount not less than the full
+replacement value of the Facility.
+
+(c) Third Party Liability Insurance: For the entire Term, covering the
+Seller's legal liability for bodily injury, death, or property damage to
+third parties arising out of or in connection with the construction, operation,
+or maintenance of the Facility, with a minimum limit of one hundred million
+United States Dollars (USD 100,000,000) per occurrence and in the aggregate.
+
+(d) Business Interruption Insurance: From the Commercial Operation Date
+throughout the Operating Period, covering loss of revenue resulting from
+physical loss or damage to the Facility, for an indemnity period of not less
+than eighteen (18) months and a sum insured not less than eighteen (18) months
+of projected tariff revenue.
+
+(e) Employer's Liability and Workers' Compensation Insurance: As required by
+Applicable Law.
+
+(f) Professional Indemnity Insurance: For the design and engineering period,
+with a minimum limit of USD 25,000,000.
+
+10.2 INSURANCE REQUIREMENTS
+
+(a) All insurance policies shall be underwritten by insurers with a minimum
+credit rating of "A-" from Standard & Poor's or "A3" from Moody's.
+(b) The Buyer shall be named as an additional insured on the Third Party
+Liability Insurance and as a loss payee on the Operational All Risks and
+Business Interruption Insurance.
+(c) The Seller shall provide the Buyer with certificates of insurance and
+copies of all insurance policies within thirty (30) days of placement or
+renewal.
+(d) The Seller shall not cancel, materially modify, or allow to lapse any
+required insurance policy without at least sixty (60) days' prior written
+notice to the Buyer.
+
+
+================================================================================
+               ARTICLE 11: FORCE MAJEURE
+================================================================================
+
+11.1 DEFINITION
+
+"Force Majeure" or "Force Majeure Event" means any event or circumstance, or
+combination of events or circumstances, that: (a) is beyond the reasonable
+control of the affected Party; (b) could not have been prevented or avoided
+by the affected Party through the exercise of reasonable diligence and Good
+Utility Practice; and (c) directly and materially prevents or delays the
+affected Party from performing one or more of its material obligations under
+this Agreement.
+
+11.2 FORCE MAJEURE EVENTS
+
+Without limiting the generality of Section 11.1, Force Majeure Events shall
+include the following, subject to the conditions set forth in Section 11.1:
+
+(a) Natural Force Majeure Events:
+    (i) earthquake, tsunami, volcanic eruption, landslide, or subsidence;
+    (ii) flood, storm, cyclone, hurricane, or typhoon of an intensity
+         exceeding a 1-in-50-year recurrence interval;
+    (iii) sandstorm or dust storm persisting for more than seventy-two (72)
+          consecutive hours at the Site, as measured by the Facility's
+          weather monitoring equipment;
+    (iv) lightning strike causing direct physical damage to the Facility;
+    (v) epidemic, pandemic, or plague declared by the World Health
+         Organization or the UAE Ministry of Health;
+    (vi) wildfire or brush fire threatening or damaging the Facility or
+         restricting access thereto.
+
+(b) Political Force Majeure Events:
+    (i) war (declared or undeclared), invasion, armed conflict, blockade,
+        embargo, or military action;
+    (ii) revolution, insurrection, civil unrest, terrorism, or sabotage;
+    (iii) act of any Governmental Authority, including nationalization,
+          expropriation, confiscation, or sequestration of the Facility or
+          any material assets of the Seller;
+    (iv) imposition of economic sanctions or trade restrictions by the
+         United Nations, the European Union, the United States, or the UAE;
+    (v) nuclear, biological, or chemical contamination (unless caused by
+        the affected Party).
+
+(c) Grid Force Majeure Events:
+    (i) failure or collapse of the electrical grid not caused by the Seller;
+    (ii) disconnection of the Facility from the grid directed by the Grid
+         Operator due to grid security concerns not attributable to the
+         Seller.
+
+11.3 EXCLUSIONS FROM FORCE MAJEURE
+
+The following shall not constitute Force Majeure Events:
+(a) any event or circumstance that could have been prevented or mitigated by
+    the affected Party through the exercise of Good Utility Practice;
+(b) normal weather conditions, including seasonal variations in Solar Resource;
+(c) equipment failures or breakdowns attributable to defective design,
+    manufacturing defects, or inadequate maintenance;
+(d) economic hardship, including changes in market prices, currency
+    fluctuations, loss of profitability, or inability to obtain financing;
+(e) the failure of any subcontractor, supplier, or vendor of the affected
+    Party to perform, unless such failure is itself caused by a Force
+    Majeure Event;
+(f) labor disputes, strikes, or lockouts limited to the Seller's workforce
+    or the workforce of its contractors, unless such labor action is part of
+    a general industry-wide or nationwide labor action.
+
+11.4 FORCE MAJEURE NOTICE AND OBLIGATIONS
+
+(a) The affected Party shall give written notice to the other Party within
+five (5) Business Days of becoming aware of a Force Majeure Event, specifying
+the nature, expected duration, and likely effect of the Force Majeure Event
+on the affected Party's ability to perform its obligations.
+
+(b) The affected Party shall use all reasonable efforts to mitigate the
+effects of the Force Majeure Event and to resume performance of its
+obligations as soon as reasonably practicable.
+
+(c) The affected Party shall provide regular updates (not less than weekly)
+to the other Party on the status of the Force Majeure Event and the
+measures being taken to mitigate its effects.
+
+11.5 CONSEQUENCES OF FORCE MAJEURE
+
+(a) Neither Party shall be liable for any failure or delay in performing any
+of its obligations under this Agreement to the extent that such failure or
+delay is caused by a Force Majeure Event.
+
+(b) If a Force Majeure Event prevents or delays the achievement of the
+Commercial Operation Date, the Long-Stop Date shall be extended day-for-day
+for the duration of the Force Majeure Event.
+
+(c) If a Force Majeure Event continues for a period exceeding three hundred
+and sixty-five (365) consecutive days, either Party may terminate this
+Agreement upon sixty (60) days' written notice, subject to payment of the
+Termination Payment as specified in Article 13.5.
+
+
+================================================================================
+               ARTICLE 12: CHANGE OF LAW
+================================================================================
+
+12.1 CHANGE OF LAW RISK ALLOCATION
+
+(a) The Buyer shall bear the risk of any Change of Law that results in an
+increase in the Seller's costs of developing, financing, constructing,
+owning, operating, or maintaining the Facility, or that reduces the Seller's
+revenues under this Agreement, where such increase in costs or reduction in
+revenues exceeds, individually or in the aggregate, five percent (5%) of
+the Seller's annual tariff revenue in any Contract Year.
+
+(b) The Seller shall bear the risk of any Change of Law that results in a
+decrease in the Seller's costs or an increase in the Seller's revenues.
+
+12.2 ADJUSTMENT MECHANISM
+
+(a) If a Change of Law occurs that triggers the risk allocation mechanism
+in Section 12.1(a), the Seller shall promptly notify the Buyer and the
+Parties shall negotiate in good faith to agree on an adjustment to the Base
+Tariff or other commercial terms of this Agreement to restore the Seller to
+the economic position it would have been in but for the Change of Law.
+
+(b) If the Parties are unable to agree on an adjustment within ninety (90)
+days of the Seller's notice, the matter shall be referred to an independent
+expert for determination, and the expert's determination shall be final and
+binding on the Parties.
+
+
+================================================================================
+               ARTICLE 13: TERMINATION
+================================================================================
+
+13.1 SELLER DEFAULTS
+
+Each of the following shall constitute a "Seller Default":
+(a) the Seller fails to achieve Commercial Operation by the Long-Stop Date
+    (as may be extended);
+(b) the Seller abandons the Facility for a period of sixty (60) consecutive
+    days;
+(c) the Seller fails to deliver Net Electrical Output to the Delivery Point
+    for a continuous period of one hundred and eighty (180) days (other than
+    due to Force Majeure, Compensable Curtailment, or approved Scheduled
+    Maintenance);
+(d) the Seller materially breaches any material provision of this Agreement
+    and fails to cure such breach within the Cure Period;
+(e) the Seller becomes insolvent, enters into bankruptcy, administration,
+    or liquidation proceedings, or makes an assignment for the benefit of
+    creditors;
+(f) any representation or warranty made by the Seller in this Agreement
+    proves to be materially false or misleading when made;
+(g) the Seller fails to maintain the insurance required under Article 10
+    and does not remedy such failure within thirty (30) days of notice.
+
+13.2 BUYER DEFAULTS
+
+Each of the following shall constitute a "Buyer Default":
+(a) the Buyer fails to pay any undisputed amount due under this Agreement
+    within sixty (60) days after the Payment Due Date;
+(b) the Buyer materially breaches any material provision of this Agreement
+    and fails to cure such breach within the Cure Period;
+(c) the Buyer becomes insolvent, enters into bankruptcy, administration,
+    or liquidation proceedings;
+(d) the Buyer's electricity distribution license is revoked or terminated;
+(e) any representation or warranty made by the Buyer proves to be materially
+    false or misleading when made.
+
+13.3 TERMINATION RIGHTS
+
+(a) Upon the occurrence of a Seller Default, the Buyer may terminate this
+Agreement by giving not less than sixty (60) days' written notice to the
+Seller, provided that the Seller has been given the opportunity to cure such
+default within the Cure Period specified in Section 13.4.
+
+(b) Upon the occurrence of a Buyer Default, the Seller may terminate this
+Agreement by giving not less than sixty (60) days' written notice to the
+Buyer, provided that the Buyer has been given the opportunity to cure such
+default within the Cure Period specified in Section 13.4.
+
+13.4 CURE PERIOD
+
+The Cure Period for any default (other than insolvency-related defaults,
+for which no Cure Period applies) shall be sixty (60) days from the date
+of receipt of written notice specifying the default, provided that if the
+defaulting Party has commenced and is diligently pursuing a cure within
+such sixty (60) day period, the Cure Period shall be extended to a maximum
+of one hundred and twenty (120) days.
+
+13.5 TERMINATION PAYMENTS
+
+(a) Upon termination for Seller Default, the Seller shall pay to the Buyer
+a Termination Payment equal to the aggregate of:
+    (i) the cost to the Buyer of procuring replacement capacity and energy
+        from alternative sources for the unexpired portion of the Term;
+    (ii) any outstanding Liquidated Damages; and
+    (iii) the Buyer's reasonable legal and administrative costs.
+
+(b) Upon termination for Buyer Default, the Buyer shall pay to the Seller a
+Termination Payment equal to the aggregate of:
+    (i) the net present value (discounted at SOFR plus 1%) of the Seller's
+        expected tariff revenue for the unexpired portion of the Term, less
+        the Seller's avoided costs;
+    (ii) the outstanding balance of the Seller's project financing; and
+    (iii) the Seller's reasonable legal and administrative costs.
+
+13.6 TRANSFER OF ASSETS
+
+Upon termination of this Agreement for any reason, the Buyer shall have the
+option (but not the obligation) to acquire the Facility at a price equal to
+the fair market value of the Facility as determined by an independent valuer
+agreed upon by the Parties.
+
+
+================================================================================
+               ARTICLE 14: CREDIT SUPPORT
+================================================================================
+
+14.1 LETTER OF CREDIT
+
+(a) The Seller shall deliver to the Buyer, on or before the Closing Date,
+an irrevocable standby letter of credit (the "Letter of Credit" or "LC") in
+the amount of twenty-five million United States Dollars (USD 25,000,000),
+issued by a bank with a minimum long-term credit rating of "A" from Standard
+& Poor's or "A2" from Moody's (the "Issuing Bank").
+
+(b) The Letter of Credit shall be in the form set forth in Schedule 5 and
+shall be maintained by the Seller throughout the Term.
+
+(c) The Buyer shall have the right to draw upon the Letter of Credit in the
+event of: (i) a Seller Default that is not cured within the applicable Cure
+Period; (ii) the Seller's failure to pay any undisputed Liquidated Damages
+within thirty (30) days of demand; or (iii) the Seller's failure to renew
+or replace the Letter of Credit at least thirty (30) days prior to its
+expiry.
+
+14.2 RENEWAL OF LETTER OF CREDIT
+
+The Seller shall ensure that the Letter of Credit is renewed or replaced not
+less than thirty (30) days prior to its expiry date. If the Seller fails to
+renew or replace the Letter of Credit, the Buyer shall have the right to
+draw the full amount of the Letter of Credit and hold such amount as cash
+security.
+
+14.3 PARENT COMPANY GUARANTEE
+
+(a) The Seller shall procure and deliver to the Buyer, on or before the
+Closing Date, an unconditional and irrevocable guarantee from TAQA (Abu Dhabi
+National Energy Company PJSC) (the "Parent Company Guarantee") guaranteeing
+the full and timely performance by the Seller of all of its obligations
+under this Agreement.
+
+(b) The Parent Company Guarantee shall be in the form set forth in Schedule 5
+and shall remain in full force and effect throughout the Term and for a
+period of twelve (12) months thereafter.
+
+
+================================================================================
+               ARTICLE 15: ASSIGNMENT AND TRANSFER
+================================================================================
+
+15.1 RESTRICTION ON ASSIGNMENT
+
+Neither Party may assign, transfer, novate, or otherwise dispose of its
+rights or obligations under this Agreement, in whole or in part, without the
+prior written consent of the other Party, which consent shall not be
+unreasonably withheld, conditioned, or delayed.
+
+15.2 PERMITTED TRANSFERS
+
+Notwithstanding Section 15.1, the following transfers shall be deemed
+Permitted Transfers and shall not require the consent of the other Party
+(provided that written notice is given within thirty (30) days):
+
+(a) a transfer by the Seller to an Affiliate of the Seller, provided that
+    the transferee assumes all of the Seller's obligations under this
+    Agreement and the Seller remains jointly and severally liable for such
+    obligations (or the Parent Company Guarantee remains in full force
+    and effect with respect to such transferee);
+
+(b) a collateral assignment by the Seller of its rights (but not obligations)
+    under this Agreement to the Lenders as security for the Seller's
+    financing arrangements, subject to the terms of any direct agreement
+    or consent agreement among the Parties and the Lenders;
+
+(c) a transfer by the Buyer to any successor entity resulting from a
+    reorganization, merger, or consolidation of the Buyer mandated by or
+    approved by the Department of Energy of Abu Dhabi.
+
+15.3 LENDER CONSENT RIGHTS
+
+The Buyer agrees to enter into a direct agreement or consent agreement with
+the Lenders, in form and substance reasonably acceptable to the Buyer and
+the Lenders, providing for customary lender protections, including without
+limitation: (a) notice and cure rights; (b) step-in rights upon a Seller
+Default; and (c) recognition of a Lender-appointed substitute seller.
+
+
+================================================================================
+               ARTICLE 16: DISPUTE RESOLUTION
+================================================================================
+
+16.1 AMICABLE RESOLUTION
+
+The Parties shall first attempt to resolve any dispute, controversy, or
+claim arising out of or relating to this Agreement, or the breach,
+termination, or invalidity thereof, through good faith consultation and
+negotiation between senior representatives of the Parties. Each Party shall
+appoint a senior representative within ten (10) Business Days of receipt of
+a written notice of dispute, and the senior representatives shall meet (in
+person or by videoconference) within twenty (20) Business Days thereafter
+to attempt to resolve the dispute.
+
+16.2 ARBITRATION
+
+If the dispute is not resolved through amicable resolution within sixty (60)
+days of the initial written notice of dispute (or such longer period as the
+Parties may agree in writing), the dispute shall be finally and exclusively
+settled by arbitration administered by the Abu Dhabi Commercial Conciliation
+and Arbitration Centre ("ADCCAC") in accordance with the ADCCAC Arbitration
+Rules in effect at the time of the arbitration.
+
+16.3 ARBITRATION PROCEDURES
+
+(a) The seat of arbitration shall be Abu Dhabi, United Arab Emirates.
+(b) The language of the arbitration shall be English.
+(c) The arbitral tribunal shall consist of three (3) arbitrators. Each Party
+    shall appoint one arbitrator, and the two Party-appointed arbitrators
+    shall appoint the presiding arbitrator. If any arbitrator is not
+    appointed within thirty (30) days, the appointing authority shall be
+    the Chairman of ADCCAC.
+(d) The arbitral award shall be final and binding on the Parties and shall
+    not be subject to appeal, except as required by mandatory provisions
+    of Applicable Law.
+(e) The Parties agree that the arbitral tribunal shall have the power to
+    award interim and conservatory measures, including injunctive relief.
+(f) Each Party shall bear its own costs of the arbitration, and the costs
+    of the arbitral tribunal and ADCCAC administrative fees shall be borne
+    equally by the Parties, unless the arbitral tribunal determines
+    otherwise.
+
+16.4 GOVERNING LAW
+
+This Agreement shall be governed by and construed in accordance with the
+laws of the Emirate of Abu Dhabi and, to the extent applicable, the federal
+laws of the United Arab Emirates.
+
+16.5 CONTINUED PERFORMANCE
+
+Pending the final resolution of any dispute, the Parties shall continue to
+perform their respective obligations under this Agreement to the extent not
+directly affected by the dispute.
+
+
+================================================================================
+               ARTICLE 17: INDEMNIFICATION
+================================================================================
+
+17.1 MUTUAL INDEMNITY
+
+Each Party (the "Indemnifying Party") shall indemnify, defend, and hold
+harmless the other Party and its Affiliates, directors, officers, employees,
+agents, and representatives (collectively, the "Indemnified Parties") from
+and against any and all claims, demands, actions, proceedings, losses,
+liabilities, damages, costs, and expenses (including reasonable attorneys'
+fees and costs) arising out of or in connection with:
+
+(a) any breach by the Indemnifying Party of its representations, warranties,
+    or obligations under this Agreement;
+(b) the negligence or willful misconduct of the Indemnifying Party or its
+    employees, agents, or contractors;
+(c) any violation of Applicable Law by the Indemnifying Party; and
+(d) any death, personal injury, or property damage caused by the
+    Indemnifying Party's operations or activities.
+
+17.2 EXCLUSION OF CONSEQUENTIAL DAMAGES
+
+NOTWITHSTANDING ANY OTHER PROVISION OF THIS AGREEMENT, NEITHER PARTY SHALL
+BE LIABLE TO THE OTHER PARTY FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, PUNITIVE, OR EXEMPLARY DAMAGES, INCLUDING WITHOUT LIMITATION
+LOST PROFITS, LOSS OF BUSINESS OPPORTUNITY, LOSS OF REVENUE, LOSS OF USE,
+OR DIMINUTION IN VALUE, ARISING OUT OF OR IN CONNECTION WITH THIS AGREEMENT,
+WHETHER BASED ON CONTRACT, TORT, STRICT LIABILITY, OR ANY OTHER THEORY,
+EVEN IF SUCH PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES;
+PROVIDED, HOWEVER, THAT THIS EXCLUSION SHALL NOT APPLY TO: (I) THE
+INDEMNIFICATION OBLIGATIONS SET FORTH IN SECTION 17.1; (II) A PARTY'S
+FRAUD, GROSS NEGLIGENCE, OR WILLFUL MISCONDUCT; OR (III) TERMINATION
+PAYMENTS PAYABLE UNDER ARTICLE 13.
+
+17.3 AGGREGATE CAP ON LIABILITY
+
+The aggregate liability of each Party under this Agreement (excluding
+liability for fraud, willful misconduct, indemnification obligations under
+Section 17.1, and Termination Payments) shall not exceed one hundred percent
+(100%) of the Seller's total annual tariff revenue under this Agreement,
+calculated as the product of the Annual Contract Quantity and the applicable
+Base Tariff for the relevant Contract Year.
+
+
+================================================================================
+               ARTICLE 18: CONFIDENTIALITY
+================================================================================
+
+18.1 CONFIDENTIAL INFORMATION
+
+"Confidential Information" means all information (whether written, oral,
+electronic, or in any other form) disclosed by one Party (the "Disclosing
+Party") to the other Party (the "Receiving Party") in connection with this
+Agreement, including without limitation the terms and conditions of this
+Agreement, financial information, business plans, technical data, trade
+secrets, know-how, and any other information designated as confidential.
+
+18.2 OBLIGATIONS
+
+The Receiving Party shall: (a) keep all Confidential Information strictly
+confidential; (b) not disclose Confidential Information to any third party
+without the prior written consent of the Disclosing Party; and (c) use
+Confidential Information solely for the purposes of performing its
+obligations and exercising its rights under this Agreement.
+
+18.3 EXCEPTIONS
+
+The obligations in Section 18.2 shall not apply to Confidential Information
+that: (a) is or becomes publicly available through no fault of the Receiving
+Party; (b) was in the Receiving Party's possession prior to disclosure by
+the Disclosing Party; (c) is independently developed by the Receiving Party
+without reference to the Confidential Information; (d) is received from a
+third party without restriction and without breach of any obligation of
+confidentiality; or (e) is required to be disclosed by Applicable Law, court
+order, or regulatory requirement, provided that the Receiving Party gives
+prompt written notice to the Disclosing Party and cooperates in seeking
+protective measures.
+
+18.4 PERMITTED DISCLOSURES
+
+The Receiving Party may disclose Confidential Information to:
+(a) its Affiliates, directors, officers, employees, agents, and advisors
+    who have a need to know such information for purposes related to this
+    Agreement and who are bound by confidentiality obligations no less
+    restrictive than those set forth herein;
+(b) the Lenders and their advisors, subject to customary confidentiality
+    undertakings;
+(c) any Governmental Authority, regulatory body, or tax authority having
+    jurisdiction over the Receiving Party, to the extent required by
+    Applicable Law or regulation; and
+(d) rating agencies, insurers, and reinsurers, subject to customary
+    confidentiality undertakings.
+
+18.5 SURVIVAL
+
+The confidentiality obligations set forth in this Article 18 shall survive
+the expiration or termination of this Agreement for a period of five (5)
+years.
+
+
+================================================================================
+               ARTICLE 19: REPRESENTATIONS AND WARRANTIES
+================================================================================
+
+19.1 SELLER'S REPRESENTATIONS AND WARRANTIES
+
+The Seller represents and warrants to the Buyer, as of the Execution Date
+and the Closing Date, that:
+
+(a) the Seller is a limited liability company duly organized, validly
+    existing, and in good standing under the laws of the Emirate of Abu
+    Dhabi;
+(b) the Seller has full power and authority to enter into and perform its
+    obligations under this Agreement;
+(c) this Agreement has been duly authorized, executed, and delivered by the
+    Seller and constitutes a legal, valid, and binding obligation of the
+    Seller, enforceable against the Seller in accordance with its terms;
+(d) the execution, delivery, and performance of this Agreement by the Seller
+    do not conflict with or result in a breach of any Applicable Law or any
+    agreement to which the Seller is a party;
+(e) there is no pending or threatened litigation, arbitration, or proceeding
+    that could reasonably be expected to have a Material Adverse Effect on
+    the Seller or its ability to perform its obligations under this
+    Agreement.
+
+19.2 BUYER'S REPRESENTATIONS AND WARRANTIES
+
+The Buyer represents and warrants to the Seller, as of the Execution Date
+and the Closing Date, that:
+
+(a) the Buyer is a public joint stock company duly organized, validly
+    existing, and in good standing under the laws of the Emirate of Abu
+    Dhabi;
+(b) the Buyer has full power and authority to enter into and perform its
+    obligations under this Agreement;
+(c) this Agreement has been duly authorized, executed, and delivered by the
+    Buyer and constitutes a legal, valid, and binding obligation of the
+    Buyer, enforceable against the Buyer in accordance with its terms;
+(d) the Buyer holds a valid electricity distribution license issued by the
+    Department of Energy of Abu Dhabi;
+(e) the Buyer's entering into this Agreement has been approved by all
+    necessary corporate and regulatory bodies.
+
+
+================================================================================
+               ARTICLE 20: MISCELLANEOUS PROVISIONS
+================================================================================
+
+20.1 NOTICES
+
+All notices required or permitted under this Agreement shall be in writing
+and shall be delivered by hand, registered mail, reputable international
+courier, or email (with confirmation of receipt) to the addresses specified
+in the Notices section of this Agreement. Any notice shall be deemed received
+on the Business Day following the date of delivery.
+
+20.2 ENTIRE AGREEMENT
+
+This Agreement (including all Schedules and Annexes hereto) constitutes the
+entire agreement between the Parties with respect to the subject matter
+hereof and supersedes all prior negotiations, representations, and
+agreements, whether written or oral.
+
+20.3 AMENDMENTS
+
+No amendment or modification of this Agreement shall be effective unless
+made in writing and signed by duly authorized representatives of both
+Parties.
+
+20.4 WAIVER
+
+No failure or delay by either Party in exercising any right, power, or
+remedy under this Agreement shall operate as a waiver thereof, nor shall
+any single or partial exercise of any right, power, or remedy preclude any
+other or further exercise of such right or any other right, power, or
+remedy.
+
+20.5 SEVERABILITY
+
+If any provision of this Agreement is held to be invalid, illegal, or
+unenforceable, the remaining provisions shall continue in full force and
+effect, and the Parties shall negotiate in good faith to replace the invalid
+provision with a valid provision that achieves, to the extent possible, the
+intended economic and legal effect of the invalid provision.
+
+20.6 COUNTERPARTS
+
+This Agreement may be executed in any number of counterparts, each of which
+shall be deemed an original, and all of which together shall constitute one
+and the same instrument.
+
+
+================================================================================
+               SCHEDULE 1: TECHNICAL SPECIFICATIONS
+================================================================================
+
+S1.1 FACILITY OVERVIEW
+
+Project Name: Al Dhafra 250 MW Solar PV Project
+Technology: Crystalline silicon photovoltaic
+Configuration: Fixed-tilt / Single-axis tracking (hybrid layout)
+Nominal Capacity: 250 MW AC / 312.5 MW DC (DC:AC ratio of 1.25)
+Number of Modules: Approximately 500,000 units
+Module Type: Monocrystalline bifacial PERC+
+Module Manufacturer: LONGi Green Energy Technology Co., Ltd. (or approved equal)
+Module Model: LONGi Hi-MO 7 (or equivalent)
+Module Rated Power: 625 Wp
+Module Dimensions: 2,278 mm x 1,134 mm x 35 mm
+Module Weight: 32.2 kg
+Module Efficiency: 22.5% (STC)
+Cell Type: n-type TOPCon monocrystalline silicon
+Bifaciality Factor: 80% (+/- 5%)
+Temperature Coefficient (Pmax): -0.29%/degC
+Maximum System Voltage: 1,500 VDC
+Connector Type: MC4 EVO2
+
+S1.2 INVERTER SPECIFICATIONS
+
+Inverter Type: Central / String hybrid (string inverters predominant)
+Inverter Manufacturer: Huawei Technologies Co., Ltd. (or approved equal)
+Inverter Model: SUN2000-330KTL-H1 (or equivalent)
+Number of Inverters: Approximately 78 units (3.2 MW string inverter stations)
+Inverter Rated Power: 3,200 kW AC per inverter station
+Maximum DC Input Power: 4,000 kW
+Maximum Efficiency: 99.03%
+Euro-Weighted Efficiency: 98.7%
+AC Output Voltage: 800 V, 3-phase
+Power Factor Range: 0.8 leading to 0.8 lagging (adjustable)
+Protection Class: IP66
+Operating Temperature Range: -25 degC to +60 degC
+Communication Protocols: MODBUS TCP/IP, IEC 61850, SunSpec
+
+S1.3 TRACKING SYSTEM SPECIFICATIONS
+
+Tracker Type: Single-axis horizontal tracker
+Tracker Manufacturer: Nextracker Inc. (or approved equal)
+Tracker Model: NX Horizon (or equivalent)
+Tracking Range: +/- 60 degrees
+Tracking Algorithm: TrueCapture (astronomical + terrain-following + diffuse
+    light optimization)
+Row Spacing: 5.5 m (center-to-center)
+Modules per Tracker Row: 90 modules (2-in-portrait configuration)
+Motor Type: Self-powered DC motor with integrated PV panel
+Wind Stow Speed: 22 m/s (activated automatically)
+Design Wind Speed: 150 km/h (3-second gust at 10 m height)
+Snow Load Capacity: Not applicable (desert climate)
+Corrosion Protection: Hot-dip galvanized steel, C4 environment rated
+
+S1.4 ELECTRICAL COLLECTION SYSTEM
+
+Medium Voltage Collection: 33 kV, 3-phase, underground cable network
+Cable Type: XLPE insulated, copper conductor, armored
+Collection Feeders: 12 feeders, each serving approximately 20.8 MW
+Feeder Cable Size: 630 mm2 (trunk), 400 mm2 (branch)
+
+S1.5 STEP-UP SUBSTATION
+
+Substation Rating: 2 x 140 MVA, 33/132 kV
+Transformer Type: ONAN/ONAF, copper wound, mineral oil filled
+Cooling Type: Forced air cooling (ONAF mode)
+On-Load Tap Changer: +/- 10% in 17 steps
+132 kV Switchgear: GIS (Gas Insulated Switchgear), SF6
+33 kV Switchgear: Metal-clad, vacuum circuit breakers
+Protection System: Distance protection, differential protection,
+    overcurrent protection, earth fault protection, busbar protection
+SCADA System: Fully integrated, IEC 61850 compliant
+Reactive Power Compensation: Static VAR Compensator (SVC), +/- 50 MVAR
+
+S1.6 DEGRADATION SCHEDULE
+
+Year 1: 0.00% (no degradation during first year)
+Year 2: 2.00% (initial light-induced degradation)
+Year 3 through Year 25: 0.45% per year (linear annual degradation)
+
+Cumulative degradation at end of Term (Year 25):
+    2.00% + (23 x 0.45%) = 2.00% + 10.35% = 12.35%
+    Guaranteed minimum power output at Year 25: 87.65% of nameplate
+
+S1.7 WEATHER MONITORING
+
+The Facility shall include not less than four (4) meteorological stations,
+each equipped with:
+- Pyranometer (Class A, ISO 9060): measuring GHI
+- Pyrheliometer with solar tracker: measuring DNI
+- Pyranometer (tilted): measuring plane-of-array irradiance
+- Ambient temperature sensor (ventilated)
+- Module back-surface temperature sensor
+- Wind speed and direction sensor (anemometer and wind vane)
+- Barometric pressure sensor
+- Relative humidity sensor
+- Rain gauge
+- Soiling sensor (DustIQ or equivalent)
+
+Data logging interval: 1 minute
+Data transmission: Real-time via fiber optic to central SCADA
+
+
+================================================================================
+               SCHEDULE 2: SITE DESCRIPTION
+================================================================================
+
+S2.1 LOCATION
+
+Project Site: Al Dhafra Solar PV Project Site
+Emirate: Abu Dhabi, United Arab Emirates
+Geographical Coordinates (approximate center of site):
+    Latitude: 23.6345 degrees North
+    Longitude: 54.4012 degrees East
+    Elevation: 105 meters above mean sea level
+
+S2.2 SITE AREA
+
+Total Site Area: Approximately 500 hectares (5.0 km2)
+Fenced Area: Approximately 490 hectares
+Active Array Area: Approximately 420 hectares
+
+S2.3 TERRAIN AND SOIL CONDITIONS
+
+Terrain Type: Flat desert terrain with minimal topographic variation
+Maximum Slope: Less than 2%
+Soil Type: Sandy soil with compacted subsurface layers
+Groundwater Level: Greater than 15 meters below ground level
+Seismic Zone: Zone 0 (low seismic activity)
+
+S2.4 CLIMATIC CONDITIONS
+
+Annual Global Horizontal Irradiance (GHI): 2,140 kWh/m2/year (P50)
+Annual Direct Normal Irradiance (DNI): 1,960 kWh/m2/year (P50)
+Average Annual Temperature: 28.4 degC
+Maximum Recorded Temperature: 51.8 degC
+Minimum Recorded Temperature: 4.2 degC
+Average Annual Relative Humidity: 55%
+Average Annual Rainfall: 42 mm
+Prevailing Wind Direction: Northwest (Shamal)
+Maximum Wind Speed (50-year return period): 135 km/h
+
+S2.5 ACCESS
+
+Primary Access Road: Al Dhafra Highway (Route E65), approximately 3 km from
+    site entrance
+Site Access Road: 7 m wide compacted gravel road from Route E65 to site gate
+Internal Roads: 5 m wide compacted gravel roads within the site perimeter
+
+
+================================================================================
+               SCHEDULE 3: MILESTONE SCHEDULE
+================================================================================
+
+Milestone                                    Target Date
+---------------------------------------------------------------------------
+Execution of PPA                             March 15, 2024
+Effective Date                               April 1, 2024
+Satisfaction of Conditions Precedent         December 31, 2024
+Financial Close                              June 30, 2025
+Commencement of Construction                 July 15, 2025
+Completion of Site Preparation/Grading       September 30, 2025
+Commencement of Piling Works                 October 15, 2025
+Completion of Tracker Installation           March 31, 2026
+Completion of Module Installation            June 30, 2026
+Completion of Electrical Works               August 31, 2026
+Substation Energization                      September 15, 2026
+Mechanical Completion                        September 30, 2026
+Commencement of Commissioning Tests          October 1, 2026
+Grid Synchronization                         October 15, 2026
+Completion of Performance Tests              November 30, 2026
+Commercial Operation Date (COD)              December 31, 2026 (Long-Stop Date)
+
+
+================================================================================
+               SCHEDULE 4: TARIFF SCHEDULE
+================================================================================
+
+The following table sets forth the Base Tariff applicable to each Contract
+Year during the Term:
+
+Contract    Period                  Tariff          Tariff
+Year        (From COD)              (USD/MWh)       (USD/kWh)
+--------    --------------------    -----------     ----------
+1           Year 1                  17.86           0.01786
+2           Year 2                  17.86           0.01786
+3           Year 3                  17.86           0.01786
+4           Year 4                  17.86           0.01786
+5           Year 5                  17.86           0.01786
+6           Year 6                  18.22           0.01822
+7           Year 7                  18.58           0.01858
+8           Year 8                  18.95           0.01895
+9           Year 9                  19.33           0.01933
+10          Year 10                 19.72           0.01972
+11          Year 11                 20.11           0.02011
+12          Year 12                 20.52           0.02052
+13          Year 13                 20.93           0.02093
+14          Year 14                 21.34           0.02134
+15          Year 15                 21.77           0.02177
+16          Year 16                 22.21           0.02221
+17          Year 17                 22.65           0.02265
+18          Year 18                 23.10           0.02310
+19          Year 19                 23.57           0.02357
+20          Year 20                 24.04           0.02404
+21          Year 21                 24.52           0.02452
+22          Year 22                 25.01           0.02501
+23          Year 23                 25.51           0.02551
+24          Year 24                 26.02           0.02602
+25          Year 25                 26.54           0.02654
+
+Notes:
+(a) The Base Tariff for Contract Years 1-5 is fixed at USD 17.86/MWh.
+(b) From Contract Year 6 onward, the tariff escalates at 2.0% per annum,
+    compounded annually.
+(c) All tariffs are in nominal United States Dollars and are not subject
+    to further inflation adjustment.
+(d) Tariff amounts are rounded to two decimal places (USD/MWh) and five
+    decimal places (USD/kWh).
+
+
+================================================================================
+               SCHEDULE 5: FORMS OF CREDIT SUPPORT
+================================================================================
+
+S5.1 FORM OF IRREVOCABLE STANDBY LETTER OF CREDIT
+
+[ISSUING BANK LETTERHEAD]
+
+IRREVOCABLE STANDBY LETTER OF CREDIT NO. [__________]
+
+Date of Issue: [__________]
+Date of Expiry: [__________] (twelve (12) months from date of issue, subject
+    to automatic annual renewal)
+Applicant: Al Dhafra Solar Energy LLC
+Beneficiary: Abu Dhabi Distribution Company (ADDC)
+Amount: USD 25,000,000.00 (Twenty-Five Million United States Dollars)
+
+We, [Issuing Bank Name], hereby issue this irrevocable standby letter of
+credit in favor of Abu Dhabi Distribution Company (ADDC) (the "Beneficiary")
+for the account of Al Dhafra Solar Energy LLC (the "Applicant") in the
+amount of USD 25,000,000.00 (Twenty-Five Million United States Dollars).
+
+This Letter of Credit is issued in connection with the Power Purchase
+Agreement dated March 15, 2024 (the "PPA") between the Applicant and the
+Beneficiary.
+
+We undertake to pay to the Beneficiary any amount up to the full amount of
+this Letter of Credit upon receipt by us at our above address of the
+Beneficiary's first written demand accompanied by the Beneficiary's signed
+statement certifying that:
+
+"The Applicant has failed to perform its obligations under the PPA as more
+particularly described herein: [brief description of default]"
+
+This Letter of Credit is subject to the International Standby Practices
+1998 (ISP98), International Chamber of Commerce Publication No. 590.
+
+This Letter of Credit shall automatically extend for successive periods of
+twelve (12) months from the current expiry date unless we notify the
+Beneficiary in writing at least sixty (60) days prior to any expiry date
+that we elect not to extend this Letter of Credit.
+
+[ISSUING BANK SIGNATURE]
+
+
+S5.2 FORM OF PARENT COMPANY GUARANTEE
+
+UNCONDITIONAL AND IRREVOCABLE GUARANTEE
+
+Date: [__________]
+
+Guarantor: Abu Dhabi National Energy Company PJSC (TAQA)
+Guaranteed Party: Al Dhafra Solar Energy LLC (the "Seller")
+Beneficiary: Abu Dhabi Distribution Company (ADDC) (the "Buyer")
+
+TAQA (the "Guarantor") hereby unconditionally and irrevocably guarantees to
+the Buyer the full, complete, and timely performance by the Seller of all
+of its obligations under the Power Purchase Agreement dated March 15, 2024
+between the Seller and the Buyer (the "PPA").
+
+The Guarantor's obligations under this Guarantee are primary and not
+secondary, and the Buyer shall not be required to proceed against the
+Seller or exhaust any remedy against the Seller before making a demand
+under this Guarantee.
+
+This Guarantee shall remain in full force and effect for the duration of
+the PPA Term and for a period of twelve (12) months thereafter.
+
+This Guarantee shall be governed by and construed in accordance with the
+laws of the Emirate of Abu Dhabi and, to the extent applicable, the federal
+laws of the United Arab Emirates.
+
+[TAQA AUTHORIZED SIGNATORIES]
+
+
+================================================================================
+
+IN WITNESS WHEREOF, the Parties have caused this Agreement to be executed by
+their duly authorized representatives as of the date first written above.
+
+FOR AND ON BEHALF OF                    FOR AND ON BEHALF OF
+AL DHAFRA SOLAR ENERGY LLC              ABU DHABI DISTRIBUTION COMPANY (ADDC)
+
+____________________________            ____________________________
+Name: [__________]                      Name: [__________]
+Title: [__________]                     Title: [__________]
+Date: March 15, 2024                    Date: March 15, 2024
+
+Witness:                                Witness:
+____________________________            ____________________________
+Name: [__________]                      Name: [__________]
+Title: [__________]                     Title: [__________]
+
+================================================================================
+                         END OF AGREEMENT
+================================================================================

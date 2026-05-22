@@ -201,7 +201,7 @@ public class HelpView extends VerticalLayout {
             "is plain SSE so there's nothing Kotlin- or Scala-specific to build. A Kotlin consumer just " +
             "writes <code>stream.onSnapshot { ui.render(it) }</code>; Scala is the same with <code>=&gt;</code>.</p>" +
             "<p style=\"margin-top:0.75rem;\">Integrated across every sample app in the repo — ResolveAI, " +
-            "the example app, Saudi Tourism, Industrial IoT, and of course ClaimsIQ.</p>" +
+            "ContractIQ, Saudi Tourism, Industrial IoT, and of course ClaimsIQ.</p>" +
             "</div>"
         );
         card.add(eyebrow, h, body);

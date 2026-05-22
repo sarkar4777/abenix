@@ -1,0 +1,191 @@
+HVDC INTERCONNECTOR CAPACITY AGREEMENT
+(IFA2 — Interconnexion France-Angleterre 2)
+
+BETWEEN
+(1) INTERCONNECTOR INVESTMENTS (UK) LIMITED — "IFA2 OpCo"
+    an English company holding the OFGEM cap-and-floor interconnector licence for the IFA2 HVDC link (Chilling, UK ↔ Tourbe, France, 1,000 MW nameplate, 204 km submarine HVDC, ±320 kV VSC).
+(2) EUROCURRENT TRADING B.V. — "Capacity Holder"
+    a Netherlands trading company and member of EPEX SPOT and APX UK, holding ENTSO-E balancing responsibility.
+
+EXECUTION DATE: 5 February 2025
+SERVICE COMMENCEMENT DATE: 1 March 2025
+TERM: Five (5) years with two 2-year extension options
+CONTRACT REFERENCE: IFA2-LTCH-2025-0217
+
+RECITALS
+(A) IFA2 is a regulated interconnector operating under the OFGEM cap-and-floor regime since 2021.
+(B) The Capacity Holder has won Long-Term (LT) annual capacity rights in the March 2025 JAO auction: 80 MW firm day-ahead capacity in the FR→UK direction.
+(C) The Parties have agreed the commercial, operational, scheduling, and financial terms set out below.
+
+ARTICLE 1  DEFINITIONS
+1.1 "Annual Firm Capacity" — 80 MW firm, direction FR→UK, day-ahead auction product.
+1.2 "Nomination" — hourly nomination by the Capacity Holder per ENTSO-E NC CACM procedures, submitted by 12:00 CET D-1.
+1.3 "Transmission Rights" — financial or physical transmission rights per the JAO allocation (HAR-1 2025).
+1.4 "Use-It-Or-Sell-It (UIOSI)" — the mechanism returning unnominated capacity to the D-1 market; any resale proceeds return pro-rata to Transmission Rights holders.
+1.5 "Curtailment" — reduction of scheduled flows due to system security, N-1 reliability, force majeure, or planned maintenance.
+1.6 "Congestion Rent" — the price differential between IFA2 price zones (FR NP and UK N2EX) captured on flow schedules.
+1.7 "Outage Compensation" — compensation due to Capacity Holder under Cap-and-Floor if interconnector unavailability exceeds the regulatory floor.
+1.8 "ITC Fund" — Inter-Transmission System Operator Compensation fund per EU 838/2010.
+1.9 "GoO" — Guarantees of Origin per European Directive 2018/2001.
+1.10 "Cap-and-Floor Regime" — OFGEM/CRE hybrid revenue mechanism with regulatory floor (£30m/year) and cap (£95m/year).
+
+ARTICLE 2  CAPACITY ALLOCATION
+2.1 IFA2 OpCo grants the Capacity Holder the Annual Firm Capacity for the Term.
+2.2 Capacity is held on a "use or sell" basis — unnominated capacity flows to UIOSI per Article 8.
+2.3 Daily auction participation (DA, ID) operates in parallel — the Capacity Holder's Annual Firm holdings are additive to any daily allocations.
+2.4 No right to re-sell the full annual capacity; but intraday resale to other qualified NEMOs is permitted.
+2.5 Product substitution: if the JAO closes the FR→UK product, IFA2 OpCo may substitute with UK→FR direction subject to 30-day notice and economic equivalence test.
+
+ARTICLE 3  NOMINATION AND SCHEDULING
+3.1 Nominations submitted via JAO platform (e-CMT) daily by 12:00 CET on D-1.
+3.2 Scheduling to be consistent with ENTSO-E Coordinated Capacity Calculation Region (CCR Channel) rules.
+3.3 Late nominations — rejected automatically by e-CMT. Failure to nominate triggers UIOSI under Article 8.
+3.4 Weekly planning: rolling 7-day schedule subject to border control limits as notified by National Grid and RTE.
+3.5 Intraday adjustments: permitted per XBID trades; last-updated schedule binds.
+
+ARTICLE 4  ACCESS TO INTRA-DAY MARKETS
+4.1 The Capacity Holder has access to XBID (Cross-Border Intra-Day) shared order book for IFA2 capacity resale/re-purchase.
+4.2 Continuous intraday trading from D-1 18:00 CET to gate closure (D 00:00 delivery hour).
+4.3 Intraday pricing: local NEMO markets (EPEX SPOT, APX) with standard ENTSO-E matching rules.
+4.4 XBID failure fallback: auction-based intraday per ENTSO-E Implementation Framework.
+
+ARTICLE 5  COMPENSATION AND FEES
+5.1 Annual Capacity Fee: €12.5 million (= €156.25/kW-year × 80 MW), payable monthly in arrears (€1.042m/month).
+5.2 Payment is FIRM — not conditional on actual flow, subject only to compensation for Curtailment and Outage per Article 6.
+5.3 Indexation: Annual review per HICP-Eurozone published by Eurostat, cap 2.5% pa, floor 0%.
+5.4 Congestion rents earned by the Capacity Holder on nominated flows = Σ(hourly flow MW) × (UK price - FR price) — accrue directly to the Capacity Holder on its nominated schedule.
+5.5 Auction sweeps: any JAO auction proceeds from UIOSI return to IFA2 OpCo net of 5% administration margin; IFA2 OpCo pays the Capacity Holder 95% of the gross auction-return value within 30 days of settlement.
+
+ARTICLE 6  CURTAILMENT AND OUTAGE COMPENSATION
+6.1 Firm Curtailment: capacity reduction below 80 MW nominated FR→UK triggers compensation to the Capacity Holder at the higher of:
+     (a) Market spread = max(0, UK_DA_price - FR_DA_price) × Curtailed_MWh, or
+     (b) Regulatory floor compensation per OFGEM/CRE methodology v3.2.
+6.2 Planned maintenance outages (1-2 per year, each 10-14 days) — pro-rata Capacity Fee reduction, no additional compensation.
+6.3 Unplanned outages — compensation starts after 48-hour grace period. Cap: 90 days/year of full compensation.
+6.4 Force Majeure events — no compensation for duration of FM event.
+6.5 N-1 redispatching (TSO action) — the Capacity Holder compensated at market spread × reduced MWh.
+
+ARTICLE 7  SETTLEMENT
+7.1 Daily settlement files via JAO e-CMT — Market Coupling settlement data (MCS) by D+1 14:00 CET.
+7.2 Congestion rent settlement: D+3 business days via standard bank transfer.
+7.3 Annual reconciliation within 60 days of Contract Year-end.
+7.4 Disputes: 20 business days per ENTSO-E dispute resolution framework, escalation to NRA (OFGEM/CRE) if unresolved.
+
+ARTICLE 8  USE-IT-OR-SELL-IT (UIOSI)
+8.1 Unnominated capacity returns to D-1 market automatically at gate closure.
+8.2 UIOSI proceeds = UIOSI_MWh × (UK_DA - FR_DA, if positive for direction).
+8.3 Split: 95% to Capacity Holder, 5% to IFA2 OpCo admin.
+8.4 UIOSI revenue does NOT offset the Annual Capacity Fee — the Fee is firm.
+
+ARTICLE 9  CAP-AND-FLOOR REGIME (TSO-level)
+9.1 IFA2 OpCo's total ex-Capacity-Fee revenues subject to OFGEM/CRE cap-and-floor:
+     Floor: £30.0m/year (approximately €34.5m)
+     Cap: £95.0m/year (approximately €109.3m)
+9.2 True-ups executed every 5 years against cumulative actual revenues.
+9.3 This Agreement is transparent to the cap-and-floor true-up — Annual Capacity Fee flows through to OpCo's revenue.
+9.4 Regulatory change (OFGEM RIIO-T2 / CRE TURPE 6) may trigger tariff re-opener per Article 21.
+
+ARTICLE 10  BALANCING AND IMBALANCE
+10.1 Balance Responsible Party (BRP): the Capacity Holder is responsible for real-time balancing in both control zones (UK — ESO, France — RTE).
+10.2 Imbalance settlement per standard single-price mechanism.
+10.3 Deviation alerts: e-CMT issues hourly deviation notices > 50 MW.
+10.4 Correction opportunity: intraday trading per Article 4.
+
+ARTICLE 11  PHYSICAL vs FINANCIAL TRANSMISSION RIGHTS
+11.1 This Agreement confers Physical Transmission Rights (PTR) with UIOSI.
+11.2 Optional conversion to Financial Transmission Rights (FTR): the Capacity Holder may elect FTR conversion at the start of any Contract Year. FTR payoff = price differential × notional × allocated hours, without physical nomination obligations.
+11.3 Conversion consequences: loss of physical UIOSI, simplified settlement, smaller market risk.
+
+ARTICLE 12  GREEN CERTIFICATES (GoO)
+12.1 Nominated flow volumes carry no automatic GoO transfer — electricity tracked per EU directive as grey/unlabeled.
+12.2 Optional Green Corridor service: the Capacity Holder can request certified renewable corridor flows at €1.50/MWh additional fee, requiring GoO match at source (FR nuclear / renewables mix).
+12.3 Green Corridor audits: annual by certified verifier (TÜV Rheinland or equivalent).
+
+ARTICLE 13  MARKET MANIPULATION (REMIT COMPLIANCE)
+13.1 The Capacity Holder warrants full REMIT compliance, inside information disclosure via UMMs to ACER.
+13.2 Trade reporting: via ACER Registered Reporting Mechanism (RRM) within 1 hour of execution.
+13.3 Cross-border supervision: ACER / NRAs (OFGEM, CRE) have audit access to all nomination and trading records.
+
+ARTICLE 14  CREDIT SUPPORT
+14.1 The Capacity Holder posts bank guarantee equal to 2 months' Annual Capacity Fee = €2.083m.
+14.2 Downgrade trigger: Capacity Holder parent rating below BBB- → upgrade to 3 months' collateral + additional €1m cash buffer.
+14.3 IFA2 OpCo retains right to suspend service for credit-support breach beyond 15-business-day cure.
+14.4 Cross-default: any default under ISDA Master Agreement with either party triggers credit re-review.
+
+ARTICLE 15  FORCE MAJEURE
+15.1 Events: storms, marine casualties affecting cable, earthquakes, industrial action beyond 5 days, regulatory suspension, war, sabotage.
+15.2 Notification within 12 hours. Detailed particulars within 5 business days.
+15.3 Compensation suspension during FM. Cumulative FM > 150 days/year triggers review.
+15.4 Termination: either party may terminate after FM > 180 consecutive days.
+
+ARTICLE 16  NORMAL INTERCONNECTOR OUTAGES
+16.1 Scheduled: 1-2 windows per year, each max 14 days.
+16.2 Scheduling coordination with RTE (French TSO) and National Grid (UK ESO) per SOGL protocols.
+16.3 Notice to Capacity Holder: 90 days advance, revised 30 days before, final 7 days before.
+
+ARTICLE 17  CHANGE IN LAW
+17.1 Categories:
+     (a) Brexit post-transition regulatory frameworks (TCA Title XI Energy).
+     (b) NC CACM / NC EB / NC HVDC amendments.
+     (c) UK carbon border adjustment mechanism (CBAM) or EU CBAM price application to cross-border flows.
+     (d) National Grid / RTE tariff restructuring (TURPE 7, RIIO-T2 Phase 2).
+17.2 Material threshold: cumulative >12% of annual economics.
+17.3 Re-opener: 90-day window, failing which mutual termination with NPV close-out.
+
+ARTICLE 18  ASSIGNMENT
+18.1 Capacity Holder may assign to: Affiliates (no consent), successors in merger/acquisition (no consent).
+18.2 Third-party assignment: IFA2 OpCo consent (not unreasonably withheld) + credit support transfer.
+18.3 JAO rules require secondary market auction-based transfer for certain periods.
+
+ARTICLE 19  BUSINESS CONTINUITY
+19.1 Both parties maintain ISO 22301 business continuity certifications.
+19.2 Annual BCP test including failover of nomination systems.
+19.3 Data retention: 10 years for nomination/settlement records per REMIT.
+
+ARTICLE 20  CYBERSECURITY
+20.1 NIS2 compliance (EU Directive 2022/2555) + UK NIS Regulations.
+20.2 Annual ISO 27001 certification or SOC 2 Type II.
+20.3 Incident notification: 24 hours for potential breaches, detailed within 72 hours.
+
+ARTICLE 21  RE-OPENER / MATERIAL ADVERSE CHANGE
+21.1 Triggers: Article 17 changes of law; >15% change in forward cross-border spread for >6 consecutive months; regulatory disqualification of either party.
+21.2 Window: 60 days good-faith, escalation to CEO-level within 30 days, arbitration if still unresolved.
+
+ARTICLE 22  TERMINATION
+22.1 Events of Default:
+     (a) Payment >30 days overdue.
+     (b) Insolvency, administration, CVA.
+     (c) Regulatory disqualification (NRA revocation, ACER ban).
+     (d) Credit support breach >15 business days.
+22.2 Cure: (a) 15 business days; others no cure.
+22.3 Termination Payment: NPV of remaining Capacity Fee + NPV of lost congestion rent (forward curve basis), discounted at Euribor + 300 bps.
+
+ARTICLE 23  DISPUTE RESOLUTION
+23.1 Step 1: Negotiation (20 business days).
+23.2 Step 2: ACER/NRA mediation (if regulatory-interpretation issue).
+23.3 Step 3: LCIA arbitration, London, English law for contractual matters / French law for TSO regulatory matters (dual-regime).
+23.4 Emergency relief: court injunction permitted for cyber incidents or sanctions issues.
+
+ARTICLE 24  REPRESENTATIONS AND WARRANTIES
+24.1 Mutual: authority, licenses, no known proceedings.
+24.2 IFA2 OpCo: valid OFGEM/CRE licence, ENTSO-E system operator compliance.
+24.3 Capacity Holder: EPEX SPOT + APX membership, ENTSO-E BRP qualification, REMIT registration, full regulatory standing.
+
+ARTICLE 25  CONFIDENTIALITY
+25.1 Confidentiality: 5 years post-termination, excluding regulatory / statutory disclosures.
+25.2 REMIT — mandatory regulatory disclosures permitted.
+25.3 Trade data aggregation for ACER Market Monitoring permitted.
+
+ARTICLE 26  NOTICES
+26.1 Formal: email + registered post.
+26.2 To IFA2 OpCo: General Counsel, 100 Victoria Street, London SW1E 5JL.
+26.3 To Capacity Holder: Legal Department, Zuidplein 36, 1077 XV Amsterdam.
+
+SCHEDULE 1 — JAO auction records and capacity certificates
+SCHEDULE 2 — Nomination windows and technical procedures
+SCHEDULE 3 — Compensation formulae (outage, curtailment, market spread)
+SCHEDULE 4 — UIOSI settlement protocols
+SCHEDULE 5 — Cap-and-floor regulatory framework references
+SCHEDULE 6 — REMIT reporting procedures
+SCHEDULE 7 — Cybersecurity and business continuity requirements
+SCHEDULE 8 — Credit support and collateral templates

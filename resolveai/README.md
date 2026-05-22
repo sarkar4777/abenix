@@ -5,7 +5,7 @@ Customer-service AI standalone app on top of Abenix.
 **Design of record:** [`docs/RESOLVEAI_DESIGN.md`](../docs/RESOLVEAI_DESIGN.md)
 
 Resolves tickets, cites the policy used, predicts CSAT, and surfaces
-tomorrow's problem tonight — peer app to `example_app/` and
+tomorrow's problem tonight — peer app to `contractiq/` and
 `sauditourism/`, thin by design.
 
 ## Anatomy
@@ -16,7 +16,7 @@ resolveai/
                       delegates every reasoning call to Abenix via
                       the bundled SDK.
     main.py           Case ingest + SLA/QA/trend trigger endpoints.
-    sdk/              Bundled copy of abenix_sdk (same as example_app/).
+    sdk/              Bundled copy of abenix_sdk (same as contractiq/).
     Dockerfile
     requirements.txt
   web/                Next.js on :3004 — dashboard, cases queue, case

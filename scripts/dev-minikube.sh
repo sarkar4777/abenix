@@ -3,7 +3,7 @@
 # Abenix — Fast Demo Startup
 #
 # Ensures minikube is up, required pods are running, port-forwards are active,
-# and standalone apps (the example app + Saudi Tourism) are started.
+# and standalone apps (ContractIQ + Saudi Tourism) are started.
 #
 #   bash scripts/dev-minikube.sh            Start everything
 #   bash scripts/dev-minikube.sh --status   Just show what's running
@@ -70,7 +70,7 @@ get_db_url() {
 show_status() {
   echo -e "\n${B}Services:${N}"
   for e in "8000:Abenix API" "3000:Abenix Web" "5432:PostgreSQL" "6379:Redis" \
-           "8001:the example app API" "3001:the example app Web" "8002:Saudi Tourism API" "3002:Saudi Tourism Web"; do
+           "8001:ContractIQ API" "3001:ContractIQ Web" "8002:Saudi Tourism API" "3002:Saudi Tourism Web"; do
     local p="${e%%:*}" l="${e##*:}"
     if listening "$p"; then
       echo -e "    ${G}●${N} ${l}  → localhost:${p}"
@@ -80,7 +80,7 @@ show_status() {
   done
   echo -e "\n${B}Links:${N}"
   echo -e "    Abenix:     ${C}http://localhost:3000${N}"
-  echo -e "    the example app:     ${C}http://localhost:3001${N}  (test@example_app.com / TestPass123!)"
+  echo -e "    ContractIQ:     ${C}http://localhost:3001${N}  (test@contractiq.com / TestPass123!)"
   echo -e "    Saudi Tourism:  ${C}http://localhost:3002${N}  (test@sauditourism.gov.sa / TestPass123!)"
   echo -e "    Industrial IoT: ${C}http://localhost:3003${N}"
   echo -e "    ResolveAI:      ${C}http://localhost:3004${N}  — Customer-service agents"
@@ -129,8 +129,8 @@ pf abenix-web           3000 3000
 pf abenix-redis-master  6379 6379
 
 # Standalone apps + extras (only if services exist in k8s)
-kubectl -n "$NS" get svc example_app-api      &>/dev/null 2>&1 && pf example_app-api      8001 8001
-kubectl -n "$NS" get svc example_app-web      &>/dev/null 2>&1 && pf example_app-web      3001 3001
+kubectl -n "$NS" get svc contractiq-api      &>/dev/null 2>&1 && pf contractiq-api      8001 8001
+kubectl -n "$NS" get svc contractiq-web      &>/dev/null 2>&1 && pf contractiq-web      3001 3001
 kubectl -n "$NS" get svc sauditourism-api    &>/dev/null 2>&1 && pf sauditourism-api    8002 8002
 kubectl -n "$NS" get svc sauditourism-web    &>/dev/null 2>&1 && pf sauditourism-web    3002 3002
 kubectl -n "$NS" get svc industrial-iot-api  &>/dev/null 2>&1 && pf industrial-iot-api  8003 8003
@@ -167,35 +167,35 @@ _start_st_api() {
 }
 
 _start_ciq_api() {
-  mkdir -p "$ROOT/example_app/logs"
-  cd "$ROOT/example_app/api"
-  local ciq_key; ciq_key=$(env_val EXAMPLE_APP_ABENIX_API_KEY)
+  mkdir -p "$ROOT/contractiq/logs"
+  cd "$ROOT/contractiq/api"
+  local ciq_key; ciq_key=$(env_val CONTRACTIQ_ABENIX_API_KEY)
   DATABASE_URL="$DB_URL" PORT=8001 ABENIX_API_URL="http://localhost:8000" \
-    EXAMPLE_APP_ABENIX_API_KEY="$ciq_key" \
+    CONTRACTIQ_ABENIX_API_KEY="$ciq_key" \
     PGSSLMODE=disable \
-    $PYTHON main.py > "$ROOT/example_app/logs/api.log" 2>&1 &
-  ok "the example app API (starting on :8001)"
+    $PYTHON main.py > "$ROOT/contractiq/logs/api.log" 2>&1 &
+  ok "ContractIQ API (starting on :8001)"
 }
 
 # 4. Standalone apps
 echo -e "\n${B}4. Standalone apps${N}"
 DB_URL=$(get_db_url)
 
-# the example app API
+# ContractIQ API
 if curl -sf http://localhost:8001/api/health &>/dev/null; then
-  ok "the example app API (already running)"
+  ok "ContractIQ API (already running)"
 else
   _start_ciq_api
 fi
 
-# the example app Web
-if listening 3001 && ! kubectl -n "$NS" get svc example_app-web &>/dev/null 2>&1; then
-  ok "the example app Web (already running)"
+# ContractIQ Web
+if listening 3001 && ! kubectl -n "$NS" get svc contractiq-web &>/dev/null 2>&1; then
+  ok "ContractIQ Web (already running)"
 elif ! listening 3001; then
-  cd "$ROOT/example_app/web"
+  cd "$ROOT/contractiq/web"
   [ ! -d node_modules ] && npm install --silent &>/dev/null
-  NEXT_PUBLIC_API_URL="http://localhost:8001" nohup npm run dev > "$ROOT/example_app/logs/web.log" 2>&1 &
-  ok "the example app Web (starting on :3001)"
+  NEXT_PUBLIC_API_URL="http://localhost:8001" nohup npm run dev > "$ROOT/contractiq/logs/web.log" 2>&1 &
+  ok "ContractIQ Web (starting on :3001)"
 fi
 
 # Saudi Tourism API

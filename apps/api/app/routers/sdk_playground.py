@@ -240,7 +240,7 @@ asyncio.run(main())
 import os
 from abenix_sdk import Abenix, ActingSubject
 
-# Per-end-user KB namespace. Standalone apps (the example app, IndustrialIoT, ...)
+# Per-end-user KB namespace. Standalone apps (ContractIQ, IndustrialIoT, ...)
 # call this once per end-user to get a private collection UUID, then ingest
 # documents into it. The agent's knowledge_search tool, when called with this
 # subject, sees ONLY this user's documents.
@@ -328,7 +328,7 @@ asyncio.run(main())
 import os
 from abenix_sdk import Abenix, ActingSubject
 
-# The standalone-app pattern — the example app / Industrial-IoT / ResolveAI use
+# The standalone-app pattern — ContractIQ / Industrial-IoT / ResolveAI use
 # this. The platform key has can_delegate scope; ActingSubject identifies
 # WHICH end-user is acting so chat threads + tool RBAC are scoped per user.
 async def main():

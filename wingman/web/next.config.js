@@ -1,6 +1,6 @@
 // Wingman web — port 3006. Browser uses relative /api/wingman/* paths;
 // Next.js proxies them to WINGMAN_API_INTERNAL_URL (the wingman-api pod).
-// Same architecture as industrial-iot/example_app.
+// Same architecture as industrial-iot/contractiq.
 const INTERNAL_API = process.env.WINGMAN_API_INTERNAL_URL || 'http://localhost:8006';
 
 const nextConfig = {

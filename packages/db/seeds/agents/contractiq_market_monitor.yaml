@@ -1,0 +1,315 @@
+name: "ContractIQ Market Monitor"
+slug: contractiq-market-monitor
+description: >-
+  Scheduled pipeline that continuously monitors energy market conditions against
+  contract portfolio terms. Fetches power prices (ENTSO-E), carbon prices (Ember),
+  FX rates (ECB), and compares against strike prices, cap/floor prices, and
+  escalation clauses. Generates alerts when market conditions create risk exposure.
+
+  Domain knowledge (table names, column layouts) lives in this pipeline's prompts —
+  the tools it uses (database_query, database_writer, market data fetchers) are
+  fully generic and reusable for any other domain.
+agent_type: oob
+category: energy
+icon_url: "AlertTriangle"
+version: "1.1.0"
+status: active
+mode: pipeline
+system_prompt: |
+  You are ContractIQ Market Monitor, an automated system that monitors energy
+  market conditions against contract portfolio terms and generates risk alerts.
+  Your job is to protect the portfolio from adverse market movements.
+
+model_config:
+  model: gemini-2.0-flash
+  temperature: 0.2
+  tools:
+    - llm_call
+    - agent_step
+    - entso_e
+    - ember_climate
+    - ecb_rates
+    - financial_calculator
+    - database_query
+    - database_writer
+    - current_time
+
+input_variables:
+  - name: check_scope
+    type: string
+    description: "Scope of check: 'full' for all contracts, or a contract_id for single"
+    required: false
+
+example_prompts:
+  - "Run full market risk assessment"
+  - "Check current power prices against my PPA portfolio"
+  - "Are any of my contracts at risk from currency movements?"
+
+pipeline_config:
+  nodes:
+    - id: get_time
+      tool_name: current_time
+      label: "Get Current Time"
+      arguments:
+        timezone: "UTC"
+      depends_on: []
+      position: { x: 100, y: 50 }
+
+    # ── Read all analyzed contracts with their pricing fields ─────────────
+    # Domain knowledge (the SQL with contractiq_* table names) lives here in
+    # the pipeline definition, not in any platform tool.
+    - id: load_contracts
+      tool_name: database_query
+      label: "Load Contract Portfolio"
+      arguments:
+        query: |
+          SELECT
+            c.id::text AS id,
+            c.title,
+            c.contract_type,
+            c.risk_score,
+            c.total_capacity_mw,
+            c.contract_value,
+            c.currency,
+            c.counterparty_a,
+            c.counterparty_b,
+            c.effective_date,
+            c.expiry_date,
+            COALESCE(
+              jsonb_agg(
+                jsonb_build_object(
+                  'field_name', d.field_name,
+                  'field_value', d.field_value,
+                  'field_type', d.field_type
+                )
+              ) FILTER (
+                WHERE d.field_name IS NOT NULL
+                  AND (d.section IN ('commercial_terms', 'technical')
+                       OR d.field_name ILIKE '%price%'
+                       OR d.field_name ILIKE '%rate%'
+                       OR d.field_name ILIKE '%volume%'
+                       OR d.field_name ILIKE '%capacity%'
+                       OR d.field_name ILIKE '%escalation%'
+                       OR d.field_name ILIKE '%currency%')
+              ),
+              '[]'::jsonb
+            ) AS pricing_fields
+          FROM contractiq_contracts c
+          LEFT JOIN contractiq_extracted_data d ON d.contract_id = c.id
+          WHERE c.status = 'analyzed'
+          GROUP BY c.id
+          ORDER BY c.created_at DESC
+        max_rows: 200
+      depends_on: []
+      position: { x: 400, y: 50 }
+
+    - id: fetch_eu_power
+      tool_name: entso_e
+      label: "EU Power Prices"
+      arguments:
+        data_type: day_ahead_price
+        area: DE_LU
+      depends_on: []
+      position: { x: 100, y: 200 }
+
+    - id: fetch_uk_carbon
+      tool_name: ember_climate
+      label: "UK Power & Carbon"
+      arguments:
+        data_type: carbon_price
+        country: GBR
+      depends_on: []
+      position: { x: 400, y: 200 }
+
+    - id: fetch_fx
+      tool_name: ecb_rates
+      label: "FX Rates"
+      arguments:
+        data_type: fx_rate
+        currency_pair: EUR/USD
+      depends_on: []
+      position: { x: 700, y: 200 }
+
+    # ── Read recent alerts so the assessor can deduplicate ────────────────
+    - id: recent_alerts
+      tool_name: database_query
+      label: "Recent Alerts (48h)"
+      arguments:
+        query: |
+          SELECT
+            a.alert_type,
+            a.severity,
+            a.title,
+            a.contract_field,
+            a.contract_value,
+            a.market_value,
+            a.delta_pct,
+            c.id::text AS contract_id,
+            c.title AS contract_title
+          FROM contractiq_market_alerts a
+          JOIN contractiq_contracts c ON a.contract_id = c.id
+          WHERE a.created_at > (NOW() - INTERVAL '48 hours')
+          ORDER BY a.created_at DESC
+          LIMIT 50
+        max_rows: 50
+      depends_on: []
+      position: { x: 1000, y: 200 }
+
+    - id: analyze_risk
+      tool_name: agent_step
+      label: "Market Risk Assessor"
+      arguments:
+        system_prompt: |
+          You are an energy market risk analyst. Analyze the contract portfolio against
+          current market conditions and generate alerts.
+
+          For EACH contract, evaluate:
+          1. Is the contract price above/below current market prices?
+          2. What is the mark-to-market exposure?
+          3. Are cap/floor prices being breached?
+          4. Are FX rates creating exposure for cross-currency contracts?
+          5. Has escalation diverged significantly from market?
+          6. Are carbon prices affecting competitiveness?
+
+          Use financial_calculator (NPV, IRR, payback) to quantify exposure
+          where helpful.
+
+          Output TWO JSON arrays:
+
+          ALERTS (only if delta_pct > 10% or severity is critical):
+          {"alerts": [
+            {
+              "contract_id": "uuid",
+              "alert_type": "price_breach|fx_risk|carbon_risk|escalation_risk|market_favorable|curtailment_risk",
+              "severity": "info|warning|critical",
+              "title": "Short descriptive title",
+              "description": "Detailed description with numbers",
+              "contract_field": "field name",
+              "contract_value": "contract value with units",
+              "market_value": "current market value with units",
+              "delta_pct": numeric_deviation
+            }
+          ]}
+
+          RISK_SCORES:
+          {"risk_scores": [
+            {
+              "contract_id": "uuid",
+              "market_risk_score": 0-100,
+              "risk_description": "Why this score"
+            }
+          ]}
+
+          Do NOT duplicate alerts that exist in recent_alerts.
+          Be specific with numbers: "Contract price 45 EUR/MWh vs spot 62 EUR/MWh (+37.8%)"
+        input_message: |
+          Current time: {{get_time.response}}
+
+          CONTRACTS WITH PRICING:
+          {{load_contracts.response}}
+
+          EU POWER PRICES:
+          {{fetch_eu_power.response}}
+
+          UK POWER & CARBON:
+          {{fetch_uk_carbon.response}}
+
+          FX RATES:
+          {{fetch_fx.response}}
+
+          RECENT ALERTS (do not duplicate):
+          {{recent_alerts.response}}
+
+          Analyze all contracts against current market data and generate alerts.
+        tools: "financial_calculator"
+        model: gemini-2.0-flash
+        max_iterations: 5
+      depends_on:
+        - get_time
+        - load_contracts
+        - fetch_eu_power
+        - fetch_uk_carbon
+        - fetch_fx
+        - recent_alerts
+      position: { x: 400, y: 450 }
+
+    # ── Persist alerts and risk scores via the generic database_writer ───
+    - id: write_results
+      tool_name: agent_step
+      label: "Write Alerts & Scores"
+      arguments:
+        system_prompt: |
+          You write the market analysis results to the ContractIQ database using
+          the database_writer tool. The output of analyze_risk contains two JSON
+          arrays: "alerts" and "risk_scores".
+
+          For EACH item in alerts:
+            Call database_writer with:
+              operation: "insert"
+              table: "contractiq_market_alerts"
+              data: {
+                "contract_id": <uuid>,
+                "alert_type": <type>,
+                "severity": <severity>,
+                "title": <title>,
+                "description": <description>,
+                "contract_field": <field>,
+                "contract_value": <value>,
+                "market_value": <market_value>,
+                "delta_pct": <delta>
+              }
+
+          For EACH item in risk_scores:
+            First check if a market_monitor risk row exists for this contract:
+              database_writer operation="upsert"
+              table: "contractiq_risk_analyses"
+              data: {
+                "contract_id": <uuid>,
+                "analysis_type": "market_monitor",
+                "risk_category": "market",
+                "risk_score": <score>,
+                "risk_description": <description>
+              }
+              conflict_columns: ["contract_id", "analysis_type"]
+
+          Process ALL items from both arrays. Report a one-line summary at the end:
+          "Wrote N alerts and M risk scores."
+        input_message: "Write these to the database: {{analyze_risk.response}}"
+        tools: "database_writer"
+        model: gemini-2.0-flash
+        max_iterations: 25
+      depends_on:
+        - analyze_risk
+      position: { x: 400, y: 650 }
+
+    - id: summary
+      tool_name: llm_call
+      label: "Generate Report"
+      arguments:
+        prompt: |
+          Summarize the market monitoring results:
+          - What alerts were generated?
+          - Which contracts had risk score changes?
+          - What are the key market conditions right now?
+          - Any recommended actions?
+
+          Analysis: {{analyze_risk.response}}
+          Write results: {{write_results.response}}
+
+          Be concise. Use markdown formatting.
+        model: gemini-2.0-flash
+      depends_on:
+        - write_results
+      position: { x: 400, y: 850 }
+
+  edges:
+    - { source: get_time, target: analyze_risk }
+    - { source: load_contracts, target: analyze_risk }
+    - { source: fetch_eu_power, target: analyze_risk }
+    - { source: fetch_uk_carbon, target: analyze_risk }
+    - { source: fetch_fx, target: analyze_risk }
+    - { source: recent_alerts, target: analyze_risk }
+    - { source: analyze_risk, target: write_results }
+    - { source: write_results, target: summary }
+
+  viewport: { x: 0, y: 0, zoom: 0.6 }

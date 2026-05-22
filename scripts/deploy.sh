@@ -33,7 +33,7 @@ _build_secrets_flags() {
   [ -n "${MEDIASTACK_API_KEY:-}" ]     && flags="${flags} --set secrets.mediastackApiKey=${MEDIASTACK_API_KEY}"
   [ -n "${ENTSOE_API_KEY:-}" ]           && flags="${flags} --set secrets.entsoeApiKey=${ENTSOE_API_KEY}"
   [ -n "${EIA_API_KEY:-}" ]              && flags="${flags} --set secrets.eiaApiKey=${EIA_API_KEY}"
-  [ -n "${EXAMPLE_APP_JWT_SECRET:-}" ]    && flags="${flags} --set secrets.example_appJwtSecret=${EXAMPLE_APP_JWT_SECRET}"
+  [ -n "${CONTRACTIQ_JWT_SECRET:-}" ]    && flags="${flags} --set secrets.contractiqJwtSecret=${CONTRACTIQ_JWT_SECRET}"
   echo "${flags}"
 }
 
@@ -197,18 +197,18 @@ build_images() {
     fi
   done
 
-  # Build the example app standalone images (api + web)
-  if [ -d "${ROOT_DIR}/example_app" ]; then
-    step "Building the example app standalone images"
+  # Build ContractIQ standalone images (api + web)
+  if [ -d "${ROOT_DIR}/contractiq" ]; then
+    step "Building ContractIQ standalone images"
     for ciq in "api" "web"; do
-      local ciq_image="${registry}/example_app-${ciq}:${IMAGE_TAG}"
-      local ciq_dockerfile="${ROOT_DIR}/example_app/${ciq}/Dockerfile"
-      [ ! -f "${ciq_dockerfile}" ] && { warn "No Dockerfile for example_app/${ciq}"; continue; }
+      local ciq_image="${registry}/contractiq-${ciq}:${IMAGE_TAG}"
+      local ciq_dockerfile="${ROOT_DIR}/contractiq/${ciq}/Dockerfile"
+      [ ! -f "${ciq_dockerfile}" ] && { warn "No Dockerfile for contractiq/${ciq}"; continue; }
 
-      log "Building example_app-${ciq}..."
-      docker build -t "${ciq_image}" -t "${registry}/example_app-${ciq}:latest" \
-        -f "${ciq_dockerfile}" "${ROOT_DIR}/example_app/${ciq}" 2>&1 | tail -3
-      ok "example_app-${ciq}: built"
+      log "Building contractiq-${ciq}..."
+      docker build -t "${ciq_image}" -t "${registry}/contractiq-${ciq}:latest" \
+        -f "${ciq_dockerfile}" "${ROOT_DIR}/contractiq/${ciq}" 2>&1 | tail -3
+      ok "contractiq-${ciq}: built"
 
       if [ "${push}" = "true" ]; then
         docker push "${ciq_image}" 2>&1 | tail -1
@@ -265,45 +265,45 @@ build_images() {
   fi
 }
 
-# ── Deploy the example app as k8s manifests (after Abenix is running) ─────────
-deploy_example_app() {
-  if [ ! -f "${ROOT_DIR}/example_app/k8s/example_app.yaml" ]; then
-    warn "the example app k8s manifests not found, skipping"
+# ── Deploy ContractIQ as k8s manifests (after Abenix is running) ─────────
+deploy_contractiq() {
+  if [ ! -f "${ROOT_DIR}/contractiq/k8s/contractiq.yaml" ]; then
+    warn "ContractIQ k8s manifests not found, skipping"
     return 0
   fi
 
-  step "Deploying the example app to namespace ${NAMESPACE}"
+  step "Deploying ContractIQ to namespace ${NAMESPACE}"
 
   # Inject secrets from .env if available
-  local ciq_key="${EXAMPLE_APP_ABENIX_API_KEY:-}"
-  local ciq_jwt="${EXAMPLE_APP_JWT_SECRET:-example_app-dev-secret-please-change}"
+  local ciq_key="${CONTRACTIQ_ABENIX_API_KEY:-}"
+  local ciq_jwt="${CONTRACTIQ_JWT_SECRET:-contractiq-dev-secret-please-change}"
   local anth_key="${ANTHROPIC_API_KEY:-}"
 
   if [ -z "${ciq_key}" ]; then
-    warn "EXAMPLE_APP_ABENIX_API_KEY not set — chat will fail until you set it"
+    warn "CONTRACTIQ_ABENIX_API_KEY not set — chat will fail until you set it"
   fi
 
   # Apply manifests with secret substitution
   sed \
     -e "s|REPLACE_AT_DEPLOY_TIME|placeholder|g" \
-    "${ROOT_DIR}/example_app/k8s/example_app.yaml" | kubectl apply -f - 2>&1 | tail -10
+    "${ROOT_DIR}/contractiq/k8s/contractiq.yaml" | kubectl apply -f - 2>&1 | tail -10
 
   # Update secret with real values (use --dry-run to generate, then apply)
-  kubectl create secret generic example_app-secrets \
+  kubectl create secret generic contractiq-secrets \
     --namespace="${NAMESPACE}" \
-    --from-literal=EXAMPLE_APP_ABENIX_API_KEY="${ciq_key}" \
-    --from-literal=EXAMPLE_APP_JWT_SECRET="${ciq_jwt}" \
+    --from-literal=CONTRACTIQ_ABENIX_API_KEY="${ciq_key}" \
+    --from-literal=CONTRACTIQ_JWT_SECRET="${ciq_jwt}" \
     --from-literal=ANTHROPIC_API_KEY="${anth_key}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -3
 
-  ok "the example app deployed"
+  ok "ContractIQ deployed"
 
   # Wait for pods to be ready
-  log "Waiting for the example app pods to be ready..."
-  kubectl wait --for=condition=ready pod -l app=example_app-api \
-    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "the example app API not ready in 120s"
-  kubectl wait --for=condition=ready pod -l app=example_app-web \
-    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "the example app Web not ready in 120s"
+  log "Waiting for ContractIQ pods to be ready..."
+  kubectl wait --for=condition=ready pod -l app=contractiq-api \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "ContractIQ API not ready in 120s"
+  kubectl wait --for=condition=ready pod -l app=contractiq-web \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "ContractIQ Web not ready in 120s"
 }
 
 # ── Deploy Industrial-IoT standalone ─────────────────────────────────────────
@@ -574,9 +574,9 @@ setup_port_forwards() {
 
   # Standalone apps — each on its own port so the Use Cases dropdown
   # in the core UI can deep-link to them at localhost:<port>.
-  if kubectl -n "${NAMESPACE}" get svc example_app-web &>/dev/null; then
-    start_persistent_forward "example_app-web" 3001 3001
-    start_persistent_forward "example_app-api" 8001 8001
+  if kubectl -n "${NAMESPACE}" get svc contractiq-web &>/dev/null; then
+    start_persistent_forward "contractiq-web" 3001 3001
+    start_persistent_forward "contractiq-api" 8001 8001
   fi
   if kubectl -n "${NAMESPACE}" get svc sauditourism-web &>/dev/null; then
     start_persistent_forward "sauditourism-web" 3002 3002
@@ -816,7 +816,7 @@ deploy_local() {
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"
 
   # Deploy standalone apps after Abenix is running
-  deploy_example_app     || warn "the example app deployment failed (non-fatal)"
+  deploy_contractiq     || warn "ContractIQ deployment failed (non-fatal)"
   deploy_industrial_iot || warn "Industrial-IoT deployment failed (non-fatal)"
   deploy_resolveai      || warn "ResolveAI deployment failed (non-fatal)"
   deploy_claimsiq       || warn "ClaimsIQ deployment failed (non-fatal)"
@@ -831,26 +831,26 @@ deploy_local() {
     install_observability_stack
   fi
 
-  # Forward the example app ports too
-  if kubectl get svc example_app-web -n "${NAMESPACE}" &>/dev/null; then
-    log "Setting up the example app port forwards..."
-    pkill -f "kubectl port-forward.*example_app" 2>/dev/null || true
-    nohup kubectl port-forward -n "${NAMESPACE}" svc/example_app-web 3001:3001 > /tmp/pf-ciq-web.log 2>&1 &
-    nohup kubectl port-forward -n "${NAMESPACE}" svc/example_app-api 8001:8001 > /tmp/pf-ciq-api.log 2>&1 &
+  # Forward ContractIQ ports too
+  if kubectl get svc contractiq-web -n "${NAMESPACE}" &>/dev/null; then
+    log "Setting up ContractIQ port forwards..."
+    pkill -f "kubectl port-forward.*contractiq" 2>/dev/null || true
+    nohup kubectl port-forward -n "${NAMESPACE}" svc/contractiq-web 3001:3001 > /tmp/pf-ciq-web.log 2>&1 &
+    nohup kubectl port-forward -n "${NAMESPACE}" svc/contractiq-api 8001:8001 > /tmp/pf-ciq-api.log 2>&1 &
     sleep 2
-    ok "the example app port forwards: web→3001, api→8001"
+    ok "ContractIQ port forwards: web→3001, api→8001"
   fi
 
   echo ""
   echo -e "${GREEN}================================================================${NC}"
-  echo -e "${GREEN}  Abenix + the example app on minikube${NC}"
+  echo -e "${GREEN}  Abenix + ContractIQ on minikube${NC}"
   echo -e "${GREEN}================================================================${NC}"
   echo ""
   echo -e "  ${CYAN}Abenix Web${NC}    http://localhost:3000"
-  echo -e "  ${CYAN}the example app Web${NC}    http://localhost:3001"
+  echo -e "  ${CYAN}ContractIQ Web${NC}    http://localhost:3001"
   echo -e "  ${CYAN}ClaimsIQ${NC}         http://localhost:3005"
   echo -e "  ${CYAN}Abenix API${NC}    http://localhost:8000/docs"
-  echo -e "  ${CYAN}the example app API${NC}    http://localhost:8001/api/health"
+  echo -e "  ${CYAN}ContractIQ API${NC}    http://localhost:8001/api/health"
   echo -e "  ${CYAN}Neo4j Browser${NC}    http://localhost:7474"
   if [[ "${OBSERVABILITY:-true}" == "true" ]]; then
     echo -e "  ${CYAN}Grafana${NC}           http://localhost:3030  (admin / abenix-admin)"

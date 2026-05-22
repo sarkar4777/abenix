@@ -38,7 +38,7 @@ ADMIN_PASSWORD = os.environ.get("ABENIX_ADMIN_PASSWORD", "Admin123456")
 # A platform-scope X-API-Key. Either the canonical seeded key or a fresh
 # one minted at test setup. Set ABENIX_API_KEY to skip mint.
 PLATFORM_API_KEY = os.environ.get("ABENIX_API_KEY") or os.environ.get(
-    "EXAMPLE_APP_ABENIX_API_KEY"
+    "CONTRACTIQ_ABENIX_API_KEY"
 )
 
 
@@ -205,7 +205,7 @@ def test_agents_smoke_at_least_80pct_green(auth_token: str) -> None:
 def _api_key_or_skip() -> str:
     if not PLATFORM_API_KEY:
         pytest.skip(
-            "Set ABENIX_API_KEY (or EXAMPLE_APP_ABENIX_API_KEY) to run SDK tests."
+            "Set ABENIX_API_KEY (or CONTRACTIQ_ABENIX_API_KEY) to run SDK tests."
         )
     return PLATFORM_API_KEY
 
@@ -217,7 +217,7 @@ def test_sdk_execute_returns_populated_output_and_terminal_db_row() -> None:
     .execute() default of wait=True (with async-mode fallback poll) is
     still in place. If this regresses, every standalone app's
     `forge.execute(...)` returns ExecutionResult(output="") and the
-    Insights / the example app / ResolveAI flows go silent.
+    Insights / ContractIQ / ResolveAI flows go silent.
     """
     import asyncio
 

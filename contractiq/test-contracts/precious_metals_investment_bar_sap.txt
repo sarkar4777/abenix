@@ -1,0 +1,185 @@
+================================================================================
+        INVESTMENT BAR SALE AND PURCHASE AGREEMENT
+              (Good Delivery 1 kg and 100 g cast bars)
+
+                       CONTRACT NO. IBP-2026-061
+
+                  DATE OF EXECUTION: 5 March 2026
+================================================================================
+
+BETWEEN:
+
+(1) HELVETIA METALS REFINING AG, a Swiss stock corporation registered in
+    the Commercial Register of the Canton of Zurich under CHE-104.582.913
+    (the "Seller");
+
+(2) MERIDIAN BULLION DCC LTD, a private limited company organised under
+    the laws of the Dubai International Financial Centre, with its
+    registered office at Office 1701, Index Tower, DIFC, Dubai, United Arab
+    Emirates (the "Buyer").
+
+WHEREAS the Seller is a refiner on the LBMA Good Delivery list for Gold and
+the LBMA Good Delivery list for Silver, and the Buyer is a wholesale bullion
+distributor; the parties wish to record the terms on which the Seller shall
+sell investment-grade gold bars to the Buyer for the calendar year 2026 to
+2027.
+
+NOW, THEREFORE, the parties agree as follows:
+
+--------------------------------------------------------------------------------
+1. PRODUCT SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+1.1 Product. The Seller shall sell, and the Buyer shall purchase, cast
+    gold investment bars in the following weights and minimum fineness:
+
+      (a) 1 kg cast bars, fineness 999.9 (four-nines fine);
+      (b) 100 g cast bars, fineness 999.9.
+
+1.2 Bar specifications. Each bar shall comply with LBMA Good Delivery Rules
+    for Gold version 1.1 of August 2023, with the following clarifications:
+
+      (a) every bar shall carry the Seller's refinery hallmark, a unique
+          serial number, the year of casting, the gross weight to four
+          decimal places of a troy ounce, and the fineness expressed as
+          parts per thousand;
+
+      (b) the cast surface shall be free of porosity, cracks, scratches
+          deeper than 0.1 mm, slag inclusions, or any visible alteration
+          to the hallmark.
+
+1.3 Brand. All bars shall be of the Seller's "Helvetia Refined" branded
+    series. The Buyer represents that the Seller's branded bars are
+    accepted on the same terms as bars from the following refiners on the
+    Buyer's accepted-refiners list: Metalor Technologies SA, Heraeus
+    Precious Metals GmbH, Tanaka Kikinzoku Kogyo K.K., Valcambi SA,
+    Argor-Heraeus SA, Rand Refinery (Pty) Ltd, Asahi Refining USA Inc, and
+    The Royal Canadian Mint.
+
+1.4 Volumes. The Seller shall offer, and the Buyer shall purchase, a
+    minimum of forty thousand (40,000) troy ounces of fine gold in 1 kg
+    bars per calendar quarter and a minimum of fifteen thousand (15,000)
+    troy ounces of fine gold in 100 g bars per calendar quarter.
+
+--------------------------------------------------------------------------------
+2. PRICING
+--------------------------------------------------------------------------------
+
+2.1 Reference price. The price of each consignment shall be:
+
+       Price per fine troy ounce = (LBMA Gold PM Fix on the Pricing Date)
+                                   + Loco Zurich premium of 0.75%
+                                   + Manufacturing premium of USD 0.85 per troy ounce
+
+2.2 Pricing Date. The Buyer shall fix the price for each consignment on or
+    before the Seller's notified Pricing Window. The Pricing Window is the
+    two business days commencing on the date of shipment notification.
+
+2.3 Settlement currency. All payments shall be made in United States
+    Dollars (USD) by SWIFT MT-103 to the Seller's nominated account.
+
+2.4 Payment terms. Payment shall be made on T+2 (two business days after
+    the Pricing Date) by irrevocable wire transfer. The bars shall be
+    released from the Seller's vault to the Buyer's nominated logistics
+    agent on confirmation of cleared funds.
+
+--------------------------------------------------------------------------------
+3. LOCO AND DELIVERY
+--------------------------------------------------------------------------------
+
+3.1 Loco. All sales shall be loco Zurich. Title and risk pass at the
+    moment the bars are released to the Buyer's nominated logistics agent
+    at the Seller's vault gate in Mendrisio, Switzerland.
+
+3.2 Insurance. Up to the point of release, the Seller shall maintain
+    all-risk insurance at one hundred and ten per cent (110%) of bar
+    value. After release, the Buyer is solely responsible for insurance.
+
+3.3 Repatriation. The Buyer may, on at least seven (7) business days'
+    notice, request that bars instead be delivered loco London or loco
+    Dubai. The Seller shall use commercially reasonable efforts to arrange
+    onward transport at the Buyer's cost; risk in transit shall remain
+    with the Buyer.
+
+3.4 Chain of integrity. Each bar shall be tracked in the Seller's vault
+    management system from production to gate-out. The Seller shall
+    provide a serialised manifest of every consignment to the Buyer at
+    least twenty-four (24) hours prior to release.
+
+--------------------------------------------------------------------------------
+4. ASSAY AND REJECTION
+--------------------------------------------------------------------------------
+
+4.1 The Buyer may, at the Buyer's expense, conduct random destructive
+    assay on up to one per cent (1%) of bars per consignment by quantity,
+    using fire assay at any LBMA-recognised laboratory.
+
+4.2 Tolerance. Where the Buyer's assay reveals a fineness below 999.7 on
+    any bar, the entire batch from which the bar was sampled shall be
+    rejected and replaced by the Seller at the Seller's cost.
+
+4.3 Umpire. Where the Buyer and the Seller's assays differ by more than
+    two-hundredths of one per cent (0.02%), the parties shall instruct
+    an umpire assay; the loser bears the umpire's costs.
+
+--------------------------------------------------------------------------------
+5. COMPLIANCE AND SANCTIONS
+--------------------------------------------------------------------------------
+
+5.1 LBMA. The Seller represents and warrants that all bars produced
+    hereunder originate from material that has passed the Seller's LBMA
+    Responsible Gold Guidance v9 due diligence process.
+
+5.2 OECD. The Seller maintains a documented OECD Due Diligence programme
+    aligned with the OECD Due Diligence Guidance for Responsible Supply
+    Chains of Minerals from Conflict-Affected and High-Risk Areas, 3rd
+    edition (2016).
+
+5.3 Excluded origins. The Seller represents that no material delivered
+    hereunder originates from, or has been refined in, the Russian
+    Federation, the Democratic People's Republic of Korea, the Islamic
+    Republic of Iran, or any other jurisdiction subject to comprehensive
+    sanctions imposed by OFAC, the European Union, or the United Nations
+    at the time of delivery.
+
+5.4 OFAC. Each party warrants that it is not, and is not owned or
+    controlled by, a person on the OFAC Specially Designated Nationals
+    list, the EU Consolidated List, the UK Sanctions List, or the
+    Swiss SECO sanctions list.
+
+5.5 VAT. The parties acknowledge that 1 kg and 100 g bars of 999.9
+    fineness produced and sold hereunder qualify as "investment gold"
+    within the meaning of HMRC Notice 701/14 (Investment Gold Coins) and
+    are exempt from United Kingdom VAT.
+
+5.6 PMCA. The Seller shall complete every filing required by the Swiss
+    Precious Metals Control Act.
+
+--------------------------------------------------------------------------------
+6. TERM
+--------------------------------------------------------------------------------
+
+6.1 This Agreement shall be effective from 1 April 2026 to 31 March 2027,
+    renewing automatically for successive twelve-month periods unless
+    either party gives ninety (90) days' written notice of non-renewal.
+
+6.2 Either party may terminate immediately on written notice if:
+    (a) the other ceases to hold a current LBMA Good Delivery listing;
+    (b) the other becomes the subject of a sanctions action;
+    (c) the other becomes insolvent.
+
+--------------------------------------------------------------------------------
+7. GENERAL
+--------------------------------------------------------------------------------
+
+7.1 Governing law and forum. Swiss law; arbitration in Zurich under the
+    Swiss Rules of International Arbitration, by a single arbitrator.
+
+7.2 Confidentiality applies to all assay reports, serial-number lists and
+    chain-of-custody manifests.
+
+[Signature blocks omitted for brevity.]
+
+================================================================================
+                          END OF AGREEMENT
+================================================================================

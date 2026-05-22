@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # seed-standalone-keys.sh — idempotent ABENIX_API_KEY seeding for standalone apps
 #
-# For each standalone (example_app, sauditourism, industrial-iot, resolveai,
+# For each standalone (contractiq, sauditourism, industrial-iot, resolveai,
 # claimsiq) this script:
 #   1) Reads the existing key from <app>-secrets in the cluster.
 #   2) Validates the key still exists in the platform's api_keys table and
@@ -13,7 +13,7 @@
 #
 # Usage:
 #   bash scripts/seed-standalone-keys.sh                # seed all 5 apps
-#   bash scripts/seed-standalone-keys.sh example_app     # one app only
+#   bash scripts/seed-standalone-keys.sh contractiq     # one app only
 #
 # Requirements: kubectl context already targets the cluster, abenix-api pod
 # is Ready, and the namespace env-var matches deploy-azure.sh (default: abenix).
@@ -32,7 +32,7 @@ step() { echo -e "\n${BOLD}▶ $1${NC}"; }
 
 # Standalone definitions: app|secret|env_var|key_name|deployment(s)
 APPS=(
-  "example_app|example_app-secrets|EXAMPLE_APP_ABENIX_API_KEY|standalone-example_app|example_app-api,example_app-web"
+  "contractiq|contractiq-secrets|CONTRACTIQ_ABENIX_API_KEY|standalone-contractiq|contractiq-api,contractiq-web"
   "sauditourism|sauditourism-secrets|SAUDITOURISM_ABENIX_API_KEY|standalone-sauditourism|sauditourism-api,sauditourism-web"
   "industrial-iot|industrial-iot-secrets|INDUSTRIALIOT_ABENIX_API_KEY|standalone-industrial-iot|industrial-iot-api,industrial-iot-web"
   "resolveai|resolveai-secrets|RESOLVEAI_ABENIX_API_KEY|standalone-resolveai|resolveai-api,resolveai-web"

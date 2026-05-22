@@ -154,8 +154,8 @@ toastError(
 **Symptom**: new pods can't pull the image.
 
 **Fix**:
-- Check the registry tag actually exists: `az acr repository show-tags -n abenixacr71a48 --repository abenix-api --top 5`.
-- Check the AKS-ACR attach is intact: `az aks check-acr -n abenix-aks -g abenix-rg --acr abenixacr71a48`.
+- Check the registry tag actually exists: `az acr repository show-tags -n your-acr --repository abenix-api --top 5`.
+- Check the AKS-ACR attach is intact: `az aks check-acr -n abenix-aks -g abenix-rg --acr your-acr`.
 - Re-attach if needed: `az aks update --attach-acr ...`.
 - For cross-ACR migration, see [`feedback_publish_public_traps`](../) for the gotchas.
 

@@ -39,8 +39,8 @@ if ! curl -sf http://localhost:8000/api/health >/dev/null 2>&1; then
   warn "Abenix API is not running on :8000 — pipeline calls will fail"
 fi
 
-# Resolve key (fall back to the example app key if dedicated one isn't set), then probe.
-: "${INDUSTRIALIOT_ABENIX_API_KEY:=${EXAMPLE_APP_ABENIX_API_KEY:-}}"
+# Resolve key (fall back to ContractIQ key if dedicated one isn't set), then probe.
+: "${INDUSTRIALIOT_ABENIX_API_KEY:=${CONTRACTIQ_ABENIX_API_KEY:-}}"
 export INDUSTRIALIOT_ABENIX_API_KEY
 if [ -n "$INDUSTRIALIOT_ABENIX_API_KEY" ]; then
   _AF_URL="${ABENIX_API_URL:-http://localhost:8000}"
@@ -90,7 +90,7 @@ log "Starting Industrial-IoT API on :8003..."
 cd "$IOT_ROOT/api"
 PORT=8003 \
 ABENIX_API_URL="${ABENIX_API_URL:-http://localhost:8000}" \
-INDUSTRIALIOT_ABENIX_API_KEY="${INDUSTRIALIOT_ABENIX_API_KEY:-${EXAMPLE_APP_ABENIX_API_KEY:-}}" \
+INDUSTRIALIOT_ABENIX_API_KEY="${INDUSTRIALIOT_ABENIX_API_KEY:-${CONTRACTIQ_ABENIX_API_KEY:-}}" \
 $PYTHON main.py > "$IOT_ROOT/logs/api.log" 2>&1 &
 IOT_API_PID=$!
 sleep 4

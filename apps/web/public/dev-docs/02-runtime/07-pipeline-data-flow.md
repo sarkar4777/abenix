@@ -267,7 +267,7 @@ A node with `type: agent` and `agent_slug` runs an `agent_step` — a thin wrapp
 ```yaml
 - id: classify_intent
   type: agent
-  agent_slug: example_app-intent-classifier
+  agent_slug: contractiq-intent-classifier
   arguments:
     text: "{{fetch.body.content}}"
 ```

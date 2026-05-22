@@ -11,7 +11,7 @@ class ExecuteRequest(BaseModel):
     #   - SDK / X-API-Key callers default to wait=True (synchronous), because
     #     they have no UI to subscribe to a live stream and are almost always
     #     blocking on the agent's output (the SDK contract that every
-    #     standalone app — the example app, ResolveAI, SauditTourism, IndustrialIoT,
+    #     standalone app — ContractIQ, ResolveAI, SauditTourism, IndustrialIoT,
     #     ClaimsIQ — depends on).
     #   - Browser / cookie / JWT callers default to wait=False (async), because
     #     they have /api/executions/{id}/watch + /api/executions/live for live

@@ -1,0 +1,72 @@
+{
+  "name": "contractiq-risk-tier-predictor",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Calibrated Gradient Boosting classifier that maps a contract's 10 structural features (notional, tenor, tolerance, indexation, counterparty rating, credit support, force-majeure clarity, governing-law friction, take-or-pay flag, market volatility) into a four-level deal risk tier. The hedge_advisor agent calls this as a fast prior before deciding whether to run a full VaR + scenario sweep, and the market-risk dashboard shows it next to the analytical VaR number so the operator can see when the ML prior disagrees with the parametric model.",
+  "input_schema": {
+    "features": [
+      "notional_usd",
+      "tenor_years",
+      "tolerance_pct",
+      "indexation_strength",
+      "counterparty_rating_num",
+      "credit_support_ratio",
+      "force_majeure_clarity",
+      "governing_law_friction",
+      "has_take_or_pay",
+      "market_volatility_z"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [
+      50000000,
+      5.0,
+      10.0,
+      0.4,
+      4,
+      0.5,
+      0.8,
+      0.2,
+      1,
+      0.5
+    ]
+  },
+  "output_schema": {
+    "type": "classification",
+    "classes": [
+      "critical",
+      "high",
+      "low",
+      "medium"
+    ],
+    "returns": "tier label + calibrated probabilities"
+  },
+  "tags": [
+    "contractiq",
+    "risk",
+    "tier",
+    "hedge-advisor"
+  ],
+  "training": {
+    "samples": 1500,
+    "algorithm": "StandardScaler -> CalibratedClassifierCV(GradientBoostingClassifier)",
+    "synthetic": true,
+    "holdout_accuracy": 0.9283,
+    "classes": [
+      "critical",
+      "high",
+      "low",
+      "medium"
+    ]
+  }
+}

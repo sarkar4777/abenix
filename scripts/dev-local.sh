@@ -142,8 +142,8 @@ kill_processes() {
   log "Stopping Abenix processes..."
   kill_port 8000 "API server"
   kill_port 3000 "Web server"
-  kill_port 8001 "the example app API"
-  kill_port 3001 "the example app Web"
+  kill_port 8001 "ContractIQ API"
+  kill_port 3001 "ContractIQ Web"
   kill_port 8002 "Saudi Tourism API"
   kill_port 3002 "Saudi Tourism Web"
   kill_port 8003 "Industrial-IoT API"
@@ -206,16 +206,16 @@ check_status() {
     err "Neo4j not responding on :7474"
   fi
 
-  # the example app
+  # ContractIQ
   if curl -s --max-time 3 http://localhost:8001/api/health >/dev/null 2>&1; then
-    ok "the example app API — http://localhost:8001"
+    ok "ContractIQ API — http://localhost:8001"
   else
-    warn "the example app API not responding on :8001"
+    warn "ContractIQ API not responding on :8001"
   fi
   if curl -s --max-time 3 http://localhost:3001 -o /dev/null 2>&1; then
-    ok "the example app Web — http://localhost:3001"
+    ok "ContractIQ Web — http://localhost:3001"
   else
-    warn "the example app Web not responding on :3001"
+    warn "ContractIQ Web not responding on :3001"
   fi
 
   # Saudi Tourism
@@ -631,7 +631,7 @@ from models.api_key import ApiKey
 from models.user import User
 
 WANT = {
-    'EXAMPLE_APP_ABENIX_API_KEY':   'standalone-example_app',
+    'CONTRACTIQ_ABENIX_API_KEY':   'standalone-contractiq',
     'SAUDITOURISM_ABENIX_API_KEY': 'standalone-sauditourism',
     'INDUSTRIALIOT_ABENIX_API_KEY':'standalone-industrial-iot',
     'RESOLVEAI_ABENIX_API_KEY':    'standalone-resolveai',
@@ -694,14 +694,14 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
 " 2>/dev/null)
     ok "Standalone keys reconciled: $(echo "$STANDALONE_KEYS_JSON" | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); print(len(d), "key(s) active")' 2>/dev/null)"
   else
-    warn "Could not reconcile standalone keys — chat in the example app/Saudi Tourism/etc. may 401"
+    warn "Could not reconcile standalone keys — chat in ContractIQ/Saudi Tourism/etc. may 401"
   fi
 
-  # ── Step 8: Start the example app standalone application ──────────
-  if [ -f "$ROOT_DIR/example_app/start.sh" ]; then
+  # ── Step 8: Start ContractIQ standalone application ──────────
+  if [ -f "$ROOT_DIR/contractiq/start.sh" ]; then
     echo ""
-    log "Step 8/11 — Starting the example app standalone application..."
-    bash "$ROOT_DIR/example_app/start.sh" || warn "the example app failed to start (non-fatal)"
+    log "Step 8/11 — Starting ContractIQ standalone application..."
+    bash "$ROOT_DIR/contractiq/start.sh" || warn "ContractIQ failed to start (non-fatal)"
   fi
 
   # ── Step 9: Start Saudi Tourism standalone application ──────
@@ -745,14 +745,14 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
   echo ""
   echo -e "  ${CYAN}Abenix App${NC}     http://localhost:3000"
-  echo -e "  ${CYAN}the example app App${NC}     http://localhost:3001"
+  echo -e "  ${CYAN}ContractIQ App${NC}     http://localhost:3001"
   echo -e "  ${CYAN}Saudi Tourism${NC}      http://localhost:3002"
   echo -e "  ${CYAN}Industrial IoT${NC}     http://localhost:3003"
   echo -e "  ${CYAN}ResolveAI${NC}          http://localhost:3004  (customer-service agents)"
   echo -e "  ${CYAN}ClaimsIQ${NC}           http://localhost:3005  (insurance FNOL, Java + Vaadin)"
   echo -e "  ${CYAN}Wingman${NC}            http://localhost:3006  (energy commodity trading)"
   echo -e "  ${CYAN}Abenix API${NC}     http://localhost:8000"
-  echo -e "  ${CYAN}the example app API${NC}     http://localhost:8001"
+  echo -e "  ${CYAN}ContractIQ API${NC}     http://localhost:8001"
   echo -e "  ${CYAN}Saudi Tourism API${NC}  http://localhost:8002"
   echo -e "  ${CYAN}Industrial-IoT API${NC} http://localhost:8003"
   echo -e "  ${CYAN}ResolveAI API${NC}      http://localhost:8004"

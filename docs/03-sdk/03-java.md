@@ -53,10 +53,10 @@ The async surface uses Java 17's `HttpClient` with virtual threads (JDK 21+) whe
 ## actAs
 
 ```java
-ActingSubject subject = ActingSubject.of("example_app", userId, email, displayName);
+ActingSubject subject = ActingSubject.of("contractiq", userId, email, displayName);
 
 ExecutionResult r = client.withSubject(subject)
-    .execute("example_app-clause-extractor", Map.of("document_id", docId), Wait.COMPLETE);
+    .execute("contractiq-clause-extractor", Map.of("document_id", docId), Wait.COMPLETE);
 ```
 
 `withSubject` returns a wrapper. the original `client` is unaffected.
@@ -96,9 +96,9 @@ public class ScanController {
     
     @PostMapping("/api/scan")
     public ResponseEntity<?> scan(@RequestBody ScanRequest req, Principal principal) {
-        var subject = ActingSubject.of("example_app", principal.getName(), null, null);
+        var subject = ActingSubject.of("contractiq", principal.getName(), null, null);
         var result = abenix.withSubject(subject)
-            .executeAsync("example_app-…", req.toMap(), Wait.SUBMITTED)
+            .executeAsync("contractiq-…", req.toMap(), Wait.SUBMITTED)
             .get();
         return ResponseEntity.accepted().body(Map.of("execution_id", result.executionId()));
     }

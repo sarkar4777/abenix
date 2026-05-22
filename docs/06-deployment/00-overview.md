@@ -27,7 +27,7 @@ flowchart LR
   G[git clone] --> P[Phase 1<br/>Provision infra<br/>(create AKS / start minikube)]
   P --> B[Phase 2<br/>Build + push images<br/>15 images per release]
   B --> H[Phase 3<br/>Helm upgrade<br/>main abenix chart]
-  H --> S[Phase 4<br/>Deploy standalone apps<br/>(wingman, example_app, etc.)]
+  H --> S[Phase 4<br/>Deploy standalone apps<br/>(wingman, contractiq, etc.)]
   S --> SD[Phase 5<br/>Seed agents + KBs + ML models]
   SD --> T[Phase 6<br/>Smoke tests + UAT]
 ```
@@ -59,7 +59,7 @@ bash scripts/deploy-azure.sh provision
 
 What it does:
 1. Creates resource group (idempotent).
-2. Creates Azure Container Registry (`abenixacr71a48.azurecr.io`).
+2. Creates Azure Container Registry (`your-acr.azurecr.io`).
 3. Creates AKS cluster (3-5 nodes, B-series VMs by default).
 4. Attaches ACR to AKS so pulls auth automatically.
 5. Installs ingress-nginx, KEDA.
@@ -79,7 +79,7 @@ Builds 15 images in parallel:
 - `agent-runtime` — runtime image (4 deployments share it)
 - `edge-runtime`, `edge-runtime-rust`, `edge-runtime-c` — optional edge
 - `wingman-api`, `wingman-web` — Wingman
-- `example_app-api`, `example_app-web` — the example app
+- `contractiq-api`, `contractiq-web` — ContractIQ
 - `sauditourism-api`, `sauditourism-web` — Saudi Tourism
 - `resolveai-api`, `resolveai-web` — ResolveAI
 - `industrial-iot-api`, `industrial-iot-web` — Industrial-IoT
@@ -169,7 +169,7 @@ bash scripts/deploy-azure.sh redeploy --only=wingman-api
 helm rollback abenix -n abenix
 
 # Standalone apps — re-apply the manifest with the prior tag
-kubectl set image deploy/wingman-api api=abenixacr71a48.azurecr.io/wingman-api:<prior-tag>
+kubectl set image deploy/wingman-api api=your-acr.azurecr.io/wingman-api:<prior-tag>
 ```
 
 ### Migration safety

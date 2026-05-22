@@ -12,7 +12,7 @@ import httpx
 @dataclass
 class ActingSubject:
     """RBAC delegation: act on behalf of an end user."""
-    subject_type: str           # e.g., "example_app", "external", "user"
+    subject_type: str           # e.g., "contractiq", "external", "user"
     subject_id: str             # end-user ID in third-party system
     email: str | None = None
     display_name: str | None = None
@@ -711,7 +711,7 @@ class Abenix:
         version predates the ``wait`` flag, or the queue dispatcher fell back),
         we poll the execution row until it terminates so the caller never gets
         an empty ``output``. This is the industrial-strength path: a single SDK
-        fix repairs every standalone app (the example app insights, ResolveAI,
+        fix repairs every standalone app (ContractIQ insights, ResolveAI,
         SauditTourism, IndustrialIoT, …) that depends on synchronous output.
         """
         agent_id = await self._resolve_agent_id(agent_slug_or_id)

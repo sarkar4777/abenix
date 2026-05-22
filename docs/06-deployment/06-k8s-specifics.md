@@ -20,8 +20,8 @@ flowchart LR
     AR4[agent-runtime-long-running]
     WAPI[wingman-api]
     WW[wingman-web]
-    CAPI[example_app-api]
-    CW[example_app-web]
+    CAPI[contractiq-api]
+    CW[contractiq-web]
     SAPI[sauditourism-api]
     SW[sauditourism-web]
     RAPI[resolveai-api]
@@ -252,7 +252,7 @@ Policies allow:
 
 On AKS we **attach the ACR** at provision time:
 ```bash
-az aks update -n abenix-aks -g abenix-rg --attach-acr abenixacr71a48
+az aks update -n abenix-aks -g abenix-rg --attach-acr your-acr
 ```
 
 This adds an `imagePullSecret` to every namespace automatically. No per-pod pull secret needed.

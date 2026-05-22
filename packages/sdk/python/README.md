@@ -6,7 +6,7 @@ Execute, stream, and monitor Abenix AI agents from any Python application.
 from abenix_sdk import Abenix
 
 async with Abenix(api_key="af_...", base_url="https://api.abenix.dev") as forge:
-    result = await forge.execute("example_app-extractor", "Extract terms from this PDF: ...")
+    result = await forge.execute("contractiq-extractor", "Extract terms from this PDF: ...")
     print(result.output)
 ```
 
@@ -54,7 +54,7 @@ app's Docker image carries its own copy:
 | ------------------------------------------ | -------------------------------- |
 | `packages/sdk/python/abenix_sdk/`          | **Canonical** — edit only here.  |
 | `packages/agent-sdk/abenix_sdk/`           | Used by `apps/agent-runtime`.    |
-| `example_app/api/sdk/abenix_sdk/`           | Vendored into the example app image.  |
+| `contractiq/api/sdk/abenix_sdk/`           | Vendored into ContractIQ image.  |
 | `industrial-iot/api/sdk/abenix_sdk/`       | Vendored into Industrial-IoT.    |
 | `resolveai/api/sdk/abenix_sdk/`            | Vendored into ResolveAI.         |
 | `sauditourism/api/sdk/abenix_sdk/`         | Vendored into Saudi Tourism.     |
@@ -81,7 +81,7 @@ end user via the `X-Abenix-Subject` header:
 from abenix_sdk import Abenix, ActingSubject
 
 subject = ActingSubject(
-    subject_type="example_app",
+    subject_type="contractiq",
     subject_id="user-123",
     email="user@example.com",
 )

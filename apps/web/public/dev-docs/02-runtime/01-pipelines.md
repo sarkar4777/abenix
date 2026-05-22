@@ -142,7 +142,7 @@ See [05-ui/01-builder-canvas](../05-ui/01-builder-canvas.md) for the UI patterns
 
 ### Pattern 1 — Extract → Classify → Route
 The most common. One pipeline, three agents, one switch.
-Used by: the example app clause review, Wingman broker inbox triage.
+Used by: ContractIQ clause review, Wingman broker inbox triage.
 
 ### Pattern 2 — Map / for-each
 Fan a per-item agent over a list. E.g. for each clause in a contract, run risk analysis.

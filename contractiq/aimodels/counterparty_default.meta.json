@@ -1,0 +1,68 @@
+{
+  "name": "contractiq-counterparty-default",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Logistic-regression PD model. Given 7 financial ratios + 3 sector flags + a public/private flag, returns a calibrated 12-month probability of default and a four-level rating bucket (investment / speculative / sub-IG / distressed). The credit_risk agent calls this BEFORE running sanctions / PEP / adverse-media so cheap counterparties get screened fast and expensive deep-checks only run on suspect names.",
+  "input_schema": {
+    "features": [
+      "debt_to_equity",
+      "interest_coverage",
+      "current_ratio",
+      "quick_ratio",
+      "return_on_assets",
+      "revenue_growth_yoy",
+      "altman_z",
+      "sector_oilgas",
+      "sector_power",
+      "sector_metals",
+      "is_public"
+    ],
+    "types": [
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float",
+      "float"
+    ],
+    "example": [
+      1.5,
+      4.0,
+      1.2,
+      0.8,
+      0.06,
+      0.08,
+      3.5,
+      1,
+      0,
+      0,
+      1
+    ]
+  },
+  "output_schema": {
+    "type": "binary_classification",
+    "classes": [
+      0,
+      1
+    ],
+    "returns": "P(default within 12m); rating bucket derived from probability bands"
+  },
+  "tags": [
+    "contractiq",
+    "credit-risk",
+    "counterparty",
+    "pd"
+  ],
+  "training": {
+    "samples": 4000,
+    "algorithm": "StandardScaler -> Logistic Regression",
+    "synthetic": true,
+    "holdout_accuracy": 0.8947,
+    "base_default_rate": 0.1092
+  }
+}

@@ -19,7 +19,7 @@ and the tool will pick that up without a redeploy. Operations updates
 the JSON monthly from OPEC MOMR + RBN/Clarksons publications.
 
 The tool is intentionally generic — anything calling LPG freight math
-can use it (Wingman, the example app chartering desk, the Industrial-IoT
+can use it (Wingman, ContractIQ chartering desk, the Industrial-IoT
 shipping module, future tankers app).
 """
 

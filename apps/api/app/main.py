@@ -276,7 +276,7 @@ from app.routers import search as search_router, admin_cluster as admin_cluster_
 app.include_router(search_router.router)
 app.include_router(admin_cluster_router.router)
 
-# the example app has been extracted to /example_app/ as a standalone application.
+# ContractIQ has been extracted to /contractiq/ as a standalone application.
 # It uses the Abenix SDK for AI features via the actAs delegation pattern.
 
 

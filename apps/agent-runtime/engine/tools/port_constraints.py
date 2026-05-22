@@ -105,7 +105,7 @@ _VESSEL_AIR_DRAUGHT_M: dict[str, float] = {
 }
 
 # Curated port table — focus is on liquid-bulk terminals where Wingman /
-# the example app / chartering desks actually fix cargoes.
+# ContractIQ / chartering desks actually fix cargoes.
 _PORTS: dict[str, dict[str, Any]] = {
     "USHOU": {
         "name": "Houston, TX (Enterprise Houston Ship Channel LPG)",

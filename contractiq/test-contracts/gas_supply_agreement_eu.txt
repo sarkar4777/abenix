@@ -1,0 +1,1382 @@
+================================================================================
+               LONG-TERM LNG SALE AND PURCHASE AGREEMENT
+================================================================================
+
+                           BETWEEN
+
+              QATARGAS OPERATING COMPANY LIMITED
+              (as Seller)
+
+                             AND
+
+              ENGIE SA
+              (as Buyer)
+
+================================================================================
+
+          COMMODITY: LIQUEFIED NATURAL GAS (LNG)
+          DELIVERY POINT: FOS CAVAOU LNG TERMINAL, FRANCE
+          ANNUAL CONTRACT QUANTITY: 3.0 MILLION TONNES PER ANNUM (MTPA)
+          CONTRACT REFERENCE: QG-ENGIE-LTSA-2024-001
+          EXECUTION DATE: November 15, 2023
+          EFFECTIVE DATE: January 1, 2024
+          TERM: Twenty (20) Years
+
+================================================================================
+
+THIS LONG-TERM LNG SALE AND PURCHASE AGREEMENT (hereinafter referred to as
+the "Agreement") is entered into on the 15th day of November, 2023 (the
+"Execution Date"),
+
+BETWEEN:
+
+(1) QATARGAS OPERATING COMPANY LIMITED, a limited liability company
+    established under the laws of the State of Qatar, having its registered
+    office at Qatargas Tower, Al Corniche Street, West Bay, Doha, State of
+    Qatar, P.O. Box 22666 (hereinafter referred to as the "Seller"); and
+
+(2) ENGIE SA, a societe anonyme organized and existing under the laws of
+    the French Republic, having its registered office at 1 Place Samuel de
+    Champlain, 92400 Courbevoie, France, registered with the Trade and
+    Companies Register of Nanterre under number 542 107 651 (hereinafter
+    referred to as the "Buyer").
+
+The Seller and the Buyer are hereinafter collectively referred to as the
+"Parties" and individually as a "Party".
+
+RECITALS
+
+WHEREAS, the Seller is the operator of the Qatargas liquefied natural gas
+production facilities in Ras Laffan Industrial City, State of Qatar, with
+aggregate liquefaction capacity in excess of 77 million tonnes per annum
+(mtpa), and is one of the world's largest producers and exporters of LNG;
+
+WHEREAS, QatarEnergy (formerly Qatar Petroleum), the state hydrocarbon
+company of the State of Qatar, holds an indirect majority interest in the
+Seller and its upstream gas production assets, including the North Field,
+which contains the world's largest non-associated natural gas reserves
+(estimated at approximately 900 trillion cubic feet);
+
+WHEREAS, the Seller is currently expanding its LNG production capacity
+through the North Field East (NFE) and North Field South (NFS) expansion
+projects, which will increase Qatar's total LNG production capacity to
+approximately 126 mtpa by 2028;
+
+WHEREAS, the Buyer is a leading European integrated energy company
+headquartered in France, engaged in the production, procurement, trading,
+transportation, distribution, and sale of natural gas and LNG across Europe
+and globally;
+
+WHEREAS, the Buyer owns and operates LNG receiving and regasification
+terminal infrastructure in France, including interests in the Fos Cavaou
+LNG terminal and the Montoir-de-Bretagne LNG terminal;
+
+WHEREAS, the European Union has identified the diversification of natural
+gas supply sources and the development of LNG import infrastructure as
+critical objectives for ensuring energy security and reducing dependence
+on any single supplier, consistent with the EU Energy Security Strategy
+and the REPowerEU Plan;
+
+WHEREAS, the Parties wish to enter into this long-term Agreement for the
+sale and purchase of LNG on the terms and conditions set forth herein,
+reflecting the mutual commercial interests of the Parties and the long-term
+strategic relationship between the State of Qatar and the French Republic
+in the energy sector;
+
+NOW, THEREFORE, in consideration of the mutual covenants, representations,
+warranties, and agreements contained herein, and for other good and valuable
+consideration, the receipt and sufficiency of which are hereby acknowledged,
+the Parties agree as follows:
+
+
+================================================================================
+                    ARTICLE 1: DEFINITIONS AND INTERPRETATION
+================================================================================
+
+1.1 DEFINITIONS
+
+In this Agreement, unless the context otherwise requires, the following
+capitalized terms shall have the meanings ascribed to them below:
+
+"ACQ" or "Annual Contract Quantity" means three million (3,000,000) tonnes
+of LNG per Contract Year, subject to adjustment in accordance with this
+Agreement.
+
+"Actual Delivery Quantity" means the quantity of LNG (in tonnes) actually
+delivered by the Seller and received by the Buyer at the Delivery Point
+during any period.
+
+"Affiliate" means, with respect to any Person, any other Person that
+directly or indirectly controls, is controlled by, or is under common
+control with, such Person.
+
+"ADP" or "Annual Delivery Programme" means the schedule of LNG cargo
+deliveries for a Contract Year, established in accordance with Article 5.
+
+"Applicable Law" means all laws, statutes, regulations, rules, orders,
+decrees, directives, and requirements of any Governmental Authority
+applicable to the Parties, the LNG, or the performance of obligations
+under this Agreement, including the laws of the State of Qatar, the laws
+of the French Republic, and applicable EU law.
+
+"Berth" means the LNG unloading berth at the Delivery Terminal designated
+for the receipt of LNG Carriers delivering LNG under this Agreement.
+
+"Boil-Off Gas" or "BOG" means the natural gas generated by the evaporation
+of LNG during storage, transportation, and unloading operations.
+
+"British Thermal Unit" or "BTU" means the quantity of heat required to
+raise the temperature of one pound of water by one degree Fahrenheit at
+or near 39.2 degrees Fahrenheit, at standard atmospheric pressure.
+
+"Business Day" means any day other than a Saturday, Sunday, or a public
+holiday in both Doha, Qatar and Paris, France.
+
+"Cargo" means a full shipload quantity of LNG loaded onto and transported
+by an LNG Carrier.
+
+"CIF" means Cost, Insurance, and Freight (Incoterms 2020).
+
+"Contract Price" shall have the meaning set forth in Article 4.1.
+
+"Contract Year" means each period of twelve (12) consecutive calendar months
+commencing on January 1 and ending on December 31 during the Term. The first
+Contract Year shall commence on the Effective Date.
+
+"DES" means Delivered Ex-Ship (equivalent to DAP -- Delivered at Place --
+under Incoterms 2020, with the delivery point being the flange connection
+between the LNG Carrier's unloading manifold and the receiving terminal's
+unloading arm at the Delivery Terminal).
+
+"Delivery Period" means the period, not exceeding seventy-two (72) hours
+(unless extended by mutual agreement), during which an LNG Carrier is
+permitted to occupy the Berth at the Delivery Terminal for the purpose of
+unloading LNG.
+
+"Delivery Point" means the point at which title to and risk in the LNG
+passes from the Seller to the Buyer, being the flange connection between
+the LNG Carrier's unloading manifold and the Delivery Terminal's unloading
+arms at the Fos Cavaou LNG Terminal, Fos-sur-Mer, France.
+
+"Delivery Terminal" means the Fos Cavaou LNG receiving and regasification
+terminal, located at Port de Fos-sur-Mer, Bouches-du-Rhone, France,
+owned and operated by Fosmax LNG (a subsidiary of Elengy, itself a
+subsidiary of the Buyer).
+
+"Diversion" shall have the meaning set forth in Article 6.
+
+"Diversion Cargo" means a Cargo that the Buyer elects to divert to an
+Alternative Delivery Point in accordance with Article 6.
+
+"DQT" or "Downward Quantity Tolerance" means the quantity of LNG by which
+the Actual Delivery Quantity in a Contract Year may fall below the ACQ
+without triggering Take-or-Pay obligations, equal to fifteen percent (15%)
+of the ACQ (i.e., 450,000 tonnes).
+
+"Effective Date" means January 1, 2024.
+
+"Force Majeure" shall have the meaning set forth in Article 10.
+
+"Governmental Authority" means any government, governmental department,
+ministry, commission, board, bureau, agency, regulatory authority, court,
+tribunal, or other instrumentality, whether national, federal, state,
+emirate, regional, or local.
+
+"Gross Calorific Value" or "GCV" means the quantity of heat (in BTU or MJ)
+produced by the complete combustion of a unit quantity of gas at standard
+conditions, with the water formed by combustion being condensed to liquid.
+
+"Henry Hub" or "HH" means the Henry Hub natural gas pricing point located
+in Erath, Louisiana, United States, as published by the Intercontinental
+Exchange (ICE) or the New York Mercantile Exchange (NYMEX).
+
+"LNG" means liquefied natural gas, being natural gas that has been cooled
+to approximately minus one hundred and sixty-two degrees Celsius (-162
+degrees C) and converted to liquid form for the purpose of storage,
+transportation, and delivery.
+
+"LNG Carrier" means an ocean-going vessel designed and constructed for the
+transportation of LNG in purpose-built membrane or spherical (Moss-type)
+cargo containment tanks.
+
+"Loading Port" means the LNG loading facilities at Ras Laffan Industrial
+City, State of Qatar.
+
+"Make-Up" shall have the meaning set forth in Article 3.5.
+
+"MMBtu" means one million British Thermal Units.
+
+"mtpa" means million tonnes per annum.
+
+"Nomination" shall have the meaning set forth in Article 5.
+
+"Off-Specification LNG" means LNG that does not conform to the quality
+specifications set forth in Article 7.
+
+"Person" means any individual, corporation, company, partnership, limited
+liability company, joint venture, trust, association, governmental
+authority, or other entity.
+
+"Platts" means S&P Global Platts (now S&P Global Commodity Insights), or
+any successor pricing assessment service.
+
+"Quality Specifications" shall have the meaning set forth in Article 7.
+
+"Q-Max Carrier" means a Qatar-Max LNG carrier with a cargo capacity of
+approximately 266,000 cubic meters (m3), being the largest class of LNG
+carrier designed for the Qatargas fleet.
+
+"Ras Laffan" means Ras Laffan Industrial City, the site of Qatar's LNG
+production and export facilities, located in the northeast of the State of
+Qatar.
+
+"Seller's Facilities" means the LNG liquefaction trains, storage tanks,
+loading jetties, and all associated infrastructure located at Ras Laffan
+used by the Seller for the production, storage, and export of LNG.
+
+"Ship-or-Pay" shall have the meaning set forth in Article 3.4.
+
+"SOFR" means the Secured Overnight Financing Rate.
+
+"Take-or-Pay" shall have the meaning set forth in Article 3.3.
+
+"Term" shall have the meaning set forth in Article 2.1.
+
+"Wobbe Index" means the Gross Calorific Value of the gas divided by the
+square root of its specific gravity (relative density), expressed in
+MJ/Nm3 or BTU/scf.
+
+1.2 INTERPRETATION
+
+(a) References to "tonnes" mean metric tonnes (1,000 kilograms).
+(b) References to "Nm3" mean normal cubic meters at 0 degrees Celsius and
+    101.325 kPa.
+(c) References to "scf" mean standard cubic feet at 60 degrees Fahrenheit
+    and 14.696 psia.
+(d) All monetary amounts are in United States Dollars (USD) unless
+    otherwise specified.
+(e) Headings are for convenience only and shall not affect interpretation.
+(f) The Schedules form an integral part of this Agreement.
+
+
+================================================================================
+                    ARTICLE 2: TERM
+================================================================================
+
+2.1 DURATION
+
+This Agreement shall become effective on the Effective Date (January 1,
+2024) and shall remain in full force and effect for a period of twenty (20)
+Contract Years, expiring on December 31, 2043, unless earlier terminated in
+accordance with this Agreement (the "Term").
+
+2.2 EXTENSION
+
+The Parties may extend the Term by mutual written agreement. Either Party
+wishing to extend the Term shall notify the other Party in writing not less
+than thirty-six (36) months prior to the expiration of the Term. The Parties
+shall negotiate in good faith the terms and conditions of any extension,
+including pricing.
+
+2.3 RAMP-UP PERIOD
+
+(a) Contract Year 1 (2024): The ACQ shall be reduced to two million
+(2,000,000) tonnes to allow for the phasing of supply arrangements and
+shipping logistics.
+
+(b) Contract Year 2 (2025): The ACQ shall be increased to two million five
+hundred thousand (2,500,000) tonnes.
+
+(c) Contract Year 3 (2026) and thereafter: The full ACQ of three million
+(3,000,000) tonnes shall apply.
+
+
+================================================================================
+               ARTICLE 3: QUANTITY AND TAKE-OR-PAY
+================================================================================
+
+3.1 ANNUAL CONTRACT QUANTITY
+
+(a) Subject to the ramp-up provisions in Article 2.3, the Seller shall make
+available for delivery, and the Buyer shall take or pay for, three million
+(3,000,000) tonnes of LNG per Contract Year (the "ACQ").
+
+(b) The ACQ corresponds to approximately fifty-four (54) Cargoes per
+Contract Year, each Cargo being approximately 55,500 tonnes (loaded on a
+Q-Max Carrier with a capacity of 266,000 m3 at a nominal LNG density of
+approximately 450 kg/m3, accounting for heel retention and cargo measurement
+tolerances).
+
+3.2 QUANTITY TOLERANCES
+
+(a) Upward Quantity Tolerance ("UQT"): The Seller shall have the right (but
+not the obligation) to deliver up to one hundred and ten percent (110%) of
+the ACQ in any Contract Year. Additional Cargoes above the ACQ shall be
+subject to the Buyer's acceptance and berth availability at the Delivery
+Terminal.
+
+(b) Downward Quantity Tolerance ("DQT"): The minimum quantity that the
+Buyer must take (or pay for, in the event of failure to take) in each
+Contract Year shall be eighty-five percent (85%) of the ACQ, equal to
+two million five hundred and fifty thousand (2,550,000) tonnes (the
+"Minimum Take-or-Pay Quantity").
+
+3.3 TAKE-OR-PAY OBLIGATION
+
+(a) If the Actual Delivery Quantity received by the Buyer in any Contract
+Year is less than the Minimum Take-or-Pay Quantity (85% of ACQ), the Buyer
+shall pay to the Seller, within sixty (60) days after the end of such
+Contract Year, a take-or-pay payment ("Take-or-Pay Payment") equal to:
+
+    Take-or-Pay Payment = (Minimum Take-or-Pay Quantity - Actual Delivery
+    Quantity) x Average Contract Price for such Contract Year
+
+Where "Average Contract Price" means the weighted average price per tonne
+of LNG delivered during the Contract Year, calculated using the pricing
+formula in Article 4.1.
+
+(b) The Take-or-Pay obligation shall not apply to shortfalls in delivery
+caused by:
+    (i) Force Majeure affecting the Buyer;
+    (ii) the Seller's failure to make LNG available for delivery;
+    (iii) Off-Specification LNG rejected by the Buyer in accordance with
+          Article 7;
+    (iv) Seller-caused delays at the Loading Port;
+    (v) Diversion Cargoes diverted with the Seller's consent (to the extent
+        such diversions are deducted from the ACQ).
+
+3.4 SHIP-OR-PAY OBLIGATION
+
+(a) If the Seller fails to make available for delivery to the Buyer in any
+Contract Year a quantity of LNG equal to or greater than eighty-five percent
+(85%) of the ACQ (the "Minimum Ship-or-Pay Quantity"), the Seller shall pay
+to the Buyer, within sixty (60) days after the end of such Contract Year, a
+ship-or-pay payment ("Ship-or-Pay Payment") equal to:
+
+    Ship-or-Pay Payment = (Minimum Ship-or-Pay Quantity - Quantity Made
+    Available) x Average Contract Price for such Contract Year
+
+(b) The Ship-or-Pay obligation shall not apply to shortfalls caused by:
+    (i) Force Majeure affecting the Seller;
+    (ii) the Buyer's failure to accept or take delivery of LNG;
+    (iii) closure or unavailability of the Delivery Terminal not caused by
+          the Seller;
+    (iv) Buyer-directed diversions.
+
+3.5 MAKE-UP RIGHTS
+
+(a) In any Contract Year in which the Buyer has made a Take-or-Pay Payment,
+the Buyer shall have the right, in any subsequent Contract Year during the
+Term (the "Make-Up Year"), to take delivery of additional LNG (up to the
+quantity for which Take-or-Pay was paid) at no additional cost (i.e.,
+without paying the Contract Price for such additional LNG), subject to:
+    (i) the Buyer's Make-Up right being exercised on a first-in, first-out
+        basis;
+    (ii) the Make-Up quantity not exceeding ten percent (10%) of the ACQ in
+         any Make-Up Year (i.e., 300,000 tonnes);
+    (iii) the Seller's ability to supply the Make-Up quantity from available
+          production capacity;
+    (iv) berth availability at the Delivery Terminal; and
+    (v) the Make-Up right being exercised within five (5) Contract Years of
+        the Contract Year in which the Take-or-Pay Payment was made,
+        failing which the Make-Up right shall lapse.
+
+(b) The Buyer shall give the Seller not less than ninety (90) days' advance
+notice of its intention to exercise Make-Up rights in respect of any
+Contract Year.
+
+
+================================================================================
+               ARTICLE 4: PRICING
+================================================================================
+
+4.1 CONTRACT PRICE
+
+The price per MMBtu of LNG delivered at the Delivery Point (the "Contract
+Price") shall be calculated for each Cargo as follows:
+
+    Contract Price (USD/MMBtu) = HH + S + F
+
+Where:
+    HH = the Henry Hub Natural Gas Price, being the arithmetic average of
+         the NYMEX Henry Hub Natural Gas Futures Contract settlement prices
+         for the front-month contract during the Pricing Period;
+
+    S  = the Fixed Adder, equal to three dollars and fifty cents per MMBtu
+         (USD 3.50/MMBtu), representing the liquefaction tolling fee and
+         margin component;
+
+    F  = the Shipping Component, being the Platts-assessed freight cost for
+         LNG transportation from Ras Laffan, Qatar to Fos-sur-Mer, France,
+         on a DES basis, for the relevant voyage, as published by S&P Global
+         Commodity Insights (Platts) for the "AG-Mediterranean" route or the
+         nearest comparable route assessment, expressed in USD/MMBtu.
+
+4.2 PRICING PERIOD
+
+The "Pricing Period" for each Cargo shall be the calendar month in which the
+Bill of Lading Date falls (i.e., the month in which the Cargo is loaded at
+the Loading Port).
+
+4.3 PRICE CONVERSION
+
+For the purpose of invoicing, the Contract Price (in USD/MMBtu) shall be
+converted to a price per tonne of LNG using the actual measured Gross
+Calorific Value of the delivered Cargo:
+
+    Invoice Amount (USD) = Contract Price (USD/MMBtu) x Total GCV of Cargo
+    (MMBtu)
+
+Where Total GCV of Cargo = Volume of LNG delivered (in Nm3) x GCV per Nm3
+(BTU/Nm3) / 1,000,000
+
+4.4 ANNUAL PRICE REVIEW
+
+(a) Commencing from Contract Year 5 (2028), either Party may request a
+review of the Fixed Adder (S) component of the Contract Price by giving
+written notice to the other Party at least twelve (12) months prior to the
+start of the relevant Contract Year.
+
+(b) The purpose of the price review shall be to ensure that the Fixed Adder
+remains reflective of prevailing market conditions for long-term LNG supply
+contracts from the Gulf region to Europe. The Parties shall negotiate in
+good faith, taking into account:
+    (i) the prevailing level of LNG spot and term contract prices;
+    (ii) the prices in comparable long-term LNG contracts concluded in the
+         preceding three (3) years;
+    (iii) changes in the cost of LNG liquefaction and transportation; and
+    (iv) the overall commercial balance of this Agreement.
+
+(c) If the Parties are unable to agree on a revised Fixed Adder within six
+(6) months of the commencement of negotiations, the matter shall be referred
+to an independent expert for determination in accordance with Article 13.2.
+The expert's determination of the Fixed Adder shall be final and binding.
+
+(d) Pending the conclusion of the price review, the existing Contract Price
+shall continue to apply, and any adjustment shall be retroactively applied
+from the date the price review was requested, with interest on any
+retroactive amounts at SOFR.
+
+4.5 INVOICING AND PAYMENT
+
+(a) The Seller shall issue an invoice to the Buyer for each Cargo within
+ten (10) Business Days after the completion of unloading at the Delivery
+Terminal.
+
+(b) Each invoice shall specify:
+    (i) the Cargo identification number;
+    (ii) the name of the LNG Carrier;
+    (iii) the Bill of Lading Date and the date of delivery;
+    (iv) the volume and mass of LNG delivered (as measured);
+    (v) the Gross Calorific Value of the LNG delivered;
+    (vi) the total energy content (in MMBtu);
+    (vii) the Henry Hub price applicable during the Pricing Period;
+    (viii) the Fixed Adder;
+    (ix) the Shipping Component;
+    (x) the Contract Price (USD/MMBtu);
+    (xi) the total invoice amount (USD); and
+    (xii) bank account details for payment.
+
+(c) Payment shall be due within thirty (30) days of the date of the invoice
+by wire transfer of immediately available funds in United States Dollars to
+the Seller's designated bank account.
+
+(d) Late payment shall bear interest at SOFR plus two percent (2%) per
+annum, calculated on a daily compounding basis from the due date until the
+date of actual payment.
+
+
+================================================================================
+               ARTICLE 5: SCHEDULING AND NOMINATIONS
+================================================================================
+
+5.1 ANNUAL DELIVERY PROGRAMME
+
+(a) Not less than ninety (90) days prior to the start of each Contract Year,
+the Seller shall propose, and the Parties shall agree upon, an Annual
+Delivery Programme (ADP) setting forth the number of Cargoes, the
+approximate delivery dates (within a window of plus or minus five (5)
+days), the LNG Carrier to be used for each delivery, and the estimated
+volume and quality of each Cargo.
+
+(b) The ADP shall be consistent with the ACQ (or the adjusted ACQ for the
+ramp-up period) and shall take into account:
+    (i) the Seller's production and loading schedules;
+    (ii) berth availability at the Delivery Terminal;
+    (iii) the Buyer's regasification and send-out requirements;
+    (iv) scheduled maintenance at the Seller's Facilities and the Delivery
+         Terminal; and
+    (v) LNG Carrier availability and voyage times.
+
+5.2 NINETY-DAY ROLLING SCHEDULE
+
+At least ninety (90) days before the expected delivery date of each Cargo,
+the Seller shall provide the Buyer with a preliminary Cargo nomination
+("90-Day Nomination"), specifying:
+    (i) the expected loading date window (5-day window);
+    (ii) the expected delivery date window (5-day window);
+    (iii) the identity of the LNG Carrier;
+    (iv) the estimated volume and quality of the Cargo.
+
+5.3 THIRTY-DAY CONFIRMATION
+
+At least thirty (30) days before the expected delivery date, the Seller
+shall confirm the Cargo nomination ("30-Day Confirmation"), narrowing the
+delivery window to plus or minus three (3) days.
+
+5.4 SEVEN-DAY FINAL NOMINATION
+
+At least seven (7) days before the expected delivery date, the Seller shall
+provide a final nomination ("7-Day Final Nomination"), specifying:
+    (i) the confirmed delivery date (plus or minus one (1) day);
+    (ii) the confirmed LNG Carrier;
+    (iii) the estimated time of arrival (ETA);
+    (iv) the estimated volume and quality of the Cargo; and
+    (v) any special requirements for unloading.
+
+5.5 SCHEDULE CHANGES
+
+(a) Either Party may request changes to the delivery schedule, subject to
+reasonable notice and the other Party's acceptance (which shall not be
+unreasonably withheld).
+
+(b) The Seller shall give the Buyer at least fourteen (14) days' notice of
+any material change to a Cargo nomination (including a change of LNG
+Carrier, a delay of more than two (2) days, or a change of more than ten
+percent (10%) in estimated Cargo volume).
+
+(c) If the Delivery Terminal is unable to receive a Cargo on the nominated
+delivery date due to berth unavailability, weather restrictions, or terminal
+outage, the Buyer shall notify the Seller as soon as practicable and the
+Parties shall cooperate to reschedule the delivery.
+
+
+================================================================================
+               ARTICLE 6: DIVERSION RIGHTS
+================================================================================
+
+6.1 BUYER'S DIVERSION RIGHT
+
+(a) The Buyer shall have the right to divert up to twenty percent (20%) of
+the ACQ per Contract Year (i.e., up to 600,000 tonnes, approximately
+10-11 Cargoes) to alternative LNG receiving terminals other than the
+Delivery Terminal ("Alternative Delivery Points"), subject to the following
+conditions:
+
+    (i) the Buyer shall give the Seller at least thirty (30) days' written
+        notice of its intention to divert a Cargo, specifying the
+        Alternative Delivery Point, the estimated arrival date, and the
+        identity of the receiving terminal;
+
+    (ii) the Alternative Delivery Point must be a recognized LNG receiving
+         terminal capable of safely receiving the nominated LNG Carrier, with
+         adequate draft, berth dimensions, and compatible unloading equipment;
+
+    (iii) the LNG quality specifications at the Alternative Delivery Point
+          must be compatible with the quality of the LNG being delivered
+          (or the Buyer shall bear the risk and cost of any quality issues);
+
+    (iv) the diversion shall not result in any incremental cost or liability
+         to the Seller (any additional shipping costs, port charges, or
+         delays shall be borne by the Buyer);
+
+    (v) the diversion shall not violate any Applicable Law, trade sanction,
+        or embargo applicable to the Seller, the LNG Carrier, or the LNG;
+        and
+
+    (vi) the Buyer shall not divert any Cargo to a destination or end-user
+         subject to trade sanctions imposed by the State of Qatar, the
+         United Nations, or any jurisdiction to which the Seller is subject.
+
+(b) Title to and risk in a Diversion Cargo shall pass from the Seller to
+the Buyer at the Delivery Point of the Alternative Delivery Point (the
+flange connection between the LNG Carrier's manifold and the alternative
+terminal's unloading arm).
+
+6.2 DIVERSION PROFIT SHARING
+
+(a) If the Buyer diverts a Cargo and resells the LNG at a price exceeding
+the Contract Price applicable to such Cargo, the Buyer shall share any
+net profit (after deduction of incremental transportation, port, and
+transaction costs) with the Seller as follows:
+
+    Seller's Share: Fifty percent (50%) of the net diversion profit
+    Buyer's Share: Fifty percent (50%) of the net diversion profit
+
+(b) The Buyer shall provide the Seller with a statement of diversion
+economics within sixty (60) days after completion of the diverted delivery,
+and any diversion profit-sharing payment shall be due within thirty (30)
+days thereafter.
+
+6.3 DESTINATION RESTRICTIONS
+
+(a) Notwithstanding the Buyer's diversion rights, the Buyer shall not,
+without the prior written consent of the Seller, divert or resell any LNG
+to any country or territory that is subject to comprehensive trade
+sanctions or embargoes imposed by the State of Qatar or any major
+international body.
+
+(b) The Buyer shall provide the Seller with destination confirmation for
+each Diversion Cargo, including the identity of the receiving terminal,
+the name of the end-buyer (if applicable), and an end-use certificate
+if requested by the Seller.
+
+
+================================================================================
+               ARTICLE 7: LNG QUALITY SPECIFICATIONS
+================================================================================
+
+7.1 QUALITY SPECIFICATIONS
+
+The LNG delivered at the Delivery Point shall conform to the following
+quality specifications (the "Quality Specifications"):
+
+Parameter                        Minimum         Maximum         Unit
+-----------                      ----------      ----------      ----
+Gross Calorific Value (GCV)      1,050           1,150           BTU/scf
+Wobbe Index                      1,300           1,400           BTU/scf
+Methane (CH4)                    85.0            --              mol %
+Ethane (C2H6)                    --              8.0             mol %
+Propane (C3H8)                   --              3.5             mol %
+Butanes and heavier (C4+)        --              2.0             mol %
+Nitrogen (N2)                    --              1.0             mol %
+Carbon Dioxide (CO2)             --              50              ppmv
+Hydrogen Sulfide (H2S)           --              3.3             mg/Nm3
+Total Sulfur                     --              30              mg/Nm3
+Mercury (Hg)                     --              0.01            ug/Nm3
+Carbonyl Sulfide (COS)           --              5               ppmv
+Water Content                    --              0.1             ppmv
+Temperature at delivery          --              -155            degrees C
+Free Water and Solids            None            None            --
+
+7.2 MEASUREMENT AND ANALYSIS
+
+(a) The quality of each Cargo shall be determined by analysis of
+representative LNG samples taken during unloading at the Delivery Terminal
+using continuous composite sampling methods in accordance with ISO 8943
+(Refrigerated Light Hydrocarbon Fluids -- Sampling of Liquefied Natural
+Gas -- Continuous and Intermittent Methods) or equivalent standard.
+
+(b) The LNG samples shall be analyzed using gas chromatography in accordance
+with ISO 6974 (Natural Gas -- Determination of Composition and Associated
+Uncertainty by Gas Chromatography) or GPA 2261 standard.
+
+(c) The Gross Calorific Value shall be calculated from the compositional
+analysis in accordance with ISO 6976 (Natural Gas -- Calculation of
+Calorific Values, Density, Relative Density, and Wobbe Indices from
+Composition).
+
+7.3 OFF-SPECIFICATION LNG
+
+(a) If the Seller tenders LNG that does not conform to the Quality
+Specifications, the Buyer shall have the following rights:
+
+    (i) Accept the Off-Specification LNG at a mutually agreed price
+        adjustment reflecting the quality deviation, provided that the
+        Off-Specification LNG can be safely received, stored, and processed
+        at the Delivery Terminal without adverse effect on terminal equipment
+        or downstream gas quality;
+
+    (ii) Reject the Off-Specification LNG, in which case the Seller shall
+         bear all costs and liabilities associated with the rejected Cargo,
+         including demurrage, shipping costs, and the cost of procuring
+         replacement LNG;
+
+    (iii) Accept the Off-Specification LNG and blend it with other LNG or
+          gas at the Delivery Terminal to bring the resultant gas within the
+          quality specifications of the French gas grid (operated by GRTgaz),
+          with the cost of blending borne by the Seller.
+
+(b) If the Buyer rejects an Off-Specification Cargo, such rejection shall
+not count against the Buyer's Take-or-Pay obligation and the Seller shall
+remain obligated to deliver a replacement Cargo within a reasonable time.
+
+
+================================================================================
+               ARTICLE 8: DELIVERY, TITLE, AND RISK
+================================================================================
+
+8.1 DELIVERY BASIS
+
+All deliveries under this Agreement shall be on a DES (Delivered Ex-Ship)
+basis at the Delivery Point (Fos Cavaou LNG Terminal). The Seller shall be
+responsible for all costs and risks of transportation of LNG from the
+Loading Port to the Delivery Point, including:
+    (i) LNG Carrier chartering and operating costs;
+    (ii) fuel and Boil-Off Gas consumption during the voyage;
+    (iii) canal transit fees (including Suez Canal tolls);
+    (iv) port charges at the Loading Port;
+    (v) marine insurance for the cargo during transit; and
+    (vi) all other costs associated with the voyage.
+
+8.2 TITLE AND RISK
+
+(a) Title to and risk in the LNG shall pass from the Seller to the Buyer
+at the Delivery Point (the flange connection between the LNG Carrier's
+unloading manifold and the Delivery Terminal's unloading arm) as the LNG
+passes through such flange connection during unloading.
+
+(b) Upon passage of title, the Buyer shall be responsible for the LNG,
+including all costs of receiving, storing, regasifying, and distributing
+the natural gas.
+
+8.3 PORT CHARGES AT DELIVERY TERMINAL
+
+(a) Port charges, pilotage, towage, and berthing fees at the Delivery
+Terminal (Fos Cavaou) shall be borne by the Buyer.
+
+(b) Demurrage at the Delivery Terminal shall be the responsibility of the
+Buyer to the extent caused by delays attributable to the Buyer, the
+Delivery Terminal, or port authorities. Demurrage shall be calculated at
+the prevailing market rate for Q-Max LNG Carriers or, if no market rate
+is available, at a rate of USD 150,000 per day.
+
+
+================================================================================
+               ARTICLE 9: LNG CARRIERS AND VESSEL SPECIFICATIONS
+================================================================================
+
+9.1 VESSEL SPECIFICATIONS
+
+The Seller shall deliver all Cargoes using LNG Carriers that meet the
+following minimum specifications:
+
+Type: Q-Max LNG Carrier
+Cargo Capacity: Approximately 266,000 m3 (liquid volume at -162 degrees C)
+Cargo Containment System: Membrane (GTT Mark III Flex or NO 96 GW)
+Maximum LOA (Length Overall): 345 meters
+Maximum Beam: 55 meters
+Maximum Draft (loaded): 12.0 meters
+Propulsion: Steam turbine or Dual-Fuel Diesel Electric (DFDE) or
+    M-type Electronically Controlled Gas Injection (ME-GI)
+Flag: Registered under the flag of Qatar (or such other flag as may be
+    approved by the Buyer, not to be unreasonably withheld)
+Classification Society: Lloyd's Register, DNV, Bureau Veritas, or
+    American Bureau of Shipping
+Age: Not more than twenty (20) years from date of delivery from shipyard
+Insurance: Hull and machinery, P&I (Protection and Indemnity), and cargo
+    insurance at commercially reasonable levels with reputable insurers
+
+9.2 VESSEL APPROVAL
+
+(a) The Seller shall provide the Buyer with the identity and specifications
+of each LNG Carrier to be used for deliveries under this Agreement. The
+Buyer shall have the right to inspect the vessel documentation and approve
+(or reject) the vessel, provided that such approval shall not be
+unreasonably withheld.
+
+(b) Each LNG Carrier shall hold a valid International Ship Security
+Certificate (ISSC), a valid Safety Management Certificate (SMC), and a
+valid Document of Compliance (DOC) issued in accordance with the
+International Ship and Port Facility Security (ISPS) Code and the
+International Safety Management (ISM) Code.
+
+(c) Each LNG Carrier shall comply with the International Maritime
+Organization (IMO) regulations, including MARPOL Annex VI (air pollution
+and greenhouse gas emissions), and the EU Maritime MRV Regulation
+(Monitoring, Reporting, and Verification of CO2 emissions).
+
+9.3 BOIL-OFF GAS
+
+(a) The Seller shall be responsible for all Boil-Off Gas generated during
+the voyage from the Loading Port to the Delivery Point. The Boil-Off Gas
+may be used as fuel for the LNG Carrier's propulsion system or reliquefied
+on board, at the Seller's discretion.
+
+(b) The quantity of LNG delivered at the Delivery Point shall be the
+quantity measured at the Delivery Terminal's custody transfer metering
+system, and shall reflect the net quantity after deduction of any Boil-Off
+Gas consumed or vented during the voyage.
+
+
+================================================================================
+               ARTICLE 10: FORCE MAJEURE
+================================================================================
+
+10.1 DEFINITION
+
+"Force Majeure" means any event or circumstance, or combination thereof,
+that: (a) is beyond the reasonable control of the Affected Party; (b) could
+not have been prevented or avoided by the Affected Party through the
+exercise of reasonable diligence; and (c) directly and materially prevents
+or delays the Affected Party from performing its obligations under this
+Agreement.
+
+10.2 FORCE MAJEURE EVENTS
+
+Without limiting the generality of Section 10.1, Force Majeure Events
+include:
+
+(a) Natural Events:
+    (i) earthquake, tsunami, volcanic eruption, hurricane, cyclone, or
+        typhoon;
+    (ii) flood, landslide, or subsidence;
+    (iii) epidemic or pandemic;
+    (iv) extreme weather conditions preventing safe navigation or port
+         operations.
+
+(b) Political and Governmental Events:
+    (i) war (declared or undeclared), invasion, armed conflict, blockade,
+        or military action;
+    (ii) revolution, insurrection, civil unrest, terrorism, sabotage, or
+         piracy;
+    (iii) expropriation, nationalization, or confiscation by any
+          Governmental Authority;
+    (iv) trade embargo, economic sanctions, or import/export restrictions
+         imposed by the United Nations, European Union, State of Qatar, or
+         the French Republic;
+    (v) act of any Governmental Authority, including denial, revocation, or
+        non-renewal of any permit, license, or authorization required for
+        performance.
+
+(c) Infrastructure Events:
+    (i) Suez Canal blockage, closure, or restriction (including but not
+        limited to grounding incidents, security closures, or maintenance
+        shutdowns exceeding forty-eight (48) hours);
+    (ii) closure of the Port of Fos-sur-Mer or the Fos Cavaou LNG Terminal
+         due to weather, labor action, equipment failure, or regulatory
+         order;
+    (iii) major failure of the Seller's liquefaction facilities at Ras
+          Laffan not caused by inadequate maintenance;
+    (iv) closure of the Port of Ras Laffan;
+    (v) failure of the French gas transmission network (operated by GRTgaz
+        or Terega) preventing gas offtake from the Delivery Terminal.
+
+(d) Labor Events:
+    (i) general or industry-wide strike, lockout, or labor action (not
+        limited to the workforce of either Party or its contractors).
+
+10.3 EXCLUSIONS
+
+The following shall not constitute Force Majeure:
+(a) changes in market prices, currency fluctuations, or loss of profit;
+(b) inability to obtain financing;
+(c) failure of a subcontractor or supplier (unless caused by Force Majeure);
+(d) equipment breakdown due to inadequate maintenance or design defect;
+(e) normal weather conditions (including seasonal fog at Fos-sur-Mer);
+(f) changes in law or regulation (which are addressed in Article 12).
+
+10.4 NOTIFICATION
+
+The Affected Party shall notify the other Party within seventy-two (72)
+hours (three (3) calendar days) of becoming aware of the Force Majeure
+Event, specifying the nature, expected duration, estimated impact on
+performance, and the measures being taken to mitigate the effects.
+
+10.5 CONSEQUENCES
+
+(a) The Affected Party shall be relieved from liability for failure or
+delay in performing its obligations to the extent caused by the Force
+Majeure Event.
+
+(b) Take-or-Pay and Ship-or-Pay obligations shall be reduced pro rata for
+the duration of the Force Majeure Event.
+
+(c) The Affected Party shall use all reasonable efforts to mitigate the
+effects of the Force Majeure Event and to resume performance as soon as
+practicable.
+
+(d) If a Force Majeure Event continues for more than eighteen (18)
+consecutive months, either Party may terminate this Agreement by giving
+one hundred and eighty (180) days' written notice.
+
+
+================================================================================
+               ARTICLE 11: CREDIT SUPPORT
+================================================================================
+
+11.1 PARENT COMPANY GUARANTEE -- SELLER
+
+(a) The Seller shall procure and deliver to the Buyer, on or before the
+Effective Date, an unconditional and irrevocable guarantee from QatarEnergy
+(the "Seller's Parent Guarantee") guaranteeing the full and timely
+performance by the Seller of all of its obligations under this Agreement.
+
+(b) The Seller's Parent Guarantee shall be in a form reasonably acceptable
+to the Buyer and shall remain in full force and effect throughout the Term
+and for a period of twenty-four (24) months thereafter.
+
+(c) QatarEnergy, as guarantor, shall have a minimum long-term credit rating
+of "AA-" from Standard & Poor's or "Aa3" from Moody's.
+
+11.2 CREDIT SUPPORT -- BUYER
+
+(a) The Buyer shall maintain a minimum long-term credit rating of "BBB"
+(investment grade) from Standard & Poor's or "Baa2" from Moody's throughout
+the Term.
+
+(b) If the Buyer's credit rating falls below the minimum threshold specified
+in Section 11.2(a), the Buyer shall, within thirty (30) Business Days,
+deliver to the Seller either:
+    (i) an irrevocable standby letter of credit in an amount equal to three
+        (3) months' estimated LNG purchases (approximately USD 250 million),
+        issued by a bank with a minimum credit rating of "A" from Standard
+        & Poor's; or
+    (ii) a parent company guarantee from a suitable guarantor acceptable to
+         the Seller.
+
+
+================================================================================
+               ARTICLE 12: CHANGE OF LAW AND REGULATORY COMPLIANCE
+================================================================================
+
+12.1 EU REGULATORY COMPLIANCE
+
+(a) The Buyer shall comply with all applicable EU and French laws and
+regulations relating to the import, regasification, transportation, and
+sale of natural gas, including without limitation:
+    (i) Regulation (EU) 2017/1938 concerning measures to safeguard the
+        security of gas supply (the "Gas Security of Supply Regulation");
+    (ii) Directive 2009/73/EC concerning common rules for the internal
+         market in natural gas (the "EU Gas Directive"), as amended by
+         Directive (EU) 2019/692;
+    (iii) the EU Energy Efficiency Directive (Directive 2012/27/EU, as
+          recast by Directive (EU) 2023/1791);
+    (iv) the EU Emissions Trading System (EU ETS), as amended by
+         Directive (EU) 2023/959, to the extent applicable to LNG
+         regasification operations;
+    (v) the French Energy Code (Code de l'energie);
+    (vi) regulations governing third-party access to LNG terminals as
+         implemented by the Commission de Regulation de l'Energie (CRE);
+    (vii) EU sanctions regulations applicable to energy commodities.
+
+(b) The Buyer shall ensure that the Delivery Terminal complies with all
+applicable technical standards, safety regulations, and environmental
+requirements under EU and French law.
+
+12.2 THIRD-PARTY ACCESS
+
+(a) The Buyer acknowledges that the Fos Cavaou LNG Terminal is subject to
+regulated third-party access obligations under French law and EU regulations.
+The Buyer shall ensure that it maintains sufficient terminal capacity and
+slot allocations to receive all Cargoes scheduled under the Annual Delivery
+Programme.
+
+(b) If third-party access obligations or regulatory changes result in the
+Buyer's inability to receive scheduled Cargoes, the Buyer shall bear the
+costs and risks thereof, including demurrage, and such events shall not
+relieve the Buyer of its Take-or-Pay obligations.
+
+12.3 CHANGE OF LAW
+
+(a) If any change in Applicable Law after the Execution Date directly and
+materially increases the cost of performance or reduces the economic benefit
+to either Party under this Agreement by more than five percent (5%) in
+any Contract Year, the Affected Party may request a review of the affected
+commercial terms.
+
+(b) The Parties shall negotiate in good faith to agree on equitable
+adjustments to restore the Affected Party to the economic position it
+would have been in but for the change in law.
+
+
+================================================================================
+               ARTICLE 13: DISPUTE RESOLUTION
+================================================================================
+
+13.1 AMICABLE SETTLEMENT
+
+Any dispute arising out of or in connection with this Agreement shall first
+be referred to the senior management of each Party (at the level of
+Executive Vice President or above) for resolution through good faith
+negotiation. The senior representatives shall meet within thirty (30) days
+of a written request for amicable settlement and shall endeavor to resolve
+the dispute within sixty (60) days.
+
+13.2 EXPERT DETERMINATION
+
+Any dispute relating to the quality, quantity, measurement, or pricing of
+LNG (including the determination of the Fixed Adder under Article 4.4)
+shall be referred to an independent expert agreed upon by the Parties.
+If the Parties cannot agree on an expert within thirty (30) days, the
+expert shall be appointed by the International Centre for Expertise of the
+International Chamber of Commerce (ICC). The expert's determination shall
+be final and binding on the Parties.
+
+13.3 ARBITRATION
+
+Any dispute not resolved through amicable settlement or expert determination
+within one hundred and twenty (120) days of the initial written notice of
+dispute shall be finally and exclusively resolved by arbitration under the
+Rules of Arbitration of the International Chamber of Commerce (ICC), with:
+
+(a) Seat of arbitration: Paris, France;
+(b) Language of arbitration: English;
+(c) Number of arbitrators: Three (3), appointed in accordance with the ICC
+    Rules;
+(d) The arbitral award shall be final and binding and enforceable in any
+    court of competent jurisdiction under the New York Convention on the
+    Recognition and Enforcement of Foreign Arbitral Awards (1958).
+
+13.4 GOVERNING LAW
+
+This Agreement shall be governed by and construed in accordance with the
+substantive laws of England and Wales (without regard to conflict of laws
+principles), which is chosen as a neutral governing law acceptable to both
+Parties.
+
+13.5 CONTINUED PERFORMANCE
+
+Pending the final resolution of any dispute, the Parties shall continue to
+perform their respective obligations under this Agreement.
+
+
+================================================================================
+               ARTICLE 14: INDEMNIFICATION AND LIABILITY
+================================================================================
+
+14.1 MUTUAL INDEMNITY
+
+Each Party shall indemnify, defend, and hold harmless the other Party and
+its Affiliates, directors, officers, employees, and agents from and against
+all claims, losses, damages, liabilities, costs, and expenses arising from:
+(a) any breach of the Indemnifying Party's obligations under this Agreement;
+(b) the negligence or willful misconduct of the Indemnifying Party;
+(c) any violation of Applicable Law by the Indemnifying Party;
+(d) any pollution, contamination, or environmental damage caused by or
+    attributable to the Indemnifying Party's operations.
+
+14.2 LIMITATION OF LIABILITY
+
+(a) Neither Party shall be liable for indirect, incidental, special,
+consequential, or punitive damages, including loss of profit, loss of use,
+or business interruption, except to the extent arising from fraud or willful
+misconduct.
+
+(b) The aggregate liability of either Party under this Agreement shall not
+exceed the total Contract Price payable for the ACQ for three (3) Contract
+Years.
+
+
+================================================================================
+               ARTICLE 15: INSURANCE
+================================================================================
+
+15.1 SELLER'S INSURANCE
+
+The Seller shall maintain:
+(a) marine cargo insurance covering the full CIF value of each Cargo during
+    transit from the Loading Port to the Delivery Point;
+(b) P&I (Protection and Indemnity) insurance for each LNG Carrier, with
+    coverage not less than USD 1 billion per vessel;
+(c) hull and machinery insurance for each LNG Carrier at full market value;
+(d) pollution liability insurance with a minimum limit of USD 500 million
+    per incident.
+
+15.2 BUYER'S INSURANCE
+
+The Buyer shall maintain:
+(a) property insurance for the Delivery Terminal;
+(b) third-party liability insurance with a minimum limit of USD 250 million;
+(c) business interruption insurance covering at least twelve (12) months of
+    lost throughput revenue.
+
+
+================================================================================
+               ARTICLE 16: CONFIDENTIALITY
+================================================================================
+
+16.1 OBLIGATIONS
+
+Each Party shall keep confidential the terms and conditions of this
+Agreement and all information exchanged between the Parties in connection
+herewith ("Confidential Information"), except as required by Applicable Law,
+stock exchange rules, or regulatory requirements.
+
+16.2 PERMITTED DISCLOSURES
+
+Confidential Information may be disclosed to: (a) Affiliates; (b) directors,
+officers, employees, agents, and advisors on a need-to-know basis;
+(c) lenders and potential lenders; (d) potential assignees or transferees;
+(e) Governmental Authorities and regulators; and (f) auditors and
+accountants, in each case subject to customary confidentiality undertakings.
+
+16.3 SURVIVAL
+
+Confidentiality obligations shall survive the expiration or termination of
+this Agreement for a period of five (5) years.
+
+
+================================================================================
+               ARTICLE 17: ASSIGNMENT
+================================================================================
+
+17.1 RESTRICTION
+
+Neither Party may assign, transfer, or novate its rights or obligations
+under this Agreement without the prior written consent of the other Party,
+which consent shall not be unreasonably withheld.
+
+17.2 PERMITTED ASSIGNMENTS
+
+(a) Either Party may assign this Agreement to an Affiliate, provided that
+the assignor remains jointly and severally liable or the Parent Company
+Guarantee covers the assignee.
+
+(b) The Seller may assign its receivables under this Agreement to lenders
+as security for project financing.
+
+
+================================================================================
+               ARTICLE 18: MISCELLANEOUS
+================================================================================
+
+18.1 ENTIRE AGREEMENT
+
+This Agreement, together with all Schedules and Annexes, constitutes the
+entire agreement between the Parties and supersedes all prior negotiations,
+understandings, and agreements.
+
+18.2 AMENDMENTS
+
+No amendment shall be effective unless made in writing and signed by both
+Parties.
+
+18.3 WAIVER
+
+No waiver of any provision shall constitute a continuing waiver or a waiver
+of any other provision.
+
+18.4 SEVERABILITY
+
+If any provision is held invalid, the remaining provisions shall continue
+in full force and effect.
+
+18.5 COUNTERPARTS
+
+This Agreement may be executed in counterparts.
+
+18.6 ANTI-CORRUPTION
+
+Each Party represents and warrants that it has not and will not make any
+payment or give anything of value, directly or indirectly, to any government
+official or any other person for the purpose of obtaining or retaining
+business or securing any improper advantage, in violation of the United
+Kingdom Bribery Act 2010, the United States Foreign Corrupt Practices Act,
+the French Sapin II Law (Law No. 2016-1691), or any other applicable
+anti-corruption law.
+
+18.7 SANCTIONS COMPLIANCE
+
+Each Party represents and warrants that it is not, and will not during the
+Term become, a Sanctioned Person, and will not knowingly engage in any
+transaction or activity that would cause the other Party to violate
+applicable sanctions laws. "Sanctioned Person" means any person or entity
+listed on any sanctions list maintained by the United Nations, European
+Union, United States (OFAC), United Kingdom, or the State of Qatar.
+
+
+================================================================================
+               SCHEDULE 1: DELIVERY TERMINAL SPECIFICATIONS
+================================================================================
+
+Terminal Name: Fos Cavaou LNG Terminal
+Location: Port de Fos-sur-Mer, Bouches-du-Rhone, France
+Coordinates: 43.4028 degrees N, 4.8928 degrees E
+Operator: Fosmax LNG (subsidiary of Elengy)
+Terminal Capacity: 8.25 bcm/year (regasification)
+Storage Capacity: 3 x 110,000 m3 full-containment LNG tanks (total 330,000 m3)
+Number of Berths: 1 main unloading berth, 1 loading berth
+Maximum Vessel Size: Q-Max (266,000 m3)
+Unloading Rate: 12,000 m3/hour (nominal)
+Unloading Duration: Approximately 22-24 hours for a Q-Max Cargo
+Unloading Arms: 4 x 16-inch liquid arms, 1 x 16-inch vapor return arm
+Minimum Water Depth at Berth: 14.5 meters (chart datum)
+Boil-Off Gas Handling: BOG compressors + reliquefaction unit
+Send-Out Connections: Connected to GRTgaz transmission network at 80 bar
+LNG Truck Loading: Available (2 bays)
+Commissioning Year: 2010
+Regulatory Authority: Commission de Regulation de l'Energie (CRE)
+
+
+================================================================================
+               SCHEDULE 2: LOADING PORT SPECIFICATIONS
+================================================================================
+
+Loading Port: Ras Laffan Industrial City LNG Port
+Location: Ras Laffan, State of Qatar
+Coordinates: 25.9167 degrees N, 51.5333 degrees E
+Port Operator: Qatargas / QatarEnergy
+Loading Jetties: Multiple jetties for Q-Flex and Q-Max carriers
+Loading Rate: 14,000 m3/hour (nominal)
+Loading Duration: Approximately 19-21 hours for a Q-Max Cargo
+Loading Arms: 4 x 16-inch liquid arms, 1 x vapor return arm
+Minimum Water Depth: 14.0 meters (chart datum)
+Pilotage: Compulsory
+Tidal Range: 1.8 m (mean spring)
+
+
+================================================================================
+               SCHEDULE 3: VOYAGE ROUTE
+================================================================================
+
+Primary Route: Ras Laffan -- Strait of Hormuz -- Gulf of Oman -- Arabian Sea
+    -- Gulf of Aden -- Bab-el-Mandeb Strait -- Red Sea -- Suez Canal --
+    Mediterranean Sea -- Fos-sur-Mer
+
+Total Voyage Distance: Approximately 6,200 nautical miles (via Suez Canal)
+Estimated Voyage Duration: 12-14 days (at 19 knots service speed)
+Suez Canal Transit Time: Approximately 12-16 hours
+Boil-Off Rate (voyage): 0.10-0.15% of cargo volume per day
+Estimated Fuel (BOG) Consumption: 700-1,000 tonnes per voyage
+
+Alternative Route (if Suez Canal unavailable):
+    Ras Laffan -- Strait of Hormuz -- Arabian Sea -- around Cape of
+    Good Hope -- Atlantic Ocean -- Strait of Gibraltar -- Mediterranean
+    Sea -- Fos-sur-Mer
+Total Distance (alternative): Approximately 11,500 nautical miles
+Estimated Voyage Duration (alternative): 22-28 days
+
+
+================================================================================
+               SCHEDULE 4: ANNUAL CONTRACT QUANTITY BY YEAR
+================================================================================
+
+Contract    Calendar        ACQ              Minimum TOP        Number of
+Year        Year            (tonnes)         (85% of ACQ)       Cargoes (est.)
+--------    --------        ---------        ------------       --------
+1           2024            2,000,000        1,700,000          36
+2           2025            2,500,000        2,125,000          45
+3           2026            3,000,000        2,550,000          54
+4           2027            3,000,000        2,550,000          54
+5           2028            3,000,000        2,550,000          54
+6           2029            3,000,000        2,550,000          54
+7           2030            3,000,000        2,550,000          54
+8           2031            3,000,000        2,550,000          54
+9           2032            3,000,000        2,550,000          54
+10          2033            3,000,000        2,550,000          54
+11          2034            3,000,000        2,550,000          54
+12          2035            3,000,000        2,550,000          54
+13          2036            3,000,000        2,550,000          54
+14          2037            3,000,000        2,550,000          54
+15          2038            3,000,000        2,550,000          54
+16          2039            3,000,000        2,550,000          54
+17          2040            3,000,000        2,550,000          54
+18          2041            3,000,000        2,550,000          54
+19          2042            3,000,000        2,550,000          54
+20          2043            3,000,000        2,550,000          54
+
+Total Contract Quantity over 20-year Term: 57,500,000 tonnes
+
+
+================================================================================
+               SCHEDULE 5: INDICATIVE PRICING EXAMPLES
+================================================================================
+
+The following examples illustrate the Contract Price calculation under
+various Henry Hub price scenarios:
+
+Scenario 1: Low HH Price
+    HH = USD 2.50/MMBtu
+    S (Fixed Adder) = USD 3.50/MMBtu
+    F (Shipping) = USD 1.80/MMBtu
+    Contract Price = 2.50 + 3.50 + 1.80 = USD 7.80/MMBtu
+    Approx. price per tonne = 7.80 x 48.7 MMBtu/tonne = USD 379.86/tonne
+
+Scenario 2: Medium HH Price
+    HH = USD 3.50/MMBtu
+    S (Fixed Adder) = USD 3.50/MMBtu
+    F (Shipping) = USD 1.80/MMBtu
+    Contract Price = 3.50 + 3.50 + 1.80 = USD 8.80/MMBtu
+    Approx. price per tonne = 8.80 x 48.7 MMBtu/tonne = USD 428.56/tonne
+
+Scenario 3: High HH Price
+    HH = USD 5.00/MMBtu
+    S (Fixed Adder) = USD 3.50/MMBtu
+    F (Shipping) = USD 2.20/MMBtu
+    Contract Price = 5.00 + 3.50 + 2.20 = USD 10.70/MMBtu
+    Approx. price per tonne = 10.70 x 48.7 MMBtu/tonne = USD 521.09/tonne
+
+Note: The conversion factor of approximately 48.7 MMBtu per tonne is based
+on a typical Qatari LNG composition with a GCV of approximately 1,100
+BTU/scf. The actual conversion factor will be determined for each Cargo
+based on the measured compositional analysis.
+
+
+================================================================================
+               SCHEDULE 6: FORM OF PARENT COMPANY GUARANTEE
+================================================================================
+
+UNCONDITIONAL AND IRREVOCABLE GUARANTEE
+
+Date: [__________]
+
+Guarantor: QatarEnergy (formerly Qatar Petroleum)
+            P.O. Box 3212, Doha, State of Qatar
+
+Guaranteed Party: Qatargas Operating Company Limited (the "Seller")
+
+Beneficiary: ENGIE SA (the "Buyer")
+
+QatarEnergy (the "Guarantor") hereby unconditionally and irrevocably
+guarantees to the Buyer the full, complete, and timely performance by the
+Seller of all of its obligations under the Long-Term LNG Sale and Purchase
+Agreement dated November 15, 2023, between the Seller and the Buyer (the
+"Agreement"), including without limitation:
+
+(a) the Seller's obligation to make available and deliver LNG in accordance
+    with the ACQ and the Annual Delivery Programme;
+(b) the Seller's obligation to deliver LNG conforming to the Quality
+    Specifications;
+(c) the Seller's Ship-or-Pay obligations;
+(d) the Seller's indemnification obligations; and
+(e) all other obligations of the Seller under the Agreement.
+
+The Guarantor's obligations under this Guarantee are primary and
+unconditional. The Buyer shall not be required to proceed against the
+Seller, exhaust any remedy against the Seller, or take any other action
+before making a demand under this Guarantee.
+
+The Guarantor shall pay to the Buyer, on demand, any amount that the Seller
+fails to pay when due under the Agreement, within fifteen (15) Business
+Days of the Buyer's written demand specifying the nature and amount of the
+Seller's default.
+
+This Guarantee shall not be discharged or affected by: (a) any amendment
+or variation of the Agreement (whether or not consented to by the
+Guarantor); (b) any waiver or forbearance granted by the Buyer to the
+Seller; (c) any change in the constitution, name, or ownership of the
+Seller; (d) any insolvency, liquidation, or dissolution of the Seller; or
+(e) any other circumstance that might otherwise discharge the Guarantor.
+
+This Guarantee shall remain in full force and effect for the duration of
+the Term of the Agreement and for a period of twenty-four (24) months
+thereafter.
+
+This Guarantee shall be governed by and construed in accordance with the
+laws of England and Wales.
+
+EXECUTED AS A DEED by QATARENERGY
+
+____________________________
+Name: [__________]
+Title: [__________]
+Date: [__________]
+
+In the presence of:
+____________________________
+Witness Name: [__________]
+Witness Address: [__________]
+
+
+================================================================================
+
+IN WITNESS WHEREOF, the Parties have caused this Agreement to be executed by
+their duly authorized representatives as of the date first written above.
+
+FOR AND ON BEHALF OF                    FOR AND ON BEHALF OF
+QATARGAS OPERATING COMPANY LIMITED      ENGIE SA
+
+____________________________            ____________________________
+Name: [__________]                      Name: [__________]
+Title: [__________]                     Title: [__________]
+Date: November 15, 2023                 Date: November 15, 2023
+
+Witness:                                Witness:
+____________________________            ____________________________
+Name: [__________]                      Name: [__________]
+Title: [__________]                     Title: [__________]
+
+================================================================================
+                         END OF AGREEMENT
+================================================================================

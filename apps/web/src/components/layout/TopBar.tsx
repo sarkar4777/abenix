@@ -217,7 +217,7 @@ function UseCasesList({ onNavigate }: { onNavigate: () => void }) {
     if (icon === 'headphones')  return <Headphones className={`w-5 h-5 ${c}`} />;
     if (icon === 'shield')      return <ShieldCheck className={`w-5 h-5 ${c}`} />;
     if (icon === 'cpu')         return <img src="/oraclenet-logo.svg" alt="" className="w-5 h-5" />;
-    if (icon === 'example_app')  return <img src="/example_app-logo.svg" alt="" className="w-5 h-5" />;
+    if (icon === 'contractiq')  return <img src="/contractiq-logo.svg" alt="" className="w-5 h-5" />;
     return <Sparkles className={`w-5 h-5 ${c}`} />;
   };
 

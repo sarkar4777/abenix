@@ -1,6 +1,6 @@
 # Building an app on top of Abenix
 
-> Abenix is a platform you call from the outside. The six vertical apps in this monorepo (Wingman, the example app, Saudi Tourism, ResolveAI, Industrial-IoT, ClaimsIQ) are example consumers — they happen to live in the same repo so we can demo end-to-end, but the contract they use is the same one a third party would use from a separate repo, a separate cluster, a separate company.
+> Abenix is a platform you call from the outside. The six vertical apps in this monorepo (Wingman, ContractIQ, Saudi Tourism, ResolveAI, Industrial-IoT, ClaimsIQ) are example consumers — they happen to live in the same repo so we can demo end-to-end, but the contract they use is the same one a third party would use from a separate repo, a separate cluster, a separate company.
 
 This page is for the third party. It explains how to build a new vertical that talks to a running Abenix deployment without integrating into Abenix's own build, deploy, or release process.
 
@@ -68,7 +68,7 @@ To start building, get four things from whoever runs the Abenix deployment you w
 | Platform URL | `https://abenix.example.com` | The cluster's ingress. |
 | API key | `af_xxxx…` (40+ chars after the prefix) | `POST /api/api-keys` with the `can_delegate` scope. |
 | Subject-policy access | a SubjectPolicy row for your subject type, ideally with wildcard | The platform admin issues this. |
-| Agent slugs | `wingman-mispricing-extractor`, `example_app-clause-extractor`, etc. | List via `GET /api/agents` with your key. |
+| Agent slugs | `wingman-mispricing-extractor`, `contractiq-clause-extractor`, etc. | List via `GET /api/agents` with your key. |
 
 For agents that don't yet exist (i.e. you need new ones for your domain), you write them as YAML files using the platform's Agent Builder UI, or via `POST /api/agents`. That work lands on the platform side, not in your repo. The platform admin gates publication.
 
@@ -332,7 +332,7 @@ The SDK has a `client.version()` check that confirms compatibility on first call
 ## Where to go next
 
 - [01-wingman](01-wingman.md) — a real worked example. Read this even if you build outside this repo — the architecture decisions transfer.
-- [02-example_app](02-example_app.md) — heavier KB + OCR usage.
+- [02-contractiq](02-contractiq.md) — heavier KB + OCR usage.
 - [03-others](03-others.md) — short tours of the other four verticals.
 - [03-sdk/00-overview](../03-sdk/00-overview.md) — the SDK reference proper.
 - [01-architecture/01-tenants-rbac](../01-architecture/01-tenants-rbac.md) — the actAs pattern from the platform side.
@@ -342,7 +342,7 @@ The SDK has a `client.version()` check that confirms compatibility on first call
 
 ## A note on the example apps in this repo
 
-The six verticals in `/wingman`, `/example_app`, `/sauditourism`, `/resolveai`, `/industrial-iot`, `/claimsiq` are deployed via `scripts/deploy-azure.sh` for the platform's own demo cluster. They share the platform's release pipeline because that is the simplest way to keep the demo healthy.
+The six verticals in `/wingman`, `/contractiq`, `/sauditourism`, `/resolveai`, `/industrial-iot`, `/claimsiq` are deployed via `scripts/deploy-azure.sh` for the platform's own demo cluster. They share the platform's release pipeline because that is the simplest way to keep the demo healthy.
 
 If you build a vertical, **do not** add it to `deploy-azure.sh`. Your release cadence and the platform's are different. Your blast radius and the platform's are different. Keep them separated. Your deploy is your deploy.
 

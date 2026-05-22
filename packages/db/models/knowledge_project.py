@@ -33,8 +33,8 @@ class KnowledgeProject(UUIDMixin, TenantMixin, TimestampMixin, Base):
     RESOURCE_KIND = "knowledge_project"
 
     name: Mapped[str] = mapped_column(String(255))
-    # `slug` is the stable string used by integrations (e.g. the example app
-    # bootstraps "example_app", SaudiTourism bootstraps "sauditourism").
+    # `slug` is the stable string used by integrations (e.g. ContractIQ
+    # bootstraps "contractiq", SaudiTourism bootstraps "sauditourism").
     # Unique per tenant so two integrations in the same tenant can't
     # collide.
     slug: Mapped[str] = mapped_column(String(120))

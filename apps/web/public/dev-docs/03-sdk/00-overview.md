@@ -7,7 +7,7 @@
 ## Why three SDKs
 
 The platform's clients are heterogeneous:
-- **Standalone vertical apps** (Wingman, the example app) — Python backends.
+- **Standalone vertical apps** (Wingman, ContractIQ) — Python backends.
 - **Customer integrations** — usually TypeScript or Java.
 - **CI / scripts** — Python or shell.
 - **Mobile/desktop apps** — TypeScript (via the JS SDK).

@@ -138,11 +138,11 @@ model_config:
     nodes:
       - id: extract
         type: agent
-        agent_slug: example_app-clause-extractor
+        agent_slug: contractiq-clause-extractor
         inputs: {document_id: "{{context.document_id}}"}
       - id: classify
         type: agent
-        agent_slug: example_app-risk-flagger
+        agent_slug: contractiq-risk-flagger
         inputs: {clauses: "{{extract.clauses}}"}
       - id: gate
         type: human

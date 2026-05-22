@@ -121,7 +121,7 @@ secrets:
 - `ingress.hosts: localhost.*`
 
 `values-azure.yaml` adjusts:
-- `image.registry: abenixacr71a48.azurecr.io`
+- `image.registry: your-acr.azurecr.io`
 - `postgres.storageClassName: managed-premium`
 - production hostnames
 

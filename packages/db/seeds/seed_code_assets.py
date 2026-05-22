@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DISCOVERY_ROOTS = [
     REPO_ROOT / "industrial-iot",
     REPO_ROOT / "wingman",
-    REPO_ROOT / "example_app",
+    REPO_ROOT / "contractiq",
     REPO_ROOT / "sauditourism",
     REPO_ROOT / "resolveai",
     REPO_ROOT / "claimsiq",

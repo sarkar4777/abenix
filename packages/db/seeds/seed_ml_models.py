@@ -40,7 +40,7 @@ AIMODELS_DIRS = [
     REPO_ROOT / "industrial-iot" / "aimodels",
     REPO_ROOT / "wingman" / "aimodels",
     REPO_ROOT / "wingman" / "ml-models",
-    REPO_ROOT / "example_app" / "aimodels",
+    REPO_ROOT / "contractiq" / "aimodels",
     REPO_ROOT / "sauditourism" / "aimodels",
     REPO_ROOT / "resolveai" / "aimodels",
     REPO_ROOT / "claimsiq" / "aimodels",

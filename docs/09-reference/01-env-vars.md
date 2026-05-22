@@ -127,12 +127,12 @@ Wingman-specific:
 | `WINGMAN_ACTING_SUBJECT_TYPE` | Default `wingman` |
 | `AISSTREAM_API_KEY` | Required for Operations Watch live AIS |
 
-the example app-specific:
+ContractIQ-specific:
 
 | Variable | Notes |
 |---|---|
-| `EXAMPLE_APP_OCR_PROVIDER` | `tesseract` (default) or `azure` |
-| `EXAMPLE_APP_AZURE_FORM_RECOGNIZER_KEY` | When provider=azure |
+| `CONTRACTIQ_OCR_PROVIDER` | `tesseract` (default) or `azure` |
+| `CONTRACTIQ_AZURE_FORM_RECOGNIZER_KEY` | When provider=azure |
 
 ResolveAI-specific:
 

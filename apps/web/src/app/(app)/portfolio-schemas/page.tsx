@@ -207,7 +207,7 @@ export default function PortfolioSchemasPage() {
           <div className="flex items-start gap-2 mt-3 text-[11px] text-slate-400 bg-slate-900/40 border border-slate-700/40 rounded-lg p-2.5">
             <Database className="w-3.5 h-3.5 text-cyan-400 mt-0.5 shrink-0" />
             <p>
-              <strong className="text-white">Already used by:</strong> the example app&apos;s chat agent uses the <code className="text-cyan-300">portfolio_energy_contracts</code> tool
+              <strong className="text-white">Already used by:</strong> ContractIQ&apos;s chat agent uses the <code className="text-cyan-300">portfolio_energy_contracts</code> tool
               (built from the Energy Contracts starter schema) to answer cross-contract questions like &quot;total MW expiring before 2030&quot;.
               The same pattern can be reused by any standalone app — just register your schema, point your agent&apos;s
               <code className="text-cyan-300 mx-1">tools:</code> array at it.

@@ -84,17 +84,17 @@ test.describe('Saudi Tourism — Full E2E', () => {
   });
 });
 
-// ─── EXAMPLE_APP ──────────────────────────────────────────────
+// ─── CONTRACTIQ ──────────────────────────────────────────────
 
-test.describe('the example app — Smoke Test', () => {
-  test('10 — the example app landing page loads', async ({ page }) => {
+test.describe('ContractIQ — Smoke Test', () => {
+  test('10 — ContractIQ landing page loads', async ({ page }) => {
     await page.goto(CIQ_URL);
-    await expect(page).toHaveTitle(/the example app/);
+    await expect(page).toHaveTitle(/ContractIQ/);
     await expect(page.locator('h1')).toContainText('Upload your PPA');
     await page.screenshot({ path: 'test-results/ciq-10-landing.png', fullPage: true });
   });
 
-  test('11 — the example app login works', async ({ page }) => {
+  test('11 — ContractIQ login works', async ({ page }) => {
     await page.goto(CIQ_URL);
     await page.getByRole('button', { name: /Sign In/i }).first().click();
     await page.waitForTimeout(500);

@@ -21,7 +21,7 @@ const nextConfig = {
   // sequentially through 4-9 LLM nodes — total wall time runs 2-5 min.
   // Default 30s proxy timeout was returning HTTP 500 to the browser
   // mid-pipeline; the standalone API itself caps wait at 240s. Match the
-  // example_app config (600s) so the long-running paths complete.
+  // contractiq config (600s) so the long-running paths complete.
   experimental: {
     proxyTimeout: 600_000,
   },

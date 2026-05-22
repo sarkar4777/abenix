@@ -1,6 +1,6 @@
 # The other verticals — Saudi Tourism, ResolveAI, Industrial-IoT, ClaimsIQ
 
-> Brief overviews. Each follows the [thin-app pattern](00-pattern.md) and the structural notes for Wingman + the example app apply.
+> Brief overviews. Each follows the [thin-app pattern](00-pattern.md) and the structural notes for Wingman + ContractIQ apply.
 
 ---
 
@@ -118,4 +118,4 @@ Each end-to-end trace takes ~15 minutes. Once you've done it for one app you can
 
 - [00-pattern](00-pattern.md) — the contract
 - [01-wingman](01-wingman.md) — most-evolved example
-- [02-example_app](02-example_app.md) — heaviest KB + atlas user
+- [02-contractiq](02-contractiq.md) — heaviest KB + atlas user

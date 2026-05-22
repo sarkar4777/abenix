@@ -33,7 +33,7 @@ val res: ExecutionResult = client.post("$base/api/agent-execution/execute") {
 
 ## Persistent multi-turn chat (use the platform thread primitive)
 
-Same primitive the example app uses. Threads are scoped per `(app_slug, subject)`.
+Same primitive ContractIQ uses. Threads are scoped per `(app_slug, subject)`.
 
 ```kotlin
 // 1) Create or reuse a thread

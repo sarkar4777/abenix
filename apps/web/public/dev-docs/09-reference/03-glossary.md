@@ -60,7 +60,7 @@
 
 **SSE** — Server-Sent Events. The streaming format the platform uses to push execution events to browsers. One-way, text-based, reconnect-friendly. Connection at `/api/executions/{id}/events`.
 
-**Standalone app** — A vertical app (Wingman, the example app, etc.) that rides on top of the platform via the SDK. Owns UI + auth + caching but no business logic. See [`07-standalone-apps/00-pattern`](../07-standalone-apps/00-pattern.md).
+**Standalone app** — A vertical app (Wingman, ContractIQ, etc.) that rides on top of the platform via the SDK. Owns UI + auth + caching but no business logic. See [`07-standalone-apps/00-pattern`](../07-standalone-apps/00-pattern.md).
 
 **Subject** — Per actAs. The `(subject_type, subject_id)` tuple recorded on `executions.subject` and on every audit row. Tells RBAC + audit who the action was on behalf of.
 

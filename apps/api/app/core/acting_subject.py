@@ -15,7 +15,7 @@ SUBJECT_HEADER = "X-Abenix-Subject"
 class ActingSubject:
     """Represents an end user that the API key holder is acting on behalf of."""
 
-    subject_type: str  # e.g., "example_app", "external", "user"
+    subject_type: str  # e.g., "contractiq", "external", "user"
     subject_id: str  # the third-party system's user ID
     email: str | None = None
     display_name: str | None = None

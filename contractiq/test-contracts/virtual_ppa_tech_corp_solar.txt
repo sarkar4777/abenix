@@ -1,0 +1,191 @@
+VIRTUAL POWER PURCHASE AGREEMENT (VPPA) — FINANCIAL SETTLEMENT
+Hyperion Corporation (Buyer) and Arroyo Solar III LLC (Seller)
+Solar PV Facility: 450 MW DC / 350 MW AC — West Texas (ERCOT West Hub)
+
+EXECUTION DATE: 30 November 2024
+COMMERCIAL OPERATION DATE TARGET (COD): 15 September 2026
+TERM: Fifteen (15) Years from COD
+CONTRACTED CAPACITY: 300 MW AC (Seller's 450/350 MW total, ~85.7%)
+SETTLEMENT HUB: ERCOT West Hub
+CfD STRUCTURE: Two-way financial settlement (no physical delivery)
+REFERENCE: HYP-VPPA-2024-0312
+
+PREAMBLE
+This Virtual Power Purchase Agreement ("Agreement") is a pure financial contract for differences between Hyperion Corporation ("Buyer") — a Delaware technology corporation — and Arroyo Solar III LLC ("Seller") — a Delaware limited liability company and the owner of the Facility. The Buyer does not take physical delivery of electricity. Payments settle the difference between a fixed Strike Price and a floating Market Price, consistent with the Environmental Attributes transfer provisions in Article 8.
+
+ARTICLE 1  DEFINITIONS
+1.1 "Contracted Capacity" — 300 MW AC, the portion of the Facility's output included in this VPPA.
+1.2 "Expected Annual Generation" — 792 GWh/year (P50), based on solar resource and technology parameters.
+1.3 "Strike Price" — USD 42.85/MWh (2024 real), indexed per Article 7.
+1.4 "Floating Price" — ERCOT West Hub hourly Real-Time Locational Marginal Price (LMP).
+1.5 "Settlement Quantity" — Metered generation at POI × (Contracted Capacity / Total Facility Capacity) = Metered Output × 85.7%.
+1.6 "Environmental Attributes" — all Renewable Energy Certificates (RECs), Green-e certifications, GHG emissions avoidance, any Inflation Reduction Act PTC-related benefits, and like attributes.
+1.7 "Shape Basis Risk" — the difference between hub prices and nodal prices at the POI.
+1.8 "Curtailment" — scheduled or economic curtailment by ERCOT or the Seller.
+1.9 "Settlement Period" — hourly, aligned with ERCOT Real-Time intervals.
+1.10 "Negative Pricing Event" — any hour with Floating Price < USD 0.
+
+ARTICLE 2  STRUCTURE: FINANCIAL SETTLEMENT ONLY
+2.1 This is a virtual PPA: no physical power flows from Seller to Buyer.
+2.2 Seller sells physical output to ERCOT wholesale market at floating prices.
+2.3 Parties settle the CfD hourly, with Buyer paying Seller (Strike - Float) × Settlement Quantity when Strike > Float, and Seller paying Buyer (Float - Strike) × Settlement Quantity when Float > Strike.
+2.4 Environmental Attributes transfer from Seller to Buyer per Article 8.
+
+ARTICLE 3  COMMERCIAL OPERATION DATE (COD)
+3.1 Target COD: 15 September 2026.
+3.2 Guaranteed Commercial Operation Date (GCOD): 30 June 2027 (Longstop).
+3.3 COD Requirements: ≥95% Mechanical Completion, Initial Synchronisation, successful 72-hour stability test, all required permits.
+3.4 Delay Liquidated Damages: USD 15,000/day past Target COD, capped at USD 2.5M; termination right at GCOD with USD 15M damages.
+3.5 Early COD: Buyer may elect early start within 30 days of Seller's declaration.
+
+ARTICLE 4  TERM AND TERMINATION
+4.1 Initial Term: 15 years from COD. No automatic renewal.
+4.2 Early termination: mutual only, with NPV close-out.
+
+ARTICLE 5  METERING AND MEASUREMENT
+5.1 Settlement meters: ANSI C12.20 Class 0.2, at the Point of Interconnection (POI) at the 345 kV substation.
+5.2 ERCOT-registered: Seller-operated, Buyer-audited annually.
+5.3 Data source: ERCOT Settlement-Quality Meter Data (SQMD), 15-minute intervals aggregated hourly.
+5.4 Measurement disputes: resolved within 30 days per ERCOT Nodal Protocols §10.
+
+ARTICLE 6  PRICING AND STRIKE MECHANICS
+6.1 Base Strike Price: USD 42.85/MWh (2024 real dollars).
+6.2 Annual Indexation: 1.0% fixed escalator (not CPI-linked), applied January 1 each year.
+6.3 Formula per hour h:
+     Net Payment = (Strike(h) - Float(h)) × Settlement_Quantity(h)
+     — positive: Buyer pays Seller
+     — negative: Seller pays Buyer
+6.4 Monthly settlement: net of all hours in the calendar month.
+6.5 Minimum Strike Floor: USD 35/MWh (protects Seller in deflationary scenario).
+6.6 Maximum Strike Cap: USD 65/MWh (protects Buyer from extreme escalation).
+
+ARTICLE 7  NEGATIVE PRICING AND CURTAILMENT RULES
+7.1 Negative Pricing Event: when Float Price < USD 0, the CfD payment from Buyer to Seller is capped at USD 0 (no payment from Buyer). Seller bears the negative price risk.
+7.2 Curtailment events: Settlement Quantity excludes curtailed hours regardless of cause.
+7.3 Grid-caused curtailment > 150 hours/year in any 12-month period triggers good-faith review (re-opener) under Article 21.
+7.4 Nodal-to-Hub basis: if ERCOT West Hub minus POI nodal price exceeds USD 5/MWh for > 20% of hours in any quarter, basis-risk review under Article 21.
+
+ARTICLE 8  ENVIRONMENTAL ATTRIBUTES (RECs, IRA benefits)
+8.1 Title transfer: all RECs and Environmental Attributes transfer from Seller to Buyer upon ERCOT generation registration.
+8.2 Delivery method: via Green-e-certified tracking system (ERCOT WREGIS if applicable, or MRETS).
+8.3 Annual true-up: delivered MWh × 1 REC per MWh. Shortfall triggers replacement REC purchase by Seller from qualifying Texas solar sources.
+8.4 IRA ITC benefits: Seller retains 30% base ITC + 10% domestic content adders. Buyer receives PTC value via Strike Price reduction (USD 25/MWh effective PTC value for Year 1, stepping down).
+8.5 Net zero reporting: Seller provides annual Scope 2 avoided emissions report per GHG Protocol.
+
+ARTICLE 9  PAYMENT AND SETTLEMENT
+9.1 Payment frequency: monthly, net settlement.
+9.2 Invoice: Seller issues within 10 business days of month-end.
+9.3 Due date: 20 calendar days from invoice.
+9.4 Late interest: Federal Funds + 250 bps.
+9.5 Dispute resolution: 30-day review period; undisputed portions paid when due.
+9.6 Setoff: Buyer may setoff against Seller's owed amounts from this or any other agreement.
+
+ARTICLE 10  BUYER CREDIT SUPPORT
+10.1 Buyer is Hyperion Corporation — Moody's Aa3 / S&P AA-. No ongoing credit support required while Buyer maintains investment grade (A3/A- or better).
+10.2 Rating downgrade trigger: below A3/A-:
+     (a) Provide parent guarantee within 10 business days, or
+     (b) Letter of Credit equal to 6 months maximum exposure (estimated USD 15M), or
+     (c) Prepayment of 3 months.
+10.3 Cross-default: default under USD 50M+ obligations elsewhere triggers review.
+
+ARTICLE 11  SELLER CREDIT SUPPORT
+11.1 Seller's parent Arroyo Renewables Inc. (S&P BBB) provides Parent Company Guarantee equal to USD 25M.
+11.2 Replacement: if PCG provider downgraded below BBB-, Seller has 20 days to provide (a) upgrade, (b) substitute investment-grade guarantor, or (c) cash collateral USD 15M.
+11.3 Tax equity partner (pre-COD): Seller has tax-equity partnership with Bank of America Renewable Energy Group. Partnership flip date: COD + 60 months. Partner change requires Buyer consent.
+
+ARTICLE 12  FORCE MAJEURE
+12.1 Events: natural disaster, force majeure weather (hurricanes, ice storms per ERCOT protocols), ERCOT-declared emergency suspensions, strikes > 14 days, change in law preventing performance.
+12.2 NOT Force Majeure: ordinary business failures, insufficient insolation / merchant market conditions, routine maintenance.
+12.3 Notification: 48 hours, with 10-day particulars.
+12.4 Suspension: CfD settlement suspended during FM > 72 hours.
+12.5 Termination right: FM > 365 consecutive days.
+
+ARTICLE 13  CHANGE IN LAW
+13.1 Categories:
+     (a) Direct impact on RECs (e.g., federal REC scheme).
+     (b) ERCOT protocol changes materially affecting Floating Price.
+     (c) IRA tax credit structural changes.
+     (d) Carbon pricing introduction (e.g., federal or ERCOT carbon adder).
+13.2 Materiality threshold: >10% NPV impact.
+13.3 Re-opener: 90-day good-faith negotiation; if no agreement, bilateral termination with NPV close-out at current Strike/Float forward curves.
+
+ARTICLE 14  REPRESENTATIONS AND WARRANTIES
+14.1 Mutual: authority, no conflicts.
+14.2 Seller: title to Facility, interconnection agreement in good standing, all permits (EPC, environmental, ERCOT registration).
+14.3 Buyer: no regulatory disqualification for this VPPA structure.
+
+ARTICLE 15  DISCLAIMER OF PHYSICAL DELIVERY
+15.1 Buyer acknowledges no physical delivery — this is a pure financial hedge.
+15.2 Buyer not responsible for market scheduling, load shape, dispatch, or ERCOT nodal pricing risk beyond basis risk in Article 7.
+15.3 Buyer's electricity supply sourced separately from retail provider / self-supply; this Agreement is for GHG / cost hedging purposes only.
+
+ARTICLE 16  INSURANCE
+16.1 Seller: Property (USD 400M All-Risk), Business Interruption (USD 100M), GL (USD 25M/occ), Environmental (USD 10M), Cyber (USD 10M).
+16.2 Buyer: D&O + GL per normal corporate insurance.
+
+ARTICLE 17  NO ADJUSTMENT FOR CURTAILMENT COMPENSATION
+17.1 Any compensation from ERCOT (e.g., Constrained-Off make-whole) for curtailed hours belongs to Seller.
+17.2 No adjustment required under the VPPA formula — Seller's merchant revenue already reflects ERCOT make-whole provisions.
+
+ARTICLE 18  TAX AND ACCOUNTING
+18.1 Seller: responsible for all ITC/PTC filings, sales taxes, property taxes.
+18.2 Buyer: records the VPPA as a derivative under ASC 815 (hedge accounting), or per FASB cash-flow hedge treatment.
+18.3 Notify other party of any material tax position changes within 30 days.
+
+ARTICLE 19  ASSIGNMENT
+19.1 Seller may assign to: a subsidiary (no consent), a tax-equity partner exercising flip rights (no consent), or a creditworthy third party (Buyer consent).
+19.2 Buyer may assign to: any Buyer Affiliate (no consent), a successor in a merger/acquisition (no consent), or a third-party investor (Seller consent).
+19.3 Security interest: Seller may grant first-lien to Project Lenders via direct agreement; Buyer acknowledges lender cure rights.
+
+ARTICLE 20  DISPUTE RESOLUTION
+20.1 Step 1: Good-faith negotiation (30 days).
+20.2 Step 2: Senior-management escalation (20 days).
+20.3 Step 3: JAMS arbitration in Austin, Texas under Energy Industry Rules.
+20.4 Governing law: Texas, excluding conflicts of laws.
+20.5 Confidentiality applies to all steps.
+
+ARTICLE 21  RE-OPENER / MATERIAL ADVERSE CHANGE
+21.1 Scheduled reviews: Years 5 and 10 (optional mutual).
+21.2 Unscheduled re-opener triggers:
+     (a) Grid curtailment > 150 hours/year for 2 consecutive years.
+     (b) Basis (nodal-hub) > USD 5/MWh for 4 consecutive quarters.
+     (c) Cumulative IRA / REC policy changes > USD 10/MWh NPV impact.
+21.3 Re-opener window: 60 days to mutually agree; failure triggers close-out with 45-day termination notice.
+
+ARTICLE 22  TERMINATION AND CLOSE-OUT
+22.1 Events of Default:
+     (a) Payment > 30 days overdue (cure 10 days).
+     (b) Insolvency (no cure).
+     (c) Credit support breach > 15 business days.
+     (d) Sanctions / regulatory disqualification.
+22.2 Close-out payment: NPV of expected future settlements discounted at the weighted Strike/Float forward curve + USD 8.5% discount.
+22.3 Setoff with other obligations permitted.
+
+ARTICLE 23  CONFIDENTIALITY
+23.1 Commercial terms confidential for 3 years post-termination.
+23.2 Permitted disclosures: regulatory, SEC filings, lenders, investors under NDA.
+23.3 Seller may disclose aggregate financials for project finance purposes.
+
+ARTICLE 24  NOTICES
+24.1 Formal notice: certified mail + email.
+24.2 To Buyer: Hyperion Corporation, Attn: VP Energy Procurement, 3500 Hyperion Way, Menlo Park, CA 94025.
+24.3 To Seller: Arroyo Solar III LLC, c/o Arroyo Renewables Inc., 200 Burnside Rd, Austin, TX 78701.
+
+ARTICLE 25  REGULATORY APPROVALS
+25.1 FERC: filed as a non-jurisdictional financial instrument under 18 CFR Part 35.
+25.2 ERCOT: Seller registered as Qualified Scheduling Entity and Resource Entity.
+25.3 State PUC: Texas PUC notification only (no approval required for VPPAs).
+
+ARTICLE 26  GREEN-E AND VOLUNTARY MARKET CERTIFICATION
+26.1 Seller to pursue Green-e certification for RECs within 12 months of COD.
+26.2 Annual compliance audit by Center for Resource Solutions.
+26.3 Buyer may use Green-e label for its Scope 2 claims and CDP reporting.
+
+SCHEDULE 1 — Facility specifications (PV panels: First Solar Series 7, inverters: Power Electronics FS3510, racking: NEXTracker NX Horizon)
+SCHEDULE 2 — Metering and settlement data flows (ERCOT SQMD → settlement engine)
+SCHEDULE 3 — Strike Price escalation schedule (Year 1-15)
+SCHEDULE 4 — Force Majeure events exhaustive list
+SCHEDULE 5 — REC transfer protocol (WREGIS / MRETS)
+SCHEDULE 6 — Parent Company Guarantee templates (Buyer + Seller)
+SCHEDULE 7 — Joint Operating Committee (JOC) governance
+SCHEDULE 8 — Regulatory filing attachments

@@ -5,7 +5,7 @@ description: >-
   Pulls live financial data (credit ratings, financial ratios, Altman Z-score),
   analyses probability of default, and generates a risk narrative with
   recommendations for credit mitigation (letters of credit, parent guarantees,
-  collateral requirements). Used by the example app to monitor portfolio credit exposure.
+  collateral requirements). Used by ContractIQ to monitor portfolio credit exposure.
 
 agent_type: oob
 category: energy

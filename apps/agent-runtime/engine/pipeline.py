@@ -1601,7 +1601,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
         }
         # Include output for completed nodes (truncate large outputs).
         # Bumped from 10K→128K to keep multi-stage briefs (OracleNet
-        # synthesizer, the example app executive briefing, etc.) intact when the
+        # synthesizer, ContractIQ executive briefing, etc.) intact when the
         # client renders them. JSON loads can't round-trip a sliced string,
         # so on truncation we emit the raw string + an "output_truncated"
         # flag so the UI can show a "view raw" affordance.

@@ -1,0 +1,277 @@
+================================================================================
+            DORE BAR INTAKE AND REFINING AGREEMENT
+                  (Long-form Off-take from Mine to Refiner)
+
+                          CONTRACT NO. PMR-2026-014
+
+                      DATE OF EXECUTION: 18 February 2026
+================================================================================
+
+BETWEEN:
+
+(1) ANDEAN PRIMA MINING S.A., a corporation duly incorporated under the laws
+    of the Republic of Peru, with its registered office at Avenida Javier
+    Prado Este 4990, San Borja, Lima 41, Peru, registered with the National
+    Superintendency of Public Registries (SUNARP) under entry number
+    11420382, RUC 20489372617 (the "Seller" or "Mine");
+
+(2) HELVETIA METALS REFINING AG, a stock corporation (Aktiengesellschaft)
+    duly incorporated under the laws of the Swiss Confederation, with its
+    registered office at Bahnhofstrasse 18, 8001 Zurich, Switzerland,
+    registered in the Commercial Register of the Canton of Zurich under
+    CHE-104.582.913, holding a current Good Delivery listing from the London
+    Bullion Market Association in respect of Gold and Silver (the "Refiner").
+
+WHEREAS:
+
+(A) The Mine produces a primary gold-silver concentrate at its operations in
+    the Yauli district, Junin region of Peru, and refines it on-site into
+    semi-refined dore bars of nominal composition seventy-five per cent
+    (75%) gold (Au) and twenty per cent (20%) silver (Ag), with the balance
+    being copper, zinc and trace base metals.
+
+(B) The Refiner operates a Good Delivery-listed refinery at Mendrisio, in
+    the Swiss canton of Ticino, and is subject to supervision by the Swiss
+    Financial Market Supervisory Authority (FINMA) and to the Swiss Precious
+    Metals Control Act (PMCA).
+
+(C) The parties wish to record the terms under which the Mine shall sell and
+    the Refiner shall purchase the Mine's production of dore bars for the
+    twenty-four (24) month term beginning on the Effective Date.
+
+NOW, THEREFORE, the parties agree as follows:
+
+--------------------------------------------------------------------------------
+1. MATERIAL AND BAR SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+1.1 Material. The material delivered hereunder shall be dore bars of nominal
+    composition Au 750 - Ag 200 - other 50 (parts per thousand). The Seller
+    shall use commercially reasonable efforts to maintain a minimum gold
+    fineness of nine hundred and fifty parts per thousand (0.950) on a
+    monthly weighted-average basis across all bars delivered.
+
+1.2 Bar form. Each dore bar shall be cast in the Seller's licensed casting
+    facility, sequentially serialised, and stamped with the Seller's
+    refinery mark, the lot number, the gross weight in troy ounces, and the
+    estimated Au and Ag content.
+
+1.3 Bar count and tonnage. The Seller shall deliver between three thousand
+    five hundred (3,500) and four thousand five hundred (4,500) troy ounces
+    of gold-equivalent content per calendar month. The contract minimum for
+    the twenty-four (24) month term is eighty-four thousand (84,000) troy
+    ounces gold-equivalent. The contract maximum is one hundred and eight
+    thousand (108,000) troy ounces gold-equivalent.
+
+--------------------------------------------------------------------------------
+2. RESPONSIBLE SOURCING AND COMPLIANCE
+--------------------------------------------------------------------------------
+
+2.1 LBMA Responsible Gold Guidance. The Refiner is subject to the London
+    Bullion Market Association Responsible Gold Guidance, version 9 of
+    December 2023 (the "RGG"), and shall maintain its Good Delivery listing
+    throughout the term. The Seller represents and warrants that:
+
+    (a) it has a documented supply chain policy aligned with the OECD Due
+        Diligence Guidance for Responsible Supply Chains of Minerals from
+        Conflict-Affected and High-Risk Areas (3rd edition, 2016) (the
+        "OECD DDG");
+
+    (b) it has conducted a documented risk assessment of its supply chain
+        and shall make such records available to the Refiner upon request;
+
+    (c) it has implemented and maintains a corrective-action plan
+        consistent with Step 3 of the OECD DDG; and
+
+    (d) it shall procure and provide to the Refiner an annual independent
+        third-party audit report consistent with Step 4 of the OECD DDG,
+        no later than 31 March of each calendar year.
+
+2.2 OECD 5-Step. The parties acknowledge that the Refiner shall report on
+    supply chain due diligence in accordance with OECD Step 5 in its
+    annual public disclosure and in the LBMA-mandated annual Compliance
+    Report. The Seller agrees to provide all reasonable cooperation.
+
+2.3 Chain of integrity. Each dore bar shall be delivered with a serialised
+    Chain-of-Custody record. The Refiner reserves the right to track every
+    bar in its enterprise vault-management system from gate-in through to
+    investment-bar casting, and to provide the Mine with downstream
+    serialised reports on the products derived from each lot.
+
+2.4 RJC. The Refiner holds a current Responsible Jewellery Council Chain of
+    Custody certificate (RJC CoC certificate number to be provided
+    separately). The Seller shall furnish, on request, evidence sufficient
+    for the Refiner to maintain its RJC CoC certification.
+
+2.5 Excluded origins. The Seller represents that no material delivered
+    hereunder originates from, or has been processed in, the Russian
+    Federation, the Republic of Belarus, the Democratic People's Republic
+    of Korea, the Islamic Republic of Iran, the Republic of the Sudan, the
+    Democratic Republic of the Congo, or any other jurisdiction that is at
+    any time the subject of comprehensive sanctions imposed by the United
+    States Office of Foreign Assets Control (OFAC), the European Union, or
+    the United Nations.
+
+2.6 Section 1502. Where the Refiner's downstream customer is a person
+    subject to Section 1502 of the Dodd-Frank Wall Street Reform and
+    Consumer Protection Act, the Seller shall execute the Refiner's
+    standard Conflict Minerals Reporting Template (CMRT) on request.
+
+2.7 ISO. The Refiner shall maintain certification under ISO 9001:2015 and
+    ISO 14001:2015. Loss of either certification shall constitute a
+    material breach by the Refiner.
+
+2.8 Swiss PMCA. The Refiner shall complete every required filing under the
+    Swiss Precious Metals Control Act, including the per-import origin
+    declaration filed with the Swiss Federal Customs Administration.
+
+--------------------------------------------------------------------------------
+3. DELIVERY AND LOCO
+--------------------------------------------------------------------------------
+
+3.1 Loco. All deliveries shall be made loco Zurich, free into the vault of
+    the Refiner at Mendrisio, Switzerland.
+
+3.2 Logistics. The Seller shall arrange bonded transport from the Mine to
+    the Lima Jorge Chavez International Airport and onward air freight to
+    Zurich-Kloten with an LBMA-recognised secure-logistics carrier.
+
+3.3 Insurance. The Seller shall procure all-risk in-transit insurance from
+    Mine gate to Refiner vault gate, with a minimum coverage of one hundred
+    and ten per cent (110%) of the contractual value of the consignment.
+    The Refiner shall be a named additional insured.
+
+3.4 Delivery window. The standard delivery cadence is one (1) shipment per
+    calendar month. The Seller shall provide ten (10) calendar days'
+    advance notice of each shipment.
+
+3.5 Late-delivery. Any shipment delivered more than fifteen (15) calendar
+    days after the notified delivery date shall constitute a "Late
+    Delivery". The Refiner may, at its option, charge a late-delivery fee
+    of one quarter of one per cent (0.25%) of the consignment value per
+    additional week of delay, or terminate the affected delivery and claim
+    the difference between the contract price and the then-current LBMA
+    Gold Fix.
+
+--------------------------------------------------------------------------------
+4. ASSAY AND WEIGHT
+--------------------------------------------------------------------------------
+
+4.1 Assay protocol. On gate-in at the Refiner, each bar shall be weighed
+    and assayed by the Refiner's assay laboratory using fire assay for
+    gold and ICP-OES for silver. The Refiner's assay shall be communicated
+    to the Seller within five (5) business days of gate-in.
+
+4.2 Split-sample. The Seller shall be entitled to require a split-sample
+    procedure on any individual bar. Each party shall retain one sample;
+    the third sample shall be sealed and held by the Refiner for
+    independent assay at an umpire laboratory should a dispute arise.
+
+4.3 Assay tolerance. Where the Refiner's reported gold fineness differs
+    from the Seller's stated fineness by more than five hundredths of one
+    per cent (0.05%) on an absolute basis, the parties shall jointly
+    instruct an umpire laboratory listed on Schedule B. The umpire's
+    assay shall be binding. The party whose assay was more incorrect, by
+    absolute deviation from the umpire result, shall bear the umpire
+    laboratory's costs.
+
+4.4 Weight. Each bar shall be weighed to one one-hundredth (0.01) of a
+    troy ounce. Fine weight is computed as gross weight multiplied by
+    fineness divided by one thousand. Contract price applies to fine
+    weight only.
+
+--------------------------------------------------------------------------------
+5. PRICING AND PAYMENT
+--------------------------------------------------------------------------------
+
+5.1 Reference price. The price payable for each troy ounce of fine gold
+    delivered hereunder shall be:
+
+       Gold settlement price = (LBMA Gold PM Fix on the Pricing Date)
+                               minus the Treatment Charge per troy ounce
+                               minus the Refining Charge per troy ounce
+
+    where the Treatment Charge is fixed at four United States dollars
+    (USD 4.00) per troy ounce of fine gold and the Refining Charge is
+    fixed at one United States dollar and fifty cents (USD 1.50) per troy
+    ounce of fine gold.
+
+5.2 Silver settlement price = (LBMA Silver Price on the Pricing Date)
+    minus a Refining Charge of twenty-five United States cents (USD 0.25)
+    per troy ounce of fine silver, with payable fixed at ninety-five per
+    cent (95%) of the contained silver.
+
+5.3 Pricing Date. The Pricing Date shall be the second business day
+    following gate-in of the relevant consignment, unless either party
+    elects in writing to defer pricing for up to thirty (30) calendar
+    days from gate-in.
+
+5.4 Provisional payment. The Refiner shall make a provisional payment
+    equal to ninety per cent (90%) of the estimated settlement value
+    within five (5) business days of gate-in, computed against the
+    Seller's stated fineness. The balance shall be paid within ten (10)
+    business days following final assay.
+
+5.5 Settlement currency. All payments shall be in United States Dollars
+    (USD), by wire transfer to the bank account designated by the Seller
+    in writing.
+
+--------------------------------------------------------------------------------
+6. VAULTING
+--------------------------------------------------------------------------------
+
+6.1 At and from gate-in, the dore bars become the property of the Refiner
+    and form part of the Refiner's unallocated working inventory. The
+    Seller acknowledges that no segregated or allocated vault account is
+    maintained in respect of unsettled consignments hereunder.
+
+--------------------------------------------------------------------------------
+7. TERM, TERMINATION AND FORCE MAJEURE
+--------------------------------------------------------------------------------
+
+7.1 Term. This Agreement shall commence on 1 March 2026 (the "Effective
+    Date") and continue for an initial term of twenty-four (24) months,
+    automatically renewing for successive twelve-month periods unless
+    terminated by either party on not less than ninety (90) days' written
+    notice prior to expiration.
+
+7.2 Good Delivery list status. If the Refiner is suspended or removed
+    from the LBMA Good Delivery List for Gold or Silver during the term,
+    the Seller may, on five (5) business days' written notice, terminate
+    this Agreement without liability and direct any in-transit shipment
+    to an alternative LBMA-listed refinery on the Refiner's account.
+
+7.3 Force majeure. Neither party shall be liable for delay or failure
+    arising from acts of God, war, government action, pandemic, or other
+    causes beyond the affected party's reasonable control. The affected
+    party shall give prompt notice. Performance shall be suspended for
+    the duration of the event up to a maximum of ninety (90) calendar
+    days, after which either party may terminate the affected shipments.
+
+7.4 Sanctions termination. Either party may terminate this Agreement on
+    written notice if continued performance would breach the sanctions
+    regime of the United States, the European Union, the United Kingdom,
+    Switzerland or the United Nations.
+
+--------------------------------------------------------------------------------
+8. GENERAL
+--------------------------------------------------------------------------------
+
+8.1 Governing law. This Agreement is governed by the substantive law of
+    Switzerland, excluding its conflict of laws rules and the United
+    Nations Convention on Contracts for the International Sale of Goods.
+
+8.2 Dispute resolution. Disputes shall be finally settled by arbitration
+    in Zurich under the Swiss Rules of International Arbitration, by a
+    panel of three arbitrators, in English.
+
+8.3 Confidentiality. The terms of this Agreement, all assay reports, and
+    all chain-of-custody records are confidential between the parties.
+
+8.4 Counterparts. This Agreement may be executed in counterparts.
+
+[Signature blocks omitted for brevity.]
+
+================================================================================
+                          END OF AGREEMENT
+================================================================================

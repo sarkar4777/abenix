@@ -20,7 +20,7 @@ async def main():
             await db.execute(
                 select(Execution, Agent.slug)
                 .join(Agent)
-                .where(Agent.slug == "example_app-metals-extractor", Execution.status == "completed")
+                .where(Agent.slug == "contractiq-metals-extractor", Execution.status == "completed")
                 .order_by(desc(Execution.created_at))
                 .limit(1)
             )

@@ -17,8 +17,8 @@ NAMESPACE="${NAMESPACE:-abenix}"
 SERVICES=(
   "abenix-web:3000:3000:/:Abenix Web"
   "abenix-api:8000:8000:/api/health:Abenix API"
-  "example_app-web:3001:3001:/:the example app Web"
-  "example_app-api:8001:8001:/api/health:the example app API"
+  "contractiq-web:3001:3001:/:ContractIQ Web"
+  "contractiq-api:8001:8001:/api/health:ContractIQ API"
   "sauditourism-web:3002:3002:/:Saudi Tourism Web"
   "sauditourism-api:8002:8002:/api/health:Saudi Tourism API"
   "industrial-iot-web:3003:3003:/:Industrial IoT Web"
@@ -222,7 +222,7 @@ print_urls() {
     OracleNet           http://localhost:3000/oraclenet
     API docs (Swagger)  http://localhost:8000/docs
 
-  the example app
+  ContractIQ
     Dashboard           http://localhost:3001/dashboard
     Contracts           http://localhost:3001/contracts
     Upload              http://localhost:3001/upload
@@ -270,7 +270,7 @@ URLS
   echo ""
   echo -e "${B}Credentials${N}"
   echo -e "  Abenix      ${Y}admin@abenix.dev${N} / ${Y}Admin123456${N}  (or demo@abenix.dev / Demo123456)"
-  echo -e "  the example app      ${Y}test@example_app.com${N} / ${Y}TestPass123!${N}"
+  echo -e "  ContractIQ      ${Y}test@contractiq.com${N} / ${Y}TestPass123!${N}"
   echo -e "  Saudi Tourism   use the 'demo credentials' button on the sign-in modal"
   echo ""
   echo -e "${B}Controls${N}"
@@ -353,7 +353,7 @@ open_app_cmd() {
   local app="${1:-af}"
   case "${app}" in
     af|abenix)    open_url "http://localhost:3000" ;;
-    ciq|example_app)   open_url "http://localhost:3001" ;;
+    ciq|contractiq)   open_url "http://localhost:3001" ;;
     st|sauditourism|tourism) open_url "http://localhost:3002" ;;
     iot|industrial-iot) open_url "http://localhost:3003" ;;
     care|resolveai)   open_url "http://localhost:3004" ;;

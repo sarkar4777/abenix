@@ -72,7 +72,7 @@ class KnowledgeSearchTool(BaseTool):
                 db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
             # Materialise input as UUIDs; bad strings (e.g. legacy
-            # subject-namespace strings like "example_app-<uuid>") are
+            # subject-namespace strings like "contractiq-<uuid>") are
             # passed through unchanged — those are not collection ids,
             # they're Pinecone-only namespaces that bypass the table.
             uuid_inputs: list[_uuid.UUID] = []

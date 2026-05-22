@@ -30,7 +30,7 @@ class Conversation(UUIDMixin, TenantMixin, TimestampMixin, Base):
     )
     # agent_slug is denormalised so a thread survives Agent.id renames/re-seeds.
     agent_slug: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    # app_slug + subject_{type,id} let standalone apps (the example app, IoT,
+    # app_slug + subject_{type,id} let standalone apps (ContractIQ, IoT,
     # ResolveAI, …) keep their own chat namespaces, all delegated to
     # Abenix but isolated per (app, end-user) identity.
     app_slug: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

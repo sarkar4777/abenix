@@ -35,7 +35,7 @@ secrets:
 web:
   replicaCount: 1
   image:
-    repository: abenixacr71a48.azurecr.io/web
+    repository: your-acr.azurecr.io/web
     tag: scaling-v2
     pullPolicy: Always              # ACR images always pulled by tag
   service:
@@ -65,7 +65,7 @@ api:
     enabled: true
     claimName: ml-models-storage
   image:
-    repository: abenixacr71a48.azurecr.io/api
+    repository: your-acr.azurecr.io/api
     tag: wave2
     pullPolicy: Always
   health:
@@ -91,7 +91,7 @@ agent-runtime:
 worker:
   replicaCount: 1
   image:
-    repository: abenixacr71a48.azurecr.io/worker
+    repository: your-acr.azurecr.io/worker
     tag: procps-fix
     pullPolicy: Always
   autoscaling:
@@ -105,7 +105,7 @@ cognifyWorker:
   enabled: true
   replicaCount: 1
   image:
-    repository: abenixacr71a48.azurecr.io/worker
+    repository: your-acr.azurecr.io/worker
     tag: procps-fix
     pullPolicy: Always
   queue: cognify
@@ -187,7 +187,7 @@ mlModels:
   storageSize: 10Gi
   # Image each deployed model's Pod pulls. AKS points at the ACR copy;
   # minikube uses the localhost:5000 registry the default in the chart.
-  servingImage: abenixacr71a48.azurecr.io/model-serving:wave2
+  servingImage: your-acr.azurecr.io/model-serving:wave2
 monitoring:
   enabled: false
 pdb:
@@ -268,6 +268,16 @@ nats:
     enabled: true
     fileStorage:
       size: 5Gi
+
+# ── Shared /data PVC for multi-node AKS ────────────────────────────────────
+# Without this, api / worker / agent-runtime pods land on different nodes
+# and each see their OWN /data hostPath. Uploads / exports / code-assets
+# written by api are then invisible to worker. azurefile-csi is RWX so
+# every pod mounts the same volume.
+sharedData:
+  usePVC: true
+  storageClass: azurefile-csi
+  storageSize: 20Gi
 
 # ── Global image pull policy ───────────────────────────────────────────────
 global:

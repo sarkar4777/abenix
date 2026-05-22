@@ -80,7 +80,7 @@ The platform never holds Alice as a row. Wingman does. We carry her identity as 
 # apps/api/app/core/acting_subject.py
 @dataclass
 class ActingSubject:
-    subject_type: str        # "wingman", "example_app", "external", "user", "webhook"
+    subject_type: str        # "wingman", "contractiq", "external", "user", "webhook"
     subject_id: str          # the third-party system's user ID
     email: str | None = None
     display_name: str | None = None
@@ -155,7 +155,7 @@ Each standalone app picks a subject_type and stays in that lane.
 | subject_type | Used by | Example subject_id |
 |---|---|---|
 | `wingman` | Wingman energy trading | `trader-alice`, `demo-trader` |
-| `example_app` | the example app contracts | `user-7afd…` (the CIQ DB user UUID) |
+| `contractiq` | ContractIQ contracts | `user-7afd…` (the CIQ DB user UUID) |
 | `sauditourism` | Saudi Tourism Ministry | `gov-employee-22` |
 | `resolveai` | ResolveAI customer service | `agent-bob` |
 | `industrial-iot` | Industrial IoT | `operator-shift-3` |
@@ -208,8 +208,8 @@ TypeScript:
 ```ts
 const sdk = new Abenix({ apiUrl, apiKey })
 const result = await sdk
-  .withSubject({ subject_type: "example_app", subject_id: userId, email })
-  .execute("example_app-clause-extractor", { document_id })
+  .withSubject({ subject_type: "contractiq", subject_id: userId, email })
+  .execute("contractiq-clause-extractor", { document_id })
 ```
 
 `with_subject()` is a clone-and-bind operation. The returned client is a thin shim that adds the header on every call. The original client (no subject) is unchanged — useful when one process serves several users.

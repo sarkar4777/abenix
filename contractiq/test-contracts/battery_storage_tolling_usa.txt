@@ -1,0 +1,183 @@
+BATTERY ENERGY STORAGE SYSTEM (BESS) TOLLING AND GRID SERVICES AGREEMENT
+(Texas ERCOT 400 MW / 800 MWh Facility — Brazos Bend BESS)
+
+BETWEEN
+(1) BRAZOS BEND STORAGE LLC — "Owner"
+    a Delaware limited liability company having its principal office at 1001 Fannin Street, Suite 3000, Houston, Texas 77002.
+(2) ATLANTIC RENEWABLES TRADING, LLC — "Tolling Counterparty"
+    a Delaware limited liability company having its principal office at 825 Third Avenue, New York, NY 10022.
+
+EXECUTION DATE: 22 March 2025
+COMMERCIAL OPERATION DATE (COD) TARGET: 1 October 2026
+TERM: Fifteen (15) Years from COD with 2 × 5-year extensions
+FACILITY: 400 MW / 800 MWh 4-hour Lithium-Iron-Phosphate BESS
+INTERCONNECTION: Skyview 345 kV GTC substation (ERCOT nodal LZ_HOUSTON)
+CONTRACT REFERENCE: BBBESS-TOL-2025-HOU-4404
+
+RECITALS
+WHEREAS the Owner has developed the BESS and holds the ERCOT interconnection agreement;
+WHEREAS the Tolling Counterparty wishes to secure 100% dispatch rights to the Facility for energy arbitrage, ancillary services and capacity market participation;
+WHEREAS the Parties have agreed the terms and conditions for tolling, operations, performance guarantees and economics below.
+
+ARTICLE 1  DEFINITIONS
+1.1 "Availability" — fraction of time the Facility is available for dispatch, excluding Force Majeure and scheduled maintenance per Section 1.1 of Schedule 3.
+1.2 "Capacity Fee" — USD/kW-month, payable monthly as per Article 6.
+1.3 "Cycle" — one full charge-discharge event equivalent to 1.0 × nameplate energy throughput (800 MWh).
+1.4 "Degradation Curve" — the warranted round-trip efficiency and capacity retention schedule in Schedule 2.
+1.5 "Dispatch Instructions" — instructions from the Tolling Counterparty submitted via OASIS API for day-ahead and real-time dispatch.
+1.6 "Energy Charge Rate" — USD/MWh charged for charging electricity, equal to the ERCOT LMP at LZ_HOUSTON.
+1.7 "Grid Services" — AS products: Regulation Up (RegUp), Regulation Down (RegDn), Responsive Reserve (RRS), ECRS, Non-Spin.
+1.8 "Performance Guarantee" — the round-trip efficiency (85%) and availability (96%) thresholds in Article 10.
+1.9 "Tolling Fee" — the fixed monthly Capacity Fee plus the variable Performance Bonus per Article 6.4.
+1.10 "Capacity Retention" — the Usable Energy Capacity expressed as a percentage of nameplate, tested per Article 8.
+
+ARTICLE 2  DISPATCH RIGHTS
+2.1 The Tolling Counterparty has exclusive right to dispatch 100% of the Facility's Available Capacity for the Term.
+2.2 Dispatch instructions via OASIS API with 5-minute granularity. Real-time operator cover: 24/7.
+2.3 The Tolling Counterparty may co-optimise across Day-Ahead Energy, Real-Time Energy, AS products, and ERCOT capacity auction participation.
+
+ARTICLE 3  OWNER'S OPERATIONAL OBLIGATIONS
+3.1 Owner to maintain the Facility per OEM specifications (Tesla Megapack 2XL, firmware version NUC-2024.3 minimum).
+3.2 Preventive maintenance: annual full inspection (14 days), quarterly HVAC+fire system checks (2 days each).
+3.3 Warranty administration: Owner is primary warranty holder; all claims coordinated through Owner.
+3.4 Augmentation obligation: Owner shall add capacity to maintain 100% nameplate over Years 1-8 (estimated 4-6 augmentation events, cost-shared per Article 14).
+
+ARTICLE 4  METERING AND PERFORMANCE MEASUREMENT
+4.1 ERCOT Qualified Scheduling Entity (QSE) role: Owner-provided QSE, transitioning to Tolling Counterparty's QSE at COD+12 months.
+4.2 Metering: ERCOT-approved revenue meters, ANSI C12.20 Class 0.2. Quarterly calibration.
+4.3 Round-trip efficiency (RTE): measured monthly as (total AC discharge energy) / (total AC charge energy) over ≥100 full cycles.
+4.4 State of Charge (SoC): maintained between 10% and 95% per augmentation strategy; Owner alarms at bounds.
+
+ARTICLE 5  CYCLING LIMITS AND WARRANTY
+5.1 Maximum allowed cycles: 365 full equivalent cycles/year (cumulative), tracked by Owner SCADA.
+5.2 Cycles above 365 trigger additional degradation charges: USD 9,500 per excess cycle (paid by Tolling Counterparty to Owner).
+5.3 Tesla battery warranty: 20 years / 70% capacity retention under the agreed cycle profile.
+5.4 Operating temperature: ambient -20°C to +50°C; cell-level 0-45°C.
+
+ARTICLE 6  COMMERCIAL TERMS
+6.1 Capacity Fee: USD 8.50 / kW-month (2025 real), applied to nameplate 400,000 kW = USD 3,400,000/month = USD 40,800,000/year (Year 1).
+6.2 Indexation: Annual, CPI-U cap 3% floor 0%.
+6.3 Performance Bonus: If monthly Availability > 97% AND RTE > 86%, Tolling Counterparty pays Owner USD 0.50/kW-month bonus. Capped at 24 months.
+6.4 Performance Penalty: Monthly Availability < 94% → Capacity Fee reduction at USD 0.80/kW-month per percentage-point deficiency, up to USD 5.00/kW-month max.
+6.5 Augmentation Cost Recovery: capital augmentation cost passed through at 110% (10% Owner margin), amortised over 8 years remaining term.
+
+ARTICLE 7  PAYMENT TERMS
+7.1 Capacity Fee payable monthly in arrears, invoice on 5th business day.
+7.2 Charging energy reimbursed by Tolling Counterparty at actual ERCOT LMP plus 0.5% admin fee.
+7.3 Net settlement: monthly net invoice covering Capacity Fee + augmentation + penalties - performance bonuses.
+7.4 Payment due: 15 days from invoice. Late interest: Prime Rate + 200 bps.
+
+ARTICLE 8  CAPACITY WARRANTY AND TESTING
+8.1 Annual capacity test: discharge from 95% SoC to 10% SoC at 100 MW (C/4) constant power, measure delivered kWh at POD.
+8.2 Year 1 guaranteed Usable Capacity: 780 MWh (97.5% of nameplate).
+8.3 Capacity retention schedule: Year 5 ≥ 88%, Year 10 ≥ 78%, Year 15 ≥ 70%.
+8.4 Failure to meet retention: Liquidated Damages of USD 150 per kWh shortfall, or Owner funded augmentation within 90 days.
+
+ARTICLE 9  GRID SERVICES REVENUE SHARING
+9.1 AS revenue (RegUp, RegDn, RRS, ECRS, Non-Spin) and energy margin fully retained by Tolling Counterparty (tolling structure).
+9.2 No gain-share on energy or AS revenue to Owner except Performance Bonus in Article 6.3.
+9.3 Capacity market (ERCOT VRR, if implemented) revenue: 80% Tolling Counterparty / 20% Owner.
+9.4 Black Start service (if Facility qualifies): fixed fee USD 150,000/month, 50/50 split.
+
+ARTICLE 10  PERFORMANCE GUARANTEES
+10.1 Availability Guarantee: 96.0% annual, measured as (Available Hours) / (8,760 - Scheduled Maintenance Hours - FM Hours).
+10.2 Round-Trip Efficiency: 85% at standard test conditions (Schedule 2 §4), measured monthly.
+10.3 Response Time: 100% rated output within 1 second of AGC signal receipt.
+10.4 Failure of 10.1 or 10.2 triggers monthly Capacity Fee reduction per Article 6.4.
+
+ARTICLE 11  DEGRADATION MANAGEMENT AND AUGMENTATION
+11.1 Owner shall maintain Usable Energy Capacity ≥ 88% of nameplate through Year 8 via cell augmentation.
+11.2 Augmentation Events: anticipated in Years 3, 5, 7 (cumulative 12-16 additional megapacks).
+11.3 Augmentation cost pass-through capped at USD 38M aggregate over the Term.
+11.4 Tolling Counterparty consent required before augmentation > USD 8M single event.
+
+ARTICLE 12  REGULATORY AND INTERCONNECTION
+12.1 Owner maintains ERCOT Interconnection Agreement and all applicable NERC, TRE, and PUCT filings.
+12.2 Change of Law: material regulatory changes (e.g. ERCOT Real-Time Co-Optimization Phase 2, capacity market introduction) trigger re-opener in Article 22.
+12.3 IRA tax credits (ITC 30% + 10% domestic content) remain with Owner; Tolling Counterparty reimburses 15% as a tax equity benefit flow-through in the Capacity Fee.
+
+ARTICLE 13  CHANGE IN LAW
+13.1 Material change: cumulative impact > 7% of annual Capacity Fee.
+13.2 Renegotiation window: 120 days; if no agreement, arbitration per Article 24.
+13.3 Indirect policy changes (e.g., IRA rollback, ERCOT CAP market) trigger mandatory good-faith review.
+
+ARTICLE 14  CAPITAL EXPENDITURE AND IMPROVEMENTS
+14.1 Owner-funded CapEx: initial construction, end-of-life decommissioning, all scheduled augmentations (subject to Article 11.3 cap).
+14.2 Tolling Counterparty CapEx: discretionary controls upgrades, EMS/SCADA integrations with its trading systems, fiber interconnection to its trading floor.
+
+ARTICLE 15  INSURANCE
+15.1 Owner: All-risk property (USD 450M), GL (USD 25M/occ), Business Interruption (USD 75M / 12 months), Environmental Liability (USD 15M).
+15.2 Tolling Counterparty: GL (USD 10M/occ), Errors & Omissions (USD 25M aggregate).
+15.3 Waiver of subrogation mutual for property and GL.
+
+ARTICLE 16  FORCE MAJEURE
+16.1 Events: natural disasters (hurricane, earthquake, flooding, wildfire), war, terrorism, cyber-attacks, ERCOT-declared emergency ops, ISO/RTO dispatch restrictions, strikes beyond 7 days.
+16.2 Notice: 48 hours. Regular updates every 5 days.
+16.3 Suspension: Capacity Fee suspended pro-rata during FM outage > 72 hours.
+16.4 Termination right: FM duration > 270 consecutive days.
+
+ARTICLE 17  CREDIT SUPPORT AND COLLATERAL
+17.1 Initial collateral: Tolling Counterparty provides parent guarantee (Atlantic Renewables, Inc. — S&P BBB+) equal to 6 months Capacity Fee = USD 20.4M.
+17.2 Ongoing threshold: MtM monitored monthly; additional margin if exposure > USD 10M.
+17.3 Owner collateral: Letter of Credit USD 15M to secure performance guarantees in Article 10.
+17.4 Downgrade triggers: either party falling below BBB- → 20-day cure to enhance collateral.
+
+ARTICLE 18  CYBERSECURITY
+18.1 NERC CIP-005/007/009/011 compliance (critical cyber assets).
+18.2 Dispatch API hardened: TLS 1.3 mutual auth, IP allowlisting.
+18.3 Annual cyber audit by SOC 2 Type II auditor, shared report.
+18.4 Incident notification: 24 hours for suspected, 72 hours for confirmed breaches per NERC CIP-008.
+
+ARTICLE 19  CONFIDENTIALITY
+19.1 All commercial terms confidential for 5 years post-termination.
+19.2 Regulatory / legal disclosures permitted.
+19.3 Performance data shared with OEM (Tesla) for warranty analytics.
+
+ARTICLE 20  END OF LIFE / DECOMMISSIONING
+20.1 Decommissioning Fund: Owner maintains USD 5M escrow, replenished annually.
+20.2 At end of term, Owner responsible for decommissioning, recycling per EPA e-waste regulations, site restoration.
+20.3 Residual value: any salvage revenue to Owner.
+
+ARTICLE 21  GOVERNANCE AND OPS COMMITTEE
+21.1 Joint Operating Committee (JOC): 4 members (2 each party), quarterly meetings.
+21.2 JOC reviews: performance data, upcoming maintenance, augmentation, market outlook.
+21.3 Escalation: unresolved items → CEO-level within 15 days.
+
+ARTICLE 22  RE-OPENER AND RENEGOTIATION
+22.1 Contractual review at Year 5 and Year 10 (mutual, not mandatory).
+22.2 Material Adverse Change: cumulative >15% NPV degradation to either party.
+22.3 Timeline: 90-day negotiation; failure → arbitration.
+
+ARTICLE 23  TERMINATION
+23.1 Events of Default:
+     (a) Failure to pay > 30 days.
+     (b) Insolvency, Chapter 11 filing, receivership.
+     (c) Failure to meet Availability < 85% over 6 months.
+     (d) Sanctions / regulatory disqualification.
+23.2 Cure periods: (a) 30 days; (c) 180 days; no cure for (b) or (d).
+23.3 Termination Payment: NPV of remaining Capacity Fee losses - NPV of replacement toll opportunity, discounted at 10%.
+
+ARTICLE 24  DISPUTE RESOLUTION
+24.1 Mediation first (30 days). Then JAMS arbitration in Houston, Texas.
+24.2 Governing law: Texas, excluding conflicts of laws.
+24.3 Venue exclusive: federal/state courts sitting in Harris County, Texas.
+
+ARTICLE 25  REPRESENTATIONS AND WARRANTIES
+25.1 Mutual: authority, no conflicts, no known material adverse proceedings.
+25.2 Owner: title to Facility, valid interconnection agreement, environmental permits, NERC registration.
+25.3 Tolling Counterparty: QSE qualification (or ability to procure), trading floor authority.
+
+ARTICLE 26  NOTICES
+26.1 Formal notices: certified mail, return receipt + email with read receipt.
+26.2 To Owner: Brazos Bend Storage LLC, Attn: General Counsel, 1001 Fannin Street, Suite 3000, Houston, TX 77002.
+26.3 To Tolling Counterparty: Atlantic Renewables Trading LLC, Attn: Legal Department, 825 Third Avenue, New York, NY 10022.
+
+SCHEDULE 1 — Facility description (topology, battery IDs, interconnection SLD)
+SCHEDULE 2 — OEM warranty, RTE test protocol, degradation curve
+SCHEDULE 3 — Availability and maintenance standards
+SCHEDULE 4 — QSE transition plan (0-24 months)
+SCHEDULE 5 — Augmentation cost model and triggers
+SCHEDULE 6 — NERC CIP compliance matrix
+SCHEDULE 7 — Insurance certificate requirements
+SCHEDULE 8 — Credit support templates (PCG and LC forms)
+SCHEDULE 9 — Cybersecurity controls and incident response

@@ -2,7 +2,7 @@
 
 > Read this first. Everything else assumes you know the service graph and the request lifecycle.
 
-Abenix is an **open-source AI agent platform**. It lets a tenant define agents (LLM + tools + system prompt), wire them into pipelines (multi-step DAGs), feed them knowledge (documents + a typed ontology graph), and run them end-to-end with full audit trails. On top of that core sit **standalone vertical apps** (Wingman, the example app, etc.) that compose the platform's primitives into industry-specific workflows.
+Abenix is an **open-source AI agent platform**. It lets a tenant define agents (LLM + tools + system prompt), wire them into pipelines (multi-step DAGs), feed them knowledge (documents + a typed ontology graph), and run them end-to-end with full audit trails. On top of that core sit **standalone vertical apps** (Wingman, ContractIQ, etc.) that compose the platform's primitives into industry-specific workflows.
 
 The platform is multi-tenant, polyglot (Python / TypeScript / Java SDKs), and runs on Kubernetes. Everything is open source.
 
@@ -16,7 +16,7 @@ Three concentric circles.
 flowchart TB
   subgraph PERIPHERY["Standalone vertical apps (thin)"]
     W[Wingman]
-    C[the example app]
+    C[ContractIQ]
     S[Saudi Tourism]
     R[ResolveAI]
     I[Industrial-IoT]
@@ -60,13 +60,13 @@ flowchart LR
   subgraph WEB["Web tier"]
     AW[abenix-web<br/>Next.js 15]
     WW[wingman-web]
-    CW[example_app-web]
+    CW[contractiq-web]
   end
 
   subgraph API["API tier"]
     AAPI[abenix-api<br/>FastAPI]
     WAPI[wingman-api]
-    CAPI[example_app-api]
+    CAPI[contractiq-api]
   end
 
   subgraph RUNTIME["Agent runtime"]
@@ -134,7 +134,7 @@ flowchart LR
 | **worker** | Python / Celery | Long-running jobs — pipeline orchestration, batch inference, scheduled triggers | [`apps/worker/`](../../apps/worker/) |
 | **cognify-worker** | Python / Celery | Knowledge-base ingestion — parse, chunk, embed, extract graph | [`apps/cognify-worker/`](../../apps/cognify-worker/) |
 | **edge-runtime** | Rust / C | Edge-side agents for low-latency / on-prem deployments | [`apps/edge-runtime*`](../../apps/) |
-| **wingman-* / example_app-* / etc.** | Python + TypeScript | Vertical apps — see [07-standalone-apps](../07-standalone-apps/00-pattern.md) | per-app directories |
+| **wingman-* / contractiq-* / etc.** | Python + TypeScript | Vertical apps — see [07-standalone-apps](../07-standalone-apps/00-pattern.md) | per-app directories |
 
 ### Why so many `agent-runtime-*` pods?
 

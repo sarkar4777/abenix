@@ -1,7 +1,7 @@
 """Seed default tool presets for every tenant on startup.
 
 These presets are the labelled (tool, args) bundles that the metals/gas
-admin pages and dashboards used to show as the example app-specific adapters.
+admin pages and dashboards used to show as ContractIQ-specific adapters.
 They now live in abenix as generic presets and are visible to every app
 that has the underlying tool in its allow-list. Tenants can freely
 add/remove their own; the system presets are tagged is_system=True so the

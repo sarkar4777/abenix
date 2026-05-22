@@ -17,7 +17,7 @@ flowchart TB
   subgraph WEB_TIER["Web tier · Next.js"]
     AW[abenix-web]
     WW[wingman-web]
-    CW[example_app-web]
+    CW[contractiq-web]
     SW[sauditourism-web]
     RW[resolveai-web]
     IW[industrial-iot-web]
@@ -27,7 +27,7 @@ flowchart TB
   subgraph API_TIER["API tier · FastAPI"]
     AAPI[abenix-api]
     WAPI[wingman-api]
-    CAPI[example_app-api]
+    CAPI[contractiq-api]
     SAPI[sauditourism-api]
     RAPI[resolveai-api]
     IAPI[industrial-iot-api]
@@ -169,7 +169,7 @@ Each vertical app deploys two services: `*-api` (FastAPI) and `*-web` (Next.js).
 | App | Domain | Image-tag-pair | Default port (web/api) |
 |---|---|---|---|
 | **Wingman** | Energy commodity trading | `wingman-web`, `wingman-api` | 3006 / 8006 |
-| **the example app** | Contract intelligence | `example_app-web`, `example_app-api` | 3007 / 8007 |
+| **ContractIQ** | Contract intelligence | `contractiq-web`, `contractiq-api` | 3007 / 8007 |
 | **Saudi Tourism** | Tourism analytics | `sauditourism-web`, `sauditourism-api` | 3002 / 8002 |
 | **ResolveAI** | Customer-support automation | `resolveai-web`, `resolveai-api` | 3008 / 8008 |
 | **Industrial-IoT** | Equipment health + alarm desk | `industrial-iot-web`, `industrial-iot-api` | 3009 / 8009 |

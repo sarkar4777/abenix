@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
- * Cross-app browser UAT — covers every standalone except the example app
+ * Cross-app browser UAT — covers every standalone except ContractIQ
  * plus the Abenix platform. Run after a deploy:
  *
  *   BASE_AB=http://localhost:3000  AB_API=http://localhost:8000 \

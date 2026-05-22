@@ -108,7 +108,7 @@ The edge node holds its own SQLite database for the in-flight execution log. it 
    ```bash
    # Python (Docker)
    docker run -d --name abenix-edge --env-file /etc/abenix-edge.env \
-     abenixacr71a48.azurecr.io/edge-runtime:1.5.5
+     your-acr.azurecr.io/edge-runtime:1.5.5
 
    # Rust (static binary)
    /usr/local/bin/abenix-edge-rust --config /etc/abenix-edge.env

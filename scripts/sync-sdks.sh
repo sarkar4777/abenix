@@ -6,7 +6,7 @@
 #
 # Destinations (per-app embedded copies — must NEVER be edited directly):
 #   packages/agent-sdk/abenix_sdk/
-#   example_app/api/sdk/abenix_sdk/
+#   contractiq/api/sdk/abenix_sdk/
 #   industrial-iot/api/sdk/abenix_sdk/
 #   resolveai/api/sdk/abenix_sdk/
 #   sauditourism/api/sdk/abenix_sdk/
@@ -32,7 +32,7 @@ CANONICAL="${ROOT_DIR}/packages/sdk/python/abenix_sdk"
 
 DESTINATIONS=(
   "${ROOT_DIR}/packages/agent-sdk/abenix_sdk"
-  "${ROOT_DIR}/example_app/api/sdk/abenix_sdk"
+  "${ROOT_DIR}/contractiq/api/sdk/abenix_sdk"
   "${ROOT_DIR}/industrial-iot/api/sdk/abenix_sdk"
   "${ROOT_DIR}/resolveai/api/sdk/abenix_sdk"
   "${ROOT_DIR}/sauditourism/api/sdk/abenix_sdk"

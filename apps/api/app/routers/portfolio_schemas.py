@@ -216,7 +216,7 @@ async def list_templates() -> JSONResponse:
                         "record_noun_plural": "contracts",
                     },
                     "main_table": {
-                        "name": "example_app_contracts",
+                        "name": "contractiq_contracts",
                         "primary_key": "id",
                         "user_scope_column": "user_id",
                         "title_column": "title",
@@ -294,7 +294,7 @@ async def list_templates() -> JSONResponse:
                     },
                     "related_tables": [
                         {
-                            "name": "example_app_clauses",
+                            "name": "contractiq_clauses",
                             "relation": "one_to_many",
                             "foreign_key": "contract_id",
                             "label": "Clauses",
@@ -319,7 +319,7 @@ async def list_templates() -> JSONResponse:
                             "order_by": "clause_number",
                         },
                         {
-                            "name": "example_app_risk_analyses",
+                            "name": "contractiq_risk_analyses",
                             "relation": "one_to_many",
                             "foreign_key": "contract_id",
                             "label": "Risk Analyses",
@@ -347,7 +347,7 @@ async def list_templates() -> JSONResponse:
                             "order_by": "risk_score DESC",
                         },
                         {
-                            "name": "example_app_assets",
+                            "name": "contractiq_assets",
                             "relation": "one_to_many",
                             "foreign_key": "contract_id",
                             "label": "Assets",
@@ -363,7 +363,7 @@ async def list_templates() -> JSONResponse:
                             },
                         },
                         {
-                            "name": "example_app_events",
+                            "name": "contractiq_events",
                             "relation": "one_to_many",
                             "foreign_key": "contract_id",
                             "label": "Events",
@@ -380,7 +380,7 @@ async def list_templates() -> JSONResponse:
                             "order_by": "event_date",
                         },
                         {
-                            "name": "example_app_extracted_data",
+                            "name": "contractiq_extracted_data",
                             "relation": "one_to_many",
                             "foreign_key": "contract_id",
                             "label": "Extracted Data",

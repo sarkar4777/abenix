@@ -1,0 +1,914 @@
+================================================================================
+              CONTRACT FOR DIFFERENCE - POWER PURCHASE AGREEMENT
+                    IBERIAN SOLAR CfD PORTFOLIO
+
+                         CONTRACT NO. ISC-2025-0892
+
+                    DATE OF EXECUTION: 15 April 2025
+================================================================================
+
+BETWEEN:
+
+(1)  HELIOS IBERICA SOLAR S.L., a limited liability company (sociedad
+     limitada) organized under the laws of the Kingdom of Spain, with
+     registered office at Paseo de la Castellana 95, Planta 15, 28046 Madrid,
+     Spain, registered with the Mercantile Registry of Madrid under Volume
+     41283, Folio 112, Section 8, Sheet M-731492, and holding CIF number
+     B-88472913 (hereinafter referred to as the "Seller"); and
+
+(2)  EUROPEAN INDUSTRIAL CONSORTIUM GmbH, a limited liability company
+     (Gesellschaft mit beschrankter Haftung) organized under the laws of the
+     Federal Republic of Germany, with registered office at Friedrichstrasse
+     68, 10117 Berlin, Germany, registered with the Commercial Register
+     (Handelsregister) of the Local Court (Amtsgericht) of Berlin-Charlottenburg
+     under HRB 224817 (hereinafter referred to as the "Buyer").
+
+The Seller and the Buyer are hereinafter individually referred to as a "Party"
+and collectively as the "Parties".
+
+RECITALS
+
+WHEREAS the Seller owns and operates a portfolio of two (2) utility-scale
+solar photovoltaic generating plants located in the Kingdom of Spain with a
+combined installed peak capacity of 500 MWp (the "Facilities"), consisting of:
+
+     (a)  Extremadura Solar Plant (300 MWp), located in the municipality of
+          Trujillo, Province of Caceres, Autonomous Community of Extremadura,
+          Spain ("Facility Alpha"); and
+     (b)  Andalucia Solar Plant (200 MWp), located in the municipality of
+          Ecija, Province of Seville, Autonomous Community of Andalucia,
+          Spain ("Facility Beta");
+
+WHEREAS the Buyer wishes to enter into a financial hedging arrangement to
+stabilize the cost of electricity procured from the Iberian wholesale market
+for the benefit of its industrial consortium members across Germany, France,
+and the Netherlands;
+
+WHEREAS this Contract for Difference (the "CfD") is a purely financial
+instrument under which no physical delivery of electricity shall occur between
+the Parties, and settlement shall be based on the difference between a fixed
+Strike Price and the variable market reference price as published by the
+Iberian electricity market operator (OMIE);
+
+NOW, THEREFORE, in consideration of the mutual covenants and agreements herein
+contained, the Parties agree as follows:
+
+
+================================================================================
+ARTICLE 1: DEFINITIONS AND INTERPRETATION
+================================================================================
+
+1.1  In this Agreement, unless the context otherwise requires, the following
+     terms shall have the meanings ascribed to them below:
+
+     "Annual Reconciliation" has the meaning set forth in Rule EV-2
+     (Article 10.2).
+
+     "Capture Rate" means, for any Settlement Period, the ratio of the
+     production-weighted average market price received by the Facilities to
+     the baseload average OMIE day-ahead price for the same period, as
+     further defined in Rule VT-3 (Article 9.4).
+
+     "CNMC" means the Comision Nacional de los Mercados y la Competencia,
+     the Spanish national regulatory authority responsible for the GoO
+     registry.
+
+     "COD" or "Commercial Operation Date" has the meaning set forth in
+     Rule EV-1 (Article 10.1).
+
+     "Contracted Volume" has the meaning set forth in Rule VT-1
+     (Article 9.1).
+
+     "CfD Settlement Amount" has the meaning set forth in Rule PY-1
+     (Article 7.1).
+
+     "Curtailment Threshold" has the meaning set forth in Rule ED-3
+     (Article 5.4).
+
+     "Environmental Attributes" means all Guarantees of Origin and other
+     renewable energy certificates issued in respect of the Facilities'
+     generation, as described in Rule CD-1 (Article 6.1).
+
+     "Force Majeure Event" has the meaning set forth in Rule EV-4
+     (Article 10.5).
+
+     "GoO" means a Guarantee of Origin issued pursuant to Directive (EU)
+     2018/2001 and Spanish Royal Decree 1955/2000 (as amended).
+
+     "Grid Connection Point" means the point of interconnection between each
+     Facility and the Red Electrica de Espana (REE) transmission network, as
+     specified in Schedule A.
+
+     "Negative Price Period" has the meaning set forth in Rule ED-3
+     (Article 5.4).
+
+     "OMIE Day-Ahead Price" means the hourly marginal price determined by the
+     Iberian electricity market operator (Operador del Mercado Iberico de
+     Energia - Polo Espanol S.A.) for the Spanish zone, as published on
+     www.omie.es, and used as the Reference Price under Rule PM-2
+     (Article 8.2).
+
+     "Plant-Weighted Average Price" has the meaning set forth in Rule PM-3
+     (Article 8.3).
+
+     "Reference Price" has the meaning set forth in Rule PM-2 (Article 8.2).
+
+     "Settlement Period" means one (1) calendar month.
+
+     "Strike Price" means EUR 42.50 per MWh, as specified in Rule PM-1
+     (Article 8.1).
+
+     "Term" has the meaning set forth in Article 2.1.
+
+1.2  References to an "Article" or "Rule" are to articles and rules of this
+     Agreement. References to a "Schedule" are to the schedules attached hereto
+     and forming an integral part of this Agreement.
+
+1.3  Where this Agreement refers to legislation, such reference shall include
+     any successor legislation, amendment, or re-enactment thereof.
+
+
+================================================================================
+ARTICLE 2: TERM AND CONDITIONS PRECEDENT
+================================================================================
+
+2.1  This Agreement shall become effective on the date of execution (the
+     "Effective Date") and shall remain in force for a period of fifteen (15)
+     years commencing on 1 January 2025 and expiring on 31 December 2040
+     (the "Term"), subject to earlier termination in accordance with Rule EV-5
+     (Article 10.6).
+
+2.2  Both Facilities have achieved COD prior to the Effective Date. Facility
+     Alpha achieved COD on 15 September 2024 and Facility Beta achieved COD
+     on 1 November 2024, as certified under Rule EV-1 (Article 10.1).
+
+2.3  Financial settlement under Rule PY-1 (Article 7.1) shall commence on
+     1 January 2025 (the "Settlement Start Date") regardless of the Effective
+     Date, with settlement for any period between the Settlement Start Date
+     and the Effective Date to be calculated retroactively and settled within
+     thirty (30) days of the Effective Date.
+
+
+================================================================================
+ARTICLE 3: REPRESENTATIONS AND WARRANTIES
+================================================================================
+
+3.1  Each Party represents and warrants to the other that: (a) it is duly
+     organized and validly existing under the laws of its jurisdiction of
+     incorporation; (b) it has full corporate power and authority to execute
+     and perform this Agreement; (c) this Agreement constitutes a legal, valid,
+     and binding obligation enforceable in accordance with its terms; and
+     (d) it holds all necessary regulatory authorizations, including any
+     required under MiFID II for financial energy instruments.
+
+3.2  The Seller additionally represents and warrants that: (a) the Facilities
+     are duly registered in the RAIPRE (Registro Administrativo de
+     Instalaciones de Produccion de Energia Electrica) maintained by the
+     Spanish Ministry of Ecological Transition; (b) the Facilities are
+     eligible for GoO issuance through the CNMC registry pursuant to
+     Rule CD-1 (Article 6.1); (c) the Facilities are not receiving any
+     regulated remuneration under Royal Decree 413/2014 or its successors
+     that would conflict with this Agreement; (d) the Environmental Attributes
+     have not been committed to any third party and shall be exclusively
+     available to the Buyer pursuant to Rule CD-1 (Article 6.1).
+
+3.3  The Buyer represents and warrants that: (a) it has the financial capacity
+     and creditworthiness to perform its payment obligations throughout the
+     Term, as evidenced by the credit support arrangements in Rule PY-5
+     (Article 7.6); (b) it enters into this Agreement as principal and not as
+     agent for any undisclosed third party.
+
+
+================================================================================
+ARTICLE 4: OVERVIEW AND STRUCTURE
+================================================================================
+
+4.1  RULE OV-1 (CfD Mechanism): This Agreement is a financial Contract for
+     Difference under which no physical delivery of electricity occurs between
+     the Parties. The Seller sells the Facilities' output into the OMIE
+     day-ahead market independently. The Parties settle financially based on
+     the difference between the Strike Price defined in Rule PM-1
+     (Article 8.1) and the Reference Price defined in Rule PM-2 (Article 8.2),
+     applied to the Contracted Volume determined under Rule VT-1
+     (Article 9.1). If the Reference Price exceeds the Strike Price, the
+     Seller pays the Buyer the difference. If the Strike Price exceeds the
+     Reference Price, the Buyer pays the Seller the difference. Settlement
+     mechanics are specified in Rule PY-1 (Article 7.1).
+
+     Linked Rules: PM-1, PM-2, VT-1, PY-1.
+
+4.2  RULE OV-2 (Shape Risk Allocation): The Buyer bears the capture rate risk
+     inherent in solar generation. Settlement under Rule PY-1 (Article 7.1)
+     is based on the Plant-Weighted Average Price calculated under Rule PM-3
+     (Article 8.3), not the baseload average OMIE price. This means the
+     effective Reference Price reflects the actual hourly price profile during
+     which the Facilities generate, which for solar assets is typically lower
+     than the flat baseload average due to the solar merit-order effect. The
+     Buyer acknowledges this risk and has reflected it in the Strike Price
+     agreed under Rule PM-1 (Article 8.1). The Capture Rate is tracked and
+     reported under Rule VT-3 (Article 9.4).
+
+     Linked Rules: PY-1, PM-3, PM-1, VT-3.
+
+4.3  RULE OV-3 (Regulatory Framework): This Agreement is subject to Spanish
+     electricity market regulations, including but not limited to: (a) Ley
+     24/2013 del Sector Electrico; (b) Real Decreto 413/2014 on renewable
+     energy remuneration; (c) OMIE market rules; and (d) EU Directive
+     2018/2001 on renewable energy. Regulatory changes are addressed under
+     Rule EV-3 (Article 10.4). The Parties acknowledge that the Spanish
+     energy regulatory landscape is subject to ongoing reform and have
+     incorporated specific protections in Rule EV-3 to address potential
+     impacts on the pricing under Rule PM-1 (Article 8.1), the certificate
+     regime under Rule CD-1 (Article 6.1), and the volume measurement
+     framework under Rule VT-1 (Article 9.1).
+
+     Linked Rules: EV-3, PM-1, CD-1, VT-1.
+
+
+================================================================================
+ARTICLE 5: ELECTRICITY DELIVERY
+================================================================================
+
+5.1  RULE ED-1 (Generation and Market Sale): The Seller shall operate the
+     Facilities in accordance with Good Industry Practice and shall sell all
+     generated electricity into the OMIE day-ahead market. The Seller shall
+     use commercially reasonable efforts to maximize generation subject to
+     (a) equipment limitations, (b) grid constraints, (c) scheduled
+     maintenance under Rule ED-4 (Article 5.5), (d) Force Majeure under
+     Rule EV-4 (Article 10.5), and (e) the negative pricing curtailment
+     provisions of Rule ED-3 (Article 5.4). As this is a financial CfD, the
+     Seller retains full operational control over dispatch decisions, and the
+     Buyer has no right to direct or constrain generation except as expressly
+     provided in Rule ED-3 (Article 5.4).
+
+     Linked Rules: ED-3, ED-4, EV-4, VT-1.
+
+5.2  RULE ED-2 (Grid Connection and Curtailment): Each Facility is connected
+     to the REE transmission network at the Grid Connection Points specified
+     in Schedule A. In the event of grid curtailment ordered by REE (the
+     Spanish TSO), curtailed volumes shall be excluded from the Contracted
+     Volume for CfD settlement under Rule PY-1 (Article 7.1). However,
+     curtailed volumes shall be included in the annual production assessment
+     under Rule VT-2 (Article 9.3) at the deemed generation rate, calculated
+     as the solar irradiance-based expected production for the curtailed
+     hours using data from the Facility's pyranometer array, provided that
+     the curtailment was not caused by the Seller's breach of grid code
+     obligations. Grid curtailment data shall be reported to the Buyer
+     monthly as part of the production report under Rule VT-4 (Article 9.5).
+
+     Linked Rules: PY-1, VT-2, VT-4, ED-1.
+
+5.3  RULE ED-3 (Negative Pricing Curtailment): When the OMIE day-ahead price
+     as determined under Rule PM-2 (Article 8.2) falls below negative twenty
+     euros per megawatt-hour (-EUR 20.00/MWh) (the "Curtailment Threshold")
+     for six (6) or more consecutive hours (a "Negative Price Period"), the
+     Seller may, at its sole discretion, curtail generation during the
+     Negative Price Period. Any volumes curtailed during a Negative Price
+     Period shall be excluded from the Contracted Volume under Rule VT-1
+     (Article 9.1) and shall not be subject to CfD settlement under Rule PY-1
+     (Article 7.1). The Seller shall notify the Buyer within 24 hours of any
+     curtailment decision under this Rule ED-3, specifying the hours affected
+     and the estimated curtailed volume. For the avoidance of doubt, the
+     Seller is not obligated to curtail during a Negative Price Period and may
+     choose to continue generating, in which case normal settlement under
+     Rule PY-1 shall apply to those hours. The six-hour consecutive threshold
+     is calculated based on the final OMIE day-ahead prices published for the
+     delivery day under Rule PM-2.
+
+     Linked Rules: PM-2, VT-1, PY-1, ED-1, PM-4.
+
+5.4  RULE ED-4 (Scheduled Maintenance): The Seller shall conduct scheduled
+     maintenance in accordance with manufacturer recommendations and Good
+     Industry Practice. The Seller shall provide the Buyer with: (a) an annual
+     maintenance schedule by 1 December of each year for the following calendar
+     year; (b) written notice at least twenty-one (21) days prior to any
+     scheduled maintenance expected to reduce generation by more than 15% of
+     peak capacity for any Facility. Scheduled maintenance shall be planned
+     during months of lower irradiance (November through February) to the
+     extent commercially practicable. Maintenance outage hours shall be
+     excluded from the capacity factor and availability calculations under
+     Rule VT-3 (Article 9.4) and the annual production assessment under
+     Rule VT-2 (Article 9.3).
+
+     Linked Rules: ED-1, VT-3, VT-2.
+
+5.5  RULE ED-5 (Metering and Data Provision): Net generation at each Grid
+     Connection Point shall be measured by fiscal metering equipment installed
+     and maintained in accordance with Spanish metering regulations (ITC-BT-04
+     and Real Decreto 1110/2007). Hourly production data shall be sourced from
+     REE's ESIOS platform (Sistema de Informacion del Operador del Sistema)
+     and cross-referenced with the Seller's SCADA system data. Monthly metering
+     reports shall be delivered to the Buyer within seven (7) business days of
+     the end of each Settlement Period. Metered data forms the basis for the
+     Contracted Volume under Rule VT-1 (Article 9.1), the Plant-Weighted
+     Average Price calculation under Rule PM-3 (Article 8.3), and the GoO
+     volume reconciliation under Rule CD-1 (Article 6.1). Metering disputes
+     exceeding a threshold of 1.0% of monthly output shall be resolved under
+     Article 12.
+
+     Linked Rules: VT-1, PM-3, CD-1, PY-1.
+
+
+================================================================================
+ARTICLE 6: CERTIFICATE DELIVERY
+================================================================================
+
+6.1  RULE CD-1 (GoO Delivery Obligation): The Seller shall transfer to the
+     Buyer Guarantees of Origin corresponding to 100% of the Contracted Volume
+     for each Settlement Period, via the CNMC-administered GoO registry
+     (Sistema de Garantias de Origen). GoOs shall identify the technology
+     (solar photovoltaic), the specific Facility (identified by CIL code),
+     and the production period. The Seller warrants exclusive transfer rights
+     and confirms that the Facilities are not enrolled in any national support
+     scheme that would preclude GoO issuance. The GoO delivery obligation is
+     linked to the Contracted Volume determination under Rule VT-1
+     (Article 9.1) and forms a core component of the Annual Reconciliation
+     under Rule EV-2 (Article 10.2).
+
+     Linked Rules: VT-1, EV-2, CD-2, CD-3, ED-5.
+
+6.2  RULE CD-2 (Delivery Schedule and Vintage Bundling): GoOs shall be
+     delivered annually, bundled by calendar year vintage. The Seller shall
+     transfer all GoOs for a given calendar year to the Buyer's designated
+     CNMC registry account no later than 31 March of the following calendar
+     year (the "Certificate Delivery Deadline"). This annual delivery schedule
+     reflects the CNMC's GoO issuance cycle, whereby GoOs are typically issued
+     on a quarterly basis but may be subject to verification delays. The Seller
+     shall use best efforts to deliver GoOs on a quarterly interim basis where
+     the CNMC registry permits, but the binding delivery obligation is the
+     annual Certificate Delivery Deadline. Late delivery penalties are
+     specified in Rule PY-4 (Article 7.5).
+
+     Linked Rules: CD-1, PY-4, VT-1, EV-2.
+
+6.3  RULE CD-3 (Certificate Shortfall and Replacement): If the Seller is
+     unable to deliver GoOs corresponding to the full Contracted Volume for
+     any calendar year vintage by the Certificate Delivery Deadline under
+     Rule CD-2 (Article 6.2), the Seller shall, within sixty (60) days: (a)
+     procure replacement GoOs of equivalent technology (solar photovoltaic)
+     and vintage (same calendar year) from Spanish or Portuguese generating
+     facilities registered with CNMC or ERSE (the Portuguese regulator),
+     respectively; or (b) if replacement GoOs are unavailable, pay the Buyer a
+     certificate shortfall payment equal to the undelivered GoO volume
+     multiplied by the average GoO auction price published by OMIP (Operador
+     do Mercado Iberico de Energia - Polo Portugues) for Spanish solar GoOs
+     of the relevant vintage, plus a twenty percent (20%) premium. The
+     shortfall payment under this Rule CD-3 is additional to and independent
+     from the CfD Settlement Amount under Rule PY-1 (Article 7.1) and the
+     late delivery penalty under Rule PY-4 (Article 7.5).
+
+     Linked Rules: CD-2, CD-1, PY-1, PY-4, VT-2.
+
+
+================================================================================
+ARTICLE 7: PAYMENT AND SETTLEMENT
+================================================================================
+
+7.1  RULE PY-1 (CfD Settlement Calculation): For each Settlement Period, the
+     CfD Settlement Amount shall be calculated as follows:
+
+          CfD Settlement Amount = Contracted Volume x (Strike Price
+                                  - Plant-Weighted Average Price)
+
+     where:
+     - Contracted Volume is the total metered net generation (in MWh) across
+       both Facilities for the Settlement Period, as determined under Rule VT-1
+       (Article 9.1), excluding volumes curtailed under Rule ED-3
+       (Article 5.4) and grid curtailment under Rule ED-2 (Article 5.3);
+     - Strike Price is EUR 42.50/MWh as defined in Rule PM-1 (Article 8.1),
+       subject to any adjustment under Rule EV-3 (Article 10.4);
+     - Plant-Weighted Average Price is the production-weighted average OMIE
+       day-ahead price, calculated under Rule PM-3 (Article 8.3).
+
+     If the CfD Settlement Amount is positive, the Buyer shall pay the Seller
+     (i.e., the market price was below the Strike Price). If negative, the
+     Seller shall pay the Buyer (i.e., the market price exceeded the Strike
+     Price). Settlement is on a monthly financial basis with no physical
+     delivery component.
+
+     Linked Rules: VT-1, ED-3, ED-2, PM-1, PM-3, EV-3.
+
+7.2  RULE PY-2 (Invoicing and Payment Terms): The paying Party (as determined
+     by the sign of the CfD Settlement Amount under Rule PY-1) shall issue a
+     settlement statement to the other Party within fifteen (15) business days
+     after receipt of final metered data for each Settlement Period. The
+     settlement statement shall include: (a) hourly Contracted Volume by
+     Facility; (b) hourly OMIE day-ahead prices; (c) Plant-Weighted Average
+     Price calculation; (d) CfD Settlement Amount. Payment shall be due within
+     twenty-five (25) business days of the settlement statement date, by SEPA
+     credit transfer to the account specified in Schedule C. Late payments
+     shall accrue interest at EURIBOR 6-month plus 2.50% per annum, calculated
+     on an ACT/360 day-count basis. The invoicing process depends on timely
+     metering data delivery under Rule ED-5 (Article 5.5) and price
+     publication under Rule PM-2 (Article 8.2).
+
+     Linked Rules: PY-1, ED-5, PM-2, PM-3.
+
+7.3  RULE PY-3 (Annual Volume True-Up Payment): If the aggregate Contracted
+     Volume for any calendar year falls below the Minimum Annual Production
+     threshold specified in Rule VT-2 (Article 9.3), the Seller shall pay the
+     Buyer a Volume True-Up Payment calculated as:
+
+          True-Up Payment = (Minimum Annual Production - Actual Annual Volume)
+                            x Strike Price x 0.35
+
+     where Strike Price is as defined in Rule PM-1 (Article 8.1). This payment
+     compensates the Buyer for the reduced hedging benefit when production
+     underperforms expectations. Volumes excluded from Contracted Volume due
+     to Force Majeure under Rule EV-4 (Article 10.5), grid curtailment under
+     Rule ED-2 (Article 5.3), and negative pricing curtailment under Rule ED-3
+     (Article 5.4) shall be added back to Actual Annual Volume for purposes
+     of this calculation. The True-Up Payment is calculated and settled as
+     part of the Annual Reconciliation under Rule EV-2 (Article 10.2).
+
+     Linked Rules: VT-2, PM-1, EV-4, ED-2, ED-3, EV-2.
+
+7.4  RULE PY-4 (Certificate Late Delivery Penalty): If the Seller fails to
+     deliver GoOs by the Certificate Delivery Deadline specified in Rule CD-2
+     (Article 6.2), the Seller shall pay a late delivery penalty of
+     EUR 0.75 per MWh per calendar month of delay (or part thereof), applied
+     to the volume of GoOs not yet delivered. The penalty accrues from the
+     Certificate Delivery Deadline until the earlier of: (a) actual delivery
+     of the GoOs, or (b) payment of the certificate shortfall amount under
+     Rule CD-3 (Article 6.3). This penalty is separate from and cumulative
+     with the certificate shortfall payment under Rule CD-3 and the CfD
+     Settlement Amount under Rule PY-1 (Article 7.1).
+
+     Linked Rules: CD-2, CD-3, PY-1, CD-1.
+
+7.5  RULE PY-5 (Netting and Credit Support): Settlement Amounts due in the
+     same direction for a given Settlement Period shall be netted. The Party
+     with the larger aggregate net exposure (determined quarterly on a
+     mark-to-market basis) shall post collateral in the form of a bank
+     guarantee or standby letter of credit equal to the greater of (a) three
+     (3) months' estimated CfD Settlement Amounts based on forward OMIE prices
+     and projected generation under Rule VT-4 (Article 9.5), or (b)
+     EUR 3,000,000. Collateral shall be issued by a financial institution with
+     a minimum credit rating of BBB+ (S&P) or Baa1 (Moody's). Credit support
+     requirements are reviewed annually as part of the Annual Reconciliation
+     under Rule EV-2 (Article 10.2).
+
+     Linked Rules: PY-1, VT-4, EV-2, EV-5.
+
+7.6  RULE PY-6 (Tax Gross-Up): All payments under this Agreement shall be made
+     free and clear of any withholding or deduction for taxes. If either Party
+     is required by law to make any such deduction, the paying Party shall
+     gross up the payment such that the receiving Party receives the full
+     amount it would have received absent such deduction. Each Party shall
+     use commercially reasonable efforts to minimize withholding taxes,
+     including by claiming relief under the Spain-Germany double tax treaty.
+     Tax adjustments affect the net Settlement Amount under Rule PY-1
+     (Article 7.1) and are reconciled as part of the Annual Reconciliation
+     under Rule EV-2 (Article 10.2).
+
+     Linked Rules: PY-1, EV-2, PY-2.
+
+
+================================================================================
+ARTICLE 8: PRICE INDEXATION AND MARKET DATA
+================================================================================
+
+8.1  RULE PM-1 (Strike Price): The Strike Price shall be EUR 42.50 per MWh,
+     fixed for the duration of the Term, subject only to (a) adjustments
+     arising from a Regulatory Change Event under Rule EV-3 (Article 10.4),
+     and (b) the CPI escalation mechanism in Rule PM-4 (Article 8.4). The
+     Strike Price reflects the Seller's levelized cost of energy and the
+     Buyer's assessment of long-term Iberian wholesale price expectations.
+     The Strike Price is applied in the CfD Settlement Calculation under
+     Rule PY-1 (Article 7.1) and the Volume True-Up Payment under Rule PY-3
+     (Article 7.4).
+
+     Linked Rules: PY-1, PY-3, EV-3, PM-4.
+
+8.2  RULE PM-2 (Reference Price - OMIE Day-Ahead): The Reference Price for
+     each hour shall be the OMIE day-ahead marginal price for the Spanish
+     zone, as published by OMIE on www.omie.es by 13:00 CET D-1 (following
+     the daily market coupling session). The Reference Price constitutes the
+     market benchmark against which the CfD settles. It is used directly
+     in the Plant-Weighted Average Price calculation under Rule PM-3
+     (Article 8.3) and indirectly in the CfD Settlement under Rule PY-1
+     (Article 7.1). The Reference Price also determines the applicability
+     of the negative pricing curtailment provision under Rule ED-3
+     (Article 5.4).
+
+     Linked Rules: PM-3, PY-1, ED-3, PM-4.
+
+8.3  RULE PM-3 (Plant-Weighted Average Price): For each Settlement Period,
+     the Plant-Weighted Average Price ("PWAP") shall be calculated as:
+
+          PWAP = SUM(h=1 to H) [Reference Price(h) x Portfolio Output(h)]
+                 / SUM(h=1 to H) [Portfolio Output(h)]
+
+     where:
+     - Reference Price(h) is the OMIE day-ahead price for hour (h) per
+       Rule PM-2 (Article 8.2);
+     - Portfolio Output(h) is the combined metered output of both Facilities
+       for hour (h) per Rule VT-1 (Article 9.1);
+     - H is the total number of hours in the Settlement Period.
+
+     The PWAP captures the solar generation profile and represents the
+     effective market price the Facilities achieve. The PWAP is used as the
+     variable price component in the CfD Settlement under Rule PY-1
+     (Article 7.1). This approach means the Buyer bears capture rate risk,
+     as acknowledged in Rule OV-2 (Article 4.2), since the PWAP will
+     typically be lower than the flat time-weighted average OMIE price due
+     to the midday solar production concentration and merit-order
+     cannibalization effect. The PWAP methodology also interacts with the
+     negative pricing curtailment provision under Rule ED-3 (Article 5.4):
+     hours in which the Seller curtails under Rule ED-3 are excluded from
+     both the numerator and denominator of the PWAP calculation.
+
+     Linked Rules: PM-2, VT-1, PY-1, OV-2, ED-3.
+
+8.4  RULE PM-4 (CPI Escalation): The Strike Price shall be adjusted annually
+     on 1 January of each year, commencing 1 January 2027, by seventy percent
+     (70%) of the year-on-year change in the Spanish Consumer Price Index
+     (Indice de Precios al Consumo, "IPC") as published by the Instituto
+     Nacional de Estadistica (INE) for the twelve-month period ending
+     30 September of the preceding year. The adjustment shall be cumulative
+     and compounding. For the avoidance of doubt, the adjustment can result
+     in both increases and decreases to the Strike Price. The escalated Strike
+     Price shall be used in all settlement calculations under Rule PY-1
+     (Article 7.1) from the effective date of adjustment. In the event that
+     the IPC is not published or is discontinued, the Parties shall use the
+     Eurostat Harmonized Index of Consumer Prices (HICP) for Spain as a
+     substitute. The CPI-adjusted Strike Price also applies to the Volume
+     True-Up calculation under Rule PY-3 (Article 7.4) and the negative
+     pricing threshold assessment interacting with Rule ED-3 (Article 5.4)
+     is NOT adjusted -- the Curtailment Threshold remains at a fixed
+     -EUR 20.00/MWh.
+
+     Linked Rules: PM-1, PY-1, PY-3, ED-3, PM-2.
+
+8.5  RULE PM-5 (Market Data Fallback): In the event that OMIE fails to publish
+     the day-ahead price for any hour(s), the Reference Price shall be
+     determined in the following order of priority: (a) the OMIE intraday
+     session 1 price for the same hour(s); (b) the Portuguese MIBEL zone
+     day-ahead price for the same hour(s) as published by OMIE; (c) the
+     average OMIE day-ahead price for the same hour(s) across the preceding
+     seven (7) calendar days; (d) if none of the foregoing are available for
+     more than seventy-two (72) consecutive hours, the Parties shall suspend
+     CfD settlement under Rule PY-1 (Article 7.1) for the affected period
+     and negotiate in good faith a substitute reference price within thirty
+     (30) days. Fallback determinations shall be documented in the settlement
+     statement under Rule PY-2 (Article 7.2).
+
+     Linked Rules: PM-2, PY-1, PY-2, VT-1.
+
+
+================================================================================
+ARTICLE 9: VOLUME AND TIMESERIES
+================================================================================
+
+9.1  RULE VT-1 (Contracted Volume Measurement): The Contracted Volume for
+     each hour shall be the aggregate net electrical energy (in MWh, to three
+     decimal places) injected by Facility Alpha and Facility Beta at their
+     respective Grid Connection Points, as recorded by the fiscal meters
+     specified in Rule ED-5 (Article 5.5). The following adjustments apply:
+     (a) transformer losses between inverter output and Grid Connection Point
+     are already reflected in the fiscal meter readings; (b) volumes curtailed
+     under Rule ED-3 (Article 5.4) during a Negative Price Period are excluded;
+     (c) volumes curtailed due to grid instruction under Rule ED-2
+     (Article 5.3) are excluded. The Contracted Volume forms the basis for
+     the CfD Settlement under Rule PY-1 (Article 7.1), the Plant-Weighted
+     Average Price under Rule PM-3 (Article 8.3), and the GoO entitlement
+     under Rule CD-1 (Article 6.1).
+
+     Linked Rules: ED-5, ED-3, ED-2, PY-1, PM-3, CD-1.
+
+9.2  RULE VT-2 (Minimum Annual Production Guarantee): The Seller guarantees a
+     Minimum Annual Production equal to eighty percent (80%) of the combined
+     P50 yield estimate for both Facilities (the "Minimum Annual Production").
+     Based on the P50 estimates in Schedule B:
+
+          Facility Alpha (300 MWp): P50 = 525 GWh/yr -> Minimum = 420 GWh/yr
+          Facility Beta (200 MWp):  P50 = 370 GWh/yr -> Minimum = 296 GWh/yr
+          Portfolio Total:          P50 = 895 GWh/yr -> Minimum = 716 GWh/yr
+
+     The Minimum Annual Production is assessed annually as part of the Annual
+     Reconciliation under Rule EV-2 (Article 10.2). Failure to meet the
+     Minimum Annual Production triggers the Volume True-Up Payment under
+     Rule PY-3 (Article 7.4). Deemed production for Force Majeure periods
+     under Rule EV-4 (Article 10.5), grid curtailment under Rule ED-2
+     (Article 5.3), and negative pricing curtailment under Rule ED-3
+     (Article 5.4) shall be added back for purposes of this assessment.
+
+     Linked Rules: EV-2, PY-3, EV-4, ED-2, ED-3, VT-1, ED-4.
+
+9.3  RULE VT-3 (Capture Rate Monitoring): The Seller shall calculate and report
+     to the Buyer monthly the Capture Rate for each Facility and the portfolio,
+     defined as:
+
+          Capture Rate = PWAP (per Rule PM-3) / Time-Weighted Average OMIE
+                         Day-Ahead Price
+
+     where the Time-Weighted Average OMIE Day-Ahead Price is the simple
+     arithmetic mean of all hourly OMIE day-ahead prices in the Settlement
+     Period. Typical expected Capture Rates for Iberian solar are 75-90% in
+     early years, potentially declining as solar penetration increases. If the
+     trailing twelve-month Capture Rate falls below sixty-five percent (65%),
+     the Buyer may request a market review to assess whether the capture rate
+     decline is structural or temporary, and the Parties shall discuss in good
+     faith any commercially reasonable mitigation measures. The Capture Rate
+     interacts with the shape risk allocation acknowledged in Rule OV-2
+     (Article 4.2) and affects the effective value of the CfD to the Buyer
+     under Rule PY-1 (Article 7.1).
+
+     Linked Rules: PM-3, OV-2, PY-1, VT-1.
+
+9.4  RULE VT-4 (Performance Ratio and Availability): The Seller shall maintain
+     each Facility at a minimum technical availability of ninety-five percent
+     (95%) on a rolling twelve-month basis, excluding scheduled maintenance
+     under Rule ED-4 (Article 5.5) and Force Majeure under Rule EV-4
+     (Article 10.5). The Performance Ratio (PR) for each Facility shall be
+     calculated monthly as:
+
+          PR = Actual Output / (GHI x Panel Area x Nominal Efficiency)
+
+     using Global Horizontal Irradiance (GHI) data from on-site pyranometers
+     and satellite-derived data (Solargis or equivalent). If the trailing
+     twelve-month PR falls below seventy-five percent (75%) for either
+     Facility, the Seller shall commission an Independent Technical Assessment
+     at its cost. Availability and PR data feed into the production assessment
+     under Rule VT-2 (Article 9.3) and the production forecast under
+     Rule VT-5 (Article 9.6).
+
+     Linked Rules: ED-4, EV-4, VT-2, VT-5, VT-1.
+
+9.5  RULE VT-5 (Production Forecasting): The Seller shall provide the Buyer
+     with: (a) a day-ahead generation forecast by 10:00 CET D-1, updated at
+     18:00 CET D-1 following OMIE market results; (b) a monthly generation
+     forecast by the 25th of the preceding month; and (c) an annual generation
+     forecast by 15 November of the preceding year. Forecasts shall specify
+     expected hourly output by Facility and portfolio aggregate. While
+     forecasts do not modify contractual obligations, they enable the Buyer
+     to manage its own hedging positions. Systematic forecast deviation
+     exceeding 25% on a quarterly rolling basis shall trigger a consultation
+     process. Forecast accuracy interacts with the Buyer's exposure management
+     under Rule PY-5 (Article 7.6) and the production guarantees under
+     Rule VT-2 (Article 9.3).
+
+     Linked Rules: PY-5, VT-2, VT-4, PM-3.
+
+
+================================================================================
+ARTICLE 10: EVENTS
+================================================================================
+
+10.1 RULE EV-1 (Commercial Operation Date Confirmation): Both Facilities have
+     achieved COD prior to the Effective Date. Facility Alpha achieved COD on
+     15 September 2024, certified by the issuance of the Acta de Puesta en
+     Servicio by the Junta de Extremadura and successful completion of the
+     72-hour performance test at >98% inverter availability. Facility Beta
+     achieved COD on 1 November 2024, certified by the Junta de Andalucia
+     under equivalent conditions. COD certification confirms that the
+     Facilities satisfy the requirements for GoO issuance under Rule CD-1
+     (Article 6.1) and that the Contracted Volume under Rule VT-1
+     (Article 9.1) reflects fully operational plant conditions. Grid
+     Connection Agreements with REE for both Facilities are in full force
+     and effect as of the Effective Date, as relevant to Rule ED-2
+     (Article 5.3).
+
+     Linked Rules: CD-1, VT-1, ED-2, OV-1.
+
+10.2 RULE EV-2 (Annual Reconciliation): Within one hundred and twenty (120)
+     days after the end of each calendar year, the Parties shall conduct an
+     Annual Reconciliation comprising: (a) verification of aggregate
+     Contracted Volume against the Minimum Annual Production under Rule VT-2
+     (Article 9.3); (b) calculation and settlement of any Volume True-Up
+     Payment under Rule PY-3 (Article 7.4); (c) reconciliation of GoO
+     deliveries against the Contracted Volume under Rule CD-1 (Article 6.1)
+     and verification of timely delivery under Rule CD-2 (Article 6.2);
+     (d) application of the CPI escalation to the Strike Price under
+     Rule PM-4 (Article 8.4) for the forthcoming calendar year; (e) review
+     of credit support adequacy under Rule PY-5 (Article 7.6); (f) assessment
+     of Capture Rate trends under Rule VT-3 (Article 9.4); and (g) review of
+     any pending Regulatory Change Events under Rule EV-3 (Article 10.4).
+     The Annual Reconciliation statement shall be binding absent manifest
+     error, subject to the dispute resolution procedures in Article 12.
+
+     Linked Rules: VT-2, PY-3, CD-1, CD-2, PM-4, PY-5, VT-3, EV-3.
+
+10.3 RULE EV-3 (Regulatory Change): A "Regulatory Change Event" means any
+     change in Spanish or EU law, regulation, government decree, or binding
+     regulatory decision occurring after the Effective Date that directly and
+     materially affects: (a) the OMIE market design or price formation
+     mechanism, impacting the Reference Price under Rule PM-2 (Article 8.2);
+     (b) the GoO issuance, transfer, or recognition regime, impacting
+     certificate delivery under Rule CD-1 (Article 6.1); (c) taxation of
+     renewable energy generation or PPAs (including but not limited to the
+     Spanish 7% generation tax under Ley 15/2012 and any successor levies);
+     (d) grid access or connection charges affecting the economics of the
+     Facilities; (e) the introduction of mandatory curtailment regimes,
+     capacity mechanisms, or renewable energy auctions that directly compete
+     with or constrain the CfD.
+
+     Upon the occurrence of a Regulatory Change Event, either Party may serve
+     written notice within ninety (90) days requesting renegotiation of the
+     affected terms, specifically the Strike Price under Rule PM-1
+     (Article 8.1), the settlement methodology under Rule PY-1 (Article 7.1),
+     or the certificate framework under Rule CD-1 (Article 6.1). If the
+     Parties cannot reach agreement within one hundred and fifty (150) days,
+     either Party may refer the matter to expert determination under
+     Article 12 or, in cases of fundamental economic disruption, exercise
+     termination rights under Rule EV-5 (Article 10.6).
+
+     Linked Rules: PM-2, CD-1, PM-1, PY-1, EV-5, OV-3.
+
+10.4 RULE EV-4 (Force Majeure): A "Force Majeure Event" means any event or
+     circumstance beyond the reasonable control of the affected Party that
+     prevents or materially impairs performance of its obligations, including
+     but not limited to: (a) natural disasters (earthquakes, floods, wildfires,
+     volcanic eruption); (b) grid failure or transmission infrastructure
+     damage not caused by the Seller; (c) acts of war, terrorism, civil
+     unrest, or sanctions; (d) pandemic or epidemic declared by WHO; (e)
+     changes in law that make performance illegal (as distinct from merely
+     more expensive, which is addressed under Rule EV-3 (Article 10.4)).
+
+     The affected Party shall notify the other Party within five (5) business
+     days of becoming aware of a Force Majeure Event, specifying the nature,
+     expected duration, and affected volumes. During a Force Majeure Event,
+     the affected Party's obligations under Rule ED-1 (Article 5.1) shall be
+     suspended. Deemed production for Force Majeure hours shall be calculated
+     using satellite irradiance data for the affected Facility's location and
+     the trailing 12-month Performance Ratio under Rule VT-4 (Article 9.5),
+     and shall be added back to Actual Annual Volume for the Minimum Annual
+     Production assessment under Rule VT-2 (Article 9.3). If a Force Majeure
+     Event continues for more than one hundred and eighty (180) consecutive
+     days, either Party may terminate this Agreement under Rule EV-5
+     (Article 10.6).
+
+     Linked Rules: ED-1, EV-3, VT-4, VT-2, EV-5, PY-3.
+
+10.5 RULE EV-5 (Termination): Either Party may terminate this Agreement upon
+     written notice in the following circumstances: (a) material unremedied
+     breach persisting for ninety (90) days after written notice (including
+     persistent non-payment of CfD Settlement Amounts under Rule PY-1
+     (Article 7.1) exceeding EUR 3,000,000); (b) insolvency, administration,
+     or winding-up of the other Party; (c) a Force Majeure Event under
+     Rule EV-4 (Article 10.5) continuing for more than one hundred and eighty
+     (180) consecutive days; (d) a Regulatory Change Event under Rule EV-3
+     (Article 10.4) that the Parties cannot resolve and that renders the
+     Agreement fundamentally uneconomic; (e) aggregate Contracted Volume
+     falling below sixty percent (60%) of the Minimum Annual Production under
+     Rule VT-2 (Article 9.3) for two (2) consecutive years, after adding back
+     excluded volumes.
+
+     Upon termination, the terminating Party shall pay a Termination Amount
+     equal to the net present value of the remaining expected CfD Settlement
+     Amounts for the unexpired Term, calculated using forward OMIE prices
+     from the most recent OMIP futures curve and discounted at the EUR
+     mid-swap rate plus 1.50%. If the Termination Amount is positive for the
+     non-defaulting Party, it shall be payable by the defaulting Party. The
+     credit support under Rule PY-5 (Article 7.6) may be drawn upon to
+     satisfy the Termination Amount.
+
+     Linked Rules: PY-1, EV-4, EV-3, VT-2, PY-5.
+
+10.6 RULE EV-6 (Grid Connection Milestones): The Seller shall maintain in
+     full force and effect the Grid Connection Agreements with REE for both
+     Facilities throughout the Term. If any Grid Connection Agreement is
+     terminated, suspended, or materially amended by REE, the Seller shall
+     notify the Buyer within five (5) business days. If a Grid Connection
+     Agreement termination results in a Facility being unable to inject
+     electricity for more than ninety (90) consecutive days, the affected
+     Facility shall be excluded from the Contracted Volume under Rule VT-1
+     (Article 9.1), the Minimum Annual Production under Rule VT-2
+     (Article 9.3) shall be adjusted downward proportionally, and the Buyer
+     may exercise its termination rights under Rule EV-5 (Article 10.6) if
+     the remaining Contracted Capacity falls below 300 MW. Grid connection
+     status also affects the GoO issuance eligibility under Rule CD-1
+     (Article 6.1).
+
+     Linked Rules: VT-1, VT-2, EV-5, CD-1, ED-2.
+
+
+================================================================================
+ARTICLE 11: INSURANCE
+================================================================================
+
+11.1 The Seller shall maintain, at its own expense, for the duration of the
+     Term: (a) all-risks property insurance covering the full replacement value
+     of the Facilities; (b) business interruption insurance with a minimum
+     indemnity period of twelve (12) months; (c) third-party liability
+     insurance with a minimum coverage of EUR 25,000,000 per occurrence.
+
+11.2 The Seller shall provide the Buyer with certificates of insurance upon
+     request and shall notify the Buyer within fifteen (15) days of any
+     material change to insurance coverage.
+
+
+================================================================================
+ARTICLE 12: DISPUTE RESOLUTION
+================================================================================
+
+12.1 Any dispute arising out of or in connection with this Agreement shall
+     first be submitted to senior management of both Parties for resolution
+     within thirty (30) days.
+
+12.2 If not resolved through senior management discussions, disputes relating
+     to technical matters (including metering under Rule ED-5, production
+     assessment under Rule VT-2, and Capture Rate under Rule VT-3) shall be
+     referred to an independent technical expert appointed by mutual agreement
+     or, failing agreement within fifteen (15) days, by the International
+     Chamber of Commerce (ICC).
+
+12.3 All other disputes shall be referred to arbitration under the Rules of the
+     ICC International Court of Arbitration. The arbitral tribunal shall
+     consist of three (3) arbitrators. The seat of arbitration shall be Paris,
+     France. The language of arbitration shall be English. The arbitral award
+     shall be final and binding.
+
+
+================================================================================
+ARTICLE 13: GOVERNING LAW
+================================================================================
+
+13.1 This Agreement shall be governed by and construed in accordance with the
+     laws of the Kingdom of Spain, without regard to its conflict of laws
+     principles.
+
+13.2 Each Party irrevocably submits to the non-exclusive jurisdiction of the
+     courts of Madrid, Spain, for the purposes of any ancillary proceedings
+     (including interim relief) in connection with arbitration under
+     Article 12.
+
+
+================================================================================
+ARTICLE 14: MISCELLANEOUS
+================================================================================
+
+14.1 Amendments to this Agreement shall be valid only if made in writing and
+     signed by duly authorized representatives of both Parties.
+
+14.2 Neither Party may assign its rights or obligations without the prior
+     written consent of the other Party, such consent not to be unreasonably
+     withheld or delayed. Notwithstanding the foregoing, either Party may
+     assign to an Affiliate or to a lender as collateral in connection with
+     project financing, provided that the assignor shall remain jointly and
+     severally liable.
+
+14.3 This Agreement, together with its Schedules, constitutes the entire
+     agreement between the Parties in relation to the subject matter hereof.
+
+14.4 The failure of either Party to enforce any provision of this Agreement
+     shall not constitute a waiver of such provision or the right to enforce
+     it at a later time.
+
+14.5 If any provision of this Agreement is held to be invalid or unenforceable,
+     the remaining provisions shall continue in full force and effect, and the
+     Parties shall negotiate in good faith a replacement provision that most
+     closely achieves the original commercial intent.
+
+14.6 Notices shall be in writing and delivered to the addresses specified in
+     Schedule D by registered mail, courier, or email (with read receipt
+     confirmation), and shall be deemed received upon the earlier of actual
+     receipt or three (3) business days after dispatch.
+
+
+================================================================================
+SCHEDULES
+================================================================================
+
+SCHEDULE A: Facility Specifications and Grid Connection Points
+  - Facility Alpha: Extremadura Solar Plant, 300 MWp, approximately 545,000
+    bifacial monocrystalline silicon modules on single-axis trackers, Grid
+    Connection Point at Trujillo 400kV substation (REE node TRUJ-400),
+    RAIPRE registration number RE-10-EX-001234
+  - Facility Beta: Andalucia Solar Plant, 200 MWp, approximately 363,000
+    bifacial monocrystalline silicon modules on single-axis trackers, Grid
+    Connection Point at Ecija 220kV substation (REE node ECIJ-220),
+    RAIPRE registration number RE-41-AN-005678
+
+SCHEDULE B: P50 Energy Yield Estimates (Independent Engineer: DNV Energy)
+  - Facility Alpha: P50 = 525 GWh/year (specific yield: 1,750 kWh/kWp/yr)
+    P90 = 478 GWh/year; P10 = 572 GWh/year
+  - Facility Beta: P50 = 370 GWh/year (specific yield: 1,850 kWh/kWp/yr)
+    P90 = 337 GWh/year; P10 = 403 GWh/year
+  - Portfolio P50 = 895 GWh/year; Portfolio P90 = 815 GWh/year
+
+SCHEDULE C: Payment Instructions (to be completed prior to first settlement)
+
+SCHEDULE D: Notice Addresses
+  - Seller: Helios Iberica Solar S.L., Paseo de la Castellana 95, Planta 15,
+    28046 Madrid, Spain
+    Attention: Director of Energy Management
+    Email: ppa-operations@heliosiberica.es
+  - Buyer: European Industrial Consortium GmbH, Friedrichstrasse 68,
+    10117 Berlin, Germany
+    Attention: Head of Energy Procurement
+    Email: energy-desk@eiconsortium.de
+
+
+================================================================================
+IN WITNESS WHEREOF, the Parties have caused this Agreement to be executed by
+their duly authorized representatives as of the date first written above.
+
+For and on behalf of                    For and on behalf of
+HELIOS IBERICA SOLAR S.L.              EUROPEAN INDUSTRIAL CONSORTIUM GmbH
+
+_____________________________           _____________________________
+Name: Carlos Martinez Navarro           Name: Dr. Kristina Hoffmann
+Title: Chief Executive Officer          Title: Managing Director
+Date: 15 April 2025                     Date: 15 April 2025
+================================================================================

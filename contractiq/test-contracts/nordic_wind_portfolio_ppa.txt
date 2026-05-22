@@ -1,0 +1,743 @@
+================================================================================
+              POWER PURCHASE AGREEMENT (VIRTUAL / FINANCIAL)
+                    NORDIC WIND PORTFOLIO 2025
+
+                         CONTRACT NO. NWP-2025-0417
+
+                    DATE OF EXECUTION: 15 April 2025
+================================================================================
+
+BETWEEN:
+
+(1)  NORDVIND RENEWABLES AB, a limited liability company organized under the
+     laws of the Kingdom of Sweden, with registered office at Vasagatan 12,
+     SE-111 20 Stockholm, Sweden, registered with the Swedish Companies
+     Registration Office (Bolagsverket) under no. 559384-2201 (hereinafter
+     referred to as the "Seller"); and
+
+(2)  DATACENTER NORDIC OY, a limited liability company organized under the
+     laws of the Republic of Finland, with registered office at Keilaniementie
+     1, FI-02150 Espoo, Finland, registered with the Finnish Trade Register
+     under business ID 3217854-6 (hereinafter referred to as the "Buyer").
+
+The Seller and the Buyer are hereinafter individually referred to as a "Party"
+and collectively as the "Parties".
+
+RECITALS
+
+WHEREAS the Seller is developing and will own and operate a portfolio of three
+(3) onshore wind farms located across Sweden and Finland with a combined
+nameplate capacity of 420 MW (the "Facilities"), consisting of:
+
+     (a)  Lapland Wind Farm (180 MW), located in Jokkmokk Municipality,
+          Norrbotten County, Sweden ("Facility A");
+     (b)  Vasterbotten Wind Farm (140 MW), located in Skelleftea Municipality,
+          Vasterbotten County, Sweden ("Facility B"); and
+     (c)  Ostrobothnia Wind Farm (100 MW), located in Vaasa sub-region,
+          Ostrobothnia, Finland ("Facility C");
+
+WHEREAS the Buyer desires to procure renewable electricity on a virtual
+(financial settlement) basis to match its Nordic data center electricity
+consumption with renewable generation, supporting the Buyer's corporate
+sustainability commitments and RE100 membership obligations;
+
+WHEREAS the Parties wish to enter into this Power Purchase Agreement (the
+"Agreement") setting out the terms under which the Seller shall sell and the
+Buyer shall purchase the Contracted Output and associated Environmental
+Attributes from the Facilities;
+
+NOW, THEREFORE, in consideration of the mutual covenants and agreements herein
+contained, the Parties agree as follows:
+
+
+================================================================================
+ARTICLE 1: DEFINITIONS AND INTERPRETATION
+================================================================================
+
+1.1  In this Agreement, unless the context otherwise requires, the following
+     terms shall have the meanings ascribed to them below:
+
+     "AIB" means the Association of Issuing Bodies, the European hub for
+     Guarantee of Origin registries.
+
+     "Annual Delivery Guarantee" has the meaning set forth in Rule VT-2
+     (Article 9.3).
+
+     "Balancing Responsible Party" or "BRP" means the entity designated under
+     Rule ED-3 (Article 5.4) to bear imbalance settlement obligations.
+
+     "Base Price" means EUR 32.00 per MWh, as specified in Rule PM-1
+     (Article 8.1).
+
+     "Buyer Shortfall Payment" has the meaning set forth in Rule PY-3
+     (Article 7.4).
+
+     "Cap Price" means EUR 55.00 per MWh, as specified in Rule PM-1
+     (Article 8.1).
+
+     "Certificate Delivery Date" has the meaning set forth in Rule CD-2
+     (Article 6.3).
+
+     "Commercial Operation Date" or "COD" means the date on which each
+     Facility achieves Commercial Operation, as defined in Rule EV-1
+     (Article 10.1).
+
+     "Contracted Output" means the net electrical energy produced by the
+     Facilities and delivered to the relevant Grid Delivery Point, measured
+     on an hourly basis pursuant to Rule VT-1 (Article 9.1).
+
+     "Environmental Attributes" means all Guarantees of Origin and other
+     renewable energy certificates associated with the Contracted Output,
+     as further described in Rule CD-1 (Article 6.1).
+
+     "Force Majeure Event" has the meaning set forth in Rule EV-4
+     (Article 10.5).
+
+     "GoO" means a Guarantee of Origin issued pursuant to Directive (EU)
+     2018/2001 (recast Renewable Energy Directive).
+
+     "Grid Delivery Point" means the point of interconnection between each
+     Facility and the transmission system, as specified in Schedule A.
+
+     "Measurement Period" means one (1) calendar hour, from HH:00 to HH:59,
+     as the basis of settlement under Rule VT-1 (Article 9.1).
+
+     "Minimum Annual Delivery" has the meaning given in Rule VT-2
+     (Article 9.3).
+
+     "Nord Pool System Price" means the day-ahead system price published by
+     Nord Pool AS for the relevant bidding zone and settlement hour, used
+     as the Reference Price under Rule PM-2 (Article 8.2).
+
+     "P50 Estimate" means the median annual energy production estimate for
+     each Facility as set forth in Schedule B, determined by an Independent
+     Engineer.
+
+     "Price Reset" has the meaning set forth in Rule EV-3 (Article 10.4).
+
+     "Reference Price" has the meaning set forth in Rule PM-2 (Article 8.2).
+
+     "Settlement Amount" has the meaning set forth in Rule PY-1 (Article 7.1).
+
+     "Settlement Period" means each calendar month during the Term.
+
+     "Term" has the meaning set forth in Article 2.1.
+
+     "Upside Share" has the meaning given in Rule PM-3 (Article 8.3).
+
+1.2  References to an "Article" or "Rule" are to articles and rules of this
+     Agreement. References to a "Schedule" are to the schedules attached hereto
+     and forming an integral part of this Agreement.
+
+
+================================================================================
+ARTICLE 2: TERM AND CONDITIONS PRECEDENT
+================================================================================
+
+2.1  This Agreement shall become effective on the date of execution (the
+     "Effective Date") and shall remain in force for a period of twelve (12)
+     years from the latest COD among Facilities A, B, and C (the "Term"),
+     subject to earlier termination in accordance with Rule EV-5
+     (Article 10.6).
+
+2.2  The obligation to deliver and purchase Contracted Output under this
+     Agreement is conditional upon achievement of COD for each Facility,
+     as defined in Rule EV-1 (Article 10.1). Each Facility shall commence
+     delivery independently upon its respective COD.
+
+2.3  If any Facility fails to achieve COD within twenty-four (24) months of
+     the Effective Date (the "Longstop Date"), the Buyer may, at its sole
+     option, (a) extend the Longstop Date by up to twelve (12) months, or
+     (b) reduce the Contracted Capacity by excluding the non-operational
+     Facility, with a corresponding adjustment to the Annual Delivery
+     Guarantee under Rule VT-2 (Article 9.3) and the Settlement Amount
+     calculation under Rule PY-1 (Article 7.1).
+
+
+================================================================================
+ARTICLE 3: REPRESENTATIONS AND WARRANTIES
+================================================================================
+
+3.1  Each Party represents and warrants to the other that: (a) it is duly
+     organized and validly existing under the laws of its jurisdiction of
+     incorporation; (b) it has full power and authority to enter into and
+     perform its obligations under this Agreement; (c) this Agreement has been
+     duly authorized and constitutes a valid and binding obligation; and
+     (d) the execution and performance of this Agreement does not conflict with
+     any law, regulation, or contractual obligation binding upon it.
+
+3.2  The Seller additionally represents and warrants that: (a) it holds or will
+     hold all necessary permits and authorizations for the construction and
+     operation of the Facilities; (b) the Facilities will qualify for GoO
+     issuance under applicable EU and national legislation; (c) the
+     Environmental Attributes have not been and will not be sold, transferred,
+     or retired for the benefit of any third party, pursuant to the exclusivity
+     obligations in Rule CD-1 (Article 6.1).
+
+3.3  The Buyer represents and warrants that it has the financial capacity to
+     perform its payment obligations under Rule PY-1 (Article 7.1) through
+     Rule PY-4 (Article 7.5) for the duration of the Term.
+
+
+================================================================================
+ARTICLE 4: OVERVIEW AND STRUCTURE
+================================================================================
+
+4.1  RULE OV-1 (Agreement Structure): This Agreement is a virtual (financial)
+     power purchase agreement under which no physical delivery of electricity
+     occurs between the Parties. The Seller shall sell the Contracted Output
+     into the Nord Pool day-ahead market (Elspot) and, where applicable, the
+     intraday market (Elbas). Financial settlement between the Parties shall
+     be calculated as the difference between the Contract Price determined
+     under Rule PM-1 (Article 8.1) and the Reference Price determined under
+     Rule PM-2 (Article 8.2), applied to the Contracted Output measured under
+     Rule VT-1 (Article 9.1), and settled in accordance with Rule PY-1
+     (Article 7.1).
+
+     Linked Rules: PM-1, PM-2, VT-1, PY-1.
+
+4.2  RULE OV-2 (Portfolio Aggregation): The Contracted Output from all three
+     Facilities shall be aggregated for the purposes of financial settlement
+     under Rule PY-1 (Article 7.1) and the Annual Delivery Guarantee under
+     Rule VT-2 (Article 9.3). However, GoO delivery under Rule CD-1
+     (Article 6.1) and balancing responsibility under Rule ED-3 (Article 5.4)
+     shall be tracked on a per-Facility basis. In the event of partial
+     portfolio operation (e.g., pre-COD for one Facility), settlement under
+     Rule PY-1 shall apply only to operating Facilities, and the Minimum
+     Annual Delivery under Rule VT-2 shall be pro-rated accordingly.
+
+     Linked Rules: PY-1, VT-2, CD-1, ED-3, EV-1.
+
+4.3  RULE OV-3 (Regulatory Framework): This Agreement is governed by and
+     shall be interpreted in accordance with the electricity market regulations
+     of the Kingdom of Sweden and the Republic of Finland, the EU Renewable
+     Energy Directive (2018/2001), and Nord Pool's applicable trading rules.
+     Regulatory changes affecting the pricing mechanism under Rule PM-1
+     (Article 8.1) or the GoO regime under Rule CD-1 (Article 6.1) shall be
+     addressed through the regulatory change provisions of Rule EV-6
+     (Article 10.7).
+
+     Linked Rules: PM-1, CD-1, EV-6.
+
+
+================================================================================
+ARTICLE 5: ELECTRICITY DELIVERY
+================================================================================
+
+5.1  RULE ED-1 (Delivery Obligation): The Seller shall cause each Facility to
+     generate and deliver electricity to the relevant Grid Delivery Point on a
+     continuous basis, subject only to (a) scheduled maintenance notified under
+     Rule ED-4 (Article 5.5), (b) Force Majeure Events under Rule EV-4
+     (Article 10.5), and (c) curtailment events under Rule ED-2
+     (Article 5.3). The Seller shall operate each Facility in accordance with
+     Good Utility Practice and shall not voluntarily curtail production except
+     as permitted under Rule ED-2 (Article 5.3).
+
+     Linked Rules: ED-2, ED-4, EV-4, VT-1.
+
+5.2  RULE ED-2 (Grid Curtailment and Dispatch): Where a transmission system
+     operator (Svenska Kraftnat or Fingrid) issues a curtailment instruction,
+     the Seller shall comply with such instruction and the curtailed volumes
+     shall be excluded from the Contracted Output for purposes of settlement
+     under Rule PY-1 (Article 7.1). Curtailed volumes shall, however, count
+     toward the Minimum Annual Delivery calculation under Rule VT-2
+     (Article 9.3) at the deemed production rate determined by the average
+     output of the affected Facility during the four (4) hours immediately
+     preceding the curtailment event, provided that the Seller can demonstrate
+     the curtailment was not caused by the Seller's own acts or omissions.
+
+     Linked Rules: PY-1, VT-2, ED-1.
+
+5.3  RULE ED-3 (Balancing Responsibility): The Seller shall act as or procure
+     a Balancing Responsible Party for each Facility and shall bear all costs
+     associated with imbalance settlement in the relevant bidding zone (SE1,
+     SE2, SE3, or FI). The Seller shall submit production forecasts to the
+     relevant BRP no later than 12:00 CET D-1 for day-ahead nomination and
+     shall use commercially reasonable efforts to update intraday positions via
+     Elbas. All balancing costs and revenues shall be for the Seller's sole
+     account and shall not affect the Settlement Amount under Rule PY-1
+     (Article 7.1) or the Contract Price under Rule PM-1 (Article 8.1).
+
+     Linked Rules: PY-1, PM-1, ED-1, VT-3.
+
+5.4  RULE ED-4 (Scheduled Maintenance): The Seller shall provide the Buyer
+     with a rolling twelve (12) month maintenance schedule, updated quarterly,
+     and shall provide no less than thirty (30) days' prior written notice of
+     any scheduled maintenance expected to reduce output by more than 20% of
+     nameplate capacity for any individual Facility. Scheduled maintenance
+     shall be planned outside the peak wind season (October through March) to
+     the extent commercially practicable. During scheduled maintenance, the
+     Seller's delivery obligation under Rule ED-1 (Article 5.1) shall be
+     suspended for the affected Facility, and maintenance hours shall be
+     excluded from the capacity factor calculation under Rule VT-3
+     (Article 9.4).
+
+     Linked Rules: ED-1, VT-3, VT-2.
+
+5.5  RULE ED-5 (Metering and Data): Net generation at each Grid Delivery Point
+     shall be measured by revenue-grade metering equipment compliant with IEC
+     62053-22 Class 0.5S accuracy standards. Hourly meter data shall be
+     transmitted electronically to both Parties and the settlement agent no
+     later than 5 business days after the end of each Settlement Period.
+     Metered data constitutes the basis for the Contracted Output under
+     Rule VT-1 (Article 9.1) and the hourly settlement calculation under
+     Rule PY-1 (Article 7.1). Any metering discrepancy exceeding 0.5% shall
+     be resolved pursuant to the dispute resolution procedures in Article 12.
+
+     Linked Rules: VT-1, PY-1, VT-3.
+
+
+================================================================================
+ARTICLE 6: CERTIFICATE DELIVERY
+================================================================================
+
+6.1  RULE CD-1 (GoO Delivery Obligation): The Seller shall transfer to the
+     Buyer Guarantees of Origin corresponding to 100% of the Contracted Output
+     for each Settlement Period, via the AIB registry system (specifically, the
+     Swedish Cesar registry for Facilities A and B and the Finnish Grexel
+     registry for Facility C). GoOs shall identify the technology (onshore
+     wind), the specific Facility, and the production period in accordance with
+     the European Energy Certificate System (EECS) Rules. The Seller warrants
+     that all GoOs are genuine, first-transfer, and have not been used for
+     any other disclosure or compliance purpose, as represented in Article 3.2.
+
+     Linked Rules: VT-1, OV-2, CD-2, CD-3.
+
+6.2  RULE CD-2 (Delivery Schedule): GoOs shall be delivered quarterly, no
+     later than forty-five (45) days after the end of each calendar quarter
+     (each such deadline, a "Certificate Delivery Date"). Delivery shall be
+     deemed complete upon the GoOs being credited to the Buyer's designated
+     account in the relevant AIB registry. Quarterly bundling means that GoOs
+     for January-March production are delivered by 15 May, April-June by
+     15 August, July-September by 15 November, and October-December by
+     15 February of the following year. Late delivery shall incur the penalty
+     specified in Rule PY-4 (Article 7.5).
+
+     Linked Rules: CD-1, PY-4, VT-1.
+
+6.3  RULE CD-3 (Certificate Shortfall): If the Seller is unable to deliver
+     GoOs corresponding to the full Contracted Output for any quarter, the
+     Seller shall, at its own cost, procure replacement GoOs of equivalent
+     technology (onshore wind) and vintage (same calendar year) from Nordic
+     bidding zones (NO, SE, FI, DK) within thirty (30) days of the applicable
+     Certificate Delivery Date. If replacement GoOs cannot be sourced, the
+     Seller shall pay the Buyer a certificate shortfall payment equal to the
+     volume of undelivered GoOs multiplied by the average GoO market price
+     published by ECOHZ or Commerg for the relevant vintage and technology,
+     plus a 15% premium. This shortfall payment is in addition to, and not in
+     lieu of, any delivery shortfall payments under Rule PY-3 (Article 7.4).
+
+     Linked Rules: CD-1, CD-2, PY-3, PY-4, VT-2.
+
+
+================================================================================
+ARTICLE 7: PAYMENT AND SETTLEMENT
+================================================================================
+
+7.1  RULE PY-1 (Settlement Calculation): For each Measurement Period (h) during
+     a Settlement Period, the Settlement Amount shall be calculated as follows:
+
+          Settlement Amount(h) = Contracted Output(h) x (Contract Price(h)
+                                 - Reference Price(h))
+
+     where:
+     - Contracted Output(h) is the metered net generation in MWh for hour (h)
+       as determined under Rule VT-1 (Article 9.1) and verified under
+       Rule ED-5 (Article 5.6);
+     - Contract Price(h) is the price applicable for hour (h) as determined
+       under Rule PM-1 (Article 8.1) and Rule PM-3 (Article 8.3);
+     - Reference Price(h) is the Nord Pool System Price for the relevant
+       bidding zone and hour (h) as determined under Rule PM-2 (Article 8.2).
+
+     If the Settlement Amount is positive, the Buyer shall pay the Seller. If
+     negative, the Seller shall pay the Buyer. The aggregate monthly
+     Settlement Amount is the sum of all hourly Settlement Amounts for the
+     Settlement Period.
+
+     Linked Rules: VT-1, ED-5, PM-1, PM-2, PM-3.
+
+7.2  RULE PY-2 (Invoicing and Payment Terms): The Seller shall issue an
+     invoice to the Buyer within ten (10) business days after receipt of final
+     metered data for each Settlement Period. Each invoice shall contain a
+     detailed hourly breakdown of Contracted Output, Contract Price, Reference
+     Price, and Settlement Amount per Measurement Period. Payment shall be due
+     within twenty (20) business days of invoice date, by wire transfer to the
+     account specified in Schedule C. Late payment shall bear interest at
+     EURIBOR 3-month plus 2.00% per annum, calculated on a daily basis.
+     Invoicing is dependent on the metering data provision under Rule ED-5
+     (Article 5.6) and the price publication under Rule PM-2 (Article 8.2).
+
+     Linked Rules: PY-1, ED-5, PM-2.
+
+7.3  RULE PY-3 (Delivery Shortfall Payment): If the aggregate Contracted
+     Output for any Contract Year falls below the Minimum Annual Delivery
+     specified in Rule VT-2 (Article 9.3), the Seller shall pay to the Buyer a
+     Delivery Shortfall Payment calculated as:
+
+          Shortfall Payment = (Minimum Annual Delivery - Actual Annual Output)
+                              x Base Price x 0.50
+
+     where Base Price is as defined in Rule PM-1 (Article 8.1). The Delivery
+     Shortfall Payment shall be invoiced by the Buyer as part of the Annual
+     True-Up under Rule EV-2 (Article 10.3). Volumes excluded due to Force
+     Majeure under Rule EV-4 (Article 10.5) and grid curtailment deemed under
+     Rule ED-2 (Article 5.3) shall be added back to Actual Annual Output for
+     purposes of this calculation.
+
+     Linked Rules: VT-2, PM-1, EV-2, EV-4, ED-2.
+
+7.4  RULE PY-4 (Certificate Delivery Penalty): If the Seller fails to deliver
+     GoOs by the Certificate Delivery Date specified in Rule CD-2
+     (Article 6.3), the Seller shall pay a late delivery penalty of
+     EUR 0.50 per MWh per week of delay (or part thereof), applied to the
+     volume of GoOs not yet delivered. This penalty shall accrue from the
+     Certificate Delivery Date until the earlier of (a) actual delivery or
+     (b) the date on which the certificate shortfall payment under Rule CD-3
+     (Article 6.4) becomes payable. The penalty under this Rule PY-4 is
+     separate from and in addition to the shortfall payment under Rule CD-3.
+
+     Linked Rules: CD-2, CD-3, CD-1, PY-2.
+
+7.5  RULE PY-5 (Security and Credit Support): The Seller shall maintain, for
+     the duration of the Term, a performance bond or letter of credit in the
+     amount of EUR 5,000,000, issued by a financial institution with a minimum
+     credit rating of A- (S&P) or equivalent. The Buyer may draw upon such
+     security in the event of (a) non-payment of any Settlement Amount due
+     under Rule PY-1 (Article 7.1) exceeding thirty (30) days past due,
+     (b) non-delivery of GoOs exceeding ninety (90) days past the Certificate
+     Delivery Date under Rule CD-2 (Article 6.3), or (c) Seller Event of
+     Default under Rule EV-5 (Article 10.6).
+
+     Linked Rules: PY-1, CD-2, EV-5.
+
+
+================================================================================
+ARTICLE 8: PRICE INDEXATION AND MARKET DATA
+================================================================================
+
+8.1  RULE PM-1 (Contract Price - Hybrid Floor): The Contract Price for each
+     Measurement Period shall be no less than the Base Price of EUR 32.00 per
+     MWh (the "Floor Price"). The Floor Price shall be adjusted annually on
+     each anniversary of the first COD by the Harmonized Index of Consumer
+     Prices (HICP) for the Euro Area as published by Eurostat, applied on a
+     cumulative compounding basis from the Effective Date. The Floor Price
+     constitutes the minimum payment obligation and interacts with the upside
+     sharing mechanism defined in Rule PM-3 (Article 8.3) and the settlement
+     calculation in Rule PY-1 (Article 7.1).
+
+     Linked Rules: PM-3, PY-1, PY-3, EV-3.
+
+8.2  RULE PM-2 (Reference Price): The Reference Price for each Measurement
+     Period shall be the Nord Pool day-ahead system price for the bidding zone
+     in which the relevant Facility is located (SE1 for Facility A, SE2 for
+     Facility B, FI for Facility C), as published by Nord Pool AS on its
+     official platform (www.nordpoolgroup.com) by 14:00 CET D+1. Where
+     Facilities span multiple bidding zones, the Reference Price for portfolio
+     settlement under Rule PY-1 (Article 7.1) shall be the production-weighted
+     average of the applicable zone prices, weighted by metered output per
+     Facility per Measurement Period as reported under Rule VT-1
+     (Article 9.1).
+
+     Linked Rules: PY-1, VT-1, PM-1, ED-3.
+
+8.3  RULE PM-3 (Upside Sharing Mechanism): When the Reference Price for any
+     Measurement Period exceeds the Cap Price of EUR 55.00 per MWh, the
+     Contract Price for that hour shall be calculated as:
+
+          Contract Price(h) = Floor Price + 0.40 x (Reference Price(h)
+                              - Cap Price)
+
+     The Buyer's Upside Share is forty percent (40%) of the margin above the
+     Cap Price. When the Reference Price is between the Floor Price and the
+     Cap Price, the Contract Price equals the Floor Price (i.e., the Buyer
+     benefits from the entire spread). When the Reference Price is below the
+     Floor Price, the Contract Price remains at the Floor Price (i.e., the
+     Seller receives a top-up payment from the Buyer equal to the difference,
+     as calculated under Rule PY-1 (Article 7.1)). This tiered structure
+     ensures the Seller always receives at least the Floor Price while sharing
+     supernormal returns with the Buyer, and is subject to reset under
+     Rule EV-3 (Article 10.4).
+
+     Linked Rules: PM-1, PM-2, PY-1, EV-3.
+
+8.4  RULE PM-4 (Market Data Fallback): In the event that Nord Pool fails to
+     publish the day-ahead system price for any Measurement Period, the
+     Reference Price shall be determined as follows in order of priority:
+     (a) the EPEX SPOT Nordic day-ahead price for the equivalent zone and
+     hour; (b) the average of the day-ahead prices published by the two
+     nearest bidding zones for the same hour; (c) the average Reference Price
+     for the same hour across the preceding seven (7) calendar days. If none
+     of the foregoing are available, the Parties shall negotiate in good faith
+     a substitute reference price. Any fallback determination affects the
+     Settlement Amount under Rule PY-1 (Article 7.1) and shall be documented
+     in the monthly settlement report under Rule PY-2 (Article 7.2).
+
+     Linked Rules: PM-2, PY-1, PY-2, VT-1.
+
+
+================================================================================
+ARTICLE 9: VOLUME AND TIMESERIES
+================================================================================
+
+9.1  RULE VT-1 (Hourly Production Measurement): The Contracted Output for each
+     Measurement Period shall be the net electrical energy (in MWh, to three
+     decimal places) injected at the Grid Delivery Point of each Facility, as
+     recorded by the revenue meters specified in Rule ED-5 (Article 5.6),
+     adjusted for (a) transformer losses between generator terminals and the
+     Grid Delivery Point (estimated at 1.5%), and (b) any parasitic
+     consumption by the Facility's auxiliary systems. Hourly data shall form
+     the basis for settlement under Rule PY-1 (Article 7.1), the Reference
+     Price weighting under Rule PM-2 (Article 8.2), and the GoO volume
+     calculation under Rule CD-1 (Article 6.1).
+
+     Linked Rules: ED-5, PY-1, PM-2, CD-1.
+
+9.2  RULE VT-2 (Annual Delivery Guarantee): The Seller guarantees a Minimum
+     Annual Delivery equal to eighty-five percent (85%) of the aggregate P50
+     Estimate for all operating Facilities (the "Minimum Annual Delivery").
+     Based on the P50 Estimates in Schedule B, the initial Minimum Annual
+     Delivery is:
+
+          Facility A (180 MW):  P50 = 540 GWh/yr  ->  Minimum = 459 GWh/yr
+          Facility B (140 MW):  P50 = 380 GWh/yr  ->  Minimum = 323 GWh/yr
+          Facility C (100 MW):  P50 = 260 GWh/yr  ->  Minimum = 221 GWh/yr
+          Portfolio Total:      P50 = 1,180 GWh/yr -> Minimum = 1,003 GWh/yr
+
+     Failure to meet the Minimum Annual Delivery triggers the Delivery
+     Shortfall Payment under Rule PY-3 (Article 7.4), subject to the
+     exclusions for Force Majeure under Rule EV-4 (Article 10.5) and grid
+     curtailment under Rule ED-2 (Article 5.3). The Annual Delivery Guarantee
+     shall be reconciled as part of the Annual True-Up under Rule EV-2
+     (Article 10.3).
+
+     Linked Rules: PY-3, EV-4, ED-2, EV-2, VT-1, ED-4.
+
+9.3  RULE VT-3 (Capacity Factor Tracking): The Seller shall report monthly
+     the net capacity factor for each Facility, calculated as:
+
+          NCF = Actual Output / (Nameplate Capacity x Hours in Period
+                - Maintenance Hours per Rule ED-4 (Article 5.5))
+
+     If the trailing twelve-month NCF for any Facility falls below 22%, the
+     Buyer may request a Technical Review pursuant to Article 11. The capacity
+     factor is used to assess performance relative to the P50 Estimates
+     underpinning the Annual Delivery Guarantee in Rule VT-2 (Article 9.3)
+     and affects the metering reconciliation under Rule ED-5 (Article 5.6).
+
+     Linked Rules: ED-4, VT-2, ED-5, VT-1.
+
+9.4  RULE VT-4 (Production Forecast Provision): The Seller shall provide the
+     Buyer with (a) a rolling 48-hour production forecast updated every 6
+     hours, (b) a monthly production forecast issued by the 25th of the
+     preceding month, and (c) an annual production forecast issued by
+     1 December of the preceding year. Forecasts shall be provided at the
+     Facility level and aggregated portfolio level. While forecasts are
+     provided for information purposes only and do not modify the Seller's
+     delivery obligations under Rule ED-1 (Article 5.1), persistent deviation
+     of actuals from forecasts exceeding 30% on a quarterly basis shall
+     trigger a good-faith consultation between the Parties. Forecast data
+     feeds into the balancing nominations under Rule ED-3 (Article 5.4).
+
+     Linked Rules: ED-1, ED-3, VT-1, VT-2.
+
+
+================================================================================
+ARTICLE 10: EVENTS
+================================================================================
+
+10.1 RULE EV-1 (Commercial Operation Date Milestones): Each Facility shall
+     achieve COD upon satisfaction of all of the following conditions:
+     (a) completion of grid connection and energization tests; (b) issuance of
+     a Provisional Acceptance Certificate by the EPC contractor; (c) successful
+     completion of a 240-hour reliability test at no less than 95% availability;
+     and (d) receipt of all necessary operating permits. The expected COD dates
+     are: Facility A - Q2 2026, Facility B - Q3 2026, Facility C - Q4 2026.
+     Upon COD, delivery obligations under Rule ED-1 (Article 5.1) commence and
+     the Contracted Output begins to be measured under Rule VT-1 (Article 9.1)
+     for settlement under Rule PY-1 (Article 7.1).
+
+     Linked Rules: ED-1, VT-1, PY-1, OV-2, VT-2.
+
+10.2 RULE EV-2 (Annual True-Up): Within ninety (90) days after the end of each
+     Contract Year, the Parties shall conduct an Annual True-Up reconciliation,
+     which shall include: (a) verification of aggregate Contracted Output
+     against the Minimum Annual Delivery under Rule VT-2 (Article 9.3);
+     (b) calculation and settlement of any Delivery Shortfall Payment under
+     Rule PY-3 (Article 7.4); (c) reconciliation of GoO deliveries against
+     metered output under Rule CD-1 (Article 6.1); (d) recalculation of the
+     HICP-adjusted Floor Price under Rule PM-1 (Article 8.1) for the
+     forthcoming Contract Year; and (e) review of capacity factor performance
+     under Rule VT-3 (Article 9.4). The True-Up statement shall be binding
+     absent manifest error.
+
+     Linked Rules: VT-2, PY-3, CD-1, PM-1, VT-3.
+
+10.3 RULE EV-3 (Five-Year Price Reset): On the fifth (5th) and tenth (10th)
+     anniversaries of the first COD (each a "Reset Date"), either Party may
+     request a review of the Base Price and Cap Price. The reset shall be
+     determined by an independent market consultant appointed by mutual
+     agreement, taking into account: (a) the average Nord Pool system price
+     over the preceding 36 months as published under Rule PM-2 (Article 8.2);
+     (b) changes in the levelized cost of onshore wind energy; (c) prevailing
+     corporate PPA market pricing in the Nordics. The adjusted Base Price shall
+     not deviate by more than +/-15% from the then-current Base Price, and the
+     Cap Price shall be adjusted proportionally. If the Parties cannot agree
+     on the reset within 120 days of the Reset Date, the existing prices under
+     Rule PM-1 (Article 8.1) and Rule PM-3 (Article 8.3) shall continue to
+     apply unchanged.
+
+     Linked Rules: PM-1, PM-2, PM-3, PY-1.
+
+10.4 RULE EV-4 (Force Majeure): A "Force Majeure Event" means any event beyond
+     the reasonable control of the affected Party, including but not limited to:
+     (a) grid curtailment ordered by Svenska Kraftnat or Fingrid for system
+     security reasons (distinct from economic curtailment under Rule ED-2
+     (Article 5.3)); (b) extreme weather conditions where ambient temperature
+     falls below -35 degrees Celsius for more than 48 consecutive hours,
+     causing turbine cold-weather shutdown; (c) natural disasters, war,
+     terrorism, or pandemic; (d) changes in law that make performance illegal.
+     During a Force Majeure Event, the affected Party's obligations under
+     Rule ED-1 (Article 5.1) and Rule VT-2 (Article 9.3) shall be suspended
+     to the extent affected. Force Majeure volumes are excluded from the
+     Delivery Shortfall calculation under Rule PY-3 (Article 7.4) and shall
+     not count against the Minimum Annual Delivery under Rule VT-2.
+
+     Linked Rules: ED-1, ED-2, VT-2, PY-3.
+
+10.5 RULE EV-5 (Termination Triggers): Either Party may terminate this
+     Agreement by written notice upon the occurrence of any of the following:
+     (a) a material breach by the other Party that remains uncured for sixty
+     (60) days after written notice; (b) insolvency, bankruptcy, or
+     administration of the other Party; (c) failure of any Facility to achieve
+     COD by the Longstop Date (as may be extended under Article 2.3);
+     (d) aggregate Contracted Output falling below seventy percent (70%) of
+     the Minimum Annual Delivery under Rule VT-2 (Article 9.3) for two (2)
+     consecutive Contract Years, after adjusting for Force Majeure under
+     Rule EV-4 (Article 10.5); (e) non-payment of Settlement Amounts under
+     Rule PY-1 (Article 7.1) exceeding EUR 2,000,000 in aggregate and
+     remaining unpaid for sixty (60) days. Upon termination, the termination
+     payment shall be calculated as the present value of the remaining expected
+     Settlement Amounts for the unexpired Term, discounted at the EUR mid-swap
+     rate plus 1.00%.
+
+     Linked Rules: VT-2, EV-4, PY-1, EV-1, PY-5.
+
+10.6 RULE EV-6 (Regulatory Change): If a change in applicable law, regulation,
+     or government policy materially affects the economic balance of this
+     Agreement (including but not limited to changes to the GoO regime, Nordic
+     market design, or the introduction of capacity mechanisms), either Party
+     may request renegotiation of affected terms within sixty (60) days of the
+     change taking effect. Affected terms include the pricing mechanism under
+     Rule PM-1 (Article 8.1), the certificate delivery framework under
+     Rule CD-1 (Article 6.1), and the balancing responsibilities under
+     Rule ED-3 (Article 5.4). If the Parties cannot reach agreement within
+     one hundred and twenty (120) days, either Party may invoke the dispute
+     resolution mechanism in Article 12 or, if the change renders the Agreement
+     fundamentally uneconomic, terminate under Rule EV-5 (Article 10.6)
+     clause (d).
+
+     Linked Rules: PM-1, CD-1, ED-3, EV-5, OV-3.
+
+
+================================================================================
+ARTICLE 11: TECHNICAL REVIEW AND INDEPENDENT ENGINEER
+================================================================================
+
+11.1 The Buyer may request a Technical Review of any Facility if the trailing
+     twelve-month NCF falls below the threshold specified in Rule VT-3
+     (Article 9.4). The Technical Review shall be conducted by an Independent
+     Engineer mutually agreed by the Parties, at the Seller's cost.
+
+11.2 The Independent Engineer may recommend remedial measures, and the Seller
+     shall implement commercially reasonable recommendations within 180 days.
+     Failure to implement material recommendations may constitute a breach
+     relevant to termination under Rule EV-5 (Article 10.6).
+
+
+================================================================================
+ARTICLE 12: DISPUTE RESOLUTION
+================================================================================
+
+12.1 Any dispute arising out of or in connection with this Agreement shall be
+     first submitted to senior management of both Parties for resolution within
+     thirty (30) days. If unresolved, the dispute shall be referred to
+     arbitration under the Arbitration Rules of the Arbitration Institute of
+     the Stockholm Chamber of Commerce (SCC). The arbitral tribunal shall
+     consist of three (3) arbitrators. The seat of arbitration shall be
+     Stockholm, Sweden. The language of arbitration shall be English. The
+     arbitral award shall be final and binding.
+
+
+================================================================================
+ARTICLE 13: GOVERNING LAW
+================================================================================
+
+13.1 This Agreement shall be governed by and construed in accordance with the
+     substantive laws of the Kingdom of Sweden, without regard to its conflict
+     of laws principles.
+
+
+================================================================================
+ARTICLE 14: MISCELLANEOUS
+================================================================================
+
+14.1 Amendments to this Agreement shall be valid only if made in writing and
+     signed by both Parties.
+
+14.2 Neither Party may assign its rights or obligations under this Agreement
+     without the prior written consent of the other Party, except to an
+     Affiliate or in connection with a financing arrangement (provided the
+     assignor remains liable).
+
+14.3 This Agreement constitutes the entire agreement between the Parties with
+     respect to the subject matter hereof and supersedes all prior
+     negotiations, representations, and agreements.
+
+14.4 Notices shall be delivered in writing to the addresses specified in
+     Schedule D, with copies by electronic mail, and shall be deemed received
+     upon confirmed delivery.
+
+
+================================================================================
+SCHEDULES
+================================================================================
+
+SCHEDULE A: Facility Specifications and Grid Delivery Points
+  - Facility A: Lapland Wind Farm, 180 MW, 60x Vestas V150-3.0 MW turbines,
+    Grid Delivery Point at Porjus 400kV substation (SE1 bidding zone)
+  - Facility B: Vasterbotten Wind Farm, 140 MW, 40x Nordex N163/3.5 MW
+    turbines, Grid Delivery Point at Stornorrfors 220kV substation
+    (SE2 bidding zone)
+  - Facility C: Ostrobothnia Wind Farm, 100 MW, 25x Siemens Gamesa
+    SG 4.5-145 turbines, Grid Delivery Point at Vaskiluoto 110kV substation
+    (FI bidding zone)
+
+SCHEDULE B: P50 Energy Estimates
+  - Facility A: 540 GWh/year (NCF: 34.2%)
+  - Facility B: 380 GWh/year (NCF: 31.0%)
+  - Facility C: 260 GWh/year (NCF: 29.7%)
+  - Portfolio Aggregate: 1,180 GWh/year (weighted NCF: 32.1%)
+
+SCHEDULE C: Payment Instructions (to be completed prior to first invoice)
+
+SCHEDULE D: Notice Addresses
+  - Seller: NordVind Renewables AB, Vasagatan 12, SE-111 20 Stockholm, Sweden
+    Attention: Chief Commercial Officer
+    Email: ppa-ops@nordvind.se
+  - Buyer: DataCenter Nordic Oy, Keilaniementie 1, FI-02150 Espoo, Finland
+    Attention: VP Energy Procurement
+    Email: energy-contracts@dcnordic.fi
+
+
+================================================================================
+IN WITNESS WHEREOF, the Parties have caused this Agreement to be executed by
+their duly authorized representatives as of the date first written above.
+
+For and on behalf of                    For and on behalf of
+NORDVIND RENEWABLES AB                  DATACENTER NORDIC OY
+
+_____________________________           _____________________________
+Name: Erik Lindqvist                    Name: Mika Virtanen
+Title: Chief Executive Officer          Title: Chief Financial Officer
+Date: 15 April 2025                     Date: 15 April 2025
+================================================================================

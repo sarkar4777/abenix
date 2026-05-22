@@ -5,7 +5,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision = "j0e1f2g3h4i5"
-down_revision = "h8c9d0e1f2g3"
+down_revision = "i9d0e1f2g3h4"
 branch_labels = None
 depends_on = None
 
@@ -42,14 +42,14 @@ def upgrade() -> None:
         ["api_key_id", "subject_type", "subject_id"],
     )
 
-    # the example app Market Alerts
+    # ContractIQ Market Alerts
     op.create_table(
-        "example_app_market_alerts",
+        "contractiq_market_alerts",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column(
             "contract_id",
             UUID(as_uuid=True),
-            sa.ForeignKey("example_app_contracts.id", ondelete="CASCADE"),
+            sa.ForeignKey("contractiq_contracts.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("alert_type", sa.String(100), nullable=False),
@@ -68,13 +68,13 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_example_app_alerts_contract", "example_app_market_alerts", ["contract_id"]
+        "ix_contractiq_alerts_contract", "contractiq_market_alerts", ["contract_id"]
     )
     op.create_index(
-        "ix_example_app_alerts_severity", "example_app_market_alerts", ["severity"]
+        "ix_contractiq_alerts_severity", "contractiq_market_alerts", ["severity"]
     )
 
 
 def downgrade() -> None:
-    op.drop_table("example_app_market_alerts")
+    op.drop_table("contractiq_market_alerts")
     op.drop_table("subject_policies")

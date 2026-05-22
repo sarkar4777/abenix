@@ -29,12 +29,12 @@ HEADER = """
 """
 
 TARGETS = {
-    "example_app_hedge_advisor.yaml": "  ## Available Tools",
-    "example_app_market_monitor.yaml": "  ## Available Tools",
-    "example_app_market_simulator.yaml": "  ## Available Tools",
-    "example_app_portfolio_valuator.yaml": "  ## Available Tools",
-    "example_app_price_forecaster.yaml": "  ## Available Tools",
-    "example_app_stress_test.yaml": "  ## Available Tools",
+    "contractiq_hedge_advisor.yaml": "  ## Available Tools",
+    "contractiq_market_monitor.yaml": "  ## Available Tools",
+    "contractiq_market_simulator.yaml": "  ## Available Tools",
+    "contractiq_portfolio_valuator.yaml": "  ## Available Tools",
+    "contractiq_price_forecaster.yaml": "  ## Available Tools",
+    "contractiq_stress_test.yaml": "  ## Available Tools",
 }
 
 

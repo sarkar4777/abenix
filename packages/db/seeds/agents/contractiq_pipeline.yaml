@@ -1,0 +1,511 @@
+name: "ContractIQ Extraction Pipeline"
+slug: contractiq-pipeline
+description: >-
+  Multi-pass extraction pipeline for Power Purchase Agreements and Gas Supply
+  Contracts. Extracts commercial terms, technical specifications, legal clauses,
+  financial conditions, assets, events, and risk factors from 100-200 page
+  contract documents using 10 specialized AI agents.
+agent_type: oob
+category: energy
+icon: FileSearch
+version: "1.0.0"
+status: active
+mode: pipeline
+system_prompt: |
+  You are ContractIQ, an AI-powered contract intelligence system specialized in
+  Power Purchase Agreements (PPAs) and Gas Supply Contracts. You coordinate
+  specialist extraction agents to analyze complex energy contracts.
+
+example_prompts:
+  - "Extract all commercial terms from this 150-page solar PPA including pricing, escalation, and volume commitments"
+  - "Analyze the risk profile of this wind farm PPA focusing on curtailment, force majeure, and change of law provisions"
+  - "Extract all assets, their specifications, and interconnection details from this gas supply agreement"
+
+model_config:
+  model: gemini-2.0-flash
+  temperature: 0.2
+  tools:
+    - llm_call
+    - agent_step
+    - document_extractor
+    - file_reader
+    - text_analyzer
+    - code_executor
+    - entso_e
+    - ember_climate
+    - ecb_rates
+    - tavily_search
+    - financial_calculator
+    - database_query
+
+pipeline_config:
+  nodes:
+    - id: document_ingester
+      tool_name: llm_call
+      label: "Document Ingester"
+      arguments:
+        system_prompt: |
+          You are a document structure analyzer. Given raw contract text, identify and output:
+          1. Contract type (PPA, gas supply, tolling, VPPA)
+          2. Parties involved (buyer, seller, offtaker, developer)
+          3. Document sections and their page ranges
+          4. Key dates mentioned (execution, effective, expiry, COD)
+          5. Total number of pages and sections
+
+          Output as structured JSON with fields: contract_type, parties[], sections[], key_dates{}, metadata{}.
+        prompt: "Analyze this contract document structure: {{message}}"
+        model: gemini-2.0-flash
+        max_tokens: 4096
+      depends_on: []
+      position:
+        x: 400
+        y: 50
+
+    - id: commercial_extractor
+      tool_name: agent_step
+      label: "Commercial Terms Extractor"
+      arguments:
+        system_prompt: |
+          You are a commercial terms extraction specialist for energy contracts (PPAs and gas supply agreements).
+
+          Extract ALL commercial terms including:
+          - Contract price ($/MWh, $/MMBtu, p/kWh — fixed, floating, or hybrid)
+          - Price escalation mechanism (CPI, fixed %, formula-based)
+          - Indexation references (hub prices, market indices, baseload/peak split)
+          - Volume commitments (ACQ, MDQ, minimum take-or-pay, maximum delivery)
+          - Settlement period and mechanism (monthly, quarterly, balancing)
+          - Currency and FX provisions
+          - Capacity payments vs energy-only payments
+          - Balancing and imbalance charges
+          - Credit support (letters of credit, parent guarantees, amounts)
+          - Bonus/penalty mechanisms
+          - Shape factors and profile obligations
+
+          For EACH term extracted, provide:
+          - field_name: descriptive name
+          - field_value: the actual value/text
+          - page_reference: page number where found
+          - confidence: 0.0-1.0 how confident you are
+
+          ALWAYS use the document text provided. Do NOT make up values.
+          Output as JSON array of {field_name, field_value, page_reference, confidence}.
+        input_message: "Extract all commercial terms from this contract: {{document_ingester.response}}"
+        tools: "text_analyzer,financial_calculator"
+        model: gemini-2.0-flash
+      depends_on:
+        - document_ingester
+      position:
+        x: 100
+        y: 200
+
+    - id: technical_extractor
+      tool_name: agent_step
+      label: "Technical Specs Extractor"
+      arguments:
+        system_prompt: |
+          You are a technical specifications extractor for energy assets in contracts.
+
+          Extract ALL technical details including:
+          - Asset name, type (solar plant, wind farm, gas pipeline, storage, substation)
+          - Installed/nameplate capacity (MW, MWp, or MMcf/d)
+          - Technology (monocrystalline, polycrystalline, onshore wind, CCGT, etc.)
+          - Expected degradation rate (% per year)
+          - Capacity factor / availability guarantee
+          - Performance ratio
+          - Interconnection point and voltage level
+          - Metering point and metering arrangements
+          - Grid connection details
+          - Site location and coordinates (if mentioned)
+          - Commercial Operation Date (COD)
+          - Construction milestones
+
+          Output as JSON array of assets, each with full technical details.
+        input_message: "Extract all technical specifications and asset details: {{document_ingester.response}}"
+        tools: "text_analyzer"
+        model: gemini-2.0-flash
+      depends_on:
+        - document_ingester
+      position:
+        x: 350
+        y: 200
+
+    - id: legal_extractor
+      tool_name: agent_step
+      label: "Legal Clauses Extractor"
+      arguments:
+        system_prompt: |
+          You are a legal clause extraction specialist for energy contracts.
+
+          Extract EVERY clause in the contract. For each clause:
+          - clause_number: the section/clause number
+          - clause_title: the heading
+          - clause_text: full text of the clause (up to 2000 chars)
+          - clause_type: one of [termination, force_majeure, pricing, payment,
+            performance_guarantee, curtailment, change_of_law, insurance,
+            indemnity, dispute_resolution, assignment, confidentiality, other]
+          - risk_level: low, medium, high, or critical
+          - risk_notes: why this risk level was assigned
+          - key_dates: any dates mentioned in the clause
+          - key_amounts: any monetary amounts or percentages
+
+          Pay special attention to:
+          - Termination triggers and notice periods
+          - Force majeure definitions and consequences
+          - Change of law risk allocation
+          - Limitation of liability and caps
+          - Indemnification obligations
+          - Dispute resolution mechanism (arbitration, jurisdiction)
+
+          Output as JSON array of clauses.
+        input_message: "Extract all legal clauses from this contract: {{document_ingester.response}}"
+        tools: "text_analyzer"
+        model: gemini-2.0-flash
+      depends_on:
+        - document_ingester
+      position:
+        x: 600
+        y: 200
+
+    - id: financial_extractor
+      tool_name: agent_step
+      label: "Financial Terms Extractor"
+      arguments:
+        system_prompt: |
+          You are a financial terms extraction specialist for energy contracts.
+
+          Extract ALL financial provisions including:
+          - Payment terms and schedule
+          - Invoicing mechanism and timeline
+          - Late payment interest rate
+          - Liquidated damages (amounts, triggers, caps)
+          - Performance guarantees and bonding
+          - Insurance requirements (types, minimum coverage)
+          - Security deposits or letters of credit (amounts)
+          - Parent company guarantees
+          - Tax provisions and gross-up clauses
+          - Accounting treatment provisions
+          - Deemed generation / deemed delivery provisions
+          - Floor and cap prices (if any)
+          - Mark-to-market settlement provisions
+
+          Output as JSON array of {field_name, field_value, page_reference, confidence}.
+        input_message: "Extract all financial terms and conditions: {{document_ingester.response}}"
+        tools: "text_analyzer,financial_calculator"
+        model: gemini-2.0-flash
+      depends_on:
+        - document_ingester
+      position:
+        x: 850
+        y: 200
+
+    - id: clause_classifier
+      tool_name: agent_step
+      label: "Clause Risk Classifier"
+      arguments:
+        system_prompt: |
+          You are a contract risk classifier. Review extracted clauses and assign detailed risk ratings.
+
+          For each clause, assess:
+          1. Risk to BUYER (offtaker)
+          2. Risk to SELLER (developer/generator)
+          3. Overall risk level (low/medium/high/critical)
+          4. Specific risk factors
+          5. Missing protections (what SHOULD be there but isn't)
+          6. Comparison to market standard provisions
+
+          Risk classification criteria:
+          - CRITICAL: Could result in contract termination or >20% financial impact
+          - HIGH: Significant financial or operational risk (10-20% impact)
+          - MEDIUM: Moderate risk, manageable with proper monitoring (5-10%)
+          - LOW: Standard provision, minimal risk (<5%)
+
+          Output enhanced clause data with detailed risk notes.
+        input_message: "Classify and risk-rate these clauses:\n{{legal_extractor.response}}"
+        tools: "text_analyzer,tavily_search"
+        model: gemini-2.0-flash
+      depends_on:
+        - legal_extractor
+      position:
+        x: 200
+        y: 400
+
+    - id: asset_registry
+      tool_name: agent_step
+      label: "Asset Registry Builder"
+      arguments:
+        system_prompt: |
+          You are an asset registry builder. From the technical extraction, create structured asset records.
+
+          For each asset, ensure these fields are populated:
+          - asset_name, asset_type, capacity_mw
+          - location (country, region, specific site)
+          - coordinates (if mentioned or inferrable)
+          - cod_date (Commercial Operation Date)
+          - technology (specific technology type)
+          - degradation_rate (annual %)
+          - interconnection_point, metering_point
+          - manufacturer/model (if mentioned)
+          - expected annual generation (MWh or GWh)
+          - warranty details
+
+          Cross-reference with commercial terms to link capacity to pricing.
+          Output as JSON array of structured asset records.
+        input_message: "Build asset registry from:\nTechnical: {{technical_extractor.response}}\nCommercial: {{commercial_extractor.response}}"
+        tools: "text_analyzer"
+        model: gemini-2.0-flash
+      depends_on:
+        - technical_extractor
+        - commercial_extractor
+      position:
+        x: 500
+        y: 400
+
+    - id: event_extractor
+      tool_name: agent_step
+      label: "Event & Milestone Extractor"
+      arguments:
+        system_prompt: |
+          You are a contract event and deadline extractor. Find EVERY date, milestone, and deadline.
+
+          Extract:
+          - Contract execution date
+          - Effective date / conditions precedent deadline
+          - Commercial Operation Date (COD) and long-stop date
+          - Financial close deadline
+          - Construction milestones
+          - Price review dates
+          - Contract renewal/extension dates
+          - Termination notice periods and deadlines
+          - Insurance renewal dates
+          - Regulatory compliance deadlines
+          - Performance testing dates
+          - Annual/quarterly review dates
+
+          For each event:
+          - event_type: milestone/deadline/review/renewal/termination_trigger
+          - event_date: specific date or relative date
+          - description: what happens
+          - is_recurring: true/false
+          - notification_days_before: how much advance notice needed
+
+          Output as JSON array of events sorted by date.
+        input_message: "Extract all dates, milestones, and deadlines:\n{{document_ingester.response}}\nClauses: {{legal_extractor.response}}"
+        tools: "text_analyzer"
+        model: gemini-2.0-flash
+      depends_on:
+        - document_ingester
+        - legal_extractor
+      position:
+        x: 800
+        y: 400
+
+    - id: risk_analyzer
+      tool_name: agent_step
+      label: "Risk Analyzer"
+      arguments:
+        system_prompt: |
+          You are a comprehensive contract risk analyst for energy contracts.
+
+          Analyze risks across 6 categories using both contract terms AND current market data:
+
+          1. MARKET RISK: Compare contract prices to current spot/forward prices
+             - Use entso_e for EU power prices
+             - Use ember_climate for UK power and carbon
+             - Use ecb_rates for FX exposure
+             - Calculate mark-to-market exposure
+
+          2. CREDIT RISK: Assess counterparty creditworthiness
+             - Credit support adequacy (LC amounts vs exposure)
+             - Parent guarantee strength
+
+          3. OPERATIONAL RISK:
+             - Curtailment provisions and risk allocation
+             - Availability guarantees and penalties
+             - Maintenance obligations
+
+          4. REGULATORY RISK:
+             - Change of law provisions
+             - Subsidy/incentive dependency
+             - Environmental compliance
+
+          5. LEGAL RISK:
+             - Termination trigger exposure
+             - Force majeure breadth
+             - Limitation of liability adequacy
+
+          6. TECHNOLOGY RISK:
+             - Degradation assumptions
+             - Performance guarantee levels
+             - Equipment warranty coverage
+
+          For each risk: score (0-100), description, mitigation available in contract.
+          Output as JSON array of risk assessments.
+        input_message: "Analyze risks for this contract:\nCommercial: {{commercial_extractor.response}}\nClauses: {{clause_classifier.response}}\nAssets: {{asset_registry.response}}\nFinancial: {{financial_extractor.response}}"
+        tools: "entso_e,ember_climate,ecb_rates,financial_calculator,tavily_search"
+        model: gemini-2.0-flash
+      depends_on:
+        - commercial_extractor
+        - clause_classifier
+        - asset_registry
+        - financial_extractor
+      position:
+        x: 300
+        y: 600
+
+    - id: synthesis
+      tool_name: llm_call
+      label: "Synthesis & Quality Check"
+      arguments:
+        system_prompt: |
+          You are a contract analysis quality assurance specialist. Review all extracted data
+          and produce a comprehensive synthesis.
+
+          Verify:
+          1. All key commercial terms are extracted (price, volume, escalation, settlement)
+          2. All clauses are classified with risk levels
+          3. All assets are documented with specifications
+          4. All key dates and milestones are captured
+          5. Risk analysis covers all 6 categories
+
+          Flag any GAPS — information that should be in the contract but wasn't extracted.
+
+          Output a JSON synthesis with:
+          {
+            "contract_summary": "2-3 sentence overview",
+            "extraction_completeness": 0-100 percentage,
+            "gaps_identified": ["missing items"],
+            "key_risks": ["top 5 risks"],
+            "overall_risk_score": 0-100,
+            "recommendation": "proceed/review/caution"
+          }
+        prompt: |
+          Synthesize and quality-check this contract analysis:
+
+          DOCUMENT STRUCTURE: {{document_ingester.response}}
+          COMMERCIAL TERMS: {{commercial_extractor.response}}
+          TECHNICAL SPECS: {{technical_extractor.response}}
+          LEGAL CLAUSES: {{clause_classifier.response}}
+          FINANCIAL TERMS: {{financial_extractor.response}}
+          ASSETS: {{asset_registry.response}}
+          EVENTS: {{event_extractor.response}}
+          RISK ANALYSIS: {{risk_analyzer.response}}
+        model: gemini-2.0-flash
+        max_tokens: 8192
+      depends_on:
+        - commercial_extractor
+        - technical_extractor
+        - clause_classifier
+        - financial_extractor
+        - asset_registry
+        - event_extractor
+        - risk_analyzer
+      position:
+        x: 500
+        y: 800
+
+  edges:
+    - id: edge_ingester_to_commercial
+      source: document_ingester
+      target: commercial_extractor
+      sourceField: response
+      label: "Document structure"
+    - id: edge_ingester_to_technical
+      source: document_ingester
+      target: technical_extractor
+      sourceField: response
+      label: "Document structure"
+    - id: edge_ingester_to_legal
+      source: document_ingester
+      target: legal_extractor
+      sourceField: response
+      label: "Document structure"
+    - id: edge_ingester_to_financial
+      source: document_ingester
+      target: financial_extractor
+      sourceField: response
+      label: "Document structure"
+    - id: edge_legal_to_classifier
+      source: legal_extractor
+      target: clause_classifier
+      sourceField: response
+      label: "Extracted clauses"
+    - id: edge_technical_to_registry
+      source: technical_extractor
+      target: asset_registry
+      sourceField: response
+      label: "Technical specs"
+    - id: edge_commercial_to_registry
+      source: commercial_extractor
+      target: asset_registry
+      sourceField: response
+      label: "Commercial terms"
+    - id: edge_ingester_to_events
+      source: document_ingester
+      target: event_extractor
+      sourceField: response
+      label: "Document structure"
+    - id: edge_legal_to_events
+      source: legal_extractor
+      target: event_extractor
+      sourceField: response
+      label: "Extracted clauses"
+    - id: edge_commercial_to_risk
+      source: commercial_extractor
+      target: risk_analyzer
+      sourceField: response
+      label: "Commercial terms"
+    - id: edge_classifier_to_risk
+      source: clause_classifier
+      target: risk_analyzer
+      sourceField: response
+      label: "Classified clauses"
+    - id: edge_registry_to_risk
+      source: asset_registry
+      target: risk_analyzer
+      sourceField: response
+      label: "Asset registry"
+    - id: edge_financial_to_risk
+      source: financial_extractor
+      target: risk_analyzer
+      sourceField: response
+      label: "Financial terms"
+    - id: edge_commercial_to_synthesis
+      source: commercial_extractor
+      target: synthesis
+      sourceField: response
+      label: "Commercial terms"
+    - id: edge_technical_to_synthesis
+      source: technical_extractor
+      target: synthesis
+      sourceField: response
+      label: "Technical specs"
+    - id: edge_classifier_to_synthesis
+      source: clause_classifier
+      target: synthesis
+      sourceField: response
+      label: "Classified clauses"
+    - id: edge_financial_to_synthesis
+      source: financial_extractor
+      target: synthesis
+      sourceField: response
+      label: "Financial terms"
+    - id: edge_registry_to_synthesis
+      source: asset_registry
+      target: synthesis
+      sourceField: response
+      label: "Asset registry"
+    - id: edge_events_to_synthesis
+      source: event_extractor
+      target: synthesis
+      sourceField: response
+      label: "Events & milestones"
+    - id: edge_risk_to_synthesis
+      source: risk_analyzer
+      target: synthesis
+      sourceField: response
+      label: "Risk analysis"
+
+  viewport:
+    x: 0
+    y: 0
+    zoom: 0.8

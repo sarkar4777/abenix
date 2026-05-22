@@ -326,6 +326,104 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><strong>Resource preset</strong>: <code>small</code> (100m / 256Mi), <code>medium</code> (250m / 512Mi), <code>large</code> (500m / 1Gi). Limits scale 2-4× the request.</li>
             </ul>
             <p>Backend gates both inputs with structured error codes (<code>INVALID_REPLICAS</code>, <code>INVALID_RESOURCE_PRESET</code>) so the toast tells you exactly what went wrong on a bad value.</p>
+
+            <h4 className="text-white font-semibold pt-4">Shipped model catalogue</h4>
+            <p>Sixteen models ship with the platform. Each one is registered at first startup via <code>seed_ml_models.py</code> which scans <code>&lt;app&gt;/aimodels/</code> for matching <code>.pkl</code> + <code>.meta.json</code> pairs.</p>
+
+            <h5 className="text-violet-300 font-semibold pt-3 pb-1">ContractIQ (4 models)</h5>
+            <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
+              <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
+                <tr>
+                  <th className="text-left py-1.5 px-2">Slug</th>
+                  <th className="text-left py-1.5 px-2">Algorithm</th>
+                  <th className="text-left py-1.5 px-2">Inputs</th>
+                  <th className="text-left py-1.5 px-2">Output</th>
+                  <th className="text-left py-1.5 px-2">Holdout</th>
+                  <th className="text-left py-1.5 px-2">Used by</th>
+                </tr>
+              </thead>
+              <tbody className="text-slate-300">
+                <tr className="border-t border-slate-800/40">
+                  <td className="py-1.5 px-2 font-mono">contractiq-clause-classifier</td>
+                  <td className="py-1.5 px-2">TF-IDF + LogReg</td>
+                  <td className="py-1.5 px-2 text-slate-400">clause text</td>
+                  <td className="py-1.5 px-2 text-slate-400">1 of 30 ETRM classes</td>
+                  <td className="py-1.5 px-2 text-emerald-300">100%</td>
+                  <td className="py-1.5 px-2 text-slate-400">extractor</td>
+                </tr>
+                <tr className="border-t border-slate-800/40">
+                  <td className="py-1.5 px-2 font-mono">contractiq-risk-tier-predictor</td>
+                  <td className="py-1.5 px-2">Calibrated GBC</td>
+                  <td className="py-1.5 px-2 text-slate-400">10 deal features</td>
+                  <td className="py-1.5 px-2 text-slate-400">low / medium / high / critical</td>
+                  <td className="py-1.5 px-2 text-emerald-300">92.83%</td>
+                  <td className="py-1.5 px-2 text-slate-400">hedge_advisor</td>
+                </tr>
+                <tr className="border-t border-slate-800/40">
+                  <td className="py-1.5 px-2 font-mono">contractiq-counterparty-default</td>
+                  <td className="py-1.5 px-2">Logistic Regression</td>
+                  <td className="py-1.5 px-2 text-slate-400">11 financial ratios + sector</td>
+                  <td className="py-1.5 px-2 text-slate-400">P(default 12m)</td>
+                  <td className="py-1.5 px-2 text-emerald-300">89.47%</td>
+                  <td className="py-1.5 px-2 text-slate-400">hedge_advisor, credit_risk</td>
+                </tr>
+                <tr className="border-t border-slate-800/40">
+                  <td className="py-1.5 px-2 font-mono">contractiq-price-anomaly</td>
+                  <td className="py-1.5 px-2">IsolationForest</td>
+                  <td className="py-1.5 px-2 text-slate-400">8 deal features</td>
+                  <td className="py-1.5 px-2 text-slate-400">+1 inlier / -1 outlier</td>
+                  <td className="py-1.5 px-2 text-emerald-300">100% recall</td>
+                  <td className="py-1.5 px-2 text-slate-400">portfolio_valuator</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h5 className="text-cyan-300 font-semibold pt-3 pb-1">Wingman (5 models for LPG mispricing + freight forecast)</h5>
+            <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
+              <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
+                <tr>
+                  <th className="text-left py-1.5 px-2">Slug</th>
+                  <th className="text-left py-1.5 px-2">Algorithm</th>
+                  <th className="text-left py-1.5 px-2">Purpose</th>
+                </tr>
+              </thead>
+              <tbody className="text-slate-300">
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-mispricing-fairvalue</td><td className="py-1.5 px-2">BayesianRidge</td><td className="py-1.5 px-2 text-slate-400">arb fair-value on MEG-FE, USGC-NWE, MB-JPN corridors</td></tr>
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-mispricing-anomaly</td><td className="py-1.5 px-2">IsolationForest</td><td className="py-1.5 px-2 text-slate-400">corridor spread anomaly flag</td></tr>
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-scenario-prior</td><td className="py-1.5 px-2">GaussianNB</td><td className="py-1.5 px-2 text-slate-400">5-scenario Bayesian prior (base / bull-geo / bear-glut / bear-demand / tail)</td></tr>
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-broker-intent-classifier</td><td className="py-1.5 px-2">LR text classifier</td><td className="py-1.5 px-2 text-slate-400">broker message intent (RFQ / FIRM / FYI / SPEC)</td></tr>
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wingman-freight-forecast</td><td className="py-1.5 px-2">sklearn regression</td><td className="py-1.5 px-2 text-slate-400">BLPG1/2/3 short-term forecast on top of Baltic Exchange</td></tr>
+              </tbody>
+            </table>
+
+            <h5 className="text-amber-300 font-semibold pt-3 pb-1">Industrial-IoT + demo</h5>
+            <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
+              <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
+                <tr>
+                  <th className="text-left py-1.5 px-2">Slug</th>
+                  <th className="text-left py-1.5 px-2">Purpose</th>
+                </tr>
+              </thead>
+              <tbody className="text-slate-300">
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">wind-turbine-failure-classifier</td><td className="py-1.5 px-2 text-slate-400">vibration + temperature features &rarr; 7-class failure type. Used in the Industrial-IoT pump pipeline.</td></tr>
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">iris-species-classifier</td><td className="py-1.5 px-2 text-slate-400">canonical sklearn demo</td></tr>
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">housing-price-predictor</td><td className="py-1.5 px-2 text-slate-400">California housing regression</td></tr>
+                <tr className="border-t border-slate-800/40"><td className="py-1.5 px-2 font-mono">churn-predictor</td><td className="py-1.5 px-2 text-slate-400">SaaS churn binary classifier</td></tr>
+              </tbody>
+            </table>
+
+            <h4 className="text-white font-semibold pt-3">How predictions flow through the tool gate</h4>
+            <ol className="list-decimal pl-5 space-y-1 text-[13px]">
+              <li>The agent (or SDK) calls <code>ml_model.predict(model_name, input_data)</code>.</li>
+              <li>The call hits the <code>/api/tools/ml_model/execute</code> endpoint, passing through the <a href="#scaling-three-layers" className="text-cyan-300 underline">tool gate</a>: cache check (<code>cache_ttl_seconds=30</code>, scope <code>per_tenant</code>), then <code>max_inflight_global=40 / max_inflight_per_tenant=10</code> semaphore, then a 60s timeout.</li>
+              <li>MLModelTool loads the pickle from <code>/data/ml-models/&lt;tenant_id&gt;/&lt;file&gt;.pkl</code> (PVC, persistent across pod restarts).</li>
+              <li>Pickle is cached in process memory after first load. Cold-call latency 3-4s (PVC read). Warm-call 45-335ms.</li>
+              <li>Result + metadata land in <code>ml_model_invocations</code> + <code>tool_invocations</code> tables. Surfaced in <a href="/ml-models" className="text-cyan-300 underline">/ml-models</a> as a 24h stats card and in <a href="/admin/tool-scaling" className="text-cyan-300 underline">/admin/tool-scaling</a> with live counters.</li>
+            </ol>
+
+            <Callout tone="info">
+              <strong>Adding your own model.</strong> Drop a <code>my-model.pkl</code> + <code>my-model.meta.json</code> into <code>aimodels/</code> at the repo root (or under any <code>&lt;app&gt;/aimodels/</code>). Restart the api pod or run <code>seed_ml_models.py</code>. The platform discovers the pair, copies the pickle to the per-tenant PVC, and creates the MLModel + Deployment rows automatically.
+            </Callout>
           </div>
         ),
       },

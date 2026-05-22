@@ -1,13 +1,13 @@
 """Use-case registry — the navigation surface for standalone apps.
 
 The TopBar "Use Cases" menu and any launcher surface calls this endpoint
-to discover standalone apps (the example app, Saudi Tourism, Industrial IoT,
+to discover standalone apps (ContractIQ, Saudi Tourism, Industrial IoT,
 …) at runtime so the URLs are NEVER hardcoded in the client bundle.
 
 Resolution order (first match wins):
   1. `USE_CASE_URLS` env var (JSON object mapping key → url). Lets ops
      override for any quirky deployment without a code change.
-  2. Per-app env var (`EXAMPLE_APP_PUBLIC_URL`, `SAUDITOURISM_PUBLIC_URL`,
+  2. Per-app env var (`CONTRACTIQ_PUBLIC_URL`, `SAUDITOURISM_PUBLIC_URL`,
      `INDUSTRIAL_IOT_PUBLIC_URL`). Set on the api pod from the Helm
      values.
   3. Host-derived default. If the caller arrives via `*.nip.io` or a
@@ -34,14 +34,14 @@ router = APIRouter(prefix="/api/use-cases", tags=["use-cases"])
 # Each entry's `url` is filled in at request time by _resolve.
 CATALOG = [
     {
-        "key": "example_app",
-        "label": "the example app",
+        "key": "contractiq",
+        "label": "ContractIQ",
         "description": "Standalone app — PPA & gas contract intelligence.",
-        "icon": "example_app",
+        "icon": "contractiq",
         "color": "emerald",
         "host_subdomain": "ciq",
         "local_port": 3001,
-        "env_var": "EXAMPLE_APP_PUBLIC_URL",
+        "env_var": "CONTRACTIQ_PUBLIC_URL",
     },
     {
         "key": "sauditourism",
