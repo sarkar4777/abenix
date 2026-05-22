@@ -239,6 +239,14 @@ export default function AdminScalingPage() {
           ))}
         </div>
 
+        {/* Cross-links to the other scaling consoles */}
+        <div className="flex flex-wrap gap-2 text-[11px] text-slate-400">
+          <span>Related:</span>
+          <a href="/admin/tool-scaling" className="text-cyan-300 hover:underline">Tool Scaling</a>
+          <span>·</span>
+          <a href="/admin/pipeline-scaling" className="text-cyan-300 hover:underline">Pipeline Scaling (DAG view)</a>
+        </div>
+
         {/* Pool health cards */}
         <section>
           <h2 className="text-sm font-semibold text-white mb-3">Pool health</h2>

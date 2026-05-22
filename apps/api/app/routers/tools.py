@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -591,7 +592,17 @@ TOOL_CATALOG = [
     {
         "id": "yahoo_finance",
         "name": "Yahoo Finance",
-        "description": "Brent, JKM, TTF, EUA carbon, equities and other financial futures — spot + forward curves",
+        "description": (
+            "Universal Yahoo Finance reader — one tool for every instrument. "
+            "Actions: stock_price, company_info, earnings, dividends, "
+            "economic_indicator (FRED), commodity_future, fx_rate, "
+            "list_aliases. Friendly aliases (gold, silver, platinum, "
+            "palladium, copper, wti, brent, natgas_henry_hub, natgas_ttf, "
+            "corn, wheat, usdcny, eurusd, vix, sp500 ...) map to Yahoo "
+            "symbols. Save (action, args) bundles as named presets in "
+            "/admin/tool-presets so any agent or app can pull the same "
+            "configured feed by preset slug."
+        ),
         "category": "finance",
     },
     {
@@ -915,30 +926,73 @@ async def execute_tool(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Direct tool execution. Bypasses the agent loop.
+    """Direct tool execution. Bypasses the agent loop, gated by Redis.
 
-    Every call is logged in `tool_invocations` for debug + analytics so
-    the same tool being called by 50 agents and 50 SDK clients in
-    parallel is fully traceable. Tools are instantiated per-call (no
-    shared state) so direct calls do not lock or contend with agent
-    runs. CPU-heavy tools should be moved to the dedicated runtime pool
-    by `agent_runtime` — this endpoint runs inline on the api pod and is
-    appropriate for I/O-bound or sub-second tools only.
+    Every call passes through ``tool_gate.acquire()`` which enforces the
+    admin-configured cache, semaphore, rate-limit, circuit breaker and
+    daily budget. Tools are instantiated per-call (no shared state) so
+    callers do not contend. CPU-heavy work should be routed to the
+    runtime pool by setting ``pool='runtime'`` on the tool's config; the
+    api-pod path is appropriate for I/O-bound or sub-second tools.
     """
     import time
+
+    from app.core import tool_gate
     from models.tool_invocation import ToolInvocation, ToolInvocationStatus
 
     started = time.time()
+    arguments = (body or {}).get("arguments") or {}
+    config = (body or {}).get("config") or {}
+    tenant_id = str(user.tenant_id)
+
+    # Gate: cache lookup, semaphore, rate limit, circuit breaker
+    decision = await tool_gate.acquire(tool_slug, tenant_id, arguments, db)
+    if not decision.allowed:
+        await _log_invocation(
+            db,
+            user,
+            tool_slug,
+            body,
+            None,
+            started,
+            status="error",
+            error_message=decision.reason,
+        )
+        return error(f"{tool_slug}: {decision.reason}", 429)
+    if decision.cached and decision.cached_value:
+        await _log_invocation(
+            db,
+            user,
+            tool_slug,
+            body,
+            None,
+            started,
+            status="ok",
+            cache_hit=True,
+        )
+        return success(
+            {
+                "tool_slug": tool_slug,
+                "content": decision.cached_value.get("content"),
+                "metadata": {
+                    **(decision.cached_value.get("metadata") or {}),
+                    "cache_hit": True,
+                },
+                "is_error": False,
+            }
+        )
 
     try:
         from engine.agent_executor import get_tool_class
 
         cls = get_tool_class(tool_slug)
     except Exception as e:
+        await tool_gate.release(decision, tool_slug, tenant_id, ok=False)
         logger.exception("registry lookup failed: %s", e)
         return error(f"registry lookup failed: {e}", 500)
     if cls is None:
-        _log_invocation(
+        await tool_gate.release(decision, tool_slug, tenant_id, ok=False)
+        await _log_invocation(
             db,
             user,
             tool_slug,
@@ -950,24 +1004,92 @@ async def execute_tool(
         )
         return error(f"unknown tool: {tool_slug}", 404)
 
-    arguments = (body or {}).get("arguments") or {}
-    config = (body or {}).get("config") or {}
+    # Pool routing — runtime pool dispatches via Redis Streams to worker pods.
+    # Falls back to inline if the worker side isn't responding.
+    if decision.config and decision.config.pool == "runtime":
+        try:
+            from app.core import tool_worker_dispatch
+
+            worker_payload = await tool_worker_dispatch.enqueue_and_wait(
+                tool_slug,
+                tenant_id,
+                arguments,
+                config,
+                timeout_s=float(decision.config.timeout_seconds or 30),
+            )
+            is_error = bool(worker_payload.get("is_error"))
+            payload = {
+                "content": worker_payload.get("content"),
+                "metadata": {
+                    **(worker_payload.get("metadata") or {}),
+                    "via_pool": "runtime",
+                    "worker": worker_payload.get("worker"),
+                },
+            }
+            await tool_gate.release(
+                decision, tool_slug, tenant_id, ok=not is_error, result_payload=payload
+            )
+            await _log_invocation(
+                db,
+                user,
+                tool_slug,
+                body,
+                type(
+                    "R",
+                    (),
+                    {
+                        "content": payload["content"],
+                        "metadata": payload["metadata"],
+                        "is_error": is_error,
+                    },
+                )(),
+                started,
+                status="ok" if not is_error else "error",
+            )
+            return success({"tool_slug": tool_slug, **payload, "is_error": is_error})
+        except Exception as e:
+            logger.warning("runtime-pool dispatch failed (%s) — falling back inline", e)
+
+    # Try the richest constructor signature first; fall back through
+    # progressively narrower ones so tools that accept different kw sets
+    # (basic tools vs context tools like ml_model / code_asset) all work.
+    import inspect
 
     try:
-        tool = cls(
-            tenant_id=str(user.tenant_id),
-            execution_id="",
-            api_key="",
-            api_base="",
-            **config,
-        )
+        sig = inspect.signature(cls.__init__)
+        accepted = set(sig.parameters.keys()) - {"self"}
+    except (TypeError, ValueError):
+        accepted = set()
+
+    base_kwargs = {
+        "tenant_id": tenant_id,
+        "execution_id": "",
+        "agent_id": "",
+        "api_key": "",
+        "api_base": "",
+        "db_url": os.environ.get("DATABASE_URL", ""),
+    }
+    # Pass only kwargs the constructor actually accepts.
+    init_kwargs = {
+        k: v for k, v in base_kwargs.items() if not accepted or k in accepted
+    }
+    # Layer in caller-supplied config last so it can override.
+    init_kwargs.update(
+        {k: v for k, v in (config or {}).items() if not accepted or k in accepted}
+    )
+
+    try:
+        tool = cls(**init_kwargs)
     except TypeError:
-        tool = cls()
+        try:
+            tool = cls(tenant_id=tenant_id)
+        except TypeError:
+            tool = cls()
 
     try:
         result = await tool.execute(arguments)
-        await _log_invocation(db, user, tool_slug, body, result, started, status="ok")
     except Exception as e:
+        await tool_gate.release(decision, tool_slug, tenant_id, ok=False)
         logger.exception("direct tool execute failed: %s", tool_slug)
         await _log_invocation(
             db,
@@ -981,12 +1103,29 @@ async def execute_tool(
         )
         return error(f"tool {tool_slug} failed: {e}", 500)
 
+    is_error = getattr(result, "is_error", False)
+    payload = {
+        "content": getattr(result, "content", None),
+        "metadata": getattr(result, "metadata", None),
+    }
+    await tool_gate.release(
+        decision, tool_slug, tenant_id, ok=not is_error, result_payload=payload
+    )
+    await _log_invocation(
+        db,
+        user,
+        tool_slug,
+        body,
+        result,
+        started,
+        status="ok" if not is_error else "error",
+    )
+
     return success(
         {
             "tool_slug": tool_slug,
-            "content": getattr(result, "content", None),
-            "metadata": getattr(result, "metadata", None),
-            "is_error": getattr(result, "is_error", False),
+            **payload,
+            "is_error": is_error,
         }
     )
 
@@ -1001,6 +1140,7 @@ async def _log_invocation(
     *,
     status: str,
     error_message: str | None = None,
+    cache_hit: bool = False,
 ):
     import time
     from models.tool_invocation import ToolInvocation, ToolInvocationStatus

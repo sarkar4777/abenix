@@ -139,6 +139,8 @@ const NAV_GROUPS: NavGroup[] = [
       // Platform operations
       { label: 'Cluster Health',    icon: Cpu,         href: '/admin/cluster',      adminOnly: true },
       { label: 'Scaling',           icon: Gauge,       href: '/admin/scaling',      adminOnly: true },
+      { label: 'Tool Scaling',      icon: Gauge,       href: '/admin/tool-scaling', adminOnly: true },
+      { label: 'Pipeline Scaling',  icon: Gauge,       href: '/admin/pipeline-scaling', adminOnly: true },
       { label: 'Archives',          icon: Archive,     href: '/admin/archives',     adminOnly: true },
       { label: 'Model Selection',   icon: Cpu,         href: '/admin/llm-settings', adminOnly: true },
       { label: 'LLM Pricing',       icon: DollarSign,  href: '/admin/llm-pricing',  adminOnly: true },

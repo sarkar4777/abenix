@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.9.0 — 2026-05-22
+
+### Added
+- **Three-layer scaling system.** New admin screens at `/admin/tool-scaling` and `/admin/pipeline-scaling` alongside the existing `/admin/scaling`. Pipelines now compose agent + tool scaling without a separate runtime.
+- **Tool runtime gate.** Per-tool config row covers cache TTL, max-inflight (global + per-tenant), qps (global + per-tenant), circuit breaker, daily call budget, inline-vs-runtime dispatch. 15 high-traffic tools seeded with sensible defaults.
+- **Tool worker pool.** `pool='runtime'` tools dispatch through a Redis Stream (`tools:queue`) consumed by agent-runtime pods, keeping the api pod's event loop free of blocking calls.
+- **Tool presets.** Per-tenant labelled `(tool_slug, default_args)` bundles. Generic `yahoo_finance` tool extended with `commodity_future` / `fx_rate` / `list_aliases` actions plus a 26-symbol alias map. 11 system presets seeded.
+- **SDK presets client.** `forge.presets.list/get/upsert/delete/run`. Synced across all six SDK copies.
+- **Four sklearn ML models** for the example contract-intelligence app: clause classifier (TF-IDF + multinomial LR, 30 ETRM classes), risk-tier predictor (calibrated GBC, four levels), counterparty default (logistic PD), price anomaly (IsolationForest). Wired into the extractor, hedge advisor, and portfolio valuator agents.
+
+### Changed
+- `yahoo_finance` description + schema rewritten to reflect its universal-reader role.
+- Help pages on both the platform and the example app updated with the new three-layer scaling architecture, decision tree for operators, and ML-as-tool guidance.
+- `get_tool_class` in the agent executor now falls through to the context-tool factory map so `ml_model`, `code_asset`, and the memory / meeting tools are reachable via direct execute.
+- Direct-execute and preset-run paths use constructor-introspection so each tool gets only the kwargs it accepts.
+
+### Fixed
+- SDK `_get` accepts a `params=` kwarg so `presets.list` filters work.
+- Market-data registry on the example app flushes the source row before referencing its id, and rolls back on persist failure so a failure doesn't poison the request's session.
+- `redeploy --only=X` documented trap reinforced via direct image push paths.
+
 ## v1.8.0 — 2026-05-22
 
 ### Added

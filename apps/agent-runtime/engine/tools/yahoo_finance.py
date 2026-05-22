@@ -5,12 +5,53 @@ from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
+# Friendly aliases for commodities, FX, indices — keeps prompts and saved
+# presets readable. Add liberally; missing aliases fall back to the literal
+# Yahoo symbol passed by the caller.
+COMMODITY_ALIASES: dict[str, str] = {
+    # Precious metals (front-month futures)
+    "gold": "GC=F",
+    "silver": "SI=F",
+    "platinum": "PL=F",
+    "palladium": "PA=F",
+    "copper": "HG=F",
+    # Energy (front-month futures)
+    "wti": "CL=F",
+    "brent": "BZ=F",
+    "natgas_henry_hub": "NG=F",
+    "natgas_ttf": "TTF=F",
+    "heating_oil": "HO=F",
+    "rbob_gasoline": "RB=F",
+    # Agriculture
+    "corn": "ZC=F",
+    "wheat": "ZW=F",
+    "soybean": "ZS=F",
+    "coffee": "KC=F",
+    "sugar": "SB=F",
+    "cotton": "CT=F",
+    # Metals ETFs (NAV proxy for AUM/flow)
+    "etf_gld": "GLD",
+    "etf_slv": "SLV",
+    "etf_pplt": "PPLT",
+    "etf_pall": "PALL",
+    # FX
+    "usdcny": "CNY=X",
+    "usdjpy": "JPY=X",
+    "eurusd": "EURUSD=X",
+    # Equity benchmarks
+    "sp500": "^GSPC",
+    "vix": "^VIX",
+}
+
 
 class YahooFinanceTool(BaseTool):
     name = "yahoo_finance"
     description = (
-        "Get financial data: stock prices, company financials, earnings, "
-        "dividends, and economic indicators from FRED."
+        "Generic Yahoo Finance reader. One tool, every instrument: equities, "
+        "indices, futures, FX, ETFs, FRED macro series. Use action="
+        "'commodity_future' with a friendly alias (gold/silver/wti/brent/"
+        "natgas_henry_hub/natgas_ttf/copper/corn/wheat/usdcny ...) or pass any "
+        "raw Yahoo symbol. Configure per-tenant presets in /admin/tool-presets."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -24,13 +65,26 @@ class YahooFinanceTool(BaseTool):
                     "dividends",
                     "economic_indicator",
                     "market_index",
+                    "commodity_future",
+                    "fx_rate",
+                    "list_aliases",
                 ],
+                "description": (
+                    "stock_price/company_info/earnings/dividends for equities; "
+                    "economic_indicator for FRED (needs FRED_API_KEY); "
+                    "commodity_future for any commodity by alias or =F symbol; "
+                    "fx_rate for FX (alias or =X symbol); "
+                    "list_aliases returns the named-alias dictionary."
+                ),
             },
             "symbol": {
                 "type": "string",
                 "description": (
-                    "Stock ticker (e.g., 'AAPL') or FRED indicator "
-                    "(e.g., 'GDP', 'UNRATE', 'CPIAUCSL')"
+                    "Stock ticker (AAPL), FRED series (GDP, UNRATE), Yahoo "
+                    "future (CL=F, GC=F, NG=F), FX (CNY=X, EURUSD=X), or "
+                    "friendly alias (gold, wti, brent, natgas_henry_hub, "
+                    "natgas_ttf, corn, usdcny). Run action=list_aliases to "
+                    "see them all."
                 ),
             },
             "period": {
@@ -40,8 +94,15 @@ class YahooFinanceTool(BaseTool):
                     "History period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max"
                 ),
             },
+            "history_days": {
+                "type": "integer",
+                "description": (
+                    "Optional shortcut for commodity_future: window in days. "
+                    "Overrides period when set."
+                ),
+            },
         },
-        "required": ["action", "symbol"],
+        "required": ["action"],
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
@@ -49,9 +110,55 @@ class YahooFinanceTool(BaseTool):
         symbol = arguments.get("symbol", "")
         period = arguments.get("period", "1y")
 
-        if not action or not symbol:
+        if not action:
+            return ToolResult(content="Error: 'action' is required", is_error=True)
+
+        if action == "list_aliases":
+            lines = ["Named aliases (alias -> yahoo symbol):"]
+            for k, v in sorted(COMMODITY_ALIASES.items()):
+                lines.append(f"  {k:<22} -> {v}")
             return ToolResult(
-                content="Error: both 'action' and 'symbol' are required",
+                content="\n".join(lines),
+                metadata={
+                    "aliases": COMMODITY_ALIASES,
+                    "count": len(COMMODITY_ALIASES),
+                },
+            )
+
+        # Resolve friendly alias -> raw Yahoo symbol. Pass-through if unknown.
+        resolved_symbol = COMMODITY_ALIASES.get((symbol or "").lower(), symbol)
+        alias_used = symbol if symbol and symbol.lower() in COMMODITY_ALIASES else None
+
+        if action in ("commodity_future", "fx_rate"):
+            history_days = arguments.get("history_days")
+            if isinstance(history_days, int) and history_days > 0:
+                period = f"{max(history_days, 5)}d"
+            if not resolved_symbol:
+                return ToolResult(
+                    content="Error: symbol or alias required", is_error=True
+                )
+            try:
+                import yfinance as yf
+            except ImportError:
+                return ToolResult(content="yfinance not installed", is_error=True)
+            try:
+                ticker = yf.Ticker(resolved_symbol)
+                result = self._stock_price(ticker, resolved_symbol, period)
+                if alias_used:
+                    result.metadata = {
+                        **(result.metadata or {}),
+                        "alias": alias_used,
+                        "resolved_symbol": resolved_symbol,
+                    }
+                return result
+            except Exception as e:
+                return ToolResult(
+                    content=f"Yahoo error for {resolved_symbol}: {e}", is_error=True
+                )
+
+        if not symbol:
+            return ToolResult(
+                content="Error: 'symbol' is required for this action",
                 is_error=True,
             )
 

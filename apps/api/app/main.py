@@ -230,6 +230,12 @@ from app.routers import (
 
 app.include_router(memories.router)
 app.include_router(tools.router)
+
+from app.routers import tool_presets as _tool_presets_mod
+from app.routers import tool_runtime as _tool_runtime_mod
+
+app.include_router(_tool_presets_mod.router)
+app.include_router(_tool_runtime_mod.router)
 app.include_router(integrations.router)
 app.include_router(ai_builder.router)
 app.include_router(tool_library.router)
@@ -331,6 +337,30 @@ async def on_startup():
                 import logging
 
                 logging.getLogger("startup").debug("skip ddl %r: %s", ddl, _e)
+
+    # Seed system tool presets for every tenant. Idempotent; preserves
+    # user edits to existing rows (only flips is_system back on).
+    try:
+        from app.core.deps import async_session
+        from app.core.seed_tool_presets import seed_presets_for_all_tenants
+
+        async with async_session() as _seed_db:
+            await seed_presets_for_all_tenants(_seed_db)
+    except Exception as _e:
+        logging.getLogger("startup").warning("seed tool presets skipped: %s", _e)
+
+    # Seed per-tool runtime defaults (cache / semaphore / rate-limit).
+    # Idempotent: only inserts missing slugs.
+    try:
+        from app.core.deps import async_session
+        from app.core.seed_tool_runtime import seed_tool_runtime_defaults
+
+        async with async_session() as _seed_db:
+            await seed_tool_runtime_defaults(_seed_db)
+    except Exception as _e:
+        logging.getLogger("startup").warning(
+            "seed tool_runtime defaults skipped: %s", _e
+        )
 
     # Start APScheduler-based cron trigger scheduler
     from app.core.scheduler import start_scheduler

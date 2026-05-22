@@ -496,3 +496,130 @@ async def tenant_spend(
             ),
         }
     )
+
+
+def _classify_node(node: dict[str, Any]) -> dict[str, Any]:
+    """Map a raw pipeline node to its scaling routing."""
+    ntype = (node.get("type") or "").lower()
+    # legacy form: tool_name without explicit type
+    tool_slug = node.get("tool") or node.get("tool_name")
+    agent_slug = node.get("agent_slug")
+    if ntype == "agent" or agent_slug:
+        return {
+            "id": node.get("id"),
+            "kind": "agent",
+            "ref": agent_slug,
+            "where_it_runs": f"runtime_pool of agent '{agent_slug}'",
+        }
+    if ntype == "tool" or tool_slug:
+        return {
+            "id": node.get("id"),
+            "kind": "tool",
+            "ref": tool_slug or ntype,
+            "where_it_runs": "tool gate (inline api pod, or tool worker pool)",
+        }
+    if ntype in {
+        "structured",
+        "switch",
+        "loop",
+        "router",
+        "conditional",
+        "merge",
+        "transform",
+    }:
+        return {
+            "id": node.get("id"),
+            "kind": "control",
+            "ref": ntype,
+            "where_it_runs": "in-process on the pipeline's runtime pod",
+        }
+    return {
+        "id": node.get("id"),
+        "kind": "unknown",
+        "ref": ntype or tool_slug or agent_slug or "—",
+        "where_it_runs": "in-process",
+    }
+
+
+@router.get("/pipelines")
+async def list_pipelines(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Return every pipeline-mode agent with its node DAG resolved to scaling routes.
+
+    Each node carries the resolved pool / tool-config so the UI can render
+    where each piece actually runs in the cluster.
+    """
+    from models.tool_runtime_config import ToolRuntimeConfig
+
+    # All agents that have a pipeline definition (mode=pipeline OR model_config carries pipeline_config)
+    rows = (
+        (await db.execute(select(Agent).where(Agent.status != AgentStatus.ARCHIVED)))
+        .scalars()
+        .all()
+    )
+
+    # Hash of agent_slug -> scaling row (for resolving agent-type nodes)
+    agents_by_slug: dict[str, Agent] = {a.slug: a for a in rows}
+
+    # Hash of tool_slug -> runtime config row
+    tcfg_rows = (await db.execute(select(ToolRuntimeConfig))).scalars().all()
+    tcfg_by_slug = {r.slug: r for r in tcfg_rows}
+
+    out = []
+    for a in rows:
+        cfg = a.model_config_ or {}
+        pcfg = cfg.get("pipeline_config") if isinstance(cfg, dict) else None
+        nodes_raw = (pcfg or {}).get("nodes") if isinstance(pcfg, dict) else None
+        if not nodes_raw:
+            continue
+
+        resolved_nodes = []
+        for raw in nodes_raw:
+            if not isinstance(raw, dict):
+                continue
+            c = _classify_node(raw)
+            if c["kind"] == "agent":
+                child = agents_by_slug.get(c["ref"])
+                if child is not None:
+                    c["agent_runtime_pool"] = child.runtime_pool
+                    c["agent_min_replicas"] = child.min_replicas
+                    c["agent_max_replicas"] = child.max_replicas
+                    c["agent_concurrency"] = child.concurrency_per_replica
+                else:
+                    c["agent_runtime_pool"] = None
+            elif c["kind"] == "tool":
+                tcfg = tcfg_by_slug.get(c["ref"])
+                if tcfg is not None:
+                    c["tool_pool"] = tcfg.pool
+                    c["tool_cache_ttl"] = tcfg.cache_ttl_seconds
+                    c["tool_qps_global"] = tcfg.rate_limit_qps_global
+                    c["tool_inflight_global"] = tcfg.max_inflight_global
+                else:
+                    c["tool_pool"] = "inline (default)"
+            resolved_nodes.append(c)
+
+        # Count nodes by kind for the summary chip
+        kind_counts: dict[str, int] = {}
+        for n in resolved_nodes:
+            kind_counts[n["kind"]] = kind_counts.get(n["kind"], 0) + 1
+
+        out.append(
+            {
+                "id": str(a.id),
+                "slug": a.slug,
+                "name": a.name,
+                "tenant_id": str(a.tenant_id),
+                "runtime_pool": a.runtime_pool,
+                "min_replicas": a.min_replicas,
+                "max_replicas": a.max_replicas,
+                "concurrency_per_replica": a.concurrency_per_replica,
+                "node_count": len(resolved_nodes),
+                "kind_counts": kind_counts,
+                "nodes": resolved_nodes,
+            }
+        )
+
+    out.sort(key=lambda p: p["node_count"], reverse=True)
+    return success(out, meta={"count": len(out)})

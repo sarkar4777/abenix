@@ -15,6 +15,19 @@ logger = logging.getLogger("agent-runtime")
 app = FastAPI(title="Abenix Runtime", version="0.1.0")
 
 
+@app.on_event("startup")
+async def _start_tool_consumer():
+    import asyncio
+
+    try:
+        from tool_stream_consumer import consumer_loop
+
+        asyncio.create_task(consumer_loop())
+        logger.info("tool_stream_consumer task launched")
+    except Exception as e:
+        logger.warning("could not start tool stream consumer: %s", e)
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "agent-runtime"}

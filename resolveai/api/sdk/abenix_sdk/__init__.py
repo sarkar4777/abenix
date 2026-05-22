@@ -202,6 +202,85 @@ class ToolsClient:
         return (res.json() or {}).get("data") or {}
 
 
+class PresetsClient:
+    """Per-tenant labelled (tool, default_args) bundles.
+
+    Presets sit between the universal tool catalogue and end users. One
+    generic ``yahoo_finance`` tool covers every instrument — but a preset
+    named ``lbma_gold_fix`` pins ``{action: commodity_future, symbol:
+    gold}`` so dashboards, agents, and SDK callers all share the same
+    configured feed by a single slug. Agents that have access to the
+    underlying tool automatically see the preset.
+    """
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def list(
+        self,
+        *,
+        tool_slug: str | None = None,
+        ui_group: str | None = None,
+        asset_class: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params = {
+            k: v
+            for k, v in {
+                "tool_slug": tool_slug,
+                "ui_group": ui_group,
+                "asset_class": asset_class,
+            }.items()
+            if v
+        }
+        data = await self._client._get("/api/tool-presets", params=params)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("data") or []
+        return []
+
+    async def get(self, slug: str) -> dict[str, Any]:
+        data = await self._client._get(f"/api/tool-presets/{slug}")
+        return data if isinstance(data, dict) else {}
+
+    async def upsert(self, body: dict[str, Any]) -> dict[str, Any]:
+        res = await self._client._http.post(
+            "/api/tool-presets",
+            json=body,
+            headers=self._client._subject_headers(),
+            timeout=self._client.timeout,
+        )
+        res.raise_for_status()
+        return (res.json() or {}).get("data") or {}
+
+    async def delete(self, slug: str) -> dict[str, Any]:
+        res = await self._client._http.delete(
+            f"/api/tool-presets/{slug}",
+            headers=self._client._subject_headers(),
+            timeout=self._client.timeout,
+        )
+        res.raise_for_status()
+        return (res.json() or {}).get("data") or {}
+
+    async def run(
+        self,
+        slug: str,
+        arguments: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        body = {"arguments": arguments or {}, "config": config or {}}
+        res = await self._client._http.post(
+            f"/api/tool-presets/{slug}/run",
+            json=body,
+            headers=self._client._subject_headers(),
+            timeout=timeout or self._client.timeout,
+        )
+        res.raise_for_status()
+        return (res.json() or {}).get("data") or {}
+
+
 class ApprovalsClient:
     """First-class HITL surface — list, get, sign off, and wait on approvals.
 
@@ -586,6 +665,7 @@ class Abenix:
         self.chat = ChatClient(self)
         self.approvals = ApprovalsClient(self)
         self.tools = ToolsClient(self)
+        self.presets = PresetsClient(self)
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
@@ -835,8 +915,8 @@ class Abenix:
     async def __aexit__(self, *args: Any) -> None:
         await self.close()
 
-    async def _get(self, path: str) -> Any:
-        res = await self._http.get(path)
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        res = await self._http.get(path, params=params or None)
         res.raise_for_status()
         return res.json().get("data")
 

@@ -50,6 +50,8 @@ from models.webhook_delivery import WebhookDelivery
 from models.pipeline_state import PipelineState
 from models.drift_alert import DriftAlert
 from models.saved_tool import SavedTool
+from models.tool_preset import ToolPreset
+from models.tool_runtime_config import ToolRuntimeConfig
 from models.ml_model import (
     MLModel,
     MLModelFramework,
@@ -158,6 +160,8 @@ __all__ = [
     "PipelineState",
     "DriftAlert",
     "SavedTool",
+    "ToolPreset",
+    "ToolRuntimeConfig",
     "Meeting",
     "MeetingDeferral",
     "MeetingProvider",

@@ -67,6 +67,16 @@ Token cost typically drops **5–10×** because agents read curated evidence, no
 
 Every agent has its own pod pool, KEDA queue-depth scaler, NATS subject, budget cap, and telemetry channel. Flip `dedicated_mode = true` and a single agent gets its own Deployment + ScaledObject. The `/admin/scaling` page projects shared / dedicated / peak cost before you flip.
 
+**Three scaling layers** — three admin screens, no overlap:
+
+| Layer | Bottleneck it solves | Admin UI |
+|---|---|---|
+| 1. Agents + pods | "the api pod is doing too much agent work" | `/admin/scaling` — per-agent `runtime_pool`, replicas, qps, daily-$-budget |
+| 2. Tools | "50 callers each hit Yahoo at the same time" | `/admin/tool-scaling` — per-tool cache, semaphore, qps, breaker, daily call-budget, `inline` vs `runtime` dispatch |
+| 3. Pipelines | "which node in this 10-step pipeline is slow?" | `/admin/pipeline-scaling` — DAG view, every node resolved to its pool / tool / control class |
+
+Pipelines don't have their own runtime — they compose Layer 1 (agent nodes route to their own pool) and Layer 2 (tool nodes go through the gate). Full architecture in [`docs/02-runtime/08-queue-scaling.md`](docs/02-runtime/08-queue-scaling.md).
+
 n8n / Zapier / LangGraph are excellent when the problem is *integration-shaped* — "Salesforce row changed, drop a Slack message." Abenix earns its place when the problem is *agent-shaped*: long-running reasoning, shared knowledge, audit-grade traceability, and isolation per tenant under load.
 
 ### 3. Real multi-tenancy + actAs delegation

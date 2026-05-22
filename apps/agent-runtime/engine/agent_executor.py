@@ -1000,14 +1000,24 @@ _CONTEXT_TOOL_FACTORIES: dict[str, Any] = {}
 
 
 def get_tool_class(slug: str) -> type | None:
-    """Public registry lookup. Used by the direct-execute API."""
+    """Public registry lookup. Used by the direct-execute API.
+
+    Falls through to the context-tool factory map so tools that need
+    constructor args (ml_model, code_asset, memory_*, meeting_*) are
+    still reachable via /api/tools/{slug}/execute. The direct-execute
+    caller passes tenant_id + execution_id which satisfies those
+    constructors.
+    """
     _ensure_tool_classes()
-    return _TOOL_CLASSES.get(slug)
+    cls = _TOOL_CLASSES.get(slug)
+    if cls is not None:
+        return cls
+    return _CONTEXT_TOOL_FACTORIES.get(slug)
 
 
 def list_tool_classes() -> list[str]:
     _ensure_tool_classes()
-    return sorted(_TOOL_CLASSES.keys())
+    return sorted(list(_TOOL_CLASSES.keys()) + list(_CONTEXT_TOOL_FACTORIES.keys()))
 
 
 def _ensure_tool_classes() -> None:

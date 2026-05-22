@@ -1390,6 +1390,63 @@ spec:
         ),
       },
       {
+        id: 'scaling-three-layers',
+        title: 'Three scaling layers (agents · tools · pipelines)',
+        icon: <Gauge className="w-4 h-4" />,
+        badge: 'Architecture',
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p>The runtime pool above is only <em>one</em> of three concentric scaling layers. Each addresses a different way the platform can get swamped, and each has its own admin UI. They <strong>compose</strong> — you don&apos;t need a separate "pipelines" runtime, because pipelines re-use agent + tool scaling underneath.</p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-[12.5px]">
+              <div className="rounded-lg border border-violet-700/40 bg-violet-900/15 p-3">
+                <div className="text-violet-300 font-semibold mb-1">Layer 1 — Agents + pods</div>
+                <div className="text-slate-400 mb-2"><a href="/admin/scaling" className="text-violet-300 underline">/admin/scaling</a></div>
+                <p className="text-slate-300 mb-2">Per-agent <code>runtime_pool</code>, <code>min_replicas</code>, <code>max_replicas</code>, <code>concurrency_per_replica</code>, <code>rate_limit_qps</code>, <code>daily_budget_usd</code>.</p>
+                <p className="text-slate-400 text-[11.5px]">Stops the api pod from doing agent work itself. KEDA scales the four pool deployments on Redis stream depth.</p>
+              </div>
+              <div className="rounded-lg border border-cyan-700/40 bg-cyan-900/15 p-3">
+                <div className="text-cyan-300 font-semibold mb-1">Layer 2 — Tools</div>
+                <div className="text-slate-400 mb-2"><a href="/admin/tool-scaling" className="text-cyan-300 underline">/admin/tool-scaling</a></div>
+                <p className="text-slate-300 mb-2">Per-tool gate: <strong>cache</strong> → <strong>breaker</strong> → <strong>qps</strong> (global + per-tenant) → <strong>daily budget</strong> → <strong>semaphore</strong>. Plus <code>pool=inline|runtime</code>.</p>
+                <p className="text-slate-400 text-[11.5px]">Stops 50 callers from each calling Yahoo at once. <code>pool=runtime</code> pushes execution onto the agent-runtime fleet so api pods don&apos;t block.</p>
+              </div>
+              <div className="rounded-lg border border-emerald-700/40 bg-emerald-900/15 p-3">
+                <div className="text-emerald-300 font-semibold mb-1">Layer 3 — Pipelines</div>
+                <div className="text-slate-400 mb-2"><a href="/admin/pipeline-scaling" className="text-emerald-300 underline">/admin/pipeline-scaling</a></div>
+                <p className="text-slate-300 mb-2">Pure composition. No new primitives. The pipeline pod lives in Layer 1. Agent nodes route to Layer 1. Tool nodes go through Layer 2. Control nodes run in-process.</p>
+                <p className="text-slate-400 text-[11.5px]">Drill into any pipeline&apos;s DAG to see exactly which pool / cache / qps each node uses.</p>
+              </div>
+            </div>
+
+            <h4 className="text-white font-semibold pt-3">The tool gate (Layer 2) — order of checks</h4>
+            <ol className="list-decimal pl-5 space-y-1 text-[13px]">
+              <li><strong>Cache lookup</strong> — SHA-256 of canonical args. Scope <code>global</code> for public data, <code>per_tenant</code> for private. TTL=0 disables.</li>
+              <li><strong>Circuit breaker</strong> — opens after N failures in window. Goes half-open after the cooldown.</li>
+              <li><strong>Rate limit</strong> — Redis token bucket. The <code>(global)</code> and <code>(per-tenant)</code> caps are applied in sequence.</li>
+              <li><strong>Daily budget</strong> — per-tenant Redis counter, resets at UTC midnight.</li>
+              <li><strong>Semaphore</strong> — Redis INCR with TTL longer than the tool timeout. Global + per-tenant inflight caps.</li>
+            </ol>
+            <p className="text-[12.5px] text-slate-400">Fails open on Redis errors so an outage doesn&apos;t take the platform down. Every <code>POST /api/tools/&#123;slug&#125;/execute</code>, every preset run, every agent-loop tool call goes through the same function.</p>
+
+            <h4 className="text-white font-semibold pt-3">Pool dispatch — when <code>pool=&apos;runtime&apos;</code></h4>
+            <p>The api pod doesn&apos;t execute the tool. It XADDs <code>tools:queue</code> with a per-job result channel, then SUBSCRIBEs and awaits the reply. Agent-runtime pods run <code>tool_stream_consumer.py</code> as a background task — KEDA capacity provisioned for agents is reused for tools without a separate deployment.</p>
+
+            <h4 className="text-white font-semibold pt-3">Decision tree for an incident</h4>
+            <ol className="list-decimal pl-5 space-y-1 text-[13px]">
+              <li><strong>Open <a href="/admin/scaling" className="text-violet-300 underline">/admin/scaling</a>.</strong> Is the pool pinned at max replicas? Move the loud agent to a less-contested pool or raise its <code>max_replicas</code>.</li>
+              <li><strong>Open <a href="/admin/tool-scaling" className="text-cyan-300 underline">/admin/tool-scaling</a>.</strong> Any tool with red breaker dot or many 24h calls? Raise its qps (if external can take it) or its cache TTL.</li>
+              <li><strong>Open <a href="/admin/pipeline-scaling" className="text-emerald-300 underline">/admin/pipeline-scaling</a>.</strong> Expand the slow pipeline. The slow node is either an agent (go to step 1) or a tool (step 2). Control nodes don&apos;t scale separately.</li>
+              <li>Only after all three show green: it&apos;s the external provider. Add a breaker and an alert.</li>
+            </ol>
+
+            <Callout tone="info">
+              Full dev-doc reference: <a href="/dev-docs/02-runtime/08-queue-scaling" className="text-cyan-300 underline">02-runtime/08-queue-scaling</a>.
+            </Callout>
+          </div>
+        ),
+      },
+      {
         id: 'scaling-postgres',
         title: 'Postgres scaling',
         icon: <Database className="w-4 h-4" />,

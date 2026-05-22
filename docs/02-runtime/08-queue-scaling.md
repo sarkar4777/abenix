@@ -291,3 +291,119 @@ Never just raise `max_replicas` blindly. The next bottleneck (database connectio
 - [00-agent-execution](00-agent-execution.md) — what happens inside a runtime pool when a message lands
 - [06-agent-to-agent](06-agent-to-agent.md) — multi-agent flows that stay within one pool
 - [04-streaming-tracing](04-streaming-tracing.md) — how events flow back through SSE
+
+---
+
+## Three scaling layers (the whole picture)
+
+Pool routing + KEDA above only solves *one* of the three bottlenecks. The complete scaling story has three concentric layers. Each addresses a different way the platform can get swamped, and each has its own admin UI.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Layer 1 — AGENT + POD SCALING                /admin/scaling     │
+│                                                                  │
+│  • per-agent runtime_pool, replicas, qps, daily_budget_usd      │
+│  • 4 deployments (default/chat/heavy/long-running)               │
+│  • KEDA watches Redis stream depth, scales pods 0..max_replicas │
+│  ▼ what stops the api pod from doing agent work itself           │
+└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  Layer 2 — TOOL SCALING                  /admin/tool-scaling    │
+│                                                                  │
+│  Tool Gate (Redis-backed, fail-open):                            │
+│    cache lookup → breaker check → qps (global + per-tenant)      │
+│    → daily budget → semaphore (global + per-tenant)              │
+│                                                                  │
+│  • per-tool ToolRuntimeConfig row (15 seeded defaults)           │
+│  • pool='inline'  → runs on api pod (sub-second tools only)      │
+│  • pool='runtime' → XADDs tools:queue, agent-runtime pods consume│
+│  ▼ what stops 50 callers from each calling Yahoo at once         │
+└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  Layer 3 — PIPELINE SCALING          /admin/pipeline-scaling    │
+│                                                                  │
+│  Pipelines compose layers 1 + 2. No new primitives.              │
+│  Pipeline itself runs on its own runtime_pool (Layer 1).         │
+│  Tool nodes inside the pipeline use the gate (Layer 2).          │
+│  Agent nodes inside the pipeline enqueue back to Layer 1.        │
+│  Control nodes (switch/loop/structured) run in-process on the    │
+│    pipeline's pod — no separate scaling.                         │
+│  ▼ what makes a 10-node pipeline composable instead of monolithic│
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Why three layers and not one
+
+One layer can't solve all three problems because they manifest at different scopes:
+
+| Bottleneck | Scope | Fix lives at |
+|---|---|---|
+| Pod CPU pegged running 100 agent loops in parallel | per pool | agent runtime_pool + KEDA |
+| External API (Yahoo, Tavily) returns 429 because 50 callers slammed it at once | per tool, org-wide | tool gate qps + cache |
+| One noisy tenant eating Yahoo's budget | per tool, per tenant | tool gate `*_per_tenant` |
+| Cold start latency for chat agents | per pool | min_replicas on chat pool |
+| Same gold-price fetched 150 times in 1s by 150 different callers | per (tool, args) | cache TTL |
+| External API outage → 50 callers all hang for 15s waiting | per tool | circuit breaker |
+| Pipeline node N is slow because its underlying tool is throttled | composed | edit Layer 2 and the pipeline picks it up automatically |
+
+### The tool gate (Layer 2) — in detail
+
+Every direct `tools/{slug}/execute`, every preset run, every agent-loop tool call passes through one function: `app.core.tool_gate.acquire()`. It returns one of:
+
+- **ALLOW_CACHED** — cached result. Tool never runs.
+- **ALLOW** — caller must run the tool, then call `release()` to return the semaphore
+- **DENY** — `reason` string the caller surfaces as a 429
+
+Order of checks (fail-open if Redis is down):
+
+1. **Cache lookup** — SHA-256 hash of canonical (sorted) `arguments`. Scope `global` for public data (LBMA gold, USDCNY), `per_tenant` for private (sanctions match). `cache_ttl_seconds = 0` disables.
+2. **Circuit breaker** — open after `circuit_breaker_threshold` failures in `circuit_breaker_window_s`. Half-open after `circuit_breaker_cooldown_s`. One success closes it.
+3. **Rate limit** — token bucket per `(tool, global)` and `(tool, tenant)`. Refill = qps, capacity = qps.
+4. **Daily budget** — Redis counter per `(tool, tenant, UTC-date)`, resets at midnight.
+5. **Semaphore** — Redis `INCR` with a TTL longer than the tool's timeout. Bounded global + per-tenant inflight cap.
+
+Successful execution caches the result and calls `release()`. Failures record into the breaker's failure window.
+
+### Pool dispatch (`pool='runtime'`)
+
+When `ToolRuntimeConfig.pool = 'runtime'`, the api pod does NOT execute the tool inline. It:
+
+1. XADDs a job onto `tools:queue` with `{job_id, tool_slug, tenant_id, arguments, config, result_channel}`
+2. SUBSCRIBEs to `tools:result:{job_id}`
+3. Awaits the worker's reply (timeout = `timeout_seconds`)
+
+Agent-runtime pods (every replica of every pool) run a co-loop in `apps/agent-runtime/tool_stream_consumer.py` that `XREADGROUP`s from `tools:queue`, instantiates the tool, runs it, publishes the result on the per-job channel. KEDA already scales agent-runtime pods on agent queue depth — that capacity is reused for tool work without a separate deployment.
+
+This keeps the api pod's event loop free of blocking tool calls, which is the gap the semaphore alone couldn't close.
+
+### Pipeline composition (Layer 3) — example
+
+```yaml
+slug: iot-pump-pipeline
+mode: pipeline
+runtime_pool: default          # <- Layer 1: where the pipeline pod lives
+pipeline_config:
+  nodes:
+    - id: timestamp
+      type: tool
+      tool: current_time       # <- Layer 2: inline (sub-ms)
+    - id: dsp
+      type: tool
+      tool: code_asset         # <- Layer 2: runtime (pool='runtime')
+    - id: diagnose
+      type: agent
+      agent_slug: iot-diagnoser # <- Layer 1: enqueues to that agent's pool
+    - id: report
+      type: structured         # <- Control: in-process on pipeline pod
+```
+
+When this pipeline runs, the pipeline pod (in the `default` runtime pool) iterates its nodes. `timestamp` is a sub-ms inline tool call. `dsp` goes through the gate, lands on `tools:queue`, an agent-runtime pod picks it up and runs the user's uploaded code. `diagnose` enqueues to whatever pool the `iot-diagnoser` agent is configured for — possibly `heavy-reasoning`. `report` is a structured-output node, runs in-process. **No new infrastructure** — every primitive already existed.
+
+### Decision tree for operators
+
+If users report slow responses, run through this in order:
+
+1. **Open `/admin/scaling`.** Is the relevant pool's replica count pinned at max? If yes → raise `max_replicas` on the loud agent, or move it to a less-contested pool.
+2. **Open `/admin/tool-scaling`.** Any tool showing many 24h calls with red circuit-breaker dot? That's where the latency is. Bump qps if the external provider can handle it, or raise cache TTL if results are reusable.
+3. **Open `/admin/pipeline-scaling`.** Expand the slow pipeline. Which node is the bottleneck? Tool node → fix in step 2. Agent node → fix in step 1. Control node → it's not the scaling, it's the logic. Profile the pipeline executor.
+4. Only after all three show green: it's the external dependency. Add a circuit breaker (Layer 2) and an SLO alert.
