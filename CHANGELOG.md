@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.7.0 — 2026-05-22
+
+### Added
+
+- **Precious Metals module for the contract intelligence app**. Six new agent-backed modules for refiner-grade contract intelligence: metals extractor (35+ fields), compliance auditor (16-item industry checklist covering LBMA Good Delivery + RGG, LPPM, OECD DDG, RJC, Dodd-Frank §1502, EU 2017/821, ISO 9001/14001/22368, Swiss PMCA, HMRC Notice 701/14, REACH, sanctions), dispute risk scorer (assay × weight × brand × late-delivery × sanctioned-origin → expected $ loss), loco + delivery analyzer (Zurich/London/NY/Shanghai premium + insurance + customs + chain of integrity), responsible sourcing tracker (OECD 5-step + RGG 5-step + RJC CoC evidence map with audit-readiness scoring), and refiner counterparty watch (LBMA + LPPM Good Delivery list status, OFAC SDN, audit-date tracking, diff alerts).
+- **Features Tour page** for the contract intelligence app at `/features` documenting every module: foundation (upload, extract, deep-extract, clause library), daily operations (briefing, renewals, force majeure, reconciliation), risk + compliance (anomalies, stress test, hedge ideas, counterparty risk, KYC), portfolio intelligence (deal clusters, families, valuation, benchmarks), markets + insight (market, simulations, timeline, version diff, compare, chat), and the new precious metals modules. Every entry lists the backing agent, inputs, outputs, how-it-works steps, and applicable industry standards.
+- **Deep Extract UI button** on the contract detail page. The 100+ field deep extractor was already wired in the API but had no UI entry point; now surfaced inline next to the standard extract action.
+- **Two sample precious-metals contracts** under the contract app's test-contracts/ folder — a doré intake long-form (mine → refiner, loco Zurich, TC/RC pricing, OECD + RGG + Swiss PMCA) and an investment-bar sale-and-purchase agreement (1 kg and 100 g cast bars, .9999 fineness, loco Zurich, HMRC investment-gold VAT, OFAC clauses).
+- **E2E spec** covering the full precious-metals flow: register → upload → standard extract → metals extract → compliance audit → dispute risk score → UI render of `/features` and `/metals`.
+
+### Changed
+
+- Contract-app sidebar reorganised — new Precious Metals group with sub-navigation, and a Features Tour link in the Tools group.
+
+### Fixed
+
+- Deep-extract feature is now reachable from the UI (was a backend-only feature on prior releases).
+
 ## v1.6.0 — 2026-05-20
 
 ### Added
