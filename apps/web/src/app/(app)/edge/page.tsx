@@ -241,6 +241,69 @@ export default function EdgePage() {
           </button>
         </section>
 
+        <details className="rounded-lg border border-slate-700/50 bg-slate-800/30 p-4">
+          <summary className="text-sm font-semibold text-slate-200 cursor-pointer">
+            Step 0 — What software do I need on the gateway box?
+          </summary>
+          <div className="mt-3 space-y-3 text-xs text-slate-300">
+            <p>Three tiers. Pick by hardware. All three end up registered identically.</p>
+            <table className="w-full text-[11.5px] border border-slate-700/40 rounded">
+              <thead className="bg-slate-900/60 text-slate-400 uppercase">
+                <tr>
+                  <th className="text-left px-2 py-1">Tier</th>
+                  <th className="text-left px-2 py-1">When</th>
+                  <th className="text-left px-2 py-1">Install on the box</th>
+                  <th className="text-left px-2 py-1">RAM</th>
+                  <th className="text-left px-2 py-1">Disk</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t border-slate-800">
+                  <td className="px-2 py-1 text-cyan-300">K8s (helm)</td>
+                  <td className="px-2 py-1">Plant has k3s/k0s fleet, log aggregation</td>
+                  <td className="px-2 py-1 font-mono">k3s + helm</td>
+                  <td className="px-2 py-1">1 GB</td>
+                  <td className="px-2 py-1">4 GB</td>
+                </tr>
+                <tr className="border-t border-slate-800">
+                  <td className="px-2 py-1 text-orange-300">Docker</td>
+                  <td className="px-2 py-1">Single industrial PC, NUC, Jetson</td>
+                  <td className="px-2 py-1 font-mono">docker 20.10+</td>
+                  <td className="px-2 py-1">512 MB</td>
+                  <td className="px-2 py-1">1 GB</td>
+                </tr>
+                <tr className="border-t border-slate-800">
+                  <td className="px-2 py-1 text-slate-300">Bare metal</td>
+                  <td className="px-2 py-1">PLCs, OpenWRT, Cortex-M, &lt;256 MB RAM boxes</td>
+                  <td className="px-2 py-1 font-mono">Rust/C static binary + (optional) systemd</td>
+                  <td className="px-2 py-1">32-64 MB</td>
+                  <td className="px-2 py-1">5-50 MB</td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="text-slate-400 mb-1">Quick install — k3s + helm (Tier 1):</div>
+                <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[10.5px] text-emerald-300 overflow-x-auto">{`curl -sfL https://get.k3s.io | sh -
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash`}</pre>
+              </div>
+              <div>
+                <div className="text-slate-400 mb-1">Quick install — docker only (Tier 2):</div>
+                <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[10.5px] text-emerald-300 overflow-x-auto">{`curl -fsSL https://get.docker.com | sh`}</pre>
+              </div>
+            </div>
+            <p className="text-slate-400">
+              <strong>Network:</strong> outbound TCP 443/8000 to the platform. Optional TCP 1883 for MQTT (falls back to HTTP push). <strong>Not needed:</strong> Python on the box (Rust/C are static), Neo4j, Postgres, GPU drivers. The runtime uses local SQLite only.
+            </p>
+            <p className="text-slate-400">
+              <strong>Optional:</strong> Mosquitto for plant MQTT bus, Ollama for local LLM (air-gapped sites), Chrony for clock sync (bundle signature has a 1h <code className="bg-slate-800 px-1 rounded">issued_at</code> skew tolerance — drift past that rejects bundles).
+            </p>
+            <p className="text-[11px] text-slate-500">
+              Full prereq matrix + add-ons + Helm/Docker/systemd snippets: <a href="/dev-docs/06-deployment/05-edge-runtime" className="text-cyan-300 underline">dev-docs &rarr; 06-deployment / 05-edge-runtime</a>.
+            </p>
+          </div>
+        </details>
+
         {tokenModal && (
           <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setTokenModal(null)}>
             <div className="bg-slate-900 border border-cyan-700/50 rounded-lg max-w-3xl w-full p-5" onClick={(e) => e.stopPropagation()}>

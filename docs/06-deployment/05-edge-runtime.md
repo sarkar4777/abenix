@@ -134,6 +134,66 @@ Every edge runtime pod (Python, Rust, or C) consumes three credentials. None of 
 - **`LOCAL_LLM_URL`** — when set (e.g. `http://ollama:11434/v1`), the runtime routes LLM calls to that endpoint. Use for air-gapped sites, regulated jurisdictions, or where bandwidth makes cloud LLM impractical. Models pinned per-agent via `model_config.model: ollama/qwen2.5:7b` in the agent YAML.
 - **Tool-only agents** — if the agent's pipeline only uses `code_executor`, `mqtt_publish`, `windowed_state`, etc. (no LLM step), neither key is required. The Rust runtime's IoT pump classifier is a good example.
 
+## Gateway prerequisites — what to install on the plant box
+
+Pick a tier by hardware class. All three end up registered with the platform identically.
+
+### Tier 1 — Kubernetes-managed (production default)
+
+| | Minimum |
+|---|---|
+| OS | Ubuntu 22.04+, Debian 12+, RHEL 9+, or Talos |
+| RAM | 1 GB free |
+| Disk | 4 GB free |
+| Kubernetes | k3s (recommended), k0s, microk8s, or upstream k8s |
+| Helm | v3.12+ |
+| Outbound network | TCP 443/8000 to the platform. TCP 1883 to platform MQTT optional (falls back to HTTP push). |
+
+Install:
+```bash
+curl -sfL https://get.k3s.io | sh -
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
+### Tier 2 — Docker-managed (single-box gateways)
+
+| | Minimum |
+|---|---|
+| OS | Same as Tier 1 |
+| RAM | 512 MB free |
+| Disk | 1 GB free |
+| Docker | 20.10+ (or Podman 4.x — the runtime image is OCI-standard) |
+
+Install:
+```bash
+curl -fsSL https://get.docker.com | sh
+```
+
+### Tier 3 — Bare metal / static binary (constrained gateways)
+
+Rust or C variant only. No container engine needed.
+
+| | Minimum |
+|---|---|
+| OS | musl-libc Linux (Alpine, Buildroot, OpenWRT) or glibc Linux |
+| RAM | 64 MB (Rust) / 32 MB (C) |
+| Disk | 50 MB (Rust) / 5 MB (C) |
+| systemd | optional, for auto-restart |
+
+### What is NOT needed on the gateway
+
+- No Python on the box if you use Rust or C (both are fully static).
+- No Neo4j or Postgres on the gateway — those live in the cloud. The runtime uses local SQLite only.
+- No GPU drivers unless an agent pins a GPU-bound local model.
+
+### Optional add-ons (any tier)
+
+| Add-on | When | Install |
+|---|---|---|
+| Mosquitto MQTT broker | The agent uses mqtt_publish/subscribe to talk to PLCs on a plant MQTT bus | `apt install mosquitto mosquitto-clients` |
+| Ollama (local LLM) | Air-gapped sites or data-residency regs | `curl -fsSL https://ollama.com/install.sh \| sh` then `ollama pull qwen2.5:7b`. Set `LOCAL_LLM_URL=http://localhost:11434/v1`. |
+| Chrony / NTP | Bundle signature verification has a 1h issued_at skew tolerance — clock drift beyond that rejects bundles | `apt install chrony` |
+
 ## Bootstrapping a new edge node
 
 1. **Provision the node** — install Docker / K3s / native binary depending on variant.
