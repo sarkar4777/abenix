@@ -177,6 +177,56 @@ volumeClaimTemplates:
 
 The standalone apps share a single PVC (`shared-data`) via `hostPath` for the file-backed cache. In AKS this becomes an Azure-Files SMB mount — see [04-data-stores](../01-architecture/04-data-stores.md#azure-files-smb-trap).
 
+### `sharedData.usePVC` — single-node vs multi-node `/data`
+
+The api / worker / agent-runtime pods all need to read+write a shared `/data` directory for uploads, exports, code-asset caches, and ML model pickles. The helm chart supports two modes:
+
+| Mode | Set with | When to use | Failure mode if wrong |
+|---|---|---|---|
+| `hostPath` | `sharedData.usePVC: false` (default in `values.yaml`) | Single-node clusters: minikube, k3d, k3s on one box | On multi-node AKS / EKS, the api on node-A writes to `/var/lib/abenix/data` on node-A. The worker on node-B reads `/var/lib/abenix/data` on node-B — empty. Uploads vanish from the worker's view. |
+| RWX PVC | `sharedData.usePVC: true` + `sharedData.storageClass: azurefile-csi` (set in `values-azure.yaml`) | Multi-node AKS, EKS, GKE — production | Requires the storage class to actually be RWX. `azurefile-csi` is. `managed-premium` is RWO and will fail to mount on the second pod. |
+
+`values-azure.yaml` enables the PVC mode. `values.yaml` keeps the hostPath default so local minikube works without an RWX provider. Any other multi-node target (EKS, GKE, on-prem) needs its own overlay enabling `sharedData.usePVC` with the right RWX class (`efs-sc` on EKS, `filestore.csi.storage.gke.io` on GKE, NFS subdir provisioner elsewhere).
+
+### PVC sizing — back-of-envelope formulas
+
+| PVC | Growth driver | Formula | At typical scale |
+|---|---|---|---|
+| `postgres-data` | `executions` table (hypertable, TimescaleDB-compressed after 7d) | ~500B raw + ~80B compressed per execution | 100k exec/day → 50MB/day raw → 8MB/day compressed → 100Gi = ~30 years of compressed history |
+| `neo4j-data` | extracted entities + relationships in `atlas_*` graphs | ~5KB per entity + ~1KB per relationship | KB of 10k docs → ~30k entities + ~80k rels → ~50MB → 50Gi accommodates 100+ KBs of that size |
+| `tempo-data` | trace spans, retention 14d default | ~2KB per span, ~30 spans per agent execution | 100k exec/day × 30 × 2KB × 14d = ~85GB → 50Gi tight, 100Gi safer for that scale |
+| `prometheus-data` | metric samples, retention 15d | bin-packed ~1.3 bytes/sample, ~2k active series → ~7GB/15d | 50Gi has headroom for 2-3x metric count growth |
+| `nats-data` | JetStream `agents` stream (capped at 1M messages) | ~1KB per message → ~1GB max | 20Gi has comfortable safety margin |
+| `shared-data` (azurefile-csi) | KB uploads, code-asset packs, model pickles | depends on uploads | 20Gi default. Bump to 100Gi+ if customers upload large PDFs at scale. |
+| `ml-models-storage` | one pickle per registered model | most pickles 1-10MB, IsolationForest models 2-5MB | 10Gi fits ~1000 models comfortably |
+
+### Resizing a running PVC
+
+PVC resize is supported on AKS (managed-premium, azurefile-csi), EKS (gp2, gp3, efs), and GKE (pd-standard, pd-ssd, filestore). The helm chart's `storageSize` field is honored on upgrade.
+
+1. Edit the value: `helm upgrade ... --set postgres.persistence.size=200Gi`.
+2. K8s sets `pvc.spec.resources.requests.storage`. Provisioner expands the underlying disk.
+3. For RWX PVCs (shared-data, ml-models): immediate — pods see the larger filesystem after a `df` refresh, no restart.
+4. For RWO PVCs (postgres, neo4j): expansion requires a pod restart. For StatefulSets that means a rolling restart of the single replica (so brief downtime). Take a backup first.
+
+### Azure Files SMB workarounds for code that writes to `/data`
+
+Azure Files is RWX but mounted via SMB. Two operations that succeed silently on local disk fail on SMB: `chmod` (changes permissions) and `utime` (sets access/modify time). Python's `shutil.copy` and `shutil.copy2` call both of these internally, which causes them to raise `OperationNotPermitted` on every write to `/data` in AKS.
+
+**Rule:** when writing files to anywhere under `/data`, use `shutil.copyfile` (bytes-only) or direct `open(...).write(...)` calls. Never `copy` or `copy2`. The seed scripts (`seed_ml_models.py`, `seed_code_assets.py`) follow this — keep new code consistent.
+
+If you need to detect SMB at runtime: `os.statvfs("/data").f_fsid` returns the filesystem ID; on SMB this is the network mount identifier and you can branch off it. In practice we just unconditionally avoid the metadata operations.
+
+### Backup strategy
+
+| PVC | Strategy | RPO |
+|---|---|---|
+| postgres | WAL streaming to S3/Blob via pgBackRest sidecar. **Do not rely on PVC snapshots** — Postgres can be mid-write when the snapshot fires, leaving an unrecoverable image. | 60s |
+| neo4j | Nightly `neo4j-admin database dump` to S3/Blob via a CronJob. Atlas data is rebuildable from KB + Postgres in the worst case. | 24h |
+| shared-data | Rebuilt on-demand: code assets come from git/zip, ML models come from `aimodels/`. Treat as ephemeral. No backup. | n/a (rebuildable) |
+| nats-data | Ephemeral — JetStream history is short-lived. Postgres is the source of truth for executions. No backup. | n/a |
+| tempo, prometheus | Retention is bounded (15d), data is observability-only. Snapshot if you want trace replay, otherwise let it roll. | n/a |
+
 ---
 
 ## RBAC (in-cluster)

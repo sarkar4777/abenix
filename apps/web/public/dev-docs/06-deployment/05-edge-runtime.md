@@ -49,6 +49,21 @@ flowchart TB
 
 Source: [`apps/edge-runtime/`](../../apps/edge-runtime/), [`apps/edge-runtime-rust/`](../../apps/edge-runtime-rust/), [`apps/edge-runtime-c/`](../../apps/edge-runtime-c/).
 
+### Picking a runtime — decision matrix
+
+| Aspect | Python | Rust | C |
+|---|---|---|---|
+| **Build time** (clean) | <1s if image cached, ~2min cold | ~5min (cargo + linker) | ~10min (cross-compile + embedded toolchain) |
+| **Cold-start latency** (pod ready → first event) | ~8s | <100ms | <10ms |
+| **Steady-state RAM** | 150MB baseline + ~10MB per cached agent | ~25MB total + ~1MB per agent | ~3MB total + ~10KB per agent |
+| **Bundle overhead** (per agent in cache) | ~50KB | ~10KB | ~10KB inline |
+| **Max concurrent agents** | 1-10 (Python GIL + per-agent state) | 1-20 (Tokio async) | 1 (single-threaded by design) |
+| **Hardware floor** | x86_64 or ARM64 with ≥256MB RAM, Docker | ARMv7+ with ≥64MB RAM, no Docker needed | Cortex-M4+ with ≥32MB RAM, bare metal |
+| **Best for** | Dev cycle speed, typical IoT gateways, K3s-managed fleets | Low-latency telemetry, edge inference under 50ms p99, large fleets where image-pull cost matters | Bare-metal industrial controllers, where Docker isn't available, or where size below 1MB is required |
+| **Worst for** | Cortex-M class chips, ultra-low latency | Rapid iteration without a build pipeline | Anything that needs multi-agent concurrency |
+
+The Python edition is the default choice. Move to Rust when cold-start latency or pod-pull bandwidth bites. Move to C only when the device cannot run Docker at all.
+
 ---
 
 ## How an edge node works
@@ -117,6 +132,63 @@ The edge node holds its own SQLite database for the in-flight execution log. it 
    /opt/abenix/edge --config /etc/abenix-edge.env
    ```
 5. **Verify** — the cloud UI's `/admin/edge` shows the node with a heartbeat timestamp.
+
+---
+
+## Agent bundle compilation, signing, and OTA delivery
+
+This is the path a cloud-authored agent takes to land on an edge node and start running.
+
+### Compilation
+
+Compilation runs in `apps/api/app/services/edge_bundle.py` whenever an agent is marked `edge_compatible: true` and assigned to one or more edge nodes:
+
+1. **Validate tool allow-list.** The agent's `model_config.tools` must be a subset of `{mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor, opcua_read, opcua_write}`. Any tool outside this list — `knowledge_search`, `atlas_query`, `database_query`, etc. — fails compilation with `EDGE_TOOL_NOT_PERMITTED`.
+2. **Inline KB / Atlas references.** If the agent references a knowledge base, the relevant chunks are flattened into the bundle as static lookup tables. Atlas refs become inlined node lists. This is why `knowledge_search` is forbidden — the edge has no network path back to cloud KB.
+3. **Serialize.** The agent + system prompt + tool config + model name go into a Protobuf message (schema in `proto/edge_agent.proto`). Output is roughly 5-50KB depending on prompt size and inlined KB volume.
+4. **Sign.** The compile service computes `SHA-256(bundle_bytes)` and signs the digest with the tenant's private RSA-2048 key (stored in the `tenant_secrets` table, AES-256 encrypted at rest with the platform's KEK). The signature is appended to the bundle as a separate `.sig` blob.
+
+### Delivery via MQTT
+
+The cloud uses MQTT (Mosquitto in-cluster, broker URL `mosquitto:1883`) for fan-out to edge nodes because plants typically already have a broker on-prem the edge nodes can also subscribe to during disconnected operation.
+
+```
+abenix/edge/{node_id}/register                  ← (response to POST /api/edge/register)
+abenix/edge/{node_id}/heartbeat                 ← edge → cloud, every 30s
+abenix/edge/{node_id}/agent/{agent_slug}        ← cloud → edge, agent bundle + sig (OTA push)
+abenix/edge/{node_id}/agent/{agent_slug}/ack    ← edge → cloud, ack of load
+abenix/edge/{node_id}/event/{event_type}        ← edge → cloud, decision logs, alerts
+abenix/edge/{node_id}/command/{command}         ← cloud → edge, ad-hoc commands (kill, reload)
+```
+
+Payload schema for the agent topic:
+
+```json
+{
+  "agent_slug": "iiot-rul-estimator",
+  "version": "1.4.2",
+  "bundle_b64": "<base64 of the protobuf bundle>",
+  "signature_b64": "<base64 of the RSA-2048 signature>",
+  "tenant_public_key_fingerprint": "sha256:...",
+  "issued_at": "2026-05-23T08:14:00Z"
+}
+```
+
+### Verification on the edge
+
+When the edge runtime receives an agent message:
+
+1. Look up the tenant's public key by fingerprint (cached on first registration, refreshed daily).
+2. Compute `SHA-256(bundle_b64_decoded)`.
+3. Verify with the tenant's public key: `openssl dgst -sha256 -verify pub.pem -signature sig.bin bundle.bin`.
+4. On failure: drop the message, log `EDGE_AGENT_SIGNATURE_INVALID`, keep the previous version running.
+5. On success: replace the agent in the local registry, ack via `/ack` topic, drain the previous version's in-flight executions.
+
+### Crypto details
+
+- **Algorithm:** RSA-PSS-2048 with SHA-256. Compatible with most hardware security modules (HSMs) for tenants that want private keys held outside Postgres.
+- **Key rotation:** swap a tenant's RSA key in `tenant_secrets`. Edge nodes detect mismatch on the next agent push (signature verification fails), pull the new fingerprint, refresh, retry.
+- **Replay attacks:** prevented by the `issued_at` field. Bundles older than 1h from the edge's local clock are rejected.
 
 ---
 

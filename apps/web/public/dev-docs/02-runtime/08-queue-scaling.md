@@ -2,6 +2,13 @@
 
 > Two parallel queue systems carry work in this platform. They look similar from the outside and do very different jobs. Once you know which is which, the rest of the scaling story is mechanical.
 
+**Reader's roadmap.** This doc covers two queue systems (NATS + Celery), four agent runtime pools (KEDA-scaled), three scaling layers (agents / tools / pipelines), and one tool gate (cache + sem + qps + breaker). If you came here for one thing, jump to it:
+
+- Q: when do I use NATS vs Celery? → [Two queue systems](#two-queue-systems-one-platform) decision table
+- Q: which pool should my agent live on? → [Pool routing](#pool-routing--cost--latency-matrix) matrix
+- Q: how does tool scaling work? → [Three scaling layers](#three-scaling-layers-the-whole-picture)
+- Q: my pipeline is slow — where do I look? → [Decision tree](#decision-tree-for-operators) at the end
+
 ---
 
 ## Two queue systems, one platform
@@ -10,6 +17,18 @@
 |---|---|---|---|
 | **Celery on Redis** | Background jobs — document ingestion, cognify pipelines, exports, scheduled sweepers | Long, durable, often minutes-long. Tasks have predictable shapes. | [`apps/worker/`](../../apps/worker/) |
 | **NATS JetStream** | Agent and pipeline executions dispatched from the API to the runtime pools | Sub-second dispatch, ordered delivery, consumer-side flow control. | [`apps/agent-runtime/`](../../apps/agent-runtime/), `infra/helm/abenix/templates/agent-runtime-pools.yaml` |
+| **Redis Streams** | Tool-gate semaphore counters, rate-limit token buckets, the `tools:queue` stream when `pool='runtime'`, the WS fan-out channel | Low-latency primitives that need to be visible to every api pod at once. Not a "queue" in the workflow sense. | [`apps/api/app/core/tool_gate.py`](../../apps/api/app/core/tool_gate.py), [`apps/agent-runtime/tool_stream_consumer.py`](../../apps/agent-runtime/tool_stream_consumer.py) |
+
+### Pick the right backend for a new feature
+
+| Work shape | Pick | Why not the others |
+|---|---|---|
+| LLM agent execution (1-300s, ordered, UI is watching) | NATS | Celery is too coarse for SSE streaming. Redis Streams has no consumer-group ack semantics this code path needs. |
+| Document ingestion, Cognify, exports, nightly sweeps (minutes-to-hours) | Celery | NATS retention is bounded (1M messages, ~3h at 100 msg/s). Celery has retry/backoff/idempotency built in. |
+| Tool-call dispatch from one pod to another (synchronous round-trip, 100ms-30s) | Redis Streams via `tool_worker_dispatch.py` | NATS would need a per-tool subject explosion. Celery's polling cadence is too slow for the api pod waiting on the reply. |
+| Distributed semaphore, rate-limit bucket, breaker state | Redis (plain INCR/Lua) | Not a queue — needs O(1) reads. |
+
+**Default: NATS for agent work, Celery for everything that's not an agent, Redis for primitives.** If you're not sure, NATS — its consumer ack + redelivery handles crash recovery for free.
 
 The API server is the entry point for both. A `POST /api/documents/{id}/process` enqueues a Celery job. A `POST /api/agents/{slug}/execute` publishes a NATS message. Neither client sees the queue — they get a job_id or execution_id back and listen for completion via polling or SSE.
 
@@ -122,6 +141,13 @@ The API server picks a subject when it publishes. The picker logic looks at agen
 
 A pool listens on its own consumer. JetStream guarantees ordered delivery per consumer, exactly-once with explicit ack within the ack_wait window. If a runtime pod dies mid-execution, the message redelivers after the ack window expires (10 minutes) and another pod picks it up. The pipe sees this as "execution timed out and retried" — visible in the executions list.
 
+**What the JetStream settings actually mean:**
+
+- `retention: limits` — drop messages when EITHER the message count cap OR the storage cap is hit. We size the message cap (1M) so the streaming history is ~3 hours of activity at 100 msg/sec. Older executions live in Postgres' `executions` table, so this short retention is intentional. Postgres is the source of truth, JetStream is just the dispatcher.
+- `storage: file` — JetStream persists to disk via RocksDB. Overhead ~200 bytes per message. A million-message stream ≈ 200 MB. For dev / test, set `storage: memory` to drop the disk dependency. Production always uses file.
+- `ack_wait: 10m` — how long JetStream waits for a `JS.ACK` from the consumer before redelivering. If a pod OOMs or gets killed by k8s mid-execution, the message sits in the unacked queue for 10 minutes, then another pod picks it up. The user sees "retried" in the executions list. Tune up for the long-running pool (3h ack_wait), down for chat (60s) so dead chat sessions don't replay 10 minutes later when the user has moved on.
+- `max_ack_pending: 100` — backpressure. If the consumer has 100 unacked messages in flight, JetStream stops delivering more until some are acked. This is what keeps a slow pod from getting buried under more work it can't process.
+
 ### Why isolate the pools
 
 Without isolation, one slow long-running execution (a 30-minute back-test) would pin a runtime pod, preventing it from picking up the next chat message. With isolation:
@@ -132,6 +158,26 @@ Without isolation, one slow long-running execution (a 30-minute back-test) would
 - A pool maxing out does not affect the others.
 
 Per-pool isolation also means **per-pool cost budgets** are easy. You can set a Prometheus alert on `sum(rate(abenix_llm_cost_usd_provider_total[1h])) by (pool)` and catch one runaway pool before it burns the month's allowance.
+
+### Pool routing — cost / latency matrix
+
+The single most consequential agent field is `runtime_pool`. Pick wrong and the agent either starves (chat agent stuck behind a 30-minute backtest) or wastes money (chat-style agent pinned on 4Gi heavy-reasoning pods). Decision matrix:
+
+| Pool | min/max replicas | Pod CPU/RAM | Typical exec time | LLM cost / exec | Use for | Avoid for |
+|---|---|---|---|---|---|---|
+| `chat` | 2 → 20 | 250m / 512Mi | 1-3s | $0.005-0.02 | Conversational agents, fast lookups, low-latency triage | Anything with multi-step tool fan-out |
+| `default` | 1 → 10 | 500m / 1Gi | 2-10s | $0.02-0.10 | General-purpose agents, single-pass extraction, sentiment | Multi-minute deep reasoning |
+| `heavy-reasoning` | 1 → 15 | 1000m / 4Gi | 10-300s | $0.10-2.00 | Pipeline executors, deep extractors, multi-pass valuation | Sub-second chat responses |
+| `long-running` | 0 → 8 | 500m / 2Gi | 30min - 6h | $1.00-30.00 | Stress tests, scenario sweeps, backtests, batch document Cognify | Anything UI is actively watching |
+| `gpu` (optional) | 0 → 4 | 1000m / 8Gi + 1 GPU | varies | varies | Embedding generation, OCR on PDFs at scale, ASR | Anything that doesn't actually need a GPU |
+| `inline` (tools only — NOT a deployment) | n/a | api pod's loop | <100ms | — | Sub-millisecond pure-Python tools (`calculator`, `current_time`) | I/O-bound or LLM-bound work |
+
+**Routing logic** (handled by `dispatch_agent_execution()` in `apps/api/app/routers/agents.py`):
+1. Agent row's `runtime_pool` field wins if set.
+2. Otherwise inferred from `agent_type`: `chat` → chat pool, `pipeline` → heavy-reasoning, anything else → default.
+3. Override per-run with `X-Abenix-Runtime-Pool` header (rare).
+
+**Adding a fifth pool.** Edit `infra/helm/abenix/values.yaml` → `agent-runtime.pools.<name>: { minReplicas, maxReplicas, concurrency, resources }`. Add a matching `ScaledObject` template + `kubectl apply`. Update the routing function above. Most teams never need this — the five existing pools cover ~98% of use cases. If you find yourself adding a pool, ask first whether you really want a different `concurrency_per_replica` on an existing pool instead.
 
 ---
 
@@ -356,13 +402,30 @@ Every direct `tools/{slug}/execute`, every preset run, every agent-loop tool cal
 
 Order of checks (fail-open if Redis is down):
 
-1. **Cache lookup** — SHA-256 hash of canonical (sorted) `arguments`. Scope `global` for public data (LBMA gold, USDCNY), `per_tenant` for private (sanctions match). `cache_ttl_seconds = 0` disables.
-2. **Circuit breaker** — open after `circuit_breaker_threshold` failures in `circuit_breaker_window_s`. Half-open after `circuit_breaker_cooldown_s`. One success closes it.
-3. **Rate limit** — token bucket per `(tool, global)` and `(tool, tenant)`. Refill = qps, capacity = qps.
-4. **Daily budget** — Redis counter per `(tool, tenant, UTC-date)`, resets at midnight.
-5. **Semaphore** — Redis `INCR` with a TTL longer than the tool's timeout. Bounded global + per-tenant inflight cap.
+1. **Cache lookup** — SHA-256 hash of canonical (sorted) `arguments`. Scope `global` for public data (LBMA gold, USDCNY), `per_tenant` for private (sanctions match against a customer's name). Two tenants calling `yahoo_finance(symbol=gold)` share the cache hit because gold's price is universal. Two tenants calling `kb_search(query="acme corp")` do NOT share — each gets their own KB. `cache_ttl_seconds = 0` disables caching entirely.
+2. **Circuit breaker** — "failure" means any of: tool raised an exception, `ToolResult.is_error=True`, gate timed out waiting for the tool. Tracked in a sliding window of `circuit_breaker_window_s`. After `circuit_breaker_threshold` failures the breaker **opens** — all calls fast-fail with 429 until `circuit_breaker_cooldown_s` elapses, then it goes **half-open** (one trial call goes through, success closes it, failure re-opens).
+3. **Rate limit** — token bucket. Capacity = qps, refill rate = qps tokens/sec. Each call costs 1 token. **Burst behavior:** 10 calls in the same millisecond on a 10-qps tool all succeed (full bucket); the 11th gets 429. Then 10 tokens refill over the next second, so steady-state throughput tracks qps. No headroom above capacity.
+4. **Daily budget** — Redis counter per `(tool, tenant, UTC-date)`. Increments on each call, resets at UTC midnight. Once over `daily_budget_calls_per_tenant`, all calls from that tenant get 429 until the next day. Use for paid feeds (LBMA = $0.10/call, cap at 5000/day per tenant).
+5. **Semaphore** — Redis `INCR` with a TTL of `tool_timeout + 30s buffer`. Bounded by `max_inflight_global` AND `max_inflight_per_tenant` (both must pass). If a pod crashes between `acquire()` and `release()`, the semaphore key auto-expires after TTL and the slot frees up — no manual cleanup. Caveat: if the tool overruns its timeout AND the TTL expires while it's still running, a second caller could squeeze in. Set TTL conservatively (≥ tool timeout + 60s) for non-reentrant tools.
 
 Successful execution caches the result and calls `release()`. Failures record into the breaker's failure window.
+
+**Defaults applied to high-traffic tools** (seeded by `apps/api/app/core/seed_tool_runtime.py` on startup):
+
+| Tool | cache TTL / scope | qps (global / per-tenant) | inflight cap | daily budget / tenant | pool |
+|---|---|---|---|---|---|
+| `yahoo_finance` | 60s global | 8 / 2 | 20 / 5 | unlimited | inline |
+| `tavily_search` | 300s global | 5 / 1 | 10 / 3 | 1000 calls | inline |
+| `open_meteo` | 600s global | 10 / unlimited | 20 / 20 | unlimited | inline |
+| `ais_stream` | 60s global | 1 / unlimited | 4 / 1 | unlimited | inline |
+| `sanctions_screening` | 86400s (24h) per_tenant | 2 / unlimited | 8 / 20 | 500 calls | inline |
+| `pep_screening` | 86400s per_tenant | 2 / unlimited | 8 / 20 | 500 calls | inline |
+| `ml_model` | 30s per_tenant | unlimited | 40 / 10 | unlimited | inline |
+| `llm_call` | no cache | unlimited / 5 | 30 / 8 | 5000 calls | inline |
+| `code_executor` | no cache | unlimited | 8 / 2 | unlimited | inline |
+| `code_asset` | no cache | unlimited | 6 / 2 | unlimited | **runtime** |
+
+Admins override any of these from `/admin/tool-scaling`. Changes take effect on the next call — no restart needed.
 
 ### Pool dispatch (`pool='runtime'`)
 
@@ -398,6 +461,8 @@ pipeline_config:
 ```
 
 When this pipeline runs, the pipeline pod (in the `default` runtime pool) iterates its nodes. `timestamp` is a sub-ms inline tool call. `dsp` goes through the gate, lands on `tools:queue`, an agent-runtime pod picks it up and runs the user's uploaded code. `diagnose` enqueues to whatever pool the `iot-diagnoser` agent is configured for — possibly `heavy-reasoning`. `report` is a structured-output node, runs in-process. **No new infrastructure** — every primitive already existed.
+
+**Error propagation.** If any tool node fails (gate returns 429, tool raises, agent times out), the pipeline executor checks for an `on_error` edge defined on that node. If present, the failure routes there with the error captured in the node's output. If absent, the pipeline halts and the execution row is marked `failed` with `failed_node_id` set. Downstream nodes never run. The retry policy comes from the *outer* execution's runtime_pool (NATS redelivers after `ack_wait` if the pipeline pod itself crashed; otherwise the pipeline is considered complete-with-failure and is not retried).
 
 ### Decision tree for operators
 
