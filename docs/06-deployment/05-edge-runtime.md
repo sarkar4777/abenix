@@ -104,19 +104,55 @@ The edge node holds its own SQLite database for the in-flight execution log. it 
 
 ---
 
+## Three secrets every edge gateway needs
+
+Every edge runtime pod (Python, Rust, or C) consumes three credentials. None of them are optional in production — every fresh Azure environment should provision all three:
+
+| Env var | What it is | Where it comes from | What breaks without it |
+|---|---|---|---|
+| `PLATFORM_TOKEN` | An `af_*` API key the runtime sends as `Authorization: Bearer …` to the cloud | UI: `/edge` → **Mint edge token + pubkey**. CLI: `POST /api/edge/tokens/mint`. Auto-mint in `deploy-azure.sh` via `_generate_abenix_api_key`. | Runtime logs `register_failed status=401`. Heartbeats fail. UI shows gateway offline. Bundles can still be pushed via direct HTTP fallback. |
+| `SIGNING_PUBKEY` (PEM) or `SIGNING_PUBKEY_PATH=/etc/edge/signing_pub.pem` | RSA-PSS-2048 public key. Cloud signs `.agent` bundles with the matching private key. | Same UI button returns it next to the token. The private key lives on the api pod (`EDGE_SIGNING_KEY_PEM` env or `/tmp/edge_signing_priv.pem`). | Rust runtime logs `no signing pubkey configured — accepting bundle UNVERIFIED`. **Real security gap** — any HTTP caller can push an unsigned bundle to the gateway. C runtime hard-fails if the pubkey is missing. |
+| `ANTHROPIC_API_KEY` (or `LOCAL_LLM_URL`) | Cloud LLM credential, or a local LLM endpoint URL | Set the `anthropic_api_key` helm value at install. For local-only edge use a local Ollama URL via `LOCAL_LLM_URL=http://ollama:11434/v1`. | Execute returns `{"stub": true, "error": "ANTHROPIC_API_KEY not configured on edge runtime"}`. Tools that don't need an LLM (code_executor, mqtt_publish, current_time, windowed_state) still work. |
+
+### Token lifecycle
+
+1. **Mint.** UI `/edge` → button. Or `POST /api/edge/tokens/mint` with admin auth. Returns the raw `af_*` token + signing pubkey PEM in one response. The raw key is shown ONCE — store it immediately. The cloud stores only `key_hash` (SHA-256) so the raw is unrecoverable.
+2. **Plumb into the runtime.** Helm: `--set platform_token=<af_…>`. Or set the env var directly on a k8s secret. Or use the cloud-init shell on a bare-metal gateway.
+3. **Rotate.** Mint a new token, helm-upgrade with the new value, then revoke the old key at `/admin/api-keys`. Edge re-registers automatically because `gateway_id` is the same.
+4. **Revoke.** Set `is_active=false` on the ApiKey row, or DELETE via `/api/api-keys/{id}`. The runtime starts failing `register` within seconds. Bundles still in flight finish.
+
+### Signing key lifecycle
+
+1. **Generate.** Cloud auto-generates on first call to `/api/edge/agents/{id}/compile`. Persists to `/tmp/edge_signing_priv.pem` by default. **For production set `EDGE_SIGNING_KEY_PEM` (PEM literal) or `EDGE_SIGNING_KEY_PATH` to a stable mount** so a pod restart doesn't generate a new keypair and invalidate every gateway's pubkey.
+2. **Distribute the pubkey.** The mint endpoint above returns it inline. `deploy-azure.sh` auto-fetches via `_fetch_edge_signing_pubkey` and passes to the helm chart's `signing_pubkey` value, which lands at `/etc/edge/signing_pub.pem` inside the runtime pod.
+3. **Rotate.** Replace `EDGE_SIGNING_KEY_PEM`, restart the api pod, re-publish the pubkey to every gateway. Bundles signed with the old key fail verification on the gateway — the runtime falls back to the previous accepted bundle.
+4. **Verify.** Rust runtime logs `agent_loaded slug=… digest=…` on success, `signature_invalid` on failure. The C runtime hard-rejects unsigned input — there is no UNVERIFIED fallback.
+
+### Local LLM vs cloud LLM at the edge
+
+- **`ANTHROPIC_API_KEY`** — when set, the edge runtime calls the public Anthropic endpoint over the gateway's outbound internet. Use for plants with reliable connectivity and no data-residency restrictions.
+- **`LOCAL_LLM_URL`** — when set (e.g. `http://ollama:11434/v1`), the runtime routes LLM calls to that endpoint. Use for air-gapped sites, regulated jurisdictions, or where bandwidth makes cloud LLM impractical. Models pinned per-agent via `model_config.model: ollama/qwen2.5:7b` in the agent YAML.
+- **Tool-only agents** — if the agent's pipeline only uses `code_executor`, `mqtt_publish`, `windowed_state`, etc. (no LLM step), neither key is required. The Rust runtime's IoT pump classifier is a good example.
+
 ## Bootstrapping a new edge node
 
 1. **Provision the node** — install Docker / K3s / native binary depending on variant.
-2. **Generate a registration token** in the cloud UI: `/admin/edge → New Edge Token`.
+2. **Mint the platform token + signing pubkey** in the cloud UI: `/edge` → **Mint edge token + pubkey**. Copy both into the gateway config below.
 3. **Drop the config** at the node:
    ```bash
    cat > /etc/abenix-edge.env <<EOF
-   ABENIX_API_URL=https://api.example.com
-   EDGE_REGISTRATION_TOKEN=ed_***
-   EDGE_NODE_ID=factory-13-line-2
-   EDGE_LOCATION="Plant 13, Line 2, Munich"
-   LOCAL_LLM_URL=http://ollama:11434     # optional
-   ALLOWED_AGENTS=iiot-rul-estimator,iiot-cold-chain-corrector
+   PLATFORM_URL=https://api.example.com
+   PLATFORM_TOKEN=af_***                            # from the mint dialog
+   GATEWAY_ID=factory-13-line-2
+   GATEWAY_NAME="Plant 13, Line 2, Munich"
+   MQTT_URL=mqtt://localhost:1883                   # optional, falls back to HTTP push
+   ANTHROPIC_API_KEY=sk-ant-...                     # or LOCAL_LLM_URL=http://ollama:11434/v1
+   SIGNING_PUBKEY_PATH=/etc/edge/signing_pub.pem    # PEM written below
+   EOF
+   sudo install -m 0644 /dev/stdin /etc/edge/signing_pub.pem <<EOF
+   -----BEGIN PUBLIC KEY-----
+   ... (paste from the mint dialog) ...
+   -----END PUBLIC KEY-----
    EOF
    ```
 4. **Start the runtime**:

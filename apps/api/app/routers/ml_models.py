@@ -47,7 +47,21 @@ ALLOWED_EXTENSIONS = {
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 
 
-def _serialize(m: MLModel) -> dict:
+def _deployment_dict(d: MLModelDeployment) -> dict:
+    return {
+        "id": str(d.id),
+        "deployment_type": d.deployment_type.value,
+        "endpoint_url": d.endpoint_url,
+        "replicas": d.replicas,
+        "status": d.status.value,
+        "pod_name": d.pod_name,
+        "service_name": d.service_name,
+        "k8s_namespace": d.k8s_namespace,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+    }
+
+
+def _serialize(m: MLModel, deployments: list[MLModelDeployment] | None = None) -> dict:
     return {
         "id": str(m.id),
         "name": m.name,
@@ -65,33 +79,29 @@ def _serialize(m: MLModel) -> dict:
         "tags": m.tags,
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "updated_at": m.updated_at.isoformat() if m.updated_at else None,
-        # deployments are loaded separately to avoid async lazy-load issues
-        "deployments": [],
+        "deployments": [_deployment_dict(d) for d in (deployments or [])],
     }
 
 
 async def _serialize_with_deployments(m: MLModel, db: AsyncSession) -> dict:
-    """Serialize with deployments (requires a DB session for the join)."""
-    data = _serialize(m)
     result = await db.execute(
         select(MLModelDeployment).where(MLModelDeployment.model_id == m.id)
     )
-    deps = result.scalars().all()
-    data["deployments"] = [
-        {
-            "id": str(d.id),
-            "deployment_type": d.deployment_type.value,
-            "endpoint_url": d.endpoint_url,
-            "replicas": d.replicas,
-            "status": d.status.value,
-            "pod_name": d.pod_name,
-            "service_name": d.service_name,
-            "k8s_namespace": d.k8s_namespace,
-            "created_at": d.created_at.isoformat() if d.created_at else None,
-        }
-        for d in deps
-    ]
-    return data
+    return _serialize(m, deployments=list(result.scalars().all()))
+
+
+async def _serialize_many(models: list[MLModel], db: AsyncSession) -> list[dict]:
+    if not models:
+        return []
+    ids = [m.id for m in models]
+    result = await db.execute(
+        select(MLModelDeployment).where(MLModelDeployment.model_id.in_(ids))
+    )
+    deps = list(result.scalars().all())
+    by_model: dict = {}
+    for d in deps:
+        by_model.setdefault(d.model_id, []).append(d)
+    return [_serialize(m, deployments=by_model.get(m.id, [])) for m in models]
 
 
 def _detect_framework(filename: str, explicit: str | None = None) -> MLModelFramework:
@@ -374,8 +384,8 @@ async def list_models(
         query = query.where(MLModel.status == status)
     query = query.order_by(MLModel.updated_at.desc())
     result = await db.execute(query)
-    models = result.scalars().all()
-    return success([_serialize(m) for m in models])
+    models = list(result.scalars().all())
+    return success(await _serialize_many(models, db))
 
 
 @router.get("/{model_id}")

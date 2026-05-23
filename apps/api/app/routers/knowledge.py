@@ -48,8 +48,21 @@ ALLOWED_TYPES = {
 }
 
 
+def _kb_rollups(kb: KnowledgeBase) -> tuple[int, int]:
+    chunks = 0
+    size = 0
+    try:
+        for d in kb.documents:
+            chunks += d.chunk_count or 0
+            size += d.file_size or 0
+    except Exception:
+        pass
+    return chunks, size
+
+
 def _serialize_kb(kb: KnowledgeBase, include_docs: bool = False) -> dict[str, Any]:
-    docs = []
+    chunk_count, total_size = _kb_rollups(kb)
+    docs: list[dict[str, Any]] = []
     if include_docs:
         try:
             docs = [_serialize_doc(d) for d in kb.documents]
@@ -64,8 +77,9 @@ def _serialize_kb(kb: KnowledgeBase, include_docs: bool = False) -> dict[str, An
         "chunk_overlap": kb.chunk_overlap,
         "status": kb.status.value if isinstance(kb.status, KBStatus) else kb.status,
         "doc_count": kb.doc_count,
+        "chunk_count": chunk_count,
+        "total_size": total_size,
         "agent_id": str(kb.agent_id) if kb.agent_id else None,
-        # v2 surface
         "project_id": str(kb.project_id) if kb.project_id else None,
         "default_visibility": (
             kb.default_visibility.value
@@ -81,26 +95,9 @@ def _serialize_kb(kb: KnowledgeBase, include_docs: bool = False) -> dict[str, An
 
 
 def _serialize_kb_summary(kb: KnowledgeBase) -> dict[str, Any]:
-    total_chunks = 0
-    total_size = 0
-    try:
-        for d in kb.documents:
-            total_chunks += d.chunk_count or 0
-            total_size += d.file_size or 0
-    except Exception:
-        pass
-
-    return {
-        "id": str(kb.id),
-        "name": kb.name,
-        "description": kb.description,
-        "status": kb.status.value if isinstance(kb.status, KBStatus) else kb.status,
-        "doc_count": kb.doc_count,
-        "chunk_count": total_chunks,
-        "total_size": total_size,
-        "created_at": kb.created_at.isoformat() if kb.created_at else None,
-        "updated_at": kb.updated_at.isoformat() if kb.updated_at else None,
-    }
+    full = _serialize_kb(kb, include_docs=False)
+    full.pop("documents", None)
+    return full
 
 
 def _serialize_doc(d: Document) -> dict[str, Any]:

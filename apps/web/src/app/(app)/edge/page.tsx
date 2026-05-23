@@ -101,6 +101,27 @@ export default function EdgePage() {
   const [toast, setToast] = useState<string | null>(null);
   const [howOpen, setHowOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [tokenModal, setTokenModal] = useState<{ token: string; pubkey: string; warning: string } | null>(null);
+  const [minting, setMinting] = useState(false);
+
+  const mintToken = useCallback(async () => {
+    const token = getToken();
+    if (!token) return;
+    setMinting(true);
+    try {
+      const r = await fetch(`${API_URL}/api/edge/tokens/mint`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: `edge-${new Date().toISOString().slice(0,10)}` }),
+      });
+      const j = await r.json();
+      const d = j?.data;
+      if (!r.ok || !d?.platform_token) { setError(j?.error?.message || 'Failed to mint token'); return; }
+      setTokenModal({ token: d.platform_token, pubkey: d.signing_pubkey_pem || '', warning: d.warning || '' });
+    } finally {
+      setMinting(false);
+    }
+  }, []);
 
   const copyToClipboard = useCallback((text: string, key: string) => {
     if (typeof navigator === 'undefined' || !navigator.clipboard) return;
@@ -201,6 +222,64 @@ export default function EdgePage() {
         {error && (
           <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200 text-sm flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" /> {error}
+          </div>
+        )}
+
+        <section className="rounded-lg border border-cyan-700/40 bg-cyan-900/10 p-4 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-cyan-200 mb-1">Step 1 — Mint a platform token + grab the signing pubkey</div>
+            <p className="text-xs text-slate-300">
+              Every gateway needs a platform token (so it can <code className="bg-slate-800 px-1 rounded">/register</code> + receive bundles) and the platform&apos;s RSA-PSS signing pubkey (so it verifies bundle signatures). Click below — token is shown once.
+            </p>
+          </div>
+          <button
+            onClick={mintToken}
+            disabled={minting}
+            className="px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium whitespace-nowrap"
+          >
+            {minting ? 'Minting…' : 'Mint edge token + pubkey'}
+          </button>
+        </section>
+
+        {tokenModal && (
+          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setTokenModal(null)}>
+            <div className="bg-slate-900 border border-cyan-700/50 rounded-lg max-w-3xl w-full p-5" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold text-cyan-200">Edge token + signing pubkey</h3>
+                <button onClick={() => setTokenModal(null)} className="text-slate-400 hover:text-white">close</button>
+              </div>
+              <div className="rounded bg-amber-900/30 border border-amber-700/40 p-2.5 text-[12px] text-amber-200 mb-3">
+                {tokenModal.warning}
+              </div>
+              <div className="space-y-3 text-[12.5px]">
+                <div>
+                  <div className="text-slate-400 mb-1">PLATFORM_TOKEN</div>
+                  <div className="flex items-center gap-2">
+                    <code className="block flex-1 bg-slate-950 border border-slate-800 rounded p-2 font-mono break-all text-emerald-300">{tokenModal.token}</code>
+                    <button onClick={() => copyToClipboard(tokenModal.token, 'tok')} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs">{copied === 'tok' ? '✓' : 'Copy'}</button>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400 mb-1">SIGNING_PUBKEY (PEM)</div>
+                  <div className="flex items-start gap-2">
+                    <pre className="block flex-1 bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-cyan-300 max-h-40 overflow-y-auto">{tokenModal.pubkey || '(none — set EDGE_SIGNING_KEY_PEM on the api pod first)'}</pre>
+                    {tokenModal.pubkey && (
+                      <button onClick={() => copyToClipboard(tokenModal.pubkey, 'pub')} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs">{copied === 'pub' ? '✓' : 'Copy'}</button>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400 mb-1">Helm install snippet</div>
+                  <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-slate-200 overflow-x-auto">{`helm install abenix-edge-rust ./infra/helm/edge-runtime-rust \\
+  --namespace abenix \\
+  --set platform_url=http://abenix-api:8000 \\
+  --set platform_token=${tokenModal.token.slice(0,16)}... \\
+  --set signing_pubkey="$(cat pub.pem)" \\
+  --set mqtt_url=mqtt://abenix-mosquitto:1883 \\
+  --set anthropic_api_key=$ANTHROPIC_API_KEY`}</pre>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

@@ -532,6 +532,9 @@ deploy_edge_runtime() {
   EDGE_RUNTIME_ALL_VARIANTS="${EDGE_RUNTIME_ALL_VARIANTS:-false}"
   if [ "${EDGE_RUNTIME_VARIANT}" = "python" ] || [ "${EDGE_RUNTIME_ALL_VARIANTS}" = "true" ]; then
     step "Deploying edge runtime (python, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
+    local edge_token edge_pubkey
+    edge_token=$(_generate_abenix_api_key 2>/dev/null || echo "")
+    edge_pubkey=$(_fetch_edge_signing_pubkey || echo "")
     helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
       --namespace "${NAMESPACE}" \
       --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime" \
@@ -539,6 +542,8 @@ deploy_edge_runtime() {
       --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
       --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
       --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+      --set platform_token="${edge_token}" \
+      --set signing_pubkey="${edge_pubkey}" \
       --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
       --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
       --timeout 5m \
@@ -554,8 +559,37 @@ deploy_edge_runtime() {
   fi
 }
 
+_fetch_edge_signing_pubkey() {
+  local api_pod
+  api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+    --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "${api_pod}" ]; then return 1; fi
+  kubectl exec -n "${NAMESPACE}" "${api_pod}" -c api -- python3 -c "
+from app.routers.edge import _resolve_signing_key
+from cryptography.hazmat.primitives import serialization
+k = _resolve_signing_key()
+print(k.public_key().public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+).decode(), end='')
+" 2>/dev/null
+}
+
 deploy_edge_runtime_rust() {
   step "Deploying edge runtime (rust, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default}-rust)"
+  local edge_token edge_pubkey
+  edge_token=$(_generate_abenix_api_key 2>/dev/null || echo "")
+  if [ -z "${edge_token}" ]; then
+    warn "  Could not mint platform token for edge-rust; runtime will skip /register and bundles must be pushed via direct HTTP"
+  else
+    log "  Minted platform_token (prefix ${edge_token:0:10}...)"
+  fi
+  edge_pubkey=$(_fetch_edge_signing_pubkey || echo "")
+  if [ -z "${edge_pubkey}" ]; then
+    warn "  Could not fetch signing pubkey; runtime will accept bundles UNVERIFIED (dev only — set EDGE_SIGNING_KEY_PEM on api pod to fix)"
+  else
+    log "  Signing pubkey fetched ($(printf '%s' "${edge_pubkey}" | wc -c) bytes)"
+  fi
   helm upgrade --install abenix-edge-rust "${ROOT_DIR}/infra/helm/edge-runtime-rust" \
     --namespace "${NAMESPACE}" \
     --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime-rust" \
@@ -563,6 +597,8 @@ deploy_edge_runtime_rust() {
     --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-rust" \
     --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-rust" \
     --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+    --set platform_token="${edge_token}" \
+    --set signing_pubkey="${edge_pubkey}" \
     --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
     --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
     --timeout 5m \
@@ -573,6 +609,12 @@ deploy_edge_runtime_rust() {
 
 deploy_edge_runtime_c() {
   step "Deploying edge runtime (c, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default}-c)"
+  local edge_token edge_pubkey
+  edge_token=$(_generate_abenix_api_key 2>/dev/null || echo "")
+  if [ -z "${edge_token}" ]; then
+    warn "  Could not mint platform token for edge-c"
+  fi
+  edge_pubkey=$(_fetch_edge_signing_pubkey || echo "")
   helm upgrade --install abenix-edge-c "${ROOT_DIR}/infra/helm/edge-runtime-c" \
     --namespace "${NAMESPACE}" \
     --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime-c" \
@@ -580,6 +622,8 @@ deploy_edge_runtime_c() {
     --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-c" \
     --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-c" \
     --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+    --set platform_token="${edge_token}" \
+    --set signing_pubkey="${edge_pubkey}" \
     --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
     --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
     --timeout 5m \

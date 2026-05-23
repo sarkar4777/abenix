@@ -1129,7 +1129,39 @@ if (result.isPaused()) {
             </ul>
             <p><strong className="text-white">When to use.</strong> Latency-sensitive sites (sub-100 ms), intermittent connectivity, data-residency regulations. <strong className="text-white">When NOT to use.</strong> Anything that needs platform-only tools (<code>knowledge_search</code>, <code>atlas_*</code>, MCP) or a &gt;2 GB model.</p>
             <Callout tone="info">Bundle format, signing math, manifest schema, and failure modes are documented in <code>infra/edge-runtime/AGENT_BUNDLE_FORMAT.md</code>. End-to-end smoke: <code>scripts/edge-smoke.sh</code>. Pick the variant that matches plant hardware — they all interop with the same bundle.</Callout>
-            <Callout tone="warn"><strong>Gotcha.</strong> Inline LLM weights are reserved in the bundle but not shipped today — the runtime calls back to a configurable LLM endpoint. Set <code>ANTHROPIC_API_KEY</code> on the gateway. Phase-2 ships a distilled small model for fully-air-gapped operation.</Callout>
+
+            <h4 className="text-white font-semibold pt-3">Three secrets every gateway needs</h4>
+            <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
+              <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
+                <tr><th className="text-left py-1.5 px-2">Env</th><th className="text-left py-1.5 px-2">What it does</th><th className="text-left py-1.5 px-2">Get it from</th><th className="text-left py-1.5 px-2">If missing</th></tr>
+              </thead>
+              <tbody className="text-slate-300">
+                <tr className="border-t border-slate-800/40">
+                  <td className="px-2 py-1.5 font-mono text-cyan-300">PLATFORM_TOKEN</td>
+                  <td className="px-2 py-1.5">af_* API key for /register + heartbeat</td>
+                  <td className="px-2 py-1.5"><a href="/edge" className="text-cyan-300 underline">/edge</a> &rarr; <em>Mint edge token + pubkey</em></td>
+                  <td className="px-2 py-1.5 text-amber-300">runtime logs 401, gateway shows offline</td>
+                </tr>
+                <tr className="border-t border-slate-800/40">
+                  <td className="px-2 py-1.5 font-mono text-cyan-300">SIGNING_PUBKEY</td>
+                  <td className="px-2 py-1.5">RSA-PSS-2048 pub key to verify bundles</td>
+                  <td className="px-2 py-1.5">Same mint dialog returns it</td>
+                  <td className="px-2 py-1.5 text-rose-300">Rust: accepts UNVERIFIED bundles. C: hard-rejects. Real security gap.</td>
+                </tr>
+                <tr className="border-t border-slate-800/40">
+                  <td className="px-2 py-1.5 font-mono text-cyan-300">ANTHROPIC_API_KEY</td>
+                  <td className="px-2 py-1.5">Cloud LLM. Or <code>LOCAL_LLM_URL</code> for air-gapped.</td>
+                  <td className="px-2 py-1.5">helm <code>--set anthropic_api_key=$KEY</code></td>
+                  <td className="px-2 py-1.5 text-slate-400">Execute returns <code>stub: true</code>. Tool-only agents still work.</td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="text-[12px] text-slate-400">
+              <strong>On a fresh Azure deploy</strong>, <code>scripts/deploy-azure.sh</code> mints both token and signing pubkey for every edge runtime variant (Python / Rust / C) automatically and passes them into the helm install. For a gateway you provision manually (a real plant box), open <code>/edge</code>, click <strong>Mint edge token + pubkey</strong>, copy both values into the gateway's helm chart or systemd env file. The token is shown ONCE — store it before closing the dialog.
+            </p>
+            <p className="text-[12px] text-slate-400">
+              <strong>Local-LLM vs cloud-LLM at the edge.</strong> Set <code>LOCAL_LLM_URL=http://ollama:11434/v1</code> on the gateway and pin <code>model: ollama/qwen2.5:7b</code> in the agent YAML for air-gapped sites. The Rust runtime auto-detects the <code>ollama/</code> prefix and routes to local. The C runtime is tool-only — no LLM key needed for sensor-loop agents like the IoT pump classifier.
+            </p>
           </div>
         ),
       },

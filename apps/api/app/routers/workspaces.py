@@ -33,6 +33,19 @@ def _slugify(text: str) -> str:
     return slug.strip("-")
 
 
+def _serialize_workspace(ws: Workspace) -> dict[str, Any]:
+    return {
+        "id": str(ws.id),
+        "name": ws.name,
+        "slug": ws.slug,
+        "description": ws.description,
+        "is_default": ws.is_default,
+        "settings": ws.settings,
+        "created_at": ws.created_at.isoformat() if ws.created_at else None,
+        "updated_at": ws.updated_at.isoformat() if ws.updated_at else None,
+    }
+
+
 @router.get("")
 async def list_workspaces(
     user: User = Depends(get_current_user),
@@ -41,21 +54,7 @@ async def list_workspaces(
     result = await db.execute(
         select(Workspace).where(Workspace.tenant_id == user.tenant_id)
     )
-    workspaces = result.scalars().all()
-    return success(
-        [
-            {
-                "id": str(ws.id),
-                "name": ws.name,
-                "slug": ws.slug,
-                "description": ws.description,
-                "is_default": ws.is_default,
-                "settings": ws.settings,
-                "created_at": ws.created_at.isoformat() if ws.created_at else None,
-            }
-            for ws in workspaces
-        ]
-    )
+    return success([_serialize_workspace(ws) for ws in result.scalars().all()])
 
 
 @router.post("")
@@ -80,16 +79,7 @@ async def create_workspace(
     await db.commit()
     await db.refresh(ws)
 
-    return success(
-        {
-            "id": str(ws.id),
-            "name": ws.name,
-            "slug": ws.slug,
-            "description": ws.description,
-            "is_default": ws.is_default,
-        },
-        status_code=201,
-    )
+    return success(_serialize_workspace(ws), status_code=201)
 
 
 @router.get("/{workspace_id}")
@@ -108,16 +98,7 @@ async def get_workspace(
     if not ws:
         return error("Workspace not found", 404)
 
-    return success(
-        {
-            "id": str(ws.id),
-            "name": ws.name,
-            "slug": ws.slug,
-            "description": ws.description,
-            "is_default": ws.is_default,
-            "settings": ws.settings,
-        }
-    )
+    return success(_serialize_workspace(ws))
 
 
 @router.put("/{workspace_id}")
@@ -145,7 +126,8 @@ async def update_workspace(
         ws.settings = body["settings"]
 
     await db.commit()
-    return success({"id": str(ws.id), "name": ws.name, "updated": True})
+    await db.refresh(ws)
+    return success(_serialize_workspace(ws))
 
 
 @router.delete("/{workspace_id}")

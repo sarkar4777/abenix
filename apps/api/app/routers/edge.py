@@ -181,6 +181,70 @@ async def runtime_download() -> JSONResponse:
     return success({"variants": variants})
 
 
+@router.post("/tokens/mint")
+async def mint_edge_token(
+    body: dict = Body(default={}),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """Mint a platform API key the edge runtime can put in PLATFORM_TOKEN.
+
+    Returns the RAW key once (it is never retrievable again — store it in the
+    edge pod's helm value or k8s secret). The matching signing pubkey is
+    returned too so the operator can configure the runtime to verify
+    bundles end-to-end in one step.
+    """
+    import hashlib
+    import secrets
+
+    from cryptography.hazmat.primitives import serialization
+
+    from models.api_key import ApiKey
+
+    name = (body.get("name") or f"edge-{secrets.token_hex(3)}").strip()
+    raw = "af_" + secrets.token_urlsafe(40)
+    key = ApiKey(
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        name=name,
+        key_prefix=raw[:8],
+        key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+        scopes={
+            "allowed_actions": ["can_delegate", "execute", "read", "edge.register"]
+        },
+        is_active=True,
+    )
+    db.add(key)
+    await db.commit()
+
+    try:
+        sk = _resolve_signing_key()
+        pubkey_pem = (
+            sk.public_key()
+            .public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            .decode()
+        )
+    except Exception:
+        pubkey_pem = ""
+
+    return success(
+        {
+            "platform_token": raw,
+            "platform_token_prefix": raw[:8] + "****" + raw[-4:],
+            "key_id": str(key.id),
+            "signing_pubkey_pem": pubkey_pem,
+            "warning": (
+                "Save the platform_token now — it will not be shown again. "
+                "Drop the signing_pubkey_pem at /etc/edge/signing_pub.pem (or "
+                "set SIGNING_PUBKEY env) so the runtime verifies bundle signatures."
+            ),
+        }
+    )
+
+
 @router.post("/gateways/register")
 async def register_gateway(
     body: dict = Body(...),

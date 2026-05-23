@@ -22,10 +22,15 @@ test-results
 **/test-results
 playwright-report
 **/playwright-report
-# Wave-2 builds target apps/api and apps/agent-runtime only — the
-# standalone app trees below ship in their own images, so excluding
-# them trims the upload tarball from ~700 MB to ~30 MB.
-contractiq
+contractiq/api
+contractiq/web
+contractiq/e2e
+contractiq/scripts
+contractiq/test-contracts
+contractiq/playwright.config.ts
+contractiq/start.sh
+contractiq/README.md
+!contractiq/aimodels
 sauditourism
 ppa-analysis
 tpi-analysis

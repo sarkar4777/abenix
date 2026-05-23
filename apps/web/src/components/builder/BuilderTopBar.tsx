@@ -94,6 +94,7 @@ export default function BuilderTopBar({
 
   return (
     <div className="h-14 bg-[#0F172A] border-b border-slate-800 flex items-center justify-between px-4 shrink-0">
+      <h1 className="sr-only">Agent Builder</h1>
       <div className="flex items-center gap-3 min-w-0">
         {editing ? (
           <input

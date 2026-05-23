@@ -821,6 +821,7 @@ export default function ChatPage() {
                 }}
                 disabled={!inputValue.trim() || !selectedAgent}
                 className="w-10 h-10 flex items-center justify-center rounded-lg bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg shadow-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all shrink-0 mb-0.5"
+                aria-label="Send message"
                 title="Send message"
               >
                 <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5">
