@@ -56,6 +56,20 @@
 ### Fixed
 - Closed the multi-node split-brain on `/data` where uploads written by api were invisible to worker pods scheduled on a different node.
 
+## v1.9.0 — 2026-05-23
+
+### Added
+- **ContractIQ now ships publicly** as a first-class standalone app alongside Wingman, Industrial-IoT, Saudi Tourism, ResolveAI, and ClaimsIQ. Full source under `contractiq/` (api, web, k8s manifests, aimodels, e2e specs, scripts).
+- **Four sklearn ML models** shipped with ContractIQ: clause classifier (30 ETRM classes), risk-tier predictor (calibrated GBC), counterparty default (logistic PD), price-anomaly (IsolationForest). Detailed model cards in the ContractIQ help page.
+- **16-model catalogue** documented in the platform Help under "Scale & operate → ML Models" with algorithm, features, holdout score, and consuming agent for every model.
+
+### Changed
+- `docker/Dockerfile.api` now bundles `contractiq/aimodels/` so `seed_ml_models.py` finds the new pickles in a fresh cluster.
+- `infra/helm/abenix/values-azure.yaml` enables `sharedData.usePVC=true` (azurefile-csi RWX) so multi-node AKS clusters share `/data` between api / worker / agent-runtime pods.
+
+### Fixed
+- Closed the multi-node split-brain on `/data` where uploads written by api were invisible to worker pods scheduled on a different node.
+
 ## v1.9.0 — 2026-05-22
 
 ### Added
