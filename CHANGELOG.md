@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.10.0 — 2026-05-25
+
+### Added
+- **ContractIQ now ships publicly** as a first-class standalone app alongside Wingman, Industrial-IoT, Saudi Tourism, ResolveAI, and ClaimsIQ. Full source under `contractiq/` (api, web, k8s manifests, aimodels, e2e specs, scripts).
+- **Four sklearn ML models** shipped with ContractIQ: clause classifier (30 ETRM classes), risk-tier predictor (calibrated GBC), counterparty default (logistic PD), price-anomaly (IsolationForest). Detailed model cards in the ContractIQ help page.
+- **16-model catalogue** documented in the platform Help under "Scale & operate → ML Models" with algorithm, features, holdout score, and consuming agent for every model.
+- **`e2e/uat_enterprise_edge.spec.ts`** — 15 complex/edge-case settings tests for enterprise robustness: JSONB persistence across re-read, DLP/retention boundary validation, API-key revocation, webhook idempotency, concurrent settings writes, malformed token handling, cross-tenant isolation, sandbox allow-list round-trip, notifications/profile/sessions/integrations endpoints.
+- **`e2e/uat_critical_paths.spec.ts`** — 26 critical-path end-to-end tests across non-settings features: auth shape, agent lifecycle (create → execute → terminal status), pipeline DSL execute, KB upload + listing, ML model invoke, code asset create + test-run, MCP registry install, conversation thread, approval signoff, tool runtime invoke, marketplace, executions tree, edge token mint, webhook delivery, team members, analytics, atlas graphs, persona, observability `/health/ready` + `/metrics`, files, batch, standalone-app render (wingman / industrial-iot), UI journeys (integrations admin badge, agents page CTA, marketplace cards, DLP persistence after API change), RBAC unauthenticated gates.
+
+### Changed
+- `docker/Dockerfile.api` now bundles `contractiq/aimodels/` so `seed_ml_models.py` finds the new pickles in a fresh cluster.
+- `infra/helm/abenix/values-azure.yaml` enables `sharedData.usePVC=true` (azurefile-csi RWX) so multi-node AKS clusters share `/data` between api / worker / agent-runtime pods.
+- **`Tenant.settings` column** promoted to `MutableDict.as_mutable(JSONB)` at the model layer so nested-dict mutations auto-track across every endpoint that touches tenant settings.
+
+### Fixed
+- Closed the multi-node split-brain on `/data` where uploads written by api were invisible to worker pods scheduled on a different node.
+- **Settings persistence regression** — `PUT /api/settings/retention`, `PUT /api/settings/dlp`, and `PUT /api/approvals/webhooks` no longer drop the write on commit. Root cause was SQLAlchemy not tracking `tenant.settings[<key>] = ...` mutations on a raw JSONB column; mitigated at both the model layer (MutableDict) and the endpoint layer (`flag_modified`).
+- **Integrations page admin badge** never lit up because the page fetched `/api/me` (404) instead of `/api/auth/me` and read `data.role` instead of `data.user.role`. Now reads from `/api/auth/me`, accepts either shape, and treats `admin` and `owner` both as admin.
+- **`e2e/uat_real_functionality.spec.ts` webhook UI test** asserted input elements before opening the Add Endpoint modal that hosts them. Now clicks the CTA first.
+
 ## v1.9.0 — 2026-05-25
 
 ### Added

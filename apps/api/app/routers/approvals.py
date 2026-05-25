@@ -327,7 +327,10 @@ async def set_webhook(
             settings.pop("approval_webhook_secret", None)
         else:
             settings["approval_webhook_secret"] = body.secret
+    from sqlalchemy.orm.attributes import flag_modified
+
     tenant.settings = settings
+    flag_modified(tenant, "settings")
     await db.commit()
     return success(
         {

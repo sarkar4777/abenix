@@ -238,13 +238,16 @@ async def update_retention(
     tenant = result.scalar_one_or_none()
     if not tenant:
         return error("Tenant not found", 404)
-    settings_obj = tenant.settings or {}
+    from sqlalchemy.orm.attributes import flag_modified
+
+    settings_obj = dict(tenant.settings or {})
     settings_obj["retention"] = {
         "execution_retention_days": max(body.get("execution_retention_days", 90), 7),
         "message_retention_days": max(body.get("message_retention_days", 365), 30),
         "audit_log_retention_days": max(body.get("audit_log_retention_days", 730), 365),
     }
     tenant.settings = settings_obj
+    flag_modified(tenant, "settings")
     await db.commit()
     return success(settings_obj["retention"])
 
@@ -279,13 +282,16 @@ async def update_dlp_settings(
     mode = body.get("mode", "detect")
     if mode not in ("detect", "mask", "block"):
         return error("mode must be one of: detect, mask, block", 400)
-    settings_obj = tenant.settings or {}
+    from sqlalchemy.orm.attributes import flag_modified
+
+    settings_obj = dict(tenant.settings or {})
     settings_obj["dlp"] = {
         "mode": mode,
         "enabled": body.get("enabled", True),
         "custom_patterns": body.get("custom_patterns", {}),
     }
     tenant.settings = settings_obj
+    flag_modified(tenant, "settings")
     await db.commit()
     return success(settings_obj["dlp"])
 

@@ -262,8 +262,9 @@ export default function IntegrationsPage() {
         if (!cancelled && r && r.data) setStatuses(r.data);
       } catch {}
       try {
-        const meR = await apiFetch<{ role?: string }>('/api/me');
-        if (!cancelled && meR?.data) setIsAdmin((meR.data.role || '') === 'admin');
+        const meR = await apiFetch<{ user?: { role?: string } }>('/api/auth/me');
+        const role = ((meR as any)?.data?.user?.role || (meR as any)?.data?.role || '') as string;
+        if (!cancelled) setIsAdmin(role === 'admin' || role === 'owner');
       } catch {}
       try {
         const [cR, rR] = await Promise.all([

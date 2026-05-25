@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, UUIDMixin
@@ -29,7 +30,9 @@ class Tenant(UUIDMixin, Base):
         Enum(TenantPlan, name="tenant_plan"), default=TenantPlan.FREE
     )
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    settings: Mapped[dict | None] = mapped_column(
+        MutableDict.as_mutable(JSONB), nullable=True, default=dict
+    )
     # Per-tenant Slack webhook for outbound notifications. Falls back to
     # ABENIX_SLACK_WEBHOOK_URL env var when NULL — see
     # apps/api/app/core/notifications.py.

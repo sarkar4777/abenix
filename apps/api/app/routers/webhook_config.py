@@ -91,6 +91,8 @@ async def create_webhook(
         return error(url_err, 400)
 
     events = body.get("events", ["execution.completed", "execution.failed"])
+    if not isinstance(events, list) or len(events) == 0:
+        return error("At least one event type is required", 400)
     invalid_events = [e for e in events if e not in VALID_EVENTS]
     if invalid_events:
         return error(f"Invalid event types: {', '.join(invalid_events)}", 400)
