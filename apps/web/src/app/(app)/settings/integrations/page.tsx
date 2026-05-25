@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Check,
@@ -221,27 +221,61 @@ const STATUS_LABEL: Record<IntegrationStatus, string> = {
   unknown: 'Status unknown',
 };
 
+function setupSnippets(envVars: string[]) {
+  if (!envVars.length) return null;
+  const cleaned = envVars.map(v => v.split(' ')[0].split('(')[0].trim()).filter(Boolean);
+  const localExport = cleaned.map(v => `export ${v}=<value>`).join('\n');
+  const dotEnv = cleaned.map(v => `${v}=<value>`).join('\n');
+  const kubectl = `kubectl create secret generic abenix-secrets -n abenix \\
+  ${cleaned.map(v => `--from-literal=${v}=<value>`).join(' \\\n  ')} \\
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl rollout restart deployment/abenix-api deployment/abenix-agent-runtime-default -n abenix`;
+  const helmSet = `helm upgrade abenix infra/helm/abenix \\
+  ${cleaned.map(v => `--set secrets.${v.toLowerCase()}=<value>`).join(' \\\n  ')} \\
+  --reuse-values`;
+  return { localExport, dotEnv, kubectl, helmSet };
+}
+
+interface McpSummary { connections: number; registry: number; }
+
 export default function IntegrationsPage() {
   const [statuses, setStatuses] = useState<Record<string, IntegrationStatus>>({});
   const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [copied, setCopied] = useState<string | null>(null);
+  const [mcp, setMcp] = useState<McpSummary>({ connections: 0, registry: 0 });
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  const copyToClipboard = useCallback((text: string, key: string) => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(k => (k === key ? null : k)), 1500);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        // /api/integrations/status is best-effort — if missing, we
-        // render "unknown" and the page is still useful as a catalogue.
         const r = await apiFetch<Record<string, IntegrationStatus>>('/api/integrations/status');
-        if (!cancelled && r && r.data) {
-          setStatuses(r.data);
-        }
-      } catch {
-        // Endpoint not implemented yet — leave statuses empty.
-      }
+        if (!cancelled && r && r.data) setStatuses(r.data);
+      } catch {}
+      try {
+        const meR = await apiFetch<{ role?: string }>('/api/me');
+        if (!cancelled && meR?.data) setIsAdmin((meR.data.role || '') === 'admin');
+      } catch {}
+      try {
+        const [cR, rR] = await Promise.all([
+          apiFetch<unknown>('/api/mcp/connections'),
+          apiFetch<unknown>('/api/mcp/registry'),
+        ]);
+        const cArr = Array.isArray((cR as any)?.data) ? (cR as any).data : ((cR as any)?.data?.connections || []);
+        const rArr = Array.isArray((rR as any)?.data) ? (rR as any).data : ((rR as any)?.data?.items || (rR as any)?.data?.servers || []);
+        if (!cancelled) setMcp({ connections: cArr.length, registry: rArr.length });
+      } catch {}
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   const filtered = INTEGRATIONS.filter(i => {
@@ -265,19 +299,30 @@ export default function IntegrationsPage() {
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       <header className="mb-6">
-        <h1 className="text-3xl font-semibold text-white mb-2">Integrations</h1>
+        <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+          <h1 className="text-3xl font-semibold text-white">Integrations</h1>
+          {isAdmin && (
+            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300">
+              Admin — you can configure
+            </span>
+          )}
+        </div>
         <p className="text-slate-400 max-w-3xl">
-          External services the platform can talk to via its built-in tools.
-          Configure each by setting the listed environment variables in your
-          deployment (helm secret for k8s, <code className="text-cyan-300">.env</code> for{' '}
-          <code className="text-cyan-300">dev-local.sh</code>).
-          See the{' '}
-          <Link href="/help" className="text-cyan-400 hover:underline">
-            help docs
-          </Link>{' '}
-          for full setup instructions.
+          External services the platform can talk to via its built-in tools. Click any row to see the exact command for local dev (<code className="text-cyan-300">.env</code>) AND for production (<code className="text-cyan-300">kubectl</code> / <code className="text-cyan-300">helm</code>). Only admins can change live values.
         </p>
       </header>
+
+      <Link href="/mcp" className="block mb-6">
+        <div className="rounded-xl border border-cyan-700/40 bg-cyan-900/15 p-4 hover:border-cyan-500/60 transition flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-cyan-200 mb-1">Need to add a runtime tool? Use MCP servers →</div>
+            <p className="text-xs text-slate-300">
+              MCP (Model Context Protocol) servers extend agent capabilities at runtime without redeploying. {mcp.registry} servers in the registry, {mcp.connections} connected.
+            </p>
+          </div>
+          <div className="text-cyan-400 text-2xl shrink-0">↗</div>
+        </div>
+      </Link>
 
       <div className="mb-6 relative">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -303,6 +348,8 @@ export default function IntegrationsPage() {
             <ul className="divide-y divide-slate-800/50">
               {grouped[cat].map(i => {
                 const st: IntegrationStatus = statuses[i.id] || 'unknown';
+                const isOpen = !!expanded[i.id];
+                const snip = setupSnippets(i.envVars);
                 return (
                   <li key={i.id} className="px-5 py-4">
                     <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -343,6 +390,16 @@ export default function IntegrationsPage() {
                             Docs <ExternalLink className="w-3 h-3" />
                           </a>
                         )}
+                        {snip && (
+                          <button
+                            onClick={() => setExpanded(prev => ({ ...prev, [i.id]: !prev[i.id] }))}
+                            className="text-xs text-slate-300 hover:text-cyan-300 px-2 py-1 rounded border border-slate-700 hover:border-cyan-500/50"
+                            aria-expanded={isOpen}
+                            aria-label={`${isOpen ? 'Hide' : 'Show'} setup for ${i.name}`}
+                          >
+                            {isOpen ? 'Hide setup' : 'Setup'}
+                          </button>
+                        )}
                         {st === 'configured' ? (
                           <Check className="w-4 h-4 text-green-400" aria-label="configured" />
                         ) : st === 'error' ? (
@@ -352,6 +409,41 @@ export default function IntegrationsPage() {
                         )}
                       </div>
                     </div>
+
+                    {isOpen && snip && (
+                      <div className="mt-4 space-y-3 text-[12px]">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="text-slate-400">Local dev — shell export</div>
+                            <button onClick={() => copyToClipboard(snip.localExport, `${i.id}-shell`)} className="text-[10px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded">{copied === `${i.id}-shell` ? '✓ copied' : 'Copy'}</button>
+                          </div>
+                          <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-emerald-300 overflow-x-auto">{snip.localExport}</pre>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="text-slate-400">Local dev — .env file</div>
+                            <button onClick={() => copyToClipboard(snip.dotEnv, `${i.id}-env`)} className="text-[10px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded">{copied === `${i.id}-env` ? '✓ copied' : 'Copy'}</button>
+                          </div>
+                          <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-emerald-300 overflow-x-auto">{snip.dotEnv}</pre>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="text-slate-400">
+                              Kubernetes (production) {!isAdmin && <span className="text-slate-500 ml-2">— admin role required to apply</span>}
+                            </div>
+                            <button onClick={() => copyToClipboard(snip.kubectl, `${i.id}-k8s`)} className="text-[10px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded">{copied === `${i.id}-k8s` ? '✓ copied' : 'Copy'}</button>
+                          </div>
+                          <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-cyan-200 overflow-x-auto">{snip.kubectl}</pre>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="text-slate-400">Helm upgrade {!isAdmin && <span className="text-slate-500 ml-2">— admin role required</span>}</div>
+                            <button onClick={() => copyToClipboard(snip.helmSet, `${i.id}-helm`)} className="text-[10px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded">{copied === `${i.id}-helm` ? '✓ copied' : 'Copy'}</button>
+                          </div>
+                          <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-cyan-200 overflow-x-auto">{snip.helmSet}</pre>
+                        </div>
+                      </div>
+                    )}
                   </li>
                 );
               })}
