@@ -85,6 +85,8 @@ n8n / Zapier / LangGraph are excellent when the problem is *integration-shaped* 
 
 The killer feature is **actAs**: a SaaS app holding a single platform key serves N end-users by passing `X-Abenix-Subject` on each request. Quotas, audit log, and data isolation all attribute to the right user. Five showcase apps in this repo ride this exact path.
 
+**Sign-in**: email + password works out of the box. Drop in OIDC creds for **Google**, **GitHub**, or **Microsoft** and the login page renders the matching button. SSO-provisioned users get their own tenant on first sign-in. Both flows can coexist on the same email — link a password account to SSO and either continues to work. See [`docs/sso.md`](docs/sso.md) for the 5-minute setup per provider.
+
 ### 4. Failure-first ops — Pipeline Surgeon, DLQ, idempotency, alerts
 
 Failures are first-class citizens, not exception traces in a log file:

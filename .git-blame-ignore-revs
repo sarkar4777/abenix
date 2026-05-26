@@ -1,0 +1,7 @@
+# Commits in this file are ignored by `git blame --ignore-revs-file=.git-blame-ignore-revs`.
+# Configure once locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# Only add commits here that are PURE STYLE/FORMATTING — never functional changes.
+
+# v1.11: bulk black reformat when CI gate moved from advisory to blocking.
+55ae117f18c2244e2e171cea0f1653d40d37576f

@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import desc, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import tool_gate

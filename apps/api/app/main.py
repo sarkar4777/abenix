@@ -160,6 +160,9 @@ async def _validation_exception_handler(
 
 
 app.include_router(auth.router)
+from app.routers import sso as _sso_router
+
+app.include_router(_sso_router.router)
 app.include_router(agent_sharing.router)
 app.include_router(agent_comments.router)
 app.include_router(agent_favorites.router)

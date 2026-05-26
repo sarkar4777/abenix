@@ -938,7 +938,6 @@ async def execute_tool(
     import time
 
     from app.core import tool_gate
-    from models.tool_invocation import ToolInvocation, ToolInvocationStatus
 
     started = time.time()
     arguments = (body or {}).get("arguments") or {}

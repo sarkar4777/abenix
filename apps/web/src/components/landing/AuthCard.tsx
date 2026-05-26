@@ -47,11 +47,7 @@ function useTypingAnimation(text: string, speed = 80) {
 }
 
 export default function AuthCard() {
-  // Default to login because the vast majority of repeat visitors are
-  // returning users. New users notice the Register tab next to Sign In;
-  // returning users staring at a Register form just type into it and end
-  // up with a duplicate-email error. Sign-in-by-default also makes the
-  // forgot-password / "I have an account" flow naturally available.
+  // Default to login — repeat visitors are the common case.
   const [tab, setTab] = useState<Tab>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -61,6 +57,18 @@ export default function AuthCard() {
     password: '',
     full_name: '',
   });
+  const [ssoProviders, setSsoProviders] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_URL}/api/auth/oidc/providers`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled) setSsoProviders((j?.data?.providers || []) as string[]);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const { displayed: titleText, done: titleDone } = useTypingAnimation('Access Portal', 90);
 
   function updateField(field: keyof FormData, value: string) {
@@ -332,6 +340,46 @@ export default function AuthCard() {
             )}
           </button>
         </form>
+
+        {ssoProviders.length > 0 && (
+          <div className="mt-4">
+            <div className="relative my-3 text-center">
+              <span className="px-2 bg-slate-900 text-[10px] text-slate-500 uppercase tracking-wider relative z-10">
+                Or continue with
+              </span>
+              <span className="absolute left-0 right-0 top-1/2 h-px bg-slate-800" aria-hidden="true" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {ssoProviders.includes('google') && (
+                <a
+                  href={`${API_URL}/api/auth/oidc/google/start?return_to=/dashboard`}
+                  className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
+                  aria-label="Sign in with Google"
+                >
+                  <span aria-hidden="true">G</span> Google
+                </a>
+              )}
+              {ssoProviders.includes('github') && (
+                <a
+                  href={`${API_URL}/api/auth/oidc/github/start?return_to=/dashboard`}
+                  className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
+                  aria-label="Sign in with GitHub"
+                >
+                  <span aria-hidden="true"></span> GitHub
+                </a>
+              )}
+              {ssoProviders.includes('microsoft') && (
+                <a
+                  href={`${API_URL}/api/auth/oidc/microsoft/start?return_to=/dashboard`}
+                  className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
+                  aria-label="Sign in with Microsoft"
+                >
+                  <span aria-hidden="true">M</span> Microsoft
+                </a>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 text-center">
           <p className="text-slate-500 text-xs mb-2">Quick Access:</p>

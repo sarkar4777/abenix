@@ -25,8 +25,15 @@ class User(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str] = mapped_column(String(255))
+    # SSO / OIDC. Both are NULL for password-auth users. For SSO users
+    # auth_provider is e.g. "google" / "github" / "microsoft" and
+    # external_id is the provider's stable subject (Google `sub`,
+    # GitHub numeric id, Microsoft `oid`). The pair is unique-indexed
+    # so the OIDC callback resolves in one query.
+    auth_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role"), default=UserRole.USER

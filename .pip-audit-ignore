@@ -1,0 +1,13 @@
+# Whitelisted vulnerability IDs for pip-audit in CI.
+#
+# Format: one ID per line. Anything after `#` on a line is a comment.
+# Use this file ONLY for advisories where:
+#   - the vulnerable code path is not reachable from our usage, OR
+#   - an upstream fix is pending and we have a tracking issue.
+#
+# Each entry MUST be followed by a comment explaining WHY and pointing
+# at a tracking issue / PR. An ignore without justification is a code
+# smell — the reviewer should ask "what's the fix plan?".
+#
+# Example:
+#   GHSA-xxxx-yyyy-zzzz  # not exposed via our API surface; tracked in #123

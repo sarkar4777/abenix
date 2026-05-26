@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.11.0 — 2026-05-26
+
+### Added
+- **SSO sign-in** with Google, GitHub, and Microsoft via OIDC. Per-provider config via env vars; missing config silently disables that provider rather than breaking the login page. SSO users get a fresh tenant on first sign-in, or get linked to an existing password account if their email already exists.
+- **`ARCHITECTURE.md`** — the monorepo anchor: top-level layout, request flow, data model, where to land per feature, the SHA-tag deploy trap.
+- **`ONBOARDING.md`** — a 30-minute path from `git clone` to a running agent, with the local SSO test recipe.
+- **`docs/sso.md`** — end-user SSO setup with per-provider walkthroughs, kubectl one-liner, helm one-liner.
+- **`docs/06-deployment/disaster-recovery.md`** — 3am-readable DR runbook covering triage, common scenarios, backup/restore for Postgres + object storage + Neo4j, and a quarterly tested-restore drill.
+- **`docs/06-deployment/load-test-baseline.md`** + **`scripts/load/baseline.js`** — reproducible k6 smoke load test with documented baseline numbers.
+- **`docs/06-deployment/deploy-only-trap.md`** — formal write-up of the `--only` deploy trap that has bitten contributors and the recovery steps.
+- **`.github/PULL_REQUEST_TEMPLATE.md`** and three issue templates (bug, feature, good-first-issue) so contributions land with the right context.
+- **`scripts/check-before-push.sh`** — runs every CI gate locally, with `--fast` / `--python` / `--web` flags for tight loops.
+- **`e2e/uat_enterprise_edge.spec.ts`** — 15 settings/JSONB edge-case tests.
+- **`e2e/uat_critical_paths.spec.ts`** — 26 critical-path E2E tests across non-settings features.
+- **`e2e/uat_ui_journeys.spec.ts`** — 20 browser-driven user journeys.
+
+### Changed
+- **CI gate** is now hard. `ruff`, `black --check`, `pytest`, `eslint`, `tsc --noEmit`, and `next build` all block merge — no more advisory `|| true`. `pip-audit` runs against `apps/api/requirements.txt`; the new `.pip-audit-ignore` file holds documented exceptions only.
+- **`Tenant.settings` column** promoted to `MutableDict.as_mutable(JSONB)` so nested-dict mutations auto-track across every endpoint that touches tenant settings.
+- **Expanded `CONTRIBUTING.md`** with branch model, commit conventions, the local gate, and the no-AI-attribution rule.
+- **Bulk `black` reformat** of the backend so the formatter bar is clean going forward. The commit is recorded in `.git-blame-ignore-revs` so `git blame` skips it.
+
+### Fixed
+- **Settings persistence regression** — `PUT /api/settings/retention`, `PUT /api/settings/dlp`, and `PUT /api/approvals/webhooks` no longer drop the write on commit. Root cause was SQLAlchemy not tracking `tenant.settings[<key>] = ...` mutations on a raw JSONB column.
+- **Integrations page admin badge** now reads from `/api/auth/me` and treats both `admin` and `owner` as admin (was hitting a 404 on `/api/me`).
+- **Webhook POST** rejects an empty `events: []` array with 400 instead of silently creating a no-op endpoint.
+
+### Operational
+- Five long-standing zombie pods in the AKS cluster were swept (`abenix-mqtt-mosquitto`, `abenix-tsdb-timescaledb`, `uat-mcp`, `ml-model-94844936`, `abenix-edge-edge-runtime-0`). Helm releases `abenix-mqtt` and `abenix-tsdb` were uninstalled.
+
 ## v1.10.0 — 2026-05-25
 
 ### Added

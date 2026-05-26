@@ -106,6 +106,8 @@ __all__ = [
     "AgentType",
     "Execution",
     "ExecutionStatus",
+    "ToolInvocation",
+    "ToolInvocationStatus",
     "KnowledgeBase",
     "KBStatus",
     "KnowledgeProject",
