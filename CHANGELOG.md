@@ -46,6 +46,52 @@ Single backwards-compatible migration `b8c9d0e1f2g3_v2_knowledge_atlas_persona.p
 
 Full developer documentation at [`docs/02-runtime/15-v2-knowledge-enterprise.md`](docs/02-runtime/15-v2-knowledge-enterprise.md).
 
+## v2.0.0 — 2026-05-26
+
+## v2.0.0 — enterprise knowledge stack
+
+Sixteen features that move Knowledge Bases, Atlas, and PersonaKB from demo-grade to Fortune-500-grade for indexing tens of thousands of documents and serving dozens of agents.
+
+### Added — Knowledge
+
+- **Document-level ACL** via new `document_grants` table + `/api/knowledge/{kb}/documents/{doc}/grants` CRUD. Pre-filter applied before similarity search, with a Redis cache keyed on `(user, kb)`.
+- **Document versioning** — `parent_document_id / version_number / is_current / superseded_by` columns + `POST /api/knowledge/{kb}/documents/{doc}/replace` endpoint. Search defaults to current; superseded versions stay queryable with `?include_superseded=true`.
+- **Incremental Cognify** — per-doc `cognified_at` filter so adding 100 docs to a 10k-doc KB only processes 100, not 10,100. In-job parallelism via `asyncio.gather` with `Semaphore(max_parallel_docs)`.
+- **Cognify config + conflict resolution** — per-tenant `cognify_configs` (threshold / action / parallelism / daily budget) + `cognify_conflicts` rows surfaced at `/settings/cognify`.
+- **Embedding-model swap with zero downtime** — `POST /api/knowledge/{kb}/reembed` (with dry-run cost estimate) enqueues a Celery worker that staging-namespaces the new vectors, atomic alias flip, 24h rollback window.
+- **Reranking + citation anchors** — Cohere `rerank-english-v3.0` (or Claude Haiku fallback) on top-50 hybrid hits; every result carries `{document_id, page, chunk_index, char_offset_start/end, anchor_url}`.
+- **OCR pipeline** — `services/extractors/` with `text_pdf` → `vision_pdf` auto-fallback (Claude Haiku vision via PyMuPDF), `office` (unstructured.io), plain text. `documents.extraction_method / quality` written for audit.
+
+### Added — Atlas
+
+- **Bi-temporal graph** — `atlas_nodes` and `atlas_edges` gain `valid_from / valid_to / recorded_at / source_anchors`. Compliance queries ("what did we know on 2025-03-15") resolve in one Cypher hop.
+- **`atlas_as_of` tool** for agents — query the graph at any timestamp.
+- **`atlas_cypher` tool** — read-only Cypher sandbox. Validator rejects every write keyword; tenant + graph context auto-injected.
+
+### Added — PersonaKB + GDPR
+
+- **GDPR cascade purge** — `POST /api/gdpr/users/{id}/purge` deletes across Postgres, Pinecone, Neo4j, blob storage, and trajectory memory; every step logged for audit at `GET /api/gdpr/users/{id}/receipts`.
+- **Persona encryption at rest** — per-tenant DEK derived from a cluster KEK env, AES-256-GCM.
+- **Daily Pinecone vacuum** — closes the orphan-vectors cost leak.
+
+### Added — Ops
+
+- **Pagination cursors everywhere** that had a hardcoded limit (persona items, cognify jobs, conflicts).
+- **Two new admin pages**: `/settings/cognify` and `/settings/gdpr`.
+- **Three k6 scenarios** for knowledge-surface load testing.
+
+### Migration
+
+Single backwards-compatible migration `b8c9d0e1f2g3_v2_knowledge_atlas_persona.py`. Every new column nullable or server-defaulted; no data movement.
+
+### Tests
+
+`e2e/uat_v2_enterprise.spec.ts` — 10 tests across the v2 surfaces (API + UI).
+
+### Reference
+
+Full developer documentation at [`docs/02-runtime/15-v2-knowledge-enterprise.md`](docs/02-runtime/15-v2-knowledge-enterprise.md).
+
 ## v1.11.0 — 2026-05-26
 
 ### Added

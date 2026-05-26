@@ -104,6 +104,46 @@ def _alembic_version_exists_sync(conn) -> bool:
     return row is not None
 
 
+def _patch_missing_columns_sync(conn) -> int:
+    """Compare ORM Base.metadata to live schema, ALTER ADD any column the
+    ORM declares that the live DB lacks. Idempotent, additive only —
+    never drops or alters existing columns. Used when alembic_version is
+    missing AND tables already exist (drift recovery)."""
+    from sqlalchemy import inspect, text
+
+    from models.base import Base
+
+    inspector = inspect(conn)
+    added = 0
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue
+        live_cols = {c["name"] for c in inspector.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in live_cols:
+                continue
+            col_type = col.type.compile(dialect=conn.dialect)
+            nullable = "" if col.nullable else " NOT NULL"
+            default = ""
+            if col.server_default is not None:
+                default_text = getattr(col.server_default, "arg", None)
+                if default_text is not None:
+                    default = f" DEFAULT {default_text}"
+            elif col.default is not None and getattr(col.default, "is_scalar", False):
+                default = f" DEFAULT {col.default.arg!r}"
+            stmt = (
+                f"ALTER TABLE {table.name} "
+                f"ADD COLUMN IF NOT EXISTS {col.name} {col_type}{default}{nullable}"
+            )
+            try:
+                conn.execute(text(stmt))
+                added += 1
+                print(f"[bootstrap] ADD COLUMN {table.name}.{col.name}")
+            except Exception as e:
+                print(f"[bootstrap] WARN failed to add {table.name}.{col.name}: {e}")
+    return added
+
+
 def _run_alembic_stamp_heads() -> None:
     """Mark every alembic head as applied, without running migrations.
 
@@ -121,7 +161,7 @@ def _run_alembic_stamp_heads() -> None:
 
 
 def _bootstrap_sync(url: str) -> int:
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, inspect
 
     import models  # noqa: F401  — registers every table on Base.metadata
     from models.base import Base
@@ -134,8 +174,17 @@ def _bootstrap_sync(url: str) -> int:
                 "skipping fresh-install bootstrap."
             )
             return 0
-        print("[bootstrap] Fresh DB detected — creating schema from ORM (sync driver).")
-        Base.metadata.create_all(bind=conn)
+        inspector = inspect(conn)
+        had_tables = bool(inspector.get_table_names())
+        if had_tables:
+            print("[bootstrap] Drift recovery — tables exist but alembic untracked.")
+            Base.metadata.create_all(bind=conn)
+            _patch_missing_columns_sync(conn)
+        else:
+            print(
+                "[bootstrap] Fresh DB detected — creating schema from ORM (sync driver)."
+            )
+            Base.metadata.create_all(bind=conn)
     _run_alembic_stamp_heads()
     print("[bootstrap] Schema created and alembic stamped at heads.")
     return 0
@@ -166,13 +215,24 @@ async def _bootstrap_async(url: str) -> int:
                     "skipping fresh-install bootstrap."
                 )
                 return 0
-            print(
-                "[bootstrap] Fresh DB detected — creating schema from ORM (async driver)."
-            )
-            # run_sync hands a sync Connection to create_all so SQLAlchemy
-            # can issue DDL statements one by one, without us writing a
-            # bespoke async DDL emitter.
-            await conn.run_sync(Base.metadata.create_all)
+
+            def _existing_tables(sync_conn) -> list[str]:
+                from sqlalchemy import inspect as _inspect
+
+                return _inspect(sync_conn).get_table_names()
+
+            existing = await conn.run_sync(_existing_tables)
+            if existing:
+                print(
+                    "[bootstrap] Drift recovery — tables exist but alembic untracked."
+                )
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.run_sync(_patch_missing_columns_sync)
+            else:
+                print(
+                    "[bootstrap] Fresh DB detected — creating schema from ORM (async driver)."
+                )
+                await conn.run_sync(Base.metadata.create_all)
     finally:
         await engine.dispose()
 
