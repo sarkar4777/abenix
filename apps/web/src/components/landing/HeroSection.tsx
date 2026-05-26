@@ -29,9 +29,9 @@ const features = [
 ];
 
 const stats: Array<{ value: number; prefix?: string; suffix: string; label: string }> = [
-  { value: 79, suffix: '', label: 'Pre-Built Agents' },
-  { value: 100, suffix: '+', label: 'Built-in Tools' },
-  { value: 49, suffix: '', label: 'Test Suites' },
+  { value: 140, suffix: '', label: 'Pre-Built Agents' },
+  { value: 132, suffix: '', label: 'Built-in Tools' },
+  { value: 45, suffix: '', label: 'Test Suites' },
 ];
 
 function CountUp({

@@ -16,7 +16,8 @@
         {"slug": "01-architecture/02-request-lifecycle", "title": "Request lifecycle"},
         {"slug": "01-architecture/03-services", "title": "Service inventory"},
         {"slug": "01-architecture/04-data-stores", "title": "Data stores"},
-        {"slug": "01-architecture/05-architectural-patterns", "title": "Architectural patterns (45)"}
+        {"slug": "01-architecture/05-architectural-patterns", "title": "Architectural patterns (45)"},
+        {"slug": "01-architecture/06-atlas-knowledge-engine", "title": "Atlas + Knowledge Engine"}
       ]
     },
     {
@@ -32,7 +33,12 @@
         {"slug": "02-runtime/06-agent-to-agent", "title": "Agent-to-agent communication"},
         {"slug": "02-runtime/07-pipeline-data-flow", "title": "Pipeline data flow + scoping"},
         {"slug": "02-runtime/08-queue-scaling", "title": "Queues, pools, KEDA"},
-        {"slug": "02-runtime/09-state-machines", "title": "State machines"}
+        {"slug": "02-runtime/09-state-machines", "title": "State machines"},
+        {"slug": "02-runtime/10-pipeline-healing-drift", "title": "Pipeline self-healing + drift detection"},
+        {"slug": "02-runtime/11-sandboxed-code-execution", "title": "Sandboxed code execution (Code Assets)"},
+        {"slug": "02-runtime/12-ml-models", "title": "ML models — upload, deploy, invoke"},
+        {"slug": "02-runtime/13-moderation-gate", "title": "Moderation gate (pre/post-LLM filtering)"},
+        {"slug": "02-runtime/14-connectors-and-triggers", "title": "Connectors + triggers (SAP / Slack / cron / webhook)"}
       ]
     },
     {
@@ -103,7 +109,8 @@
       "docs": [
         {"slug": "09-reference/00-rest-api", "title": "REST API"},
         {"slug": "09-reference/01-env-vars", "title": "Environment variables"},
-        {"slug": "09-reference/03-glossary", "title": "Glossary"}
+        {"slug": "09-reference/03-glossary", "title": "Glossary"},
+        {"slug": "09-reference/05-sso", "title": "SSO / OIDC sign-in"}
       ]
     }
   ]

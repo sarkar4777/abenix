@@ -8,9 +8,9 @@ import {
 } from 'lucide-react';
 
 const navLinks = [
-  { label: 'Capabilities', icon: Boxes, href: '#features' },
-  { label: 'How it works', icon: Hammer, href: '#how-it-works' },
-  { label: 'Docs', icon: Book, href: '/dev-docs' },
+  { label: 'Capabilities', icon: Boxes, href: '#features', external: false },
+  { label: 'How it works', icon: Hammer, href: '#how-it-works', external: false },
+  { label: 'Docs', icon: Book, href: '/docs', external: true },
 ];
 
 export default function Navbar() {
@@ -40,6 +40,7 @@ export default function Navbar() {
             <a
               key={link.label}
               href={link.href}
+              {...(link.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
               className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-400 hover:text-white rounded-lg hover:bg-slate-800/50 transition-colors"
             >
               <link.icon className="w-4 h-4" />

@@ -32,7 +32,7 @@ type IntegrationStatus = 'configured' | 'missing' | 'error' | 'unknown';
 interface Integration {
   id: string;
   name: string;
-  category: 'llm' | 'search' | 'observability' | 'comms' | 'storage' | 'data' | 'kyc' | 'meeting';
+  category: 'llm' | 'search' | 'observability' | 'comms' | 'storage' | 'data' | 'kyc' | 'meeting' | 'identity';
   description: string;
   envVars: string[];
   unlocks: string;          // which tools/features this integration unlocks
@@ -194,10 +194,40 @@ const INTEGRATIONS: Integration[] = [
     envVars: ['GITHUB_TOKEN'],
     unlocks: 'github_tool',
   },
+  // Identity providers (SSO / OIDC). Configuring any of these makes the
+  // matching "Sign in with X" button appear on the login page.
+  {
+    id: 'sso_google',
+    name: 'Google sign-in (OIDC)',
+    category: 'identity',
+    description: 'Lets users sign in with their Google account. Redirect URI: $PUBLIC_API_BASE_URL/api/auth/oidc/google/callback',
+    envVars: ['GOOGLE_OIDC_CLIENT_ID', 'GOOGLE_OIDC_CLIENT_SECRET', 'PUBLIC_API_BASE_URL', 'WEB_BASE_URL'],
+    unlocks: '"Sign in with Google" on the login page',
+    docsUrl: '/docs?slug=09-reference/05-sso',
+  },
+  {
+    id: 'sso_github',
+    name: 'GitHub sign-in (OAuth)',
+    category: 'identity',
+    description: 'Lets users sign in with their GitHub account. The user must have a verified primary email. Redirect URI: $PUBLIC_API_BASE_URL/api/auth/oidc/github/callback',
+    envVars: ['GITHUB_OAUTH_CLIENT_ID', 'GITHUB_OAUTH_CLIENT_SECRET', 'PUBLIC_API_BASE_URL', 'WEB_BASE_URL'],
+    unlocks: '"Sign in with GitHub" on the login page',
+    docsUrl: '/docs?slug=09-reference/05-sso',
+  },
+  {
+    id: 'sso_microsoft',
+    name: 'Microsoft sign-in (Azure AD / OIDC)',
+    category: 'identity',
+    description: 'Lets users sign in with their Microsoft / Azure AD account. Redirect URI: $PUBLIC_API_BASE_URL/api/auth/oidc/microsoft/callback. Set MICROSOFT_OIDC_TENANT to your tenant GUID to restrict to one org.',
+    envVars: ['MICROSOFT_OIDC_CLIENT_ID', 'MICROSOFT_OIDC_CLIENT_SECRET', 'MICROSOFT_OIDC_TENANT (default: common)', 'PUBLIC_API_BASE_URL', 'WEB_BASE_URL'],
+    unlocks: '"Sign in with Microsoft" on the login page',
+    docsUrl: '/docs?slug=09-reference/05-sso',
+  },
 ];
 
 const CATEGORY_LABEL: Record<string, string> = {
   llm: 'LLM providers',
+  identity: 'Identity provider (SSO)',
   search: 'Web search',
   observability: 'Observability',
   comms: 'Communication',
@@ -260,6 +290,18 @@ export default function IntegrationsPage() {
       try {
         const r = await apiFetch<Record<string, IntegrationStatus>>('/api/integrations/status');
         if (!cancelled && r && r.data) setStatuses(r.data);
+      } catch {}
+      try {
+        const ssoR = await apiFetch<{ providers?: string[] }>('/api/auth/oidc/providers');
+        const list = (ssoR?.data?.providers || []) as string[];
+        if (!cancelled) {
+          setStatuses((prev) => ({
+            ...prev,
+            sso_google: list.includes('google') ? 'configured' : 'missing',
+            sso_github: list.includes('github') ? 'configured' : 'missing',
+            sso_microsoft: list.includes('microsoft') ? 'configured' : 'missing',
+          }));
+        }
       } catch {}
       try {
         const meR = await apiFetch<{ user?: { role?: string } }>('/api/auth/me');

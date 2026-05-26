@@ -1571,7 +1571,7 @@ spec:
             </ol>
 
             <Callout tone="info">
-              Full dev-doc reference: <a href="/dev-docs/02-runtime/08-queue-scaling" className="text-cyan-300 underline">02-runtime/08-queue-scaling</a>.
+              Full dev-doc reference: <a href="/docs?slug=02-runtime%2F08-queue-scaling" target="_blank" rel="noopener noreferrer" className="text-cyan-300 underline">02-runtime/08-queue-scaling</a>.
             </Callout>
           </div>
         ),

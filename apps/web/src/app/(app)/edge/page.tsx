@@ -299,7 +299,7 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
               <strong>Optional:</strong> Mosquitto for plant MQTT bus, Ollama for local LLM (air-gapped sites), Chrony for clock sync (bundle signature has a 1h <code className="bg-slate-800 px-1 rounded">issued_at</code> skew tolerance — drift past that rejects bundles).
             </p>
             <p className="text-[11px] text-slate-500">
-              Full prereq matrix + add-ons + Helm/Docker/systemd snippets: <a href="/dev-docs/06-deployment/05-edge-runtime" className="text-cyan-300 underline">dev-docs &rarr; 06-deployment / 05-edge-runtime</a>.
+              Full prereq matrix + add-ons + Helm/Docker/systemd snippets: <a href="/docs?slug=06-deployment%2F05-edge-runtime" target="_blank" rel="noopener noreferrer" className="text-cyan-300 underline">docs &rarr; 06-deployment / 05-edge-runtime</a>.
             </p>
           </div>
         </details>
