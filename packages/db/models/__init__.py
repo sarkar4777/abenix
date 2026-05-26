@@ -91,6 +91,13 @@ from models.code_asset_invocation import CodeAssetInvocation
 from models.ml_model_invocation import MLModelInvocation
 from models.kb_query_invocation import KBQueryInvocation
 from models.archive import ArchiveRun, ArchiveRunStatus, RetentionPolicy
+from models.document_grant import (
+    DocumentGrant,
+    DocumentGrantPermission,
+    DocumentGrantSubject,
+)
+from models.cognify_config import CognifyConfig, CognifyConflict
+from models.gdpr_purge_log import GDPRPurgeLog
 
 __all__ = [
     "Base",
@@ -200,4 +207,10 @@ __all__ = [
     "ArchiveRun",
     "ArchiveRunStatus",
     "RetentionPolicy",
+    "DocumentGrant",
+    "DocumentGrantPermission",
+    "DocumentGrantSubject",
+    "CognifyConfig",
+    "CognifyConflict",
+    "GDPRPurgeLog",
 ]

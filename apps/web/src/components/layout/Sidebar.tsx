@@ -163,6 +163,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'MCP Servers',    icon: Plug, href: '/mcp',                feature: 'manage_mcp' },
       { label: 'Edge',           icon: CircuitBoard, href: '/edge' },
       { label: 'API Keys',       icon: Key,  href: '/settings/api-keys',  feature: 'manage_api_keys' },
+      { label: 'Cognify config',  icon: Plug, href: '/settings/cognify' },
+      { label: 'GDPR (right to erasure)', icon: Plug, href: '/settings/gdpr' },
       { label: 'Integrations',   icon: Plug, href: '/settings/integrations' },
       { label: 'Settings',       icon: Settings,   href: '/settings' },
       { label: 'Help',           icon: HelpCircle, href: '/help' },

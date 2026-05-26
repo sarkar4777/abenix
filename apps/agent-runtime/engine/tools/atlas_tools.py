@@ -629,3 +629,11 @@ ATLAS_TOOL_NAMES = {
     "atlas_search_grounded": AtlasSearchGroundedTool,
     "atlas_describe": AtlasDescribeTool,
 }
+
+try:
+    from engine.tools.atlas_cypher import AtlasAsOfTool, AtlasCypherTool
+
+    ATLAS_TOOL_NAMES["atlas_cypher"] = AtlasCypherTool
+    ATLAS_TOOL_NAMES["atlas_as_of"] = AtlasAsOfTool
+except Exception:
+    pass

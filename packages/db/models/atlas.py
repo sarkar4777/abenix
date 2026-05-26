@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import enum
 import uuid
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    DateTime,
     Enum,
     Float,
     ForeignKey,
@@ -15,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -123,6 +126,17 @@ class AtlasNode(UUIDMixin, TimestampMixin, Base):
     # `tags` is a small string array for filter chips.
     tags: Mapped[list] = mapped_column(JSONB, default=list)
 
+    valid_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    valid_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    source_anchors: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     graph: Mapped[AtlasGraph] = relationship(back_populates="nodes")
 
 
@@ -166,6 +180,17 @@ class AtlasEdge(UUIDMixin, TimestampMixin, Base):
     properties: Mapped[dict] = mapped_column(JSONB, default=dict)
     source: Mapped[str] = mapped_column(String(40), default="user")
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    valid_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    valid_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    source_anchors: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     graph: Mapped[AtlasGraph] = relationship(back_populates="edges")
 

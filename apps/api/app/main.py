@@ -163,6 +163,15 @@ app.include_router(auth.router)
 from app.routers import sso as _sso_router
 
 app.include_router(_sso_router.router)
+from app.routers import (
+    document_grants as _doc_grants_mod,
+    knowledge_v2 as _kb_v2_mod,
+    gdpr as _gdpr_mod,
+)
+
+app.include_router(_doc_grants_mod.router)
+app.include_router(_kb_v2_mod.router)
+app.include_router(_gdpr_mod.router)
 app.include_router(agent_sharing.router)
 app.include_router(agent_comments.router)
 app.include_router(agent_favorites.router)

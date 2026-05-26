@@ -4,7 +4,8 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -129,3 +130,12 @@ class PersonaItem(UUIDMixin, TenantMixin, TimestampMixin, Base):
     )  # pending | indexed | failed
     pinecone_ids: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    encrypted: Mapped[bool] = mapped_column(Boolean, default=False)
+    key_version: Mapped[int | None] = mapped_column(Integer, nullable=True)

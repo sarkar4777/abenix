@@ -38,7 +38,8 @@
         {"slug": "02-runtime/11-sandboxed-code-execution", "title": "Sandboxed code execution (Code Assets)"},
         {"slug": "02-runtime/12-ml-models", "title": "ML models — upload, deploy, invoke"},
         {"slug": "02-runtime/13-moderation-gate", "title": "Moderation gate (pre/post-LLM filtering)"},
-        {"slug": "02-runtime/14-connectors-and-triggers", "title": "Connectors + triggers (SAP / Slack / cron / webhook)"}
+        {"slug": "02-runtime/14-connectors-and-triggers", "title": "Connectors + triggers (SAP / Slack / cron / webhook)"},
+        {"slug": "02-runtime/15-v2-knowledge-enterprise", "title": "v2.0 enterprise knowledge stack (ACL / OCR / temporal graph / GDPR)"}
       ]
     },
     {

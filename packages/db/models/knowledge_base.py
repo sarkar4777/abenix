@@ -2,7 +2,18 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -95,7 +106,11 @@ class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
 class Document(UUIDMixin, Base):
     __tablename__ = "documents"
-    __table_args__ = (Index("ix_documents_kb_status", "kb_id", "status"),)
+    __table_args__ = (
+        Index("ix_documents_kb_status", "kb_id", "status"),
+        Index("ix_documents_is_current", "is_current"),
+        Index("ix_documents_kb_cognified", "kb_id", "cognified_at"),
+    )
 
     kb_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("knowledge_collections.id"), index=True
@@ -111,6 +126,23 @@ class Document(UUIDMixin, Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+    parent_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    cognified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_cognify_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    extraction_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    extraction_quality: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     knowledge_base: Mapped["KnowledgeBase"] = relationship(back_populates="documents")
 
