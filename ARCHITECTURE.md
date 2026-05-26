@@ -44,19 +44,27 @@ Five things ship from this monorepo:
 
 ## Request flow — agent execution
 
-```
-browser  ──POST /api/agents/{id}/execute──►  apps/api  ──Redis Streams──►  apps/agent-runtime
-   ▲                                            │                                │
-   │                                       (writes Execution                     │
-   │                                        row, returns                         │
-   │                                        execution_id)                        │
-   │                                                                             ▼
-   └────GET /api/executions/{id}/watch ◄─Redis pub/sub─◄────  status + events ──┘
-                                                                  │
-                                                                  ▼
-                                                            tool invocations
-                                                              ▼      ▼      ▼
-                                                          Anthropic Tavily etc.
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Browser / SDK
+  participant API as apps/api
+  participant DB as Postgres
+  participant Q as Redis Streams
+  participant R as apps/agent-runtime
+  participant T as External tools<br/>(Anthropic, Tavily, ...)
+
+  B->>API: POST /api/agents/{id}/execute
+  API->>DB: insert Execution row
+  API->>Q: enqueue on exec_q:<pool>
+  API-->>B: 202 { execution_id }
+  B->>API: GET /api/executions/{id}/watch (SSE)
+  R->>Q: consume
+  R->>T: tool invocations
+  T-->>R: tool results
+  R-->>API: status + events (pub/sub)
+  API-->>B: stream events
+  R->>DB: update Execution + ToolInvocation rows
 ```
 
 Agent code lives in `apps/agent-runtime/engine/`. Tools register themselves in `engine/tools/__init__.py`. The agent runtime pulls work from one of four Redis Streams pools (`chat`, `default`, `heavy-reasoning`, `long-running`) — pool choice is per-agent config and lets KEDA scale each pool independently.

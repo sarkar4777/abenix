@@ -2,6 +2,18 @@
 
 ## v1.11.0 — 2026-05-26
 
+### Fixed
+- **CI gate** — `python-lint` and `web-lint-typecheck-build` were failing on v1.11.0 because the local `black 26.3.1` disagreed with the CI pin `black==24.8.0` on 15 files, and `pip-audit` was tripping on `MAL-2026-4750` (a typosquatting advisory against fastapi 0.136.3 with no fix version published).
+  - Reformatted the 15 files with the pinned `black 24.8.0`.
+  - Whitelisted `MAL-2026-4750` in `.pip-audit-ignore` with justification.
+  - `scripts/check-before-push.sh` now pip-installs the CI-pinned versions (`black==24.8.0`, `ruff==0.6.9`) and runs `pip-audit` against `apps/api/requirements.txt`. Green locally now means green CI.
+
+### Changed
+- `ARCHITECTURE.md` request-flow diagram converted from ASCII to mermaid.
+- `docs/sso.md` gets a mermaid sequence diagram of the OIDC handshake.
+
+## v1.11.0 — 2026-05-26
+
 ### Added
 - **SSO sign-in** with Google, GitHub, and Microsoft via OIDC. Per-provider config via env vars; missing config silently disables that provider rather than breaking the login page. SSO users get a fresh tenant on first sign-in, or get linked to an existing password account if their email already exists.
 - **`ARCHITECTURE.md`** — the monorepo anchor: top-level layout, request flow, data model, where to land per feature, the SHA-tag deploy trap.

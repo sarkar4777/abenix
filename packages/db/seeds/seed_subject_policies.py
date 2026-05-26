@@ -28,7 +28,8 @@ async def ensure_table_and_seed():
     conn = await asyncpg.connect(db_url)
 
     # Step 1: Create table if not exists (idempotent)
-    await conn.execute("""
+    await conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS subject_policies (
             id UUID PRIMARY KEY,
             api_key_id UUID NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
@@ -42,7 +43,8 @@ async def ensure_table_and_seed():
             created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
         );
-    """)
+    """
+    )
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS ix_subject_policies_lookup ON subject_policies(api_key_id, subject_type, subject_id);"
     )

@@ -237,7 +237,10 @@ async def list_top_correlations(
     # entity scan — keeps the v1 schema (kb_id) compatible.
     from sqlalchemy import text as _t
 
-    rows = (await db.execute(_t("""
+    rows = (
+        await db.execute(
+            _t(
+                """
         SELECT canonical_name, entity_type, SUM(mention_count) AS mentions,
                COUNT(DISTINCT kb_id) AS collections
         FROM graph_entities
@@ -245,7 +248,10 @@ async def list_top_correlations(
         GROUP BY canonical_name, entity_type
         ORDER BY mentions DESC
         LIMIT 25
-        """).bindparams(coll_ids=coll_ids))).all()
+        """
+            ).bindparams(coll_ids=coll_ids)
+        )
+    ).all()
 
     return success(
         [
@@ -308,7 +314,8 @@ async def correlate_entity(
 
     related = (
         await db.execute(
-            _t("""
+            _t(
+                """
         SELECT canonical_name, entity_type, mention_count,
                cardinality(ARRAY(
                  SELECT jsonb_array_elements_text(source_doc_ids)
@@ -322,7 +329,8 @@ async def correlate_entity(
           )
         ORDER BY shared_docs DESC, mention_count DESC
         LIMIT 25
-        """).bindparams(
+        """
+            ).bindparams(
                 coll_ids=coll_ids, name=entity_name, src=__import__("json").dumps(src)
             )
         )

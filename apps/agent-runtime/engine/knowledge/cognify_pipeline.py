@@ -343,14 +343,16 @@ async def _load_active_ontology(kb_id: str, db_url: str) -> dict | None:
         engine = create_engine(db_url)
         with engine.connect() as conn:
             row = conn.execute(
-                text("""
+                text(
+                    """
                 SELECT s.entity_types, s.relationship_types
                 FROM knowledge_collections kb
                 JOIN knowledge_projects p ON p.id = kb.project_id
                 JOIN ontology_schemas s ON s.id = p.ontology_schema_id
                 WHERE kb.id = CAST(:kb_id AS uuid)
                 LIMIT 1
-                """),
+                """
+                ),
                 {"kb_id": kb_id},
             ).fetchone()
             if row is None:
@@ -414,7 +416,8 @@ async def _update_pg_metadata(
             for e in entities:
                 neo4j_id = neo4j_id_map.get(e.canonical_name, "")
                 conn.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO graph_entities (id, tenant_id, kb_id, canonical_name, entity_type,
                             description, aliases, source_doc_ids, neo4j_node_id, mention_count,
                             access_count, confidence)
@@ -428,7 +431,8 @@ async def _update_pg_metadata(
                             neo4j_node_id = EXCLUDED.neo4j_node_id,
                             mention_count = graph_entities.mention_count + EXCLUDED.mention_count,
                             updated_at = now()
-                    """),
+                    """
+                    ),
                     {
                         "id": str(uuid_mod.uuid4()),
                         "tenant_id": tenant_id,
@@ -448,7 +452,8 @@ async def _update_pg_metadata(
             rels_written = 0
             for r in relationships:
                 result = conn.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO graph_relationships (id, kb_id, source_entity_id, target_entity_id,
                             relationship_type, description, weight, source_doc_ids,
                             access_count, confidence)
@@ -458,7 +463,8 @@ async def _update_pg_metadata(
                         WHERE src.kb_id = CAST(:kb_id AS uuid) AND src.canonical_name = :src_name
                           AND tgt.kb_id = CAST(:kb_id AS uuid) AND tgt.canonical_name = :tgt_name
                         ON CONFLICT DO NOTHING
-                    """),
+                    """
+                    ),
                     {
                         "id": str(uuid_mod.uuid4()),
                         "kb_id": kb_id,
@@ -481,14 +487,16 @@ async def _update_pg_metadata(
 
             # Update KB counters
             conn.execute(
-                text("""
+                text(
+                    """
                     UPDATE knowledge_collections SET
                         entity_count = (SELECT count(*) FROM graph_entities WHERE kb_id = :kb_id),
                         relationship_count = (SELECT count(*) FROM graph_relationships WHERE kb_id = :kb_id),
                         graph_enabled = true,
                         last_cognified_at = now()
                     WHERE id = CAST(:kb_id AS uuid)
-                """),
+                """
+                ),
                 {"kb_id": kb_id},
             )
 

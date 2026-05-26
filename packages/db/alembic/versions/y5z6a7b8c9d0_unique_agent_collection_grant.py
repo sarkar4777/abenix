@@ -47,7 +47,9 @@ def _constraint_exists(name: str, table: str) -> bool:
 def upgrade() -> None:
     bind = op.get_bind()
     # 1. De-dupe defensively, keep oldest by granted_at (then by id as tiebreak).
-    bind.execute(text("""
+    bind.execute(
+        text(
+            """
             DELETE FROM agent_collection_grants a
             USING agent_collection_grants b
             WHERE a.agent_id = b.agent_id
@@ -56,7 +58,9 @@ def upgrade() -> None:
                 a.granted_at > b.granted_at
                 OR (a.granted_at = b.granted_at AND a.id > b.id)
               )
-            """))
+            """
+        )
+    )
 
     # 2. Add the unique constraint if missing.
     if not _constraint_exists("uq_agent_collection_grant", "agent_collection_grants"):

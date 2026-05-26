@@ -68,14 +68,16 @@ def upgrade() -> None:
     # Backfill: every project's creator becomes its first ADMIN. This
     # preserves access for users who created projects before the
     # membership gate existed.
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO project_members
             (id, project_id, user_id, role, granted_by)
         SELECT gen_random_uuid(), p.id, p.created_by, 'ADMIN', p.created_by
         FROM knowledge_projects p
         WHERE p.created_by IS NOT NULL
         ON CONFLICT (project_id, user_id) DO NOTHING;
-    """)
+    """
+    )
 
 
 def downgrade() -> None:

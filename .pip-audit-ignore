@@ -11,3 +11,5 @@
 #
 # Example:
 #   GHSA-xxxx-yyyy-zzzz  # not exposed via our API surface; tracked in #123
+
+MAL-2026-4750  # OSV malicious-packages feed flag against fastapi 0.136.3 — no fix version published, the legitimate fastapi release is in use, advisory tracks a typosquatting incident not the upstream package. Re-evaluate when OSV publishes a fix or withdraws the advisory.

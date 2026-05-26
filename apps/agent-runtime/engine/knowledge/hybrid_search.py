@@ -227,7 +227,10 @@ async def _vector_search_pgvector(
         engine = create_async_engine(db_url, pool_pre_ping=True)
         results: list[SearchResult] = []
         async with AsyncSession(engine) as session:
-            rows = (await session.execute(_t("""
+            rows = (
+                await session.execute(
+                    _t(
+                        """
                 SELECT id::text, collection_id::text, document_id::text,
                        chunk_index, content, metadata,
                        1 - (embedding <=> :emb::vector) AS score
@@ -235,7 +238,10 @@ async def _vector_search_pgvector(
                 WHERE collection_id = ANY(:ids)
                 ORDER BY embedding <=> :emb::vector
                 LIMIT :k
-                """).bindparams(emb=emb_str, ids=kb_ids, k=top_k))).all()
+                """
+                    ).bindparams(emb=emb_str, ids=kb_ids, k=top_k)
+                )
+            ).all()
         await engine.dispose()
         for r in rows:
             meta = r[5] or {}

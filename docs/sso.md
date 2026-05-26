@@ -8,6 +8,33 @@ On the login page, an "Or continue with" section renders one button per configur
 
 First-time SSO users get a fresh tenant ("`<full name>'s Workspace`") with `admin` role and a seeded default moderation policy. If an email is already on Abenix as a password account, the SSO link gets added to that account — the password keeps working, and SSO sign-in resolves to the same user.
 
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant SPA as Abenix SPA
+  participant API as Abenix API
+  participant P as Provider<br/>(Google / GitHub / Microsoft)
+
+  U->>SPA: click "Sign in with Google"
+  SPA->>API: GET /api/auth/oidc/google/start?return_to=/dashboard
+  API->>API: sign short-lived state JWT (10 min)
+  API-->>SPA: 302 to provider authorize URL
+  SPA->>P: GET authorize?client_id=...&state=...
+  U->>P: authenticate + consent
+  P-->>SPA: 302 to /api/auth/oidc/google/callback?code=...&state=...
+  SPA->>API: GET /api/auth/oidc/google/callback
+  API->>API: verify state JWT
+  API->>P: POST token endpoint (exchange code)
+  P-->>API: access_token
+  API->>P: GET userinfo
+  P-->>API: { sub, email, name, picture }
+  API->>API: upsert user by (provider, sub) -> email -> new
+  API->>API: issue Abenix access + refresh tokens
+  API-->>SPA: 302 to WEB_BASE_URL/auth/callback#tokens
+  SPA->>SPA: stash tokens, forward to return_to
+```
+
 ## Per-provider setup (admins)
 
 Each provider needs a client ID and client secret. The redirect URI to register with the provider is always:

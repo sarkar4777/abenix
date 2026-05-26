@@ -184,13 +184,15 @@ def run_cognify_job(
             engine = create_engine(_get_db_url())
             with engine.begin() as conn:
                 conn.execute(
-                    sa_text("""
+                    sa_text(
+                        """
                         INSERT INTO cognify_reports (id, job_id, kb_id, entities_by_type, top_entities,
                             relationship_types, new_entities, merged_entities, new_relationships,
                             strengthened_relationships, documents_processed, chunks_analyzed)
                         VALUES (:id, CAST(:job_id AS uuid), CAST(:kb_id AS uuid), CAST(:ent_types AS jsonb), CAST(:top_ent AS jsonb),
                             CAST(:rel_types AS jsonb), :new_ent, :merged, :new_rels, :strengthened, :docs, :chunks)
-                    """),
+                    """
+                    ),
                     {
                         "id": str(uuid_mod.uuid4()),
                         "job_id": job_id,

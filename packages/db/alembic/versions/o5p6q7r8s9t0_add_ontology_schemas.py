@@ -58,7 +58,8 @@ def upgrade() -> None:
     # on the project's pointer column. Phase 1 created the column
     # ontology_schema_id but couldn't add the FK because the target
     # table didn't exist yet. Wrap in try/IF NOT EXISTS for re-runs.
-    op.execute("""
+    op.execute(
+        """
         DO $$ BEGIN
             ALTER TABLE knowledge_projects
             ADD CONSTRAINT fk_kproj_ontology_schema
@@ -66,7 +67,8 @@ def upgrade() -> None:
             REFERENCES ontology_schemas(id) ON DELETE SET NULL;
         EXCEPTION WHEN duplicate_object THEN NULL;
         END $$;
-    """)
+    """
+    )
 
 
 def downgrade() -> None:

@@ -97,7 +97,9 @@ Respond with ONLY a JSON object:
   "suggestions": ["specific, small fixes"],
   "summary": "one sentence verdict"
 }}
-""".format(builtins_line=", ".join(sorted(BUILTIN_TOOLS)))
+""".format(
+    builtins_line=", ".join(sorted(BUILTIN_TOOLS))
+)
 
 
 async def _judge(

@@ -213,7 +213,8 @@ def upgrade() -> None:
     #    Pick the oldest tenant admin as created_by; fall back to any
     #    user in the tenant. If neither exists, the tenant has no KBs
     #    so we skip it (handled by the WHERE EXISTS clause below).
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO knowledge_projects
             (id, tenant_id, name, slug, description, created_by)
         SELECT
@@ -238,10 +239,12 @@ def upgrade() -> None:
             SELECT 1 FROM knowledge_projects p
             WHERE p.tenant_id = t.id AND p.slug = 'default'
         );
-    """)
+    """
+    )
 
     # 2) Every legacy KB gets project_id set to its tenant's Default.
-    op.execute("""
+    op.execute(
+        """
         UPDATE knowledge_bases kb
         SET project_id = (
             SELECT id FROM knowledge_projects p
@@ -249,12 +252,14 @@ def upgrade() -> None:
             LIMIT 1
         )
         WHERE kb.project_id IS NULL;
-    """)
+    """
+    )
 
     # 3) Every KB with agent_id gets one AgentCollectionGrant. The
     #    runtime resolver unions this set with any explicit grants —
     #    so legacy attachments keep working unchanged.
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO agent_collection_grants
             (id, agent_id, collection_id, permission, granted_by)
         SELECT
@@ -262,7 +267,8 @@ def upgrade() -> None:
         FROM knowledge_bases kb
         WHERE kb.agent_id IS NOT NULL
         ON CONFLICT (agent_id, collection_id) DO NOTHING;
-    """)
+    """
+    )
 
 
 def downgrade() -> None:

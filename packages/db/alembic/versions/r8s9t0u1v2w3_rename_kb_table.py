@@ -12,7 +12,8 @@ def upgrade() -> None:
     # The rename. Idempotent guard for re-running on dev DBs that
     # may have already had the rename applied manually. Postgres
     # auto-updates every FK that referenced knowledge_bases(id).
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF EXISTS (SELECT 1 FROM information_schema.tables
@@ -23,11 +24,13 @@ def upgrade() -> None:
                 ALTER TABLE knowledge_bases RENAME TO knowledge_collections;
             END IF;
         END $$;
-    """)
+    """
+    )
 
 
 def downgrade() -> None:
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF EXISTS (SELECT 1 FROM information_schema.tables
@@ -38,4 +41,5 @@ def downgrade() -> None:
                 ALTER TABLE knowledge_collections RENAME TO knowledge_bases;
             END IF;
         END $$;
-    """)
+    """
+    )

@@ -120,7 +120,8 @@ def _load_db_pricing() -> dict[str, dict[str, float]]:
             with conn.cursor() as cur:
                 # Latest effective row per model. DISTINCT ON is a cheap
                 # Postgres-native "latest-per-group" idiom.
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT DISTINCT ON (model)
                         model,
                         input_per_m,
@@ -129,7 +130,8 @@ def _load_db_pricing() -> dict[str, dict[str, float]]:
                     FROM llm_model_pricing
                     WHERE is_active = TRUE AND effective_from <= NOW()
                     ORDER BY model, effective_from DESC
-                    """)
+                    """
+                )
                 rows = cur.fetchall()
         finally:
             conn.close()

@@ -33,18 +33,49 @@ for a in "$@"; do
   esac
 done
 
+PY_BLACK_PIN="black==24.8.0"
+PY_RUFF_PIN="ruff==0.6.9"
+
+ensure_pinned() {
+  # CI installs these exact versions — match locally so green here = green CI.
+  local current_black current_ruff
+  current_black=$(python -m black --version 2>/dev/null | awk '{print $3}' || true)
+  current_ruff=$(python -m ruff --version 2>/dev/null | awk '{print $2}' || true)
+  if [ "$current_black" != "24.8.0" ] || [ "$current_ruff" != "0.6.9" ]; then
+    say "Pinning toolchain to CI versions ($PY_BLACK_PIN, $PY_RUFF_PIN)"
+    python -m pip install --quiet "$PY_BLACK_PIN" "$PY_RUFF_PIN"
+  fi
+}
+
 run_python() {
-  say "Python: black --check"
-  black --check apps/api apps/agent-runtime apps/worker packages/db
+  ensure_pinned
+
+  say "Python: black --check (24.8.0)"
+  python -m black --check apps/api apps/agent-runtime apps/worker packages/db
   ok "black"
 
-  say "Python: ruff"
-  ruff check apps/api apps/agent-runtime apps/worker packages/db
+  say "Python: ruff (0.6.9)"
+  python -m ruff check apps/api apps/agent-runtime apps/worker packages/db
   ok "ruff"
 
   say "Python: pytest tests/unit/"
-  pytest tests/unit/ -q --tb=short
+  python -m pytest tests/unit/ -q --tb=short
   ok "pytest"
+
+  if [ -f apps/api/requirements.txt ]; then
+    say "Python: pip-audit (with .pip-audit-ignore)"
+    python -m pip install --quiet pip-audit
+    local ignore_args=""
+    if [ -f .pip-audit-ignore ]; then
+      while IFS= read -r line; do
+        line="${line%%#*}"
+        line="$(echo "$line" | tr -d '[:space:]')"
+        [ -n "$line" ] && ignore_args="$ignore_args --ignore-vuln $line"
+      done < .pip-audit-ignore
+    fi
+    python -m pip_audit -r apps/api/requirements.txt $ignore_args
+    ok "pip-audit"
+  fi
 }
 
 run_web() {

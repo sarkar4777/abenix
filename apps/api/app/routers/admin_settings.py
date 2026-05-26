@@ -196,13 +196,15 @@ async def update_setting(
 
     meta = DEFAULTS[key]
     await db.execute(
-        text("""
+        text(
+            """
         INSERT INTO platform_settings (key, value, category, description, updated_by)
         VALUES (:key, :value, :cat, :desc, :uid)
         ON CONFLICT (key)
         DO UPDATE SET value = :value, category = :cat, description = :desc,
                       updated_by = :uid, updated_at = now()
-        """),
+        """
+        ),
         {
             "key": key,
             "value": value,

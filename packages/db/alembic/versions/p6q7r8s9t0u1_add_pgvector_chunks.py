@@ -14,7 +14,8 @@ def upgrade() -> None:
 
     # Chunks table — one row per document chunk, with its 1536-d
     # OpenAI embedding alongside source metadata.
-    op.execute("""
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS chunks (
             id UUID PRIMARY KEY,
             collection_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
@@ -26,7 +27,8 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             UNIQUE (document_id, chunk_index)
         );
-    """)
+    """
+    )
 
     # B-tree on collection_id for the WHERE filter.
     op.execute(
@@ -38,7 +40,8 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS ix_chunks_document " "ON chunks (document_id);"
     )
 
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             BEGIN
@@ -55,7 +58,8 @@ def upgrade() -> None:
                 END;
             END;
         END $$;
-    """)
+    """
+    )
 
 
 def downgrade() -> None:
