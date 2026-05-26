@@ -48,7 +48,7 @@
     "@types/react-window": "^1.8.8",
     "autoprefixer": "^10.4.0",
     "eslint": "^9.36.0",
-    "eslint-config-next": "^15.5.15",
+    "eslint-config-next": "^16.2.6",
     "jsdom": "^27.0.1",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.4.0",
