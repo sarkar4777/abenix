@@ -105,7 +105,7 @@ flowchart TB
   A --> V{Sanity check?<br/>obs + fv finite + numeric}
   V -->|yes| Cache[Cache + return]
   V -->|no| E[Empty envelope]
-  E -->|UI shows "no recent scan"| Done
+  E -->|UI shows no-recent-scan banner| Done
   Cache --> Done
 ```
 

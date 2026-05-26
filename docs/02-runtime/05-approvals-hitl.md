@@ -195,3 +195,16 @@ These are immutable and tenant-scoped. Compliance can export them via `GET /api/
 - [00-agent-execution](00-agent-execution.md) — pause/resume mechanics in detail
 - [05-ui/03-page-catalogue](../05-ui/03-page-catalogue.md) — the /approvals page
 - [03-sdk/00-overview](../03-sdk/00-overview.md#hitl-aware-execute) — SDK wait modes
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Approvals REST router** | [`apps/api/app/routers/approvals.py`](../../apps/api/app/routers/approvals.py) — create, list, signoff, wait, webhook config |
+| **Approval model** | [`packages/db/models/approval.py`](../../packages/db/models/approval.py) — `Approval`, `ApprovalStatus`, signoffs JSONB |
+| **Pause / resume mechanics** | [`apps/agent-runtime/engine/agent_executor.py`](../../apps/agent-runtime/engine/agent_executor.py) — search for `pause_state` |
+| **Approval webhooks (outbound)** | same router, `PUT /webhooks` — uses `tenant.settings.approval_webhook_url` |
+| **/approvals UI** | [`apps/web/src/app/(app)/approvals/page.tsx`](../../apps/web/src/app/(app)/approvals/page.tsx) |
+| **SDK wait modes** | [`packages/sdk/python/abenix_sdk/`](../../packages/sdk/python/abenix_sdk/) — `wait_mode` on `agents.execute()` |

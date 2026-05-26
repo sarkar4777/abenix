@@ -175,3 +175,20 @@ The platform abstracts the storage backend behind [`apps/api/app/core/blob.py`](
 | S3 | Cross-region replication (cloud-provider level) | continuous |
 
 Tenant export (for self-service backup or migration) is at `POST /api/admin/tenants/{id}/export` — produces a single tarball of every tenant-scoped row + blob.
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **SQLAlchemy models** | [`packages/db/models/`](../../packages/db/models/) — one file per table |
+| **Alembic migrations** | [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/) |
+| **Async DB engine config** | [`apps/api/app/core/db.py`](../../apps/api/app/core/db.py) |
+| **Redis client + pool config** | [`apps/api/app/core/redis.py`](../../apps/api/app/core/redis.py) |
+| **Neo4j client (Atlas)** | [`apps/api/app/services/atlas/`](../../apps/api/app/services/) — search for `neo4j_client.py` |
+| **NATS JetStream consumer wiring** | [`apps/agent-runtime/consumer.py`](../../apps/agent-runtime/consumer.py) |
+| **Blob storage abstraction (S3 / Azure Files / local /data)** | [`apps/api/app/core/blob.py`](../../apps/api/app/core/blob.py) |
+| **Backup CronJobs** | [`infra/helm/abenix/templates/`](../../infra/helm/abenix/templates/) — search for `pg-backup`, `data-backup`, `neo4j-backup` |
+| **Disaster-recovery runbook** | [06-deployment/disaster-recovery](../06-deployment/disaster-recovery.md) |
+| **Per-service env vars (DATABASE_URL, REDIS_URL, NATS_URL, NEO4J_URI)** | [09-reference/01-env-vars](../09-reference/01-env-vars.md) |

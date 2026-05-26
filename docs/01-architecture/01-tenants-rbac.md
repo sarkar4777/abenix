@@ -37,13 +37,13 @@ Three middlewares run, in order. Only the third is interesting.
 ```mermaid
 sequenceDiagram
   autonumber
-  Client->>+IngressNginx: HTTP request
-  IngressNginx->>+IPWhitelistMiddleware: source IP check
-  IPWhitelistMiddleware->>+RateLimitMiddleware: per-tenant rps + monthly cap
-  RateLimitMiddleware->>+TenantMiddleware: resolve auth subject
+  Client->>IngressNginx: HTTP request
+  IngressNginx->>IPWhitelistMiddleware: source IP check
+  IPWhitelistMiddleware->>RateLimitMiddleware: per-tenant rps + monthly cap
+  RateLimitMiddleware->>TenantMiddleware: resolve auth subject
   Note over TenantMiddleware: 1. Decode JWT or hash API key<br/>2. Set request.state.tenant_id<br/>3. Optionally resolve X-Abenix-Subject<br/>4. Validate against SubjectPolicy
-  TenantMiddleware-->>-Router: pass-through
-  Router-->>-Client: response
+  TenantMiddleware->>Router: pass-through
+  Router-->>Client: response
 ```
 
 `TenantMiddleware` lives in [`apps/api/app/core/middleware.py`](../../apps/api/app/core/middleware.py). It accepts three credential forms.

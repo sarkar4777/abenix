@@ -159,3 +159,18 @@ k exec deploy/abenix-api -- python /app/packages/db/seeds/seed_agents.py
 - [01-add-a-tool](01-add-a-tool.md) — first thing to try once running
 - [03-add-a-page](03-add-a-page.md) — first UI change
 - [04-debugging](04-debugging.md) — when things don't work
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Local dev launcher (docker-compose + uvicorn + agent-runtime + Next.js)** | [`scripts/dev-local.sh`](../../scripts/dev-local.sh) |
+| **Minikube path (full helm chart on local k8s)** | [`scripts/dev-minikube.sh`](../../scripts/dev-minikube.sh) |
+| **docker-compose data plane** | [`docker-compose.yml`](../../docker-compose.yml) |
+| **Helm chart (full deploy)** | [`infra/helm/abenix/`](../../infra/helm/abenix/) |
+| **Alembic migrations** | [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/) |
+| **Seed scripts** | [`packages/db/seeds/`](../../packages/db/seeds/) (agents, atlas, tool presets) |
+| **Pre-push CI gate (run locally)** | [`scripts/check-before-push.sh`](../../scripts/check-before-push.sh) |
+| **30-minute end-to-end onboarding** | [`ONBOARDING.md`](../../ONBOARDING.md) (top-level) |

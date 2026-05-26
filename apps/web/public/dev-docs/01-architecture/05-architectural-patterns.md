@@ -96,7 +96,9 @@ Both `dev-local.sh` and `deploy-azure.sh` run a post-migration check against `sc
 
 Four agent-runtime deployments (`default`, `chat`, `heavy-reasoning`, `long-running`) isolate workloads. Each scaled by KEDA on its own NATS queue depth. A Monte-Carlo on heavy-reasoning never starves chat.
 
-The picker in `apps/api/app/services/agent_dispatch.py` reads agent metadata (`agent_type`, `model_config.preset`, `max_iterations`) to choose the pool.
+- Pool picker: [`apps/api/app/services/agent_dispatch.py`](../../apps/api/app/services/agent_dispatch.py) — reads agent metadata (`agent_type`, `model_config.preset`, `max_iterations`).
+- Deployment manifests: [`infra/helm/abenix/templates/agent-runtime-*.yaml`](../../infra/helm/abenix/templates/).
+- KEDA ScaledObjects: see [06-deployment/03-keda](../06-deployment/03-keda.md).
 
 ### 14. Three-tier resolution with fail-loud
 
@@ -114,33 +116,61 @@ Tier 3: explicit "no data" envelope                     (fail-loud)
 
 When a tool needs human signoff, the runtime persists the loop state to `executions.pause_state` (JSONB) and exits the pod. On signoff, a fresh pod re-hydrates and resumes from the saved state. Long approvals don't pin pods.
 
+- Pause + resume code: [`apps/agent-runtime/engine/agent_executor.py`](../../apps/agent-runtime/engine/agent_executor.py) — search for `pause_state`.
+- Approval signoff handler: [`apps/api/app/routers/approvals.py`](../../apps/api/app/routers/approvals.py).
+- Full flow doc: [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
+
 ### 16. SSE bridge over NATS pub/sub
 
 The runtime publishes execution events to a Redis pub/sub channel (`progress.<root_execution_id>`). The API server's SSE bridge subscribes per execution_id. Reconnect via `Last-Event-ID` replays the last 100 events.
 
+- Publisher: [`apps/agent-runtime/engine/progress.py`](../../apps/agent-runtime/engine/progress.py).
+- SSE bridge: [`apps/api/app/routers/executions.py`](../../apps/api/app/routers/executions.py) (the `stream` and `watch` routes).
+- Full streaming + tracing doc: [02-runtime/04-streaming-tracing](../02-runtime/04-streaming-tracing.md).
+
 ### 17. Root-execution channel aggregation
 
-When an agent calls `invoke_agent`, the sub-execution's pod publishes its events to the **root's** channel, not its own. The subscriber sees the whole tree on one stream. The walk-up logic in `progress.root_for()` caps at 8 hops to bound the recursion.
+When an agent calls `invoke_agent`, the sub-execution's pod publishes its events to the **root's** channel, not its own. The subscriber sees the whole tree on one stream.
+
+- Walk-up logic: [`apps/agent-runtime/engine/progress.py:75`](../../apps/agent-runtime/engine/progress.py) — `async def root_for(execution_id)` caps the recursion at 8 hops.
+- Sub-execution publisher: [`apps/agent-runtime/engine/tools/invoke_agent.py`](../../apps/agent-runtime/engine/tools/invoke_agent.py).
 
 ### 18. Distributed tracing across the SDK boundary
 
 W3C `traceparent` propagates from the calling app's span through the SDK, through the platform API, through NATS, through the runtime, through the LLM SDK. One Tempo trace shows the whole flow. The SDK auto-injects `traceparent` if a tracer is active in the caller's process. Otherwise it skips quietly.
 
+- SDK injector: [`packages/sdk/python/abenix_sdk/_tracing.py`](../../packages/sdk/python/abenix_sdk/).
+- API extractor: [`apps/api/app/core/telemetry.py`](../../apps/api/app/core/telemetry.py).
+- Runtime span continuation: [`apps/agent-runtime/engine/tracing.py`](../../apps/agent-runtime/engine/tracing.py).
+
 ### 19. Self-healing pipelines via error_branch
 
-When a pipeline node fails, the engine can route via an `on_error: error_branch` edge to a recovery node. Recovery nodes often call a meta-agent that decides whether to retry, escalate, or skip. See [07-pipeline-data-flow](../02-runtime/07-pipeline-data-flow.md#error-handling).
+When a pipeline node fails, the engine can route via an `on_error: error_branch` edge to a recovery node. Recovery nodes often call a meta-agent that decides whether to retry, escalate, or skip.
+
+- Edge resolver: [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) — search for `on_error`.
+- Per-node fail-fast vs failure-isolated branching: [02-runtime/07-pipeline-data-flow](../02-runtime/07-pipeline-data-flow.md#error-handling).
+- Full self-healing + drift doc: [02-runtime/10-pipeline-healing-drift](../02-runtime/10-pipeline-healing-drift.md).
 
 ### 20. Topological-sort scheduler with deterministic layer order
 
-`_topological_sort()` in `pipeline.py` returns `list[list[str]]` where each inner list runs concurrently. Within a layer, IDs are sorted alphabetically for determinism — re-running the same pipeline twice produces byte-identical SSE traces.
+[`_topological_sort()` at `pipeline.py:286`](../../apps/agent-runtime/engine/pipeline.py) returns `list[list[str]]` where each inner list runs concurrently. Within a layer, IDs are sorted alphabetically for determinism — re-running the same pipeline twice produces byte-identical SSE traces.
+
+- Caller: line 466 in the same file, inside the main `execute_pipeline()` loop.
+- Test: [`apps/agent-runtime/tests/test_pipeline.py`](../../apps/agent-runtime/tests/test_pipeline.py).
 
 ### 21. Whole-value vs embedded template semantics
 
 `{{plan}}` (the entire string) returns the structured value of `plan` unchanged. `"prefix {{plan}} suffix"` returns a string with `plan` interpolated via JSON. This distinction is load-bearing — leading whitespace silently switches behaviour.
 
+- Resolver: `_resolve_inputs()` in [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) around line 339.
+- Test coverage: [`apps/agent-runtime/tests/test_pipeline.py`](../../apps/agent-runtime/tests/test_pipeline.py) — search for `whole_value` and `embedded`.
+
 ### 22. Self-attaching tools with the `_DefaultedTool` wrapper
 
-Tools registered with `parameter_defaults` are wrapped — the wrapper hides the defaulted parameters from the LLM's view of the schema. The LLM never sees the pre-set blob hash or tenant ID it would have to guess. The wrapper merges defaults at execution time. See [`apps/agent-runtime/engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py).
+Tools registered with `parameter_defaults` are wrapped — the wrapper hides the defaulted parameters from the LLM's view of the schema. The LLM never sees the pre-set blob hash or tenant ID it would have to guess. The wrapper merges defaults at execution time.
+
+- Wrapper class: [`_DefaultedTool` at `apps/agent-runtime/engine/tools/base.py:31`](../../apps/agent-runtime/engine/tools/base.py).
+- Registration helper that wraps a tool with defaults: same file, around line 111.
 
 ### 23. In-process sandbox with domain whitelist
 

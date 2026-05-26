@@ -310,10 +310,23 @@ function DocBody({ markdown }: { markdown: string }) {
           );
         },
         a({ href, children }: any) {
-          // Rewrite relative .md links to in-app navigation
-          if (typeof href === 'string' && href.endsWith('.md')) {
-            const cleaned = href.replace(/^\.\.?\//, '').replace(/\.md$/, '').replace(/^\//, '');
-            return <a href={`?slug=${encodeURIComponent(cleaned)}`}>{children}</a>;
+          // Rewrite relative .md (or .md#anchor / .md?query) links to
+          // in-app navigation. Previous version used endsWith('.md')
+          // which silently fell through on any link with a hash and
+          // produced 404s when the link target had an anchor.
+          if (typeof href === 'string' && /\.md(?:[#?].*)?$/.test(href) && !/^https?:\/\//.test(href)) {
+            const hashIdx = href.indexOf('#');
+            const queryIdx = href.indexOf('?');
+            const splitAt = [hashIdx, queryIdx].filter((i) => i >= 0).sort((a, b) => a - b)[0];
+            const path = splitAt !== undefined ? href.slice(0, splitAt) : href;
+            const fragment = splitAt !== undefined ? href.slice(splitAt) : '';
+
+            // Strip leading ../ or ./ (and any number of them) and a leading /.
+            const cleaned = path
+              .replace(/^(?:\.\.?\/)+/, '')
+              .replace(/^\//, '')
+              .replace(/\.md$/, '');
+            return <a href={`?slug=${encodeURIComponent(cleaned)}${fragment}`}>{children}</a>;
           }
           return (
             <a href={href} target={href?.startsWith('http') ? '_blank' : undefined} rel="noreferrer">

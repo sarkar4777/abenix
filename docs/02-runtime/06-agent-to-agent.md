@@ -263,3 +263,15 @@ The OTel trace ties all of this together. One trace spans root + every sub + eve
 - [04-streaming-tracing](04-streaming-tracing.md) — how the SSE bridge subscribes to the root channel
 - [05-approvals-hitl](05-approvals-hitl.md) — what happens when a sub-agent hits a human gate
 - [TRAJECTORY_MEMORY](../TRAJECTORY_MEMORY.md) — the recall_trajectory backing store
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **`invoke_agent` tool** | [`apps/agent-runtime/engine/tools/invoke_agent.py`](../../apps/agent-runtime/engine/tools/invoke_agent.py) |
+| **`recall_trajectory` tool** | [`apps/agent-runtime/engine/tools/recall_trajectory.py`](../../apps/agent-runtime/engine/tools/recall_trajectory.py) |
+| **Root-execution walk-up (`root_for`)** | [`apps/agent-runtime/engine/progress.py`](../../apps/agent-runtime/engine/progress.py) — at line 75 |
+| **Execution `parent_execution_id` column** | [`packages/db/models/execution.py`](../../packages/db/models/execution.py) |
+| **Trajectory memory model** | [`packages/db/models/agent_memory.py`](../../packages/db/models/agent_memory.py) |

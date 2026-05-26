@@ -16,7 +16,7 @@ KEDA bridges. It deploys a controller that watches external metrics (NATS, Redis
 
 ```mermaid
 flowchart LR
-  N[NATS JetStream<br/>exec.{pool}.> subject]
+  N["NATS JetStream<br/>per-pool subjects"]
   N --> SO1[ScaledObject<br/>runtime-default<br/>min=2 max=20]
   N --> SO2[ScaledObject<br/>runtime-chat<br/>min=1 max=10]
   N --> SO3[ScaledObject<br/>runtime-heavy<br/>min=1 max=4]

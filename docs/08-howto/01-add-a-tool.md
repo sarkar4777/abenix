@@ -272,3 +272,17 @@ class ExportTool(BaseTool):
 
 - [02-runtime/02-tools](../02-runtime/02-tools.md) — framework reference
 - [02-add-an-agent](02-add-an-agent.md) — give the tool somewhere to be used
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Tool base class** | [`apps/agent-runtime/engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py) — `BaseTool`, `ToolResult`, `_DefaultedTool` |
+| **Tool registry** | [`apps/agent-runtime/engine/tools/__init__.py`](../../apps/agent-runtime/engine/tools/__init__.py) — registers every tool by slug |
+| **Existing tools (132 of them)** | [`apps/agent-runtime/engine/tools/`](../../apps/agent-runtime/engine/tools/) — copy the closest one to your use case |
+| **Tool gate (cache + semaphore + qps + breaker)** | [`apps/api/app/core/tool_gate.py`](../../apps/api/app/core/tool_gate.py) |
+| **Per-tool runtime config (admin UI knobs)** | [`packages/db/models/tool_runtime_config.py`](../../packages/db/models/tool_runtime_config.py) — surfaced at `/admin/tool-scaling` |
+| **Tool tests** | [`apps/agent-runtime/tests/test_tools.py`](../../apps/agent-runtime/tests/) — patterns for mocking external HTTP |
+| **Connectors framework (for systems with auth)** | [`apps/agent-runtime/engine/tools/_connector_base.py`](../../apps/agent-runtime/engine/tools/) + [14-connectors-and-triggers](../02-runtime/14-connectors-and-triggers.md) |

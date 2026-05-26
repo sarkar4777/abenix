@@ -205,3 +205,18 @@ The wire format and behaviour are identical across languages — these docs cove
 - [03-java](03-java.md) — Java SDK reference
 - [01-architecture/01-tenants-rbac](../01-architecture/01-tenants-rbac.md) — actAs on the server side
 - [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md) — what happens when the agent pauses
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Canonical Python SDK source** | [`packages/sdk/python/abenix_sdk/`](../../packages/sdk/python/abenix_sdk/) — copied into every standalone app's `api/sdk/` |
+| **SDK sync verifier** | [`scripts/sync-sdks.sh`](../../scripts/sync-sdks.sh) — CI gate that every copy matches canonical |
+| **Python SDK packaging** | [`packages/agent-sdk/`](../../packages/agent-sdk/) — the published distribution |
+| **TypeScript SDK** | [`packages/sdk/typescript/`](../../packages/sdk/) (or `packages/abenix-sdk/`) |
+| **Java SDK** | [`packages/sdk/java/`](../../packages/sdk/) |
+| **REST surface the SDKs wrap** | [`09-reference/00-rest-api`](../09-reference/00-rest-api.md) |
+| **Error envelope** | [`apps/api/app/core/responses.py`](../../apps/api/app/core/responses.py) — `success()` / `error()` |
+| **OTel `traceparent` injection** | [`packages/agent-sdk/abenix_sdk/tracing.py`](../../packages/agent-sdk/abenix_sdk/) |

@@ -181,3 +181,19 @@ The simplified mobile builder exposes: name, model, system prompt, tools list. T
 - [01-builder-canvas](01-builder-canvas.md) — the React Flow agent + pipeline builder
 - [02-api-client](02-api-client.md) — apiFetch, error envelope, retry/refresh
 - [03-page-catalogue](03-page-catalogue.md) — every route + what it does
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Root layout** | [`apps/web/src/app/layout.tsx`](../../apps/web/src/app/layout.tsx) |
+| **Auth-gated `(app)/` layout** | [`apps/web/src/app/(app)/layout.tsx`](../../apps/web/src/app/(app)/layout.tsx) — contains `AuthGuard` |
+| **AuthContext (Zustand-style provider)** | [`apps/web/src/contexts/AuthContext.tsx`](../../apps/web/src/contexts/AuthContext.tsx) |
+| **Sidebar** | [`apps/web/src/components/layout/Sidebar.tsx`](../../apps/web/src/components/layout/Sidebar.tsx) |
+| **Topbar** | [`apps/web/src/components/layout/TopBar.tsx`](../../apps/web/src/components/layout/TopBar.tsx) |
+| **Command palette** | [`apps/web/src/components/ui/CommandPalette.tsx`](../../apps/web/src/components/ui/) |
+| **Public landing (no auth)** | [`apps/web/src/app/page.tsx`](../../apps/web/src/app/page.tsx) — uses `AuthCard` for sign-in / sign-up |
+| **Public docs (`/docs`)** | [`apps/web/src/app/docs/`](../../apps/web/src/app/docs/) — no auth wrapper, opens in new tab from sidebar |
+| **SSO callback page** | [`apps/web/src/app/auth/callback/page.tsx`](../../apps/web/src/app/auth/callback/page.tsx) |

@@ -9,21 +9,21 @@
 ```mermaid
 flowchart LR
   subgraph R["agent-runtime pod"]
-    AL[Agent loop]
+    AL["Agent loop"]
   end
-  AL --> NEV[NATS publish<br/>exec.{id}.*]
-  AL --> OT[OTel span<br/>exec.{id}]
+  AL --> NEV["NATS publish<br/>subject: exec.id.event_type"]
+  AL --> OT["OTel span<br/>name: exec.id"]
 
-  NEV --> NN[NATS JetStream]
-  NN --> API[abenix-api SSE]
-  API --> WC[Web client]
+  NEV --> NN["NATS JetStream"]
+  NN --> API["abenix-api SSE"]
+  API --> WC["Web client"]
 
-  OT --> OE[OTLP gRPC]
-  OE --> T[Tempo]
-  T --> G[Grafana Explore]
+  OT --> OE["OTLP gRPC"]
+  OE --> T["Tempo"]
+  T --> G["Grafana Explore"]
 
-  NEV -.event_id.-> PG[(Postgres<br/>audit_logs)]
-  OT -.trace_id.-> PG
+  NEV -. event_id .-> PG[("Postgres<br/>audit_logs")]
+  OT -. trace_id .-> PG
 ```
 
 Two completely separate pipes:
@@ -31,6 +31,12 @@ Two completely separate pipes:
 - **OTel traces** drive forensics. Long-lived. Tempo retains 7 days by default.
 
 Both reference the same `execution_id` and `trace_id` so you can jump from one to the other.
+
+**Source map**:
+- Event publisher: [`apps/agent-runtime/engine/progress.py`](../../apps/agent-runtime/engine/progress.py)
+- SSE bridge endpoint: [`apps/api/app/routers/executions.py`](../../apps/api/app/routers/executions.py) — search for `stream` and `watch`
+- OTel setup: [`apps/api/app/core/telemetry.py`](../../apps/api/app/core/telemetry.py) and [`apps/agent-runtime/engine/tracing.py`](../../apps/agent-runtime/engine/tracing.py)
+- Frontend SSE consumer: [`apps/web/src/hooks/useExecutionStream.ts`](../../apps/web/src/hooks/) (or similar — the hook that powers `/executions/live`)
 
 ---
 

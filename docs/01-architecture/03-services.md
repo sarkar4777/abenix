@@ -252,3 +252,22 @@ These are observed numbers from a 4-node AKS deployment under demo load. Use as 
 - [04-data-stores](04-data-stores.md) — per-store schema overview + tuning
 - [06-deployment/02-helm](../06-deployment/02-helm.md) — how these are templated
 - [06-deployment/03-keda](../06-deployment/03-keda.md) — autoscaling rules per pool
+
+---
+
+## Source map
+
+| Service | Source | Dockerfile | Helm template |
+|---|---|---|---|
+| `abenix-api` | [`apps/api/`](../../apps/api/) | [`apps/api/Dockerfile`](../../apps/api/Dockerfile) | [`infra/helm/abenix/templates/api-*.yaml`](../../infra/helm/abenix/templates/) |
+| `abenix-web` | [`apps/web/`](../../apps/web/) | [`apps/web/Dockerfile`](../../apps/web/Dockerfile) | `templates/web-*.yaml` |
+| `agent-runtime-{default, chat, heavy-reasoning, long-running}` | [`apps/agent-runtime/`](../../apps/agent-runtime/) | [`apps/agent-runtime/Dockerfile`](../../apps/agent-runtime/Dockerfile) | `templates/agent-runtime-*.yaml` (one per pool) |
+| `abenix-worker` (Celery beat + sweepers + KB ingest) | [`apps/worker/`](../../apps/worker/) | [`apps/worker/Dockerfile`](../../apps/worker/Dockerfile) | `templates/worker-*.yaml` |
+| `abenix-cognify-worker` (graph-engine ingest) | [`apps/worker/`](../../apps/worker/) (cognify task) | shares worker image | `templates/cognify-worker-*.yaml` |
+| Edge runtimes (Python / Rust / C) | [`apps/edge-runtime/`](../../apps/edge-runtime/), [`apps/edge-runtime-rust/`](../../apps/edge-runtime-rust/), [`apps/edge-runtime-c/`](../../apps/edge-runtime-c/) | per-variant Dockerfile | sub-charts: [`infra/helm/edge-runtime*`](../../infra/helm/) |
+| Postgres + Redis + Neo4j + NATS + Mosquitto + TimescaleDB | bitnami / official charts | n/a | `templates/postgresql-*.yaml`, etc. |
+| Observability stack (Prometheus, Grafana, Tempo) | `kube-prometheus-stack` chart | n/a | `templates/prometheus-*.yaml` |
+
+**Env vars per service**: [09-reference/01-env-vars](../09-reference/01-env-vars.md).
+
+**Adding a new service**: [`scripts/deploy-azure.sh`](../../scripts/deploy-azure.sh) lists every image built per release. Add your new service to the build matrix + a helm template + a sub-chart entry.

@@ -292,3 +292,17 @@ The first INSERT wins (Postgres serialises). The second sees the existing pendin
 - [05-approvals-hitl](05-approvals-hitl.md) — the approval gate UX side
 - [04-streaming-tracing](04-streaming-tracing.md) — SSE bridge details
 - [01-pipelines](01-pipelines.md) — pipeline-specific transitions
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Execution FSM** | [`packages/db/models/execution.py`](../../packages/db/models/execution.py) — `ExecutionStatus` enum |
+| **Approval FSM** | [`packages/db/models/approval.py`](../../packages/db/models/approval.py) — `ApprovalStatus` enum |
+| **Pipeline patch FSM (Surgeon)** | [`packages/db/models/pipeline_healing.py`](../../packages/db/models/pipeline_healing.py) — `PipelinePatchStatus` enum |
+| **Idempotency FSM** | [`packages/db/models/idempotency.py`](../../packages/db/models/idempotency.py) — `ExecutionIdempotency` |
+| **Dead-letter FSM** | [`packages/db/models/dead_letter.py`](../../packages/db/models/dead_letter.py) — `DeadLetterExecution` |
+| **Failure-code taxonomy** | [`apps/api/app/core/failure_codes.py`](../../apps/api/app/core/failure_codes.py) — canonical strings |
+| **Pause/resume on approval** | [`apps/agent-runtime/engine/agent_executor.py`](../../apps/agent-runtime/engine/agent_executor.py) — search for `pause_state` |

@@ -24,12 +24,12 @@ Both scripts share the same helm chart at [`infra/helm/abenix/`](../../infra/hel
 
 ```mermaid
 flowchart LR
-  G[git clone] --> P[Phase 1<br/>Provision infra<br/>(create AKS / start minikube)]
-  P --> B[Phase 2<br/>Build + push images<br/>15 images per release]
-  B --> H[Phase 3<br/>Helm upgrade<br/>main abenix chart]
-  H --> S[Phase 4<br/>Deploy standalone apps<br/>(wingman, contractiq, etc.)]
-  S --> SD[Phase 5<br/>Seed agents + KBs + ML models]
-  SD --> T[Phase 6<br/>Smoke tests + UAT]
+  G["git clone"] --> P["Phase 1<br/>Provision infra<br/>create AKS or start minikube"]
+  P --> B["Phase 2<br/>Build + push images<br/>15 images per release"]
+  B --> H["Phase 3<br/>Helm upgrade<br/>main abenix chart"]
+  H --> S["Phase 4<br/>Deploy standalone apps<br/>wingman, contractiq, etc."]
+  S --> SD["Phase 5<br/>Seed agents + KBs + ML models"]
+  SD --> T["Phase 6<br/>Smoke tests + UAT"]
 ```
 
 Each phase is idempotent. Re-running the script after a partial failure picks up where it left off.

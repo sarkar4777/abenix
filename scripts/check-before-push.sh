@@ -94,6 +94,12 @@ run_web() {
   else
     say "Web: skipping next build (--fast)"
   fi
+
+  if [ -f scripts/validate-mermaid.mjs ]; then
+    say "Docs: mermaid syntax"
+    node scripts/validate-mermaid.mjs
+    ok "mermaid"
+  fi
 }
 
 echo -e "${B}check-before-push${N} — running the same gates CI will"

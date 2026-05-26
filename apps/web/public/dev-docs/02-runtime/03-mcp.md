@@ -124,3 +124,15 @@ Useful for testing the dispatch path without depending on a real external servic
 
 - [02-tools](02-tools.md) — native tool framework (MCP is a parallel mechanism)
 - [Anthropic MCP spec](https://modelcontextprotocol.io) (external)
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **MCP REST router** | [`apps/api/app/routers/mcp.py`](../../apps/api/app/routers/mcp.py) — `/connections`, `/registry`, `/registry/install`, `/oauth2/start` |
+| **MCP connection model** | [`packages/db/models/mcp_connection.py`](../../packages/db/models/mcp_connection.py) — `UserMCPConnection`, `AgentMCPTool`, `MCPRegistryCache` |
+| **MCP client / runtime invocation** | [`apps/agent-runtime/engine/tools/mcp/`](../../apps/agent-runtime/engine/tools/) — the per-connection MCP client |
+| **Settings UI** | [`/settings/integrations` page](../../apps/web/src/app/(app)/settings/integrations/page.tsx) — surfaces MCP servers under "Identity provider" and "Runtime tools" sections |
+| **End-user docs** | [`docs/sso.md`](../sso.md) for the SSO providers, [`docs/06-deployment/05-edge-runtime.md`](../06-deployment/05-edge-runtime.md) for edge MCP fixtures |

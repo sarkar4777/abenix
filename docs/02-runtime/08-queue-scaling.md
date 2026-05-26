@@ -472,3 +472,16 @@ If users report slow responses, run through this in order:
 2. **Open `/admin/tool-scaling`.** Any tool showing many 24h calls with red circuit-breaker dot? That's where the latency is. Bump qps if the external provider can handle it, or raise cache TTL if results are reusable.
 3. **Open `/admin/pipeline-scaling`.** Expand the slow pipeline. Which node is the bottleneck? Tool node → fix in step 2. Agent node → fix in step 1. Control node → it's not the scaling, it's the logic. Profile the pipeline executor.
 4. Only after all three show green: it's the external dependency. Add a circuit breaker (Layer 2) and an SLO alert.
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Layer 1 — agent pool config** | model: [`packages/db/models/agent.py`](../../packages/db/models/agent.py); admin UI: [`apps/web/src/app/(app)/admin/scaling/page.tsx`](../../apps/web/src/app/(app)/admin/scaling/page.tsx) |
+| **Layer 2 — tool gate** | runtime config: [`packages/db/models/tool_runtime_config.py`](../../packages/db/models/tool_runtime_config.py); gate primitive: [`apps/api/app/core/tool_gate.py`](../../apps/api/app/core/tool_gate.py); dispatcher: [`apps/api/app/core/tool_worker_dispatch.py`](../../apps/api/app/core/tool_worker_dispatch.py); inline-vs-runtime: [`apps/agent-runtime/tool_stream_consumer.py`](../../apps/agent-runtime/tool_stream_consumer.py); admin UI: [`apps/web/src/app/(app)/admin/tool-scaling/page.tsx`](../../apps/web/src/app/(app)/admin/tool-scaling/page.tsx) |
+| **Layer 3 — pipeline view** | admin UI: [`apps/web/src/app/(app)/admin/pipeline-scaling/page.tsx`](../../apps/web/src/app/(app)/admin/pipeline-scaling/page.tsx) |
+| **KEDA ScaledObjects + NATS subjects** | helm templates: [`infra/helm/abenix/templates/`](../../infra/helm/abenix/templates/); full doc: [06-deployment/03-keda](../06-deployment/03-keda.md) |
+| **Celery worker (sweepers, webhooks, KB ingest)** | app: [`apps/worker/worker/celery_app.py`](../../apps/worker/worker/celery_app.py); tasks: [`apps/worker/worker/tasks/`](../../apps/worker/worker/tasks/) |
+| **Per-tenant rate-limit** | [`apps/api/app/core/middleware.py`](../../apps/api/app/core/middleware.py) (`RateLimitMiddleware`) |

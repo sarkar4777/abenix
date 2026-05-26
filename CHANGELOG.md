@@ -22,6 +22,26 @@
 
 ## v1.11.0 — 2026-05-26
 
+### Added
+- **SSO surfaced in-product** — `/settings/integrations` now has an "Identity provider (SSO)" section with Google, GitHub, and Microsoft. Each row shows live status pulled from `/api/auth/oidc/providers`, lists the exact env vars, and uses the existing per-row Setup expander to copy local-dev / kubectl / helm snippets.
+- **Six new developer-doc deep-dives**:
+  - `01-architecture/06-atlas-knowledge-engine` — Atlas + Cognify pipeline, the four typed graph tools, adding starter ontologies and extraction backends.
+  - `02-runtime/10-pipeline-healing-drift` — Pipeline Surgeon, drift detection, what the Surgeon can and can't patch, rollback semantics.
+  - `02-runtime/11-sandboxed-code-execution` — code assets, the Docker sandbox jail, multi-language support, the AI Builder loop, adding a new language.
+  - `02-runtime/12-ml-models` — upload / deploy / invoke, versioning, per-model resource isolation, adding a new framework.
+  - `02-runtime/13-moderation-gate` — pre/post-LLM filtering, custom patterns, failure semantics, adding a provider.
+  - `02-runtime/14-connectors-and-triggers` — eleven shipped connectors, how to add a new one, five trigger kinds, inbound vs outbound webhooks.
+- `09-reference/05-sso` — full reference for SSO with the OIDC sequence diagram, per-provider setup, env vars, kubectl + helm one-liners, security notes, and what's on the roadmap.
+
+### Changed
+- **Developer docs moved from `/dev-docs` (auth-gated, in-app) to `/docs` (public, opens in a new tab).** Old paths forward to the new route. The Docs link on the landing page, the sidebar entry, and the TopBar shortcut all open in a new tab now.
+- **Login-page stats corrected**: 79 → 140 pre-built agents, 100+ → 132 built-in tools, 49 → 45 test suites. Numbers now match what's actually in the repo.
+
+### Fixed
+- The `/docs` route uses `useSearchParams`, which would have failed Next 14's static prerender at build time. Wrapped the client content in a `<Suspense>` boundary with a server-side page shell. CI's `next build` is green.
+
+## v1.11.0 — 2026-05-26
+
 ### Fixed
 - **CI gate** — `python-lint` and `web-lint-typecheck-build` were failing on v1.11.0 because the local `black 26.3.1` disagreed with the CI pin `black==24.8.0` on 15 files, and `pip-audit` was tripping on `MAL-2026-4750` (a typosquatting advisory against fastapi 0.136.3 with no fix version published).
   - Reformatted the 15 files with the pinned `black 24.8.0`.

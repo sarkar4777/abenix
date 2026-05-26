@@ -343,3 +343,17 @@ Every tool call goes through the same registry and the same sandbox. Whether a n
 - [02-tools](02-tools.md) — the tool framework that pipeline nodes call
 - [06-agent-to-agent](06-agent-to-agent.md) — when to fan out from inside an agent instead
 - [04-streaming-tracing](04-streaming-tracing.md) — events that pipelines emit
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Pipeline executor + topo sort** | [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) — `_topological_sort` at line 286, `_resolve_inputs` around line 339, main `execute_pipeline` loop at line 466 |
+| **NodeCondition operators** | same file — search for `class NodeCondition` |
+| **Adaptive retry** | [`apps/agent-runtime/engine/adaptive_retry.py`](../../apps/agent-runtime/engine/adaptive_retry.py) |
+| **Pipeline schema (validation)** | [`apps/api/app/schemas/pipelines.py`](../../apps/api/app/schemas/pipelines.py) |
+| **Tests** | [`apps/agent-runtime/tests/test_pipeline.py`](../../apps/agent-runtime/tests/test_pipeline.py), [`test_tool_chaining.py`](../../apps/agent-runtime/tests/test_tool_chaining.py) |
+| **Builder canvas (visual editor)** | [`apps/web/src/app/(app)/builder/page.tsx`](../../apps/web/src/app/(app)/builder/page.tsx) — see [05-ui/01-builder-canvas](../05-ui/01-builder-canvas.md) |
+| **Healing + drift on pipeline runs** | [10-pipeline-healing-drift](10-pipeline-healing-drift.md) |
