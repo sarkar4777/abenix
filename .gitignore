@@ -126,6 +126,7 @@ build_mispricing_explainer_pdf.py
 # Re-downloaded on demand by test_big_kb_ontology_demo.spec.ts; not worth
 # committing to the repo.
 e2e/fixtures/ai_gov_corpus/
+e2e/fixtures/corpus/
 
 # Wingman demo recording — local-only. Recorder regenerates video on demand.
 /Wingman_Demo.mp4

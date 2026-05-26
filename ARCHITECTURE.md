@@ -103,6 +103,143 @@ State is a signed JWT (HS256, same secret as access tokens) — no Redis needed.
 
 End-user docs in [docs/sso.md](docs/sso.md). Per-provider setup, env vars, and the kubectl one-liner are there.
 
+## Knowledge — KB, Atlas, PersonaKB (v2.0)
+
+Three intertwined surfaces, all tenant-scoped, all auditable, all designed for the Fortune-500 use case of indexing tens of thousands of documents for agent consumption.
+
+### Knowledge Bases (KB)
+
+A KB is one collection of documents, with vectors stored either in Pinecone (default) or pgvector. Every chunk carries metadata `{tenant_id, kb_id, doc_id, page, chunk_index, char_offset_start, char_offset_end}` so retrieval results can be cited back to the exact source.
+
+```mermaid
+flowchart LR
+  U["Upload PDF / DOCX / PNG / Audio"] --> D["documents row"]
+  D --> EX["extractors/dispatch.py"]
+  EX -->|text-extractable PDF| T["text_pdf"]
+  EX -->|scanned PDF| V["vision_pdf<br/>Claude Haiku via PyMuPDF"]
+  EX -->|DOCX/PPTX/XLSX/HTML/EPUB/RTF| O["office<br/>unstructured.io"]
+  EX -->|image| I["vision (PNG/JPG/TIFF)"]
+  EX -->|txt/md/csv/json| TX["text_plain"]
+  T --> C["chunker"]
+  V --> C
+  O --> C
+  I --> C
+  TX --> C
+  C --> EM["embedder<br/>kb.embedding_model"]
+  EM --> P["Pinecone / pgvector"]
+  EM --> CG["cognify queue"]
+  CG --> AT["Atlas graph"]
+```
+
+Key columns on `documents` (v2.0):
+
+| Column | Role |
+|---|---|
+| `is_current` | search default filters `is_current=true`; superseded versions excluded |
+| `parent_document_id` | head of the version chain |
+| `version_number` | monotonic counter (1, 2, 3, …) |
+| `superseded_by` | pointer to the row that replaced this one |
+| `cognified_at` | per-doc timestamp for incremental cognify |
+| `last_cognify_job_id` | idempotency key for retries |
+| `extraction_method` | `text_pdf` / `vision_pdf` / `office` / `text_plain` / `vision_image` |
+| `extraction_quality` | 0.0-1.0 inferred from chars-per-page, flag low-quality docs |
+
+Document-level ACL (`document_grants`) pre-filters the vector candidate pool BEFORE similarity scoring, with a 60s Redis cache keyed on `(user, kb_id)`. A KB shared at the collection level can still partition individual docs across teams.
+
+Hybrid retrieval — vector similarity + graph traversal + reranker — lives in `apps/api/app/services/knowledge/hybrid_search.py`. The reranker hook in `services/reranker.py` plugs Cohere `rerank-english-v3.0` (when `COHERE_API_KEY` is set) or Claude Haiku scoring (fallback). Every returned chunk carries a `Citation{document_id, page, chunk_index, char_offset_start/end, anchor_url}`.
+
+### Atlas — the typed knowledge graph
+
+Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_graphs`, `atlas_nodes`, `atlas_edges`) for ACL and audit. Five starter ontologies ship in `ATLAS_STARTERS`: FIBO Core, FIX Protocol, EMIR, ISDA, ETRM EOD. New ontologies are a YAML drop.
+
+**Six agent tools** access Atlas:
+
+| Tool | What it does | When agents pick it |
+|---|---|---|
+| `atlas_describe` | get a node + 1-hop neighbourhood by name/ID | "tell me what we know about counterparty X" |
+| `atlas_query` | typed pattern query against the graph | "find contracts where notional > $50M with >3 unconfirmed trades" |
+| `atlas_traverse` | walk N hops along typed edges | "trace the supply chain from raw material to finished product" |
+| `atlas_search_grounded` | hybrid keyword + embedding search over node properties | "find the clause about late delivery" |
+| `atlas_cypher` *(v2.0)* | **read-only Cypher sandbox**. Validator rejects CREATE/MERGE/DELETE/SET/REMOVE/LOAD CSV/CALL apoc. Auto-injects `$abenix_tenant_id` and `$abenix_graph_id`. Row cap 1000, timeout 10s | "MATCH (p:Person)-[r:WORKS_FOR]->(c:Company) WHERE c.revenue > 1B RETURN p, r, c" |
+| `atlas_as_of` *(v2.0)* | **bi-temporal query** at any timestamp | "what did we know about contract X on 2025-01-15?" |
+
+**Bi-temporal columns** (v2.0) on `atlas_nodes` and `atlas_edges`:
+
+- `valid_from` — when the fact became true in the world
+- `valid_to` — when it stopped being true (NULL = current)
+- `recorded_at` — when we learned it
+- `source_anchors` — JSONB array of `[{document_id, page, chunk_id, confidence}, …]` per source
+
+When a document is replaced, edges derived from the old version close out (`valid_to = supersede_time`) and new edges open with `valid_from = now`. Default Cypher uses `WHERE valid_to IS NULL` so routine queries see only current state.
+
+### Cognify — the document → graph pipeline
+
+Stages:
+1. **Extractor pool** — text + vision + office adapters (see KB section).
+2. **Entity proposer** — LLM-driven against the active ontology, with per-tenant `auto_accept_threshold`.
+3. **Relationship proposer** — types edges between proposed entities.
+4. **Schema validator** — proposal must conform to the active ontology, else rejected.
+5. **Human review or auto-accept** — above-threshold proposals land directly; the rest queue in `cognify_conflicts` for `/settings/cognify` resolution.
+6. **Graph writer** — MERGE-by-canonical-name with the v2 bi-temporal columns set.
+
+**Per-tenant `cognify_configs`**:
+
+| Field | Default | Notes |
+|---|---|---|
+| `auto_accept_threshold` | 0.85 | proposals at this confidence land without review |
+| `conflict_action` | `flag` | also: `split`, `lower_conf_wins`, `higher_conf_wins` |
+| `max_parallel_docs` | 8 | in-job `asyncio.gather + Semaphore(N)` |
+| `daily_budget_usd` | unset | hard cap on extraction LLM spend per tenant per day |
+
+**Incremental cognify** (v2.0) only fetches `documents` where `cognified_at IS NULL OR updated_at > cognified_at`. Adding 100 new docs to a 10k-doc KB no longer re-processes the entire corpus.
+
+### PersonaKB — per-user memory
+
+Each user owns a ring-fenced KB scoped by `persona_scope`. Stored in `persona_items` with the user_id, scope (`self` / `meeting_<id>` / custom), kind (note / file / meeting_context), and Pinecone vector IDs. Authorization happens at query time via the meeting's `persona_scopes` whitelist — agents can only read scopes they were granted.
+
+v2.0 additions:
+- `deleted_at` / `deleted_by` for soft-delete (used by the GDPR cascade).
+- `encrypted` + `key_version` for at-rest encryption via `core/crypto.py` (per-tenant DEK derived from cluster KEK `ABENIX_DATA_KEY_KEK_BASE64`).
+
+### GDPR cascade
+
+`POST /api/gdpr/users/{id}/purge` cascades across five stores: postgres (soft-delete), Pinecone (vectors by metadata filter, retried 3×), Neo4j (DETACH DELETE nodes with the user_id property), `/data` blobs, and trajectory memory. Every per-store attempt writes a `gdpr_purge_log` row. `GET /api/gdpr/users/{id}/receipts` exposes the audit trail for regulators.
+
+### Migration story
+
+`packages/db/bootstrap.py` runs as an init container before the api pod starts:
+
+- **Fresh DB**: detects no tables + no `alembic_version` → `Base.metadata.create_all` + `alembic stamp heads`.
+- **Drift recovery**: detects tables exist + no `alembic_version` → `create_all` (adds new tables idempotently) + column-by-column inspector pass that issues `ALTER TABLE ADD COLUMN` for every column the ORM declares that's missing in the live schema → `stamp heads`.
+- **Healthy install**: `alembic_version` exists → no-op, then `alembic upgrade head` runs any new migrations.
+
+So `bash scripts/deploy-azure.sh deploy` on a fresh AKS cluster works end-to-end with no manual SQL.
+
+### Source map — knowledge stack
+
+| What | Where |
+|---|---|
+| KB REST | [`apps/api/app/routers/knowledge.py`](apps/api/app/routers/knowledge.py) (prefix `/api/knowledge-bases`) |
+| v2 admin endpoints (versioning, reembed, cognify config, conflicts) | [`apps/api/app/routers/knowledge_v2.py`](apps/api/app/routers/knowledge_v2.py) (prefix `/api/knowledge`) |
+| Document grants | [`apps/api/app/routers/document_grants.py`](apps/api/app/routers/document_grants.py) |
+| Doc-level ACL pre-filter | [`apps/api/app/services/document_access.py`](apps/api/app/services/document_access.py) |
+| Atlas REST | [`apps/api/app/routers/atlas.py`](apps/api/app/routers/atlas.py) |
+| Cognify REST | [`apps/api/app/routers/knowledge_engine.py`](apps/api/app/routers/knowledge_engine.py) |
+| Cognify pipeline | [`apps/api/app/services/knowledge_engine/cognify_pipeline.py`](apps/api/app/services/knowledge_engine/cognify_pipeline.py) |
+| Extractors | [`apps/api/app/services/extractors/`](apps/api/app/services/extractors/) |
+| Reranker + Citation | [`apps/api/app/services/reranker.py`](apps/api/app/services/reranker.py) |
+| GDPR | [`apps/api/app/services/gdpr_purge.py`](apps/api/app/services/gdpr_purge.py), [`apps/api/app/routers/gdpr.py`](apps/api/app/routers/gdpr.py) |
+| Persona | [`apps/api/app/routers/persona.py`](apps/api/app/routers/persona.py) |
+| Crypto | [`apps/api/app/core/crypto.py`](apps/api/app/core/crypto.py) |
+| Atlas tools (incl. cypher + as_of) | [`apps/agent-runtime/engine/tools/atlas_tools.py`](apps/agent-runtime/engine/tools/atlas_tools.py), [`apps/agent-runtime/engine/tools/atlas_cypher.py`](apps/agent-runtime/engine/tools/atlas_cypher.py) |
+| KB re-embed worker | [`apps/worker/worker/tasks/kb_reembed.py`](apps/worker/worker/tasks/kb_reembed.py) |
+| Pinecone vacuum worker | [`apps/worker/worker/tasks/pinecone_vacuum.py`](apps/worker/worker/tasks/pinecone_vacuum.py) |
+| Bootstrap (drift recovery) | [`packages/db/bootstrap.py`](packages/db/bootstrap.py) |
+| db-migrate init container | [`infra/helm/api/templates/deployment.yaml`](infra/helm/api/templates/deployment.yaml) |
+| Models | [`packages/db/models/knowledge_base.py`](packages/db/models/knowledge_base.py), [`atlas.py`](packages/db/models/atlas.py), [`meeting.py`](packages/db/models/meeting.py) (PersonaItem), [`document_grant.py`](packages/db/models/document_grant.py), [`cognify_config.py`](packages/db/models/cognify_config.py), [`gdpr_purge_log.py`](packages/db/models/gdpr_purge_log.py) |
+| Full v2 reference doc | [`docs/02-runtime/15-v2-knowledge-enterprise.md`](docs/02-runtime/15-v2-knowledge-enterprise.md) |
+| User-facing versioning explainer | [`docs/document-versioning.md`](docs/document-versioning.md) |
+
 ## Routers — where each feature lives
 
 | Feature | File |
