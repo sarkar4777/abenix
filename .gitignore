@@ -90,6 +90,9 @@ scripts/build_presentation.py
 # Demo-only rebrand recipe — never commit (see file for context)
 BODHI_REBRAND_RECIPE.md
 scripts/apply-bodhi-and-deploy.sh
+
+# Internal client-shaped buildout plan — never commit
+BUILDOUT_PLAN_INTERNAL.md
 # Block .pkl globally, then allow the canonical seed locations:
 #   aimodels/                  → tenant-wide samples
 #   <use-case>/aimodels/       → use-case specific samples (industrial-iot, wingman, …)

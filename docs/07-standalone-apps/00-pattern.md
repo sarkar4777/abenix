@@ -1,6 +1,6 @@
 # Building an app on top of Abenix
 
-> Abenix is a platform you call from the outside. The six vertical apps in this monorepo (Wingman, ContractIQ, Mideast Tourism, ResolveAI, Industrial-IoT, ClaimsIQ) are example consumers — they happen to live in the same repo so we can demo end-to-end, but the contract they use is the same one a third party would use from a separate repo, a separate cluster, a separate company.
+> Abenix is a platform you call from the outside. The six vertical apps in this monorepo (Wingman, E&C-Copilot, Mideast Tourism, ResolveAI, Industrial-IoT, ClaimsIQ) are example consumers — they happen to live in the same repo so we can demo end-to-end, but the contract they use is the same one a third party would use from a separate repo, a separate cluster, a separate company.
 
 This page is for the third party. It explains how to build a new vertical that talks to a running Abenix deployment without integrating into Abenix's own build, deploy, or release process.
 

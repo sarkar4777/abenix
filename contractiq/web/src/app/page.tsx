@@ -227,10 +227,10 @@ export default function ContractIQLandingPage() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
-              <img src="/contractiq-logo.svg" alt="ContractIQ" className="w-6 h-6" />
+              <img src="/contractiq-logo.svg" alt="E&C-Copilot" className="w-6 h-6" />
             </div>
             <div>
-              <div className="text-lg font-bold">ContractIQ</div>
+              <div className="text-lg font-bold">E&C-Copilot</div>
               <div className="text-[10px] text-slate-500 uppercase tracking-wider">PPA &amp; Gas Contract Intelligence</div>
             </div>
           </div>
@@ -259,7 +259,7 @@ export default function ContractIQLandingPage() {
               <span className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-purple-400 bg-clip-text text-transparent">In 60 seconds, know every risk.</span>
             </h1>
             <p className="text-lg text-slate-300 leading-relaxed mb-8 max-w-2xl">
-              ContractIQ ingests 100-200 page energy contracts, extracts every clause, asset, and risk factor via
+              E&C-Copilot ingests 100-200 page energy contracts, extracts every clause, asset, and risk factor via
               multi-pass LLM analysis, builds a knowledge graph of relationships, and lets you <strong className="text-white">chat with your entire portfolio</strong>.
               Purpose-built for PPAs, gas supply agreements, tolling, and virtual PPAs.
             </p>
@@ -327,7 +327,7 @@ export default function ContractIQLandingPage() {
           </div>
           <h2 className="text-3xl md:text-4xl font-bold mb-3">Every flavour of energy contract</h2>
           <p className="text-slate-400 max-w-2xl mx-auto">
-            ContractIQ is purpose-built for the energy industry. It doesn't just parse words — it
+            E&C-Copilot is purpose-built for the energy industry. It doesn't just parse words — it
             understands the commercial structures specific to each contract type.
           </p>
         </div>
@@ -398,7 +398,7 @@ export default function ContractIQLandingPage() {
       <section className="relative z-10 max-w-7xl mx-auto px-6 py-16 border-t border-slate-800/50">
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold mb-3">From upload to insight in 4 steps</h2>
-          <p className="text-slate-400">Zero prompting required. ContractIQ does the work.</p>
+          <p className="text-slate-400">Zero prompting required. E&C-Copilot does the work.</p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
           {[
@@ -427,7 +427,7 @@ export default function ContractIQLandingPage() {
           </div>
           <h2 className="text-3xl md:text-4xl font-bold mb-3">Built on Abenix</h2>
           <p className="text-slate-400 max-w-2xl mx-auto">
-            ContractIQ uses a single Abenix platform API key with <code className="text-emerald-300 text-sm">can_delegate</code> scope
+            E&C-Copilot uses a single Abenix platform API key with <code className="text-emerald-300 text-sm">can_delegate</code> scope
             and the <code className="text-emerald-300 text-sm">actAs</code> pattern — every end-user call is scoped to their own data
             via strict row-level RBAC. One key, many users, zero leakage.
           </p>
@@ -455,7 +455,7 @@ export default function ContractIQLandingPage() {
           <Lightbulb className="w-10 h-10 text-emerald-400 mx-auto mb-4" />
           <h2 className="text-3xl md:text-4xl font-bold mb-3">Stop reading contracts. Start using them.</h2>
           <p className="text-slate-300 max-w-2xl mx-auto mb-8">
-            Your portfolio has hundreds of pages of value buried in PDFs nobody opens. ContractIQ turns them
+            Your portfolio has hundreds of pages of value buried in PDFs nobody opens. E&C-Copilot turns them
             into a queryable, actionable, always-fresh intelligence layer.
           </p>
           <button onClick={() => setShowAuth(true)}
@@ -472,7 +472,7 @@ export default function ContractIQLandingPage() {
       <footer className="relative z-10 border-t border-slate-800/50 py-8 text-center">
         <div className="max-w-7xl mx-auto px-6">
           <p className="text-xs text-slate-500">
-            ContractIQ · PPA &amp; Gas Contract Intelligence ·
+            E&C-Copilot · PPA &amp; Gas Contract Intelligence ·
             <span className="mx-2">Built on <a href="http://localhost:3000" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300">Abenix</a></span>
           </p>
         </div>
@@ -490,10 +490,10 @@ export default function ContractIQLandingPage() {
             <div className="bg-slate-900/95 border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
               <div className="flex items-center justify-center gap-3 mb-6">
                 <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
-                  <img src="/contractiq-logo.svg" alt="ContractIQ" className="w-8 h-8" />
+                  <img src="/contractiq-logo.svg" alt="E&C-Copilot" className="w-8 h-8" />
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold text-white">ContractIQ</h1>
+                  <h1 className="text-xl font-bold text-white">E&C-Copilot</h1>
                   <p className="text-xs text-slate-500">PPA & Gas Contract Intelligence</p>
                 </div>
               </div>

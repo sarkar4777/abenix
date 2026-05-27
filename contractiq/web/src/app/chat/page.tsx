@@ -393,7 +393,7 @@ export default function ContractIQChatPage() {
                     <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
                       <Bot className="w-3 h-3 text-emerald-400" />
                     </div>
-                    <span className="text-[10px] text-slate-500 uppercase tracking-wider">ContractIQ</span>
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wider">E&C-Copilot</span>
                     {msg.meta?.contracts_analyzed && (
                       <span className="text-[10px] text-slate-600">
                         ({msg.meta.contracts_analyzed} contracts, {msg.meta.clauses_searched} clauses searched)

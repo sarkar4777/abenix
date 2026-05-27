@@ -330,7 +330,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             <h4 className="text-white font-semibold pt-4">Shipped model catalogue</h4>
             <p>Sixteen models ship with the platform. Each one is registered at first startup via <code>seed_ml_models.py</code> which scans <code>&lt;app&gt;/aimodels/</code> for matching <code>.pkl</code> + <code>.meta.json</code> pairs.</p>
 
-            <h5 className="text-violet-300 font-semibold pt-3 pb-1">ContractIQ (4 models)</h5>
+            <h5 className="text-violet-300 font-semibold pt-3 pb-1">E&C-Copilot (4 models)</h5>
             <table className="w-full text-[12px] border border-slate-700/40 rounded-md overflow-hidden">
               <thead className="bg-slate-800/60 text-slate-400 text-[10.5px] uppercase">
                 <tr>

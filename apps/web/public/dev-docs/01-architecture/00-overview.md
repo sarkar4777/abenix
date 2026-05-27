@@ -2,7 +2,7 @@
 
 > Read this first. Everything else assumes you know the service graph and the request lifecycle.
 
-Abenix is an **open-source AI agent platform**. It lets a tenant define agents (LLM + tools + system prompt), wire them into pipelines (multi-step DAGs), feed them knowledge (documents + a typed ontology graph), and run them end-to-end with full audit trails. On top of that core sit **standalone vertical apps** (Wingman, ContractIQ, etc.) that compose the platform's primitives into industry-specific workflows.
+Abenix is an **open-source AI agent platform**. It lets a tenant define agents (LLM + tools + system prompt), wire them into pipelines (multi-step DAGs), feed them knowledge (documents + a typed ontology graph), and run them end-to-end with full audit trails. On top of that core sit **standalone vertical apps** (Wingman, E&C-Copilot, etc.) that compose the platform's primitives into industry-specific workflows.
 
 The platform is multi-tenant, polyglot (Python / TypeScript / Java SDKs), and runs on Kubernetes. Everything is open source.
 
@@ -16,7 +16,7 @@ Three concentric circles.
 flowchart TB
   subgraph PERIPHERY["Standalone vertical apps (thin)"]
     W[Wingman]
-    C[ContractIQ]
+    C[E&C-Copilot]
     S[Mideast Tourism]
     R[ResolveAI]
     I[Industrial-IoT]

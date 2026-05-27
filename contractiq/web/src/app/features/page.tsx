@@ -504,7 +504,7 @@ const METALS: Feature[] = [
 ];
 
 const PILLARS = [
-  { icon: Workflow, title: 'Every interesting calculation is an agent', body: 'No business logic lives in the ContractIQ app code. Each module is a thin wrapper that calls an agent on the platform. This is what keeps the answers consistent, auditable, and improvable in one place.' },
+  { icon: Workflow, title: 'Every interesting calculation is an agent', body: 'No business logic lives in the E&C-Copilot app code. Each module is a thin wrapper that calls an agent on the platform. This is what keeps the answers consistent, auditable, and improvable in one place.' },
   { icon: Database, title: 'Every answer is cited',                       body: 'Every extracted field, every clause, every recommendation, every dispute finding points back to a contract span. You can click any number and land on the line of contract text that produced it.' },
   { icon: Network, title: 'Everything is portfolio-aware',                  body: 'No module reads a single contract in isolation. Anomalies use cohort distributions. Renewals reference benchmark cohorts. Sourcing audits cross-reference the refiner watchlist. The whole is more than the sum.' },
   { icon: Eye, title: 'Every run is observable',                            body: 'Every agent call is an Abenix execution. You can replay it, see the tool calls, inspect the inputs, watch the cost. The runs that produce your numbers are first-class artefacts.' },
@@ -545,10 +545,10 @@ export default function FeaturesPage() {
           transition={{ duration: 0.5 }}
           className="mb-12"
         >
-          <div className="text-xs uppercase tracking-wide text-cyan-400 mb-2">ContractIQ — capabilities</div>
+          <div className="text-xs uppercase tracking-wide text-cyan-400 mb-2">E&C-Copilot — capabilities</div>
           <h1 className="text-4xl md:text-5xl font-bold text-white mb-3">Every feature, every agent, every output</h1>
           <p className="text-base text-slate-400 max-w-3xl leading-relaxed">
-            ContractIQ is a portfolio-aware contract intelligence platform. Every meaningful answer is produced by a named agent, every number is cited back to a contract span, and every run is observable.
+            E&C-Copilot is a portfolio-aware contract intelligence platform. Every meaningful answer is produced by a named agent, every number is cited back to a contract span, and every run is observable.
             This page is the long-form tour — what each module does, which agent backs it, what goes in, what comes out.
           </p>
         </motion.div>

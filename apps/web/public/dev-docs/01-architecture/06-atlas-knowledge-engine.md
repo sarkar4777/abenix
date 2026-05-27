@@ -201,4 +201,4 @@ Daily Celery beat at 02:00 UTC ([`worker/tasks/pinecone_vacuum.py`](../../apps/w
 - [`02-runtime/15-v2-knowledge-enterprise.md`](../02-runtime/15-v2-knowledge-enterprise.md) — full v2.0 feature reference (16 capabilities)
 - [`04-data-model/03-knowledge.md`](../04-data-model/03-knowledge.md) — KB + Atlas + Cognify ERD with bi-temporal columns
 - [`document-versioning.md`](../document-versioning.md) — replace lifecycle in depth
-- [`07-standalone-apps/02-contractiq.md`](../07-standalone-apps/02-contractiq.md) — ContractIQ uses Atlas heavily for clause traceability
+- [`07-standalone-apps/02-contractiq.md`](../07-standalone-apps/02-contractiq.md) — E&C-Copilot uses Atlas heavily for clause traceability

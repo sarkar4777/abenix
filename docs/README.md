@@ -89,7 +89,7 @@ How a third party builds a vertical app that uses Abenix as a remote platform. I
 
 - [00 — Building an app on top of Abenix (read this first)](07-standalone-apps/00-pattern.md)
 - [01 — Wingman (reference: energy trading)](07-standalone-apps/01-wingman.md)
-- [02 — ContractIQ (reference: contract intelligence)](07-standalone-apps/02-contractiq.md)
+- [02 — E&C-Copilot (reference: contract intelligence)](07-standalone-apps/02-contractiq.md)
 - [03 — Mideast Tourism, ResolveAI, ClaimsIQ, Industrial-IoT (reference)](07-standalone-apps/03-others.md)
 
 ### 8. How-to (walkthroughs)

@@ -299,7 +299,7 @@ export default function InsightsHubPage() {
               <h4 className="text-sm font-semibold text-white mb-1">Built on Abenix — generic, auditable, replayable</h4>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Every workflow above runs as an OOB agent on Abenix with strict <code className="text-emerald-300">actAs</code> delegation —
-                ContractIQ holds one platform key but each call is scoped to <em>your</em> user. All AI work is logged in the Abenix
+                E&C-Copilot holds one platform key but each call is scoped to <em>your</em> user. All AI work is logged in the Abenix
                 executions table with full input/output, cost, latency, and tool-call trace. Click any agent slug to view its definition
                 in the Abenix "My Agents" page.
               </p>

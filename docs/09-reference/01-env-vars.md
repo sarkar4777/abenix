@@ -128,7 +128,7 @@ Wingman-specific:
 | `WINGMAN_ACTING_SUBJECT_TYPE` | Default `wingman` |
 | `AISSTREAM_API_KEY` | Required for Operations Watch live AIS |
 
-ContractIQ-specific:
+E&C-Copilot-specific:
 
 | Variable | Notes |
 |---|---|

@@ -1,4 +1,4 @@
-# ContractIQ — contract intelligence
+# E&C-Copilot — contract intelligence
 
 > Upload contracts, extract clauses, classify risk, benchmark against the corpus, run valuation. Heavy use of the KB + Atlas + ML model registry.
 
@@ -6,7 +6,7 @@
 
 ## Domain
 
-ContractIQ ingests contracts (PDF, DOCX) and produces:
+E&C-Copilot ingests contracts (PDF, DOCX) and produces:
 - A typed clause inventory (NDA, IP, indemnity, change-of-control, etc.).
 - Risk flags + severity.
 - Valuation deltas under different counterparty scenarios.
@@ -65,7 +65,7 @@ The ingest agent is a pipeline (extract → counterparty → clause → risk in 
 
 ## KB usage
 
-ContractIQ is the heaviest KB user. Per tenant:
+E&C-Copilot is the heaviest KB user. Per tenant:
 - One "Master Corpus" KB — every ingested contract chunked + embedded.
 - Per-deal KBs — temporary, for negotiation rooms.
 - A shared "Policy" KB — house counsel's preferred language for each clause type.
@@ -87,7 +87,7 @@ The `/atlas` page lets a deal lead query across multiple contracts: "show all ch
 
 ## actAs pattern
 
-ContractIQ has its own user table (`contractiq.users`). Each request to the platform carries:
+E&C-Copilot has its own user table (`contractiq.users`). Each request to the platform carries:
 ```
 X-Abenix-Subject: contractiq:<user_id>
 ```
@@ -108,4 +108,4 @@ The platform's audit log records every clause extraction, valuation, and benchma
 ## See also
 
 - [00-pattern](00-pattern.md) — the thin-app contract
-- [04-data-model/03-knowledge](../04-data-model/03-knowledge.md) — KB schema (ContractIQ is the canonical heavy user)
+- [04-data-model/03-knowledge](../04-data-model/03-knowledge.md) — KB schema (E&C-Copilot is the canonical heavy user)

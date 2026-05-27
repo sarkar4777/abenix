@@ -169,7 +169,7 @@ Each vertical app deploys two services: `*-api` (FastAPI) and `*-web` (Next.js).
 | App | Domain | Image-tag-pair | Default port (web/api) |
 |---|---|---|---|
 | **Wingman** | Energy commodity trading | `wingman-web`, `wingman-api` | 3006 / 8006 |
-| **ContractIQ** | Contract intelligence | `contractiq-web`, `contractiq-api` | 3007 / 8007 |
+| **E&C-Copilot** | Contract intelligence | `contractiq-web`, `contractiq-api` | 3007 / 8007 |
 | **Mideast Tourism** | Tourism analytics | `mideasttourism-web`, `mideasttourism-api` | 3002 / 8002 |
 | **ResolveAI** | Customer-support automation | `resolveai-web`, `resolveai-api` | 3008 / 8008 |
 | **Industrial-IoT** | Equipment health + alarm desk | `industrial-iot-web`, `industrial-iot-api` | 3009 / 8009 |

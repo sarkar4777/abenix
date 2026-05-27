@@ -1,6 +1,6 @@
 # The other verticals — Mideast Tourism, ResolveAI, Industrial-IoT, ClaimsIQ
 
-> Brief overviews. Each follows the [thin-app pattern](00-pattern.md) and the structural notes for Wingman + ContractIQ apply.
+> Brief overviews. Each follows the [thin-app pattern](00-pattern.md) and the structural notes for Wingman + E&C-Copilot apply.
 
 ---
 

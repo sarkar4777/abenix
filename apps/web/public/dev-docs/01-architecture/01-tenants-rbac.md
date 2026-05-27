@@ -155,7 +155,7 @@ Each standalone app picks a subject_type and stays in that lane.
 | subject_type | Used by | Example subject_id |
 |---|---|---|
 | `wingman` | Wingman energy trading | `trader-alice`, `demo-trader` |
-| `contractiq` | ContractIQ contracts | `user-7afd…` (the CIQ DB user UUID) |
+| `contractiq` | E&C-Copilot contracts | `user-7afd…` (the CIQ DB user UUID) |
 | `mideasttourism` | Mideast Tourism Ministry | `gov-employee-22` |
 | `resolveai` | ResolveAI customer service | `agent-bob` |
 | `industrial-iot` | Industrial IoT | `operator-shift-3` |

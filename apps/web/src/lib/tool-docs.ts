@@ -606,7 +606,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   contract_portfolio: {
     category: "Energy Market",
     name: "Contract Portfolio",
-    description: "Query ContractIQ contract portfolio for structured data. Supports listing contracts, getting details, searching clauses, viewing risks, discovering fields, querying extracted data, and comparing fields across contracts.",
+    description: "Query E&C-Copilot contract portfolio for structured data. Supports listing contracts, getting details, searching clauses, viewing risks, discovering fields, querying extracted data, and comparing fields across contracts.",
     parameters: [
       { name: "operation", type: "string", required: true, description: "Operation to perform", enum: ["list_contracts", "get_contract_detail", "search_clauses", "get_risks", "get_extracted_data", "get_portfolio_summary", "get_events", "discover_fields", "query_extracted", "compare_field"] },
       { name: "contract_id", type: "string", required: false, description: "Contract UUID for detail operations" },
@@ -632,7 +632,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   market_monitor: {
     category: "Energy Market",
     name: "Market Monitor",
-    description: "System-level tool for ContractIQ market monitoring. Loads contracts with pricing terms, writes market alerts, updates risk scores, and retrieves recent alerts for deduplication.",
+    description: "System-level tool for E&C-Copilot market monitoring. Loads contracts with pricing terms, writes market alerts, updates risk scores, and retrieves recent alerts for deduplication.",
     parameters: [
       { name: "operation", type: "string", required: true, description: "Operation", enum: ["get_all_contracts_with_pricing", "write_market_alert", "update_risk_score", "get_latest_alerts"] },
       { name: "contract_id", type: "string", required: false, description: "Contract UUID" },

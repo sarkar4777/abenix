@@ -116,7 +116,7 @@ function Inner() {
     <div className="p-8 max-w-6xl mx-auto space-y-6" data-testid="timeline-page">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">ContractIQ · interactive event timeline</p>
+          <p className="text-[10px] uppercase tracking-wider text-slate-500">E&C-Copilot · interactive event timeline</p>
           <h1 className="text-3xl font-bold text-white">Event Timeline</h1>
           <p className="text-sm text-slate-400 mt-1 max-w-2xl">
             Every milestone, deadline, review, renewal, and termination trigger lifted from

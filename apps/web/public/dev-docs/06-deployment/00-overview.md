@@ -79,7 +79,7 @@ Builds 15 images in parallel:
 - `agent-runtime` — runtime image (4 deployments share it)
 - `edge-runtime`, `edge-runtime-rust`, `edge-runtime-c` — optional edge
 - `wingman-api`, `wingman-web` — Wingman
-- `contractiq-api`, `contractiq-web` — ContractIQ
+- `contractiq-api`, `contractiq-web` — E&C-Copilot
 - `mideasttourism-api`, `mideasttourism-web` — Mideast Tourism
 - `resolveai-api`, `resolveai-web` — ResolveAI
 - `industrial-iot-api`, `industrial-iot-web` — Industrial-IoT

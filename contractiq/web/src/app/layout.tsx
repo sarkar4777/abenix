@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import SidebarLayout from './_sidebar_layout';
 
 export const metadata: Metadata = {
-  title: 'ContractIQ — Energy Contract Intelligence',
+  title: 'E&C-Copilot — Energy Contract Intelligence',
   description: 'AI-powered analysis of PPAs, gas supply agreements, and energy contracts',
 };
 
