@@ -515,6 +515,61 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             </ol>
             <p>Agents using <code>knowledge_search</code> on a graph-enabled collection get hybrid retrieval: vector similarity AND multi-hop graph walks. This is the 5–10× token reduction story.</p>
 
+            <h4 className="text-white font-semibold pt-3">v2.0 enterprise capabilities <Pill tone="cyan">new</Pill></h4>
+            <p>Sixteen features landed in v2.0 to move the knowledge stack from demo-ready to Fortune-500-ready. Open <code>/settings/cognify</code> for the runtime knobs and <code>/settings/gdpr</code> for the cascade purge UI.</p>
+
+            <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Shield className="w-3.5 h-3.5 text-cyan-300" /> Document-level ACL</h5>
+            <p>The legacy collection-level grant was all-or-nothing. v2.0 adds per-document <code>document_grants(document_id, subject_type, subject_id, permission)</code> so a single KB can serve five teams without exposing every other team&apos;s contracts. The pre-filter runs <em>before</em> similarity search — a forbidden doc never enters the candidate pool, so the top-K count an agent sees is honest. Cached per-(subject, kb_id) in Redis with a 60 s TTL; invalidated on every grant / revoke. Use <code>POST /api/knowledge/{`{kb}`}/documents/{`{doc}`}/grants</code> from the KB detail panel or via API.</p>
+
+            <h5 className="text-white font-medium pt-2 flex items-center gap-2"><GitBranch className="w-3.5 h-3.5 text-cyan-300" /> Document versioning + replace</h5>
+            <p>Upload an amendment with <code>POST /api/knowledge/{`{kb}`}/documents/{`{doc}`}/replace</code>. The old row is marked <code>is_current=false, superseded_by=&lt;new_id&gt;</code>. Three consumers update automatically — no agent or caller change required:</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong>Hybrid search</strong> filters <code>documents.is_current = true</code> before similarity scoring. The new version&apos;s chunks are the only candidates. Pass <code>?include_superseded=true</code> to surface history.</li>
+              <li><strong>Atlas edges</strong> derived from the new doc carry <code>valid_from = now, valid_to = NULL</code>. Edges from the superseded doc get <code>valid_to = supersede_time</code>, so they become historical facts queryable via <code>atlas_as_of</code>.</li>
+              <li><strong>Cognify</strong> incremental runs only fetch <code>is_current = true AND (cognified_at IS NULL OR updated_at &gt; cognified_at)</code>. The replaced document immediately appears in the next job&apos;s frontier; the superseded one is excluded.</li>
+            </ul>
+
+            <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Settings className="w-3.5 h-3.5 text-cyan-300" /> Cognify config + conflict surface</h5>
+            <p>Per-tenant row in <code>cognify_configs</code> (one row, surfaced at <code>/settings/cognify</code>):</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><code>auto_accept_threshold</code> (default <code>0.85</code>) — proposals at or above this confidence land directly in <code>atlas_*</code>; lower ones queue for review.</li>
+              <li><code>conflict_action</code> — <code>flag</code> (default; human picks) / <code>split</code> (keep both, link as VARIANT_OF) / <code>lower_conf_wins</code> / <code>higher_conf_wins</code>.</li>
+              <li><code>max_parallel_docs</code> (default 8) — in-job parallelism via <code>asyncio.gather + Semaphore</code>.</li>
+              <li><code>daily_budget_usd</code> (optional) — hard cap on Cognify spend per day.</li>
+            </ul>
+            <p>When two sources disagree on an entity property, a <code>cognify_conflicts</code> row is created. The settings page lists open conflicts with side-by-side <strong>Accept A</strong> / <strong>Accept B</strong> buttons — single click to resolve. Three job modes ship: <code>incremental</code> (default — new + updated docs), <code>full</code> (every doc, use when ontology changes), <code>selective</code> (explicit <code>document_ids</code>). For a 10k-doc KB adding 100 docs/day, incremental drops re-indexing cost ~100× vs full.</p>
+
+            <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Wand2 className="w-3.5 h-3.5 text-cyan-300" /> Embedding-model swap</h5>
+            <p>Every KB stores its <code>embedding_model</code>. Switching is a three-step, never-read-from-wrong-model operation:</p>
+            <ol className="list-decimal pl-5 space-y-1 text-[13px]">
+              <li><code>POST /api/knowledge/{`{kb}`}/reembed?dry_run=true</code> — cost estimate + ETA.</li>
+              <li><code>POST /api/knowledge/{`{kb}`}/reembed</code> with <code>{`{"embedding_model": "voyage-3"}`}</code> — enqueues the worker, returns <code>job_id</code>.</li>
+              <li>The worker streams chunks into a staging Pinecone namespace, atomic alias flip on completion, old namespace marked <code>deletable_at = now + 24h</code> for rollback safety.</li>
+            </ol>
+            <p>The query path always reads <code>kb.embedding_model</code> and embeds with that model — never assumes OpenAI. The old "indexed with X, can&apos;t query with Y" class of bug is closed.</p>
+
+            <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Search className="w-3.5 h-3.5 text-cyan-300" /> Reranking + deep-link citations</h5>
+            <p>Hybrid search now feeds the top-50 candidates through a reranker before returning the top-K:</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li>Cohere <code>rerank-english-v3.0</code> when <code>COHERE_API_KEY</code> is set (cheap, fast).</li>
+              <li>Claude Haiku scoring fallback when only <code>ANTHROPIC_API_KEY</code> is set.</li>
+              <li>Passthrough when neither key is set.</li>
+            </ul>
+            <p>Every hit carries a <code>Citation</code> with <code>{`{document_id, page, chunk_index, char_offset_start/end, document_name, anchor_url}`}</code>. Agents can embed deep-link citations like <em>contract.pdf · page 42 · chunk 3</em> in their output verbatim — click the anchor to land at the right offset in the document.</p>
+
+            <h5 className="text-white font-medium pt-2 flex items-center gap-2"><ScanLine className="w-3.5 h-3.5 text-cyan-300" /> Multi-modal extractors (OCR auto-fallback)</h5>
+            <p>The extractor dispatch replaces the legacy "if PDF: extract text" branch. Each document records the <code>extraction_method</code> + <code>extraction_quality</code> it used — auditable visibility into what needed OCR:</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong>pdf</strong> → <code>text_pdf</code> first; if chars/page &lt; 50, falls through to <code>vision_pdf</code> (PyMuPDF rasterisation + Claude vision).</li>
+              <li><strong>office</strong> (docx / pptx / xlsx / html / epub / rtf) → unstructured.io.</li>
+              <li><strong>image</strong> (png / jpg / tiff) → vision.</li>
+              <li><strong>text</strong> (txt / md / csv / json) → plain.</li>
+            </ul>
+            <p>For a typical contract archive, 30–50% of pages end up on the vision path — the system auto-routes; you don&apos;t configure anything.</p>
+
+            <h5 className="text-white font-medium pt-2 flex items-center gap-2"><Layers className="w-3.5 h-3.5 text-cyan-300" /> Pagination + cleanup</h5>
+            <p>Every list endpoint now accepts <code>?cursor=&lt;id&gt;&amp;limit=&lt;N&gt;</code> and returns <code>next_cursor</code> for stable forward iteration (replaced hardcoded <code>.limit(500)</code> on persona items, <code>.limit(20)</code> on cognify jobs, and the new conflicts endpoint). A daily Pinecone vacuum runs at 02:00 UTC — walks every tenant namespace, diffs vector IDs against <code>persona_items.pinecone_ids</code> + chunk references, deletes orphans in batches of 1000. Each orphan is ~6 KB on per-dim pricing, so for high-churn tenants the saving is material.</p>
+
             <h4 className="text-white font-semibold pt-3">Common tasks</h4>
             <Steps items={[
               'Click <strong>+ New collection</strong> inside a project.',
@@ -541,6 +596,30 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li>A defense-in-depth in-memory re-filter, in case the vector backend silently ignores the filter argument.</li>
             </ol>
             <p>Persona is also where you upload a voice sample for opt-in voice cloning (used by meeting bots — see the Meeting Primitives topic).</p>
+
+            <h4 className="text-white font-semibold pt-3 flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-cyan-300" /> At-rest encryption <Pill tone="cyan">v2.0</Pill></h4>
+            <p>Sensitive <code>PersonaItem</code> and <code>AgentMemory</code> fields can be wrapped with AES-256-GCM at the application layer. The cluster KEK lives in <code>ABENIX_DATA_KEY_KEK_BASE64</code> (sourced from Azure Key Vault / AWS KMS / HashiCorp Vault — never in the database). The per-tenant DEK is derived deterministically as <code>HMAC-SHA256(KEK, tenant_id)</code> so every pod agrees without persisting per-tenant key rows.</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong>Versioned ciphertext.</strong> Every encrypted row records the <code>key_version</code> that wrote it, so rotating the KEK doesn&apos;t require rewriting old rows in one go — readers transparently dispatch to the right derivation.</li>
+              <li><strong>Fail-open with a warning.</strong> If the KEK env var is missing, encryption is a no-op (plaintext) and a single warning logs at startup. Production deployments MUST set the KEK — the warning is intentionally loud.</li>
+              <li><strong>Scope.</strong> Encryption protects DB-at-rest exfiltration scenarios (stolen snapshot, leaked backup). It does not encrypt vectors in Pinecone — use Pinecone&apos;s own encryption-at-rest for that surface.</li>
+            </ul>
+
+            <h4 className="text-white font-semibold pt-3 flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-300" /> GDPR cascade purge <Pill tone="cyan">v2.0</Pill></h4>
+            <p>The right-to-be-forgotten request used to be a forensic exercise. <code>POST /api/gdpr/users/{`{user_id}`}/purge</code> now runs the five-store cascade in one call. The trigger UI sits at <code>/settings/gdpr</code>:</p>
+            <table className="w-full text-xs my-2">
+              <thead className="text-[10px] uppercase text-slate-500">
+                <tr><th className="text-left py-1">Store</th><th className="text-left py-1">What is purged</th></tr>
+              </thead>
+              <tbody className="text-slate-300 align-top">
+                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">postgres</td><td className="py-1"><code>persona_items</code> + <code>agent_memories</code> soft-deleted (<code>deleted_at</code>, <code>deleted_by</code>) — the row is retained for the audit trail but masked everywhere</td></tr>
+                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">pinecone</td><td className="py-1">vectors filtered by <code>metadata.user_id</code>, retried 3× then queued for the daily vacuum</td></tr>
+                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">neo4j</td><td className="py-1">nodes with property <code>user_id</code> are <code>DETACH DELETE</code>d — incident edges go with them</td></tr>
+                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">blob</td><td className="py-1"><code>/data/users/&lt;id&gt;/*</code> removed from the persistent volume</td></tr>
+                <tr className="border-t border-slate-800/60"><td className="py-1 font-mono">trajectory</td><td className="py-1">sweeper marks rows tombstoned in the trajectory store</td></tr>
+              </tbody>
+            </table>
+            <p>Every per-store attempt writes a <code>gdpr_purge_log</code> row with the result + a JSONB details blob. <code>GET /api/gdpr/users/{`{user_id}`}/receipts</code> returns the audit trail — provable to a regulator that each store was processed, including retries and partial failures.</p>
           </div>
         ),
       },
@@ -630,13 +709,25 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
             </ul>
 
             <h4 className="text-white font-semibold pt-3">Agent tools — read the graph</h4>
-            <p>Four tools ship in the catalogue. Attach them to any agent in the Builder:</p>
+            <p>Six tools ship in the catalogue (two were added in v2.0). Attach any of them to an agent from the Builder palette under <em>Knowledge</em>:</p>
             <ul className="list-disc pl-5 space-y-1.5 text-[13px]">
               <li><code className="text-cyan-300">atlas_describe</code> — summarise the graph (counts by kind, top edge labels, most-connected concepts). Use first when the user asks "what do you know about X?".</li>
               <li><code className="text-cyan-300">atlas_query</code> — pattern-match nodes by <code>label_like</code> + <code>kind</code>. Returns structured rows, the typed alternative to vector search.</li>
               <li><code className="text-cyan-300">atlas_traverse</code> — 1-hop neighbourhood of a node. Use after locating a concept to walk to related concepts.</li>
               <li><code className="text-cyan-300">atlas_search_grounded</code> — find KB documents bound to nodes near a target term. Better than vector-only when the chunks must be tied to a typed concept.</li>
+              <li><code className="text-cyan-300">atlas_cypher</code> <Pill tone="cyan">v2.0</Pill> — direct read-only Cypher for power agents when the four typed tools aren&apos;t expressive enough (ad-hoc multi-hop traversals, aggregations, EXISTS sub-queries). A server-side validator rejects every write token (<code>CREATE</code>, <code>MERGE</code>, <code>DELETE</code>, <code>DETACH DELETE</code>, <code>SET</code>, <code>REMOVE</code>, <code>DROP</code>, <code>LOAD CSV</code>, <code>CALL apoc.*</code>, <code>CALL dbms.*</code>, <code>CALL db.*</code>, <code>FOREACH</code>, <code>;</code>). Query length capped at 8 KB, execution at 10 s, results at 1000 rows. Tenant + graph id auto-injected as <code>$abenix_tenant_id</code> / <code>$abenix_graph_id</code> — a hand-crafted query cannot escape the caller&apos;s scope.</li>
+              <li><code className="text-cyan-300">atlas_as_of</code> <Pill tone="cyan">v2.0</Pill> — query the graph as it existed at an ISO-8601 timestamp. Rewrites the WHERE clause to <code>r.valid_from &lt;= ts AND (r.valid_to IS NULL OR r.valid_to &gt; ts)</code> so you get a coherent snapshot of the graph on that date — answers "what did we know on 2025-01-15?" / "show me the obligations as of last quarter" in one hop.</li>
             </ul>
+
+            <h4 className="text-white font-semibold pt-3">Bi-temporal Atlas <Pill tone="cyan">v2.0</Pill></h4>
+            <p>Every Atlas node and edge carries four time/provenance columns. Default queries hide history so you always see the current state, but the columns are there when an auditor needs them:</p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><code>valid_from</code> — when the fact became true in the world</li>
+              <li><code>valid_to</code> — when it stopped being true (<code>NULL</code> = still current)</li>
+              <li><code>recorded_at</code> — when Cognify learned the fact</li>
+              <li><code>source_anchors</code> — JSONB array of <code>{`{document_id, page, chunk_id, confidence}`}</code> per supporting citation, built up across multiple Cognify runs as evidence accumulates</li>
+            </ul>
+            <p>The default Cypher templates use <code>WHERE r.valid_to IS NULL</code>, so routine traversal returns only the current state. When you replace a document, the new doc&apos;s edges land with <code>valid_from = now</code> and the superseded doc&apos;s edges get <code>valid_to = supersede_time</code> — the agent sees v2 immediately, the auditor sees v1 via <code>atlas_as_of</code>.</p>
 
             <h4 className="text-white font-semibold pt-3">Per-agent + per-application segregation</h4>
             <p>Atlas graphs are tenant-scoped by default — every other tenant sees nothing. Inside a tenant, you can pin an agent to specific graphs:</p>
