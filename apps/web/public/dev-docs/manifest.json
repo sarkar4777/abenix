@@ -102,7 +102,8 @@
         {"slug": "08-howto/02-add-an-agent", "title": "Add a new agent"},
         {"slug": "08-howto/03-add-a-page", "title": "Add a new UI page"},
         {"slug": "08-howto/04-debugging", "title": "Debugging"},
-        {"slug": "08-howto/05-testing", "title": "Testing"}
+        {"slug": "08-howto/05-testing", "title": "Testing"},
+        {"slug": "08-howto/06-encryption-setup", "title": "Set up at-rest encryption (KEK)"}
       ]
     },
     {

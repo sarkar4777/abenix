@@ -52,6 +52,10 @@ Optional but useful:
 
 The full catalogue is in [the Integrations page docs](docs/integrations.md) (also visible in-product at `/settings/integrations` once logged in).
 
+### Production-only secret: at-rest encryption KEK
+
+When you take this to production, also set `ABENIX_DATA_KEY_KEK_BASE64` — a 32-byte base64 key that wraps the per-tenant DEK for AES-256-GCM encryption of sensitive PersonaItem + AgentMemory fields. Local dev runs fine without it (encryption is a silent no-op + a warning logs once). Generate + inject via [`docs/08-howto/06-encryption-setup.md`](docs/08-howto/06-encryption-setup.md) — five commands, ~2 min.
+
 ## 5. Run migrations + seed (3 min)
 
 ```bash

@@ -19,6 +19,7 @@
 | `OTEL_SERVICE_NAME` | no | per-service | Auto-set by deploy |
 | `OTEL_TRACES_SAMPLER_ARG` | no | `1.0` | Reduce in high-traffic prod |
 | `OTEL_PII_REDACT` | no | `true` | Set `false` for local debugging only |
+| `ABENIX_DATA_KEY_KEK_BASE64` | **prod yes**, dev no | — | 32-byte base64 cluster KEK for AES-256-GCM at-rest encryption of sensitive PersonaItem + AgentMemory fields. Generate via `openssl rand -base64 32`. Source from a real KMS (Azure Key Vault / AWS KMS / Vault) — never put in source / configmap. **Missing → encryption is a silent no-op + one warning logs.** Per-tenant DEK derives deterministically as `HMAC-SHA256(KEK, tenant_id)` so pods don't need a shared cache. Setup recipe: [`08-howto/06-encryption-setup.md`](../08-howto/06-encryption-setup.md) |
 
 ---
 
