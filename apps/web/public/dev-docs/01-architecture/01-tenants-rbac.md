@@ -156,7 +156,7 @@ Each standalone app picks a subject_type and stays in that lane.
 |---|---|---|
 | `wingman` | Wingman energy trading | `trader-alice`, `demo-trader` |
 | `contractiq` | ContractIQ contracts | `user-7afd…` (the CIQ DB user UUID) |
-| `sauditourism` | Saudi Tourism Ministry | `gov-employee-22` |
+| `mideasttourism` | Mideast Tourism Ministry | `gov-employee-22` |
 | `resolveai` | ResolveAI customer service | `agent-bob` |
 | `industrial-iot` | Industrial IoT | `operator-shift-3` |
 | `claimsiq` | ClaimsIQ FNOL | `adjuster-1701` |

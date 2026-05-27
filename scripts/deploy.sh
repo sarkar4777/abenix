@@ -578,9 +578,9 @@ setup_port_forwards() {
     start_persistent_forward "contractiq-web" 3001 3001
     start_persistent_forward "contractiq-api" 8001 8001
   fi
-  if kubectl -n "${NAMESPACE}" get svc sauditourism-web &>/dev/null; then
-    start_persistent_forward "sauditourism-web" 3002 3002
-    start_persistent_forward "sauditourism-api" 8002 8002
+  if kubectl -n "${NAMESPACE}" get svc mideasttourism-web &>/dev/null; then
+    start_persistent_forward "mideasttourism-web" 3002 3002
+    start_persistent_forward "mideasttourism-api" 8002 8002
   fi
   if kubectl -n "${NAMESPACE}" get svc industrial-iot-web &>/dev/null; then
     start_persistent_forward "industrial-iot-web" 3003 3003

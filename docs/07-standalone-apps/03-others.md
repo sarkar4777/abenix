@@ -1,10 +1,10 @@
-# The other verticals — Saudi Tourism, ResolveAI, Industrial-IoT, ClaimsIQ
+# The other verticals — Mideast Tourism, ResolveAI, Industrial-IoT, ClaimsIQ
 
 > Brief overviews. Each follows the [thin-app pattern](00-pattern.md) and the structural notes for Wingman + ContractIQ apply.
 
 ---
 
-## Saudi Tourism
+## Mideast Tourism
 
 **Domain**: tourism analytics + planning for Saudi Vision 2030 (hotel occupancy, visa flows, event impact modelling, regional recommendations).
 
@@ -21,7 +21,7 @@
 - `st-simulator` — what-if event modelling
 - `st-chat` — concierge-style chat for the home page
 
-**Theme**: green + white. App at `sauditourism/`, ports 3002 (web) / 8002 (api).
+**Theme**: green + white. App at `mideasttourism/`, ports 3002 (web) / 8002 (api).
 
 ---
 

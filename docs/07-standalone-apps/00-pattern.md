@@ -1,6 +1,6 @@
 # Building an app on top of Abenix
 
-> Abenix is a platform you call from the outside. The six vertical apps in this monorepo (Wingman, ContractIQ, Saudi Tourism, ResolveAI, Industrial-IoT, ClaimsIQ) are example consumers — they happen to live in the same repo so we can demo end-to-end, but the contract they use is the same one a third party would use from a separate repo, a separate cluster, a separate company.
+> Abenix is a platform you call from the outside. The six vertical apps in this monorepo (Wingman, ContractIQ, Mideast Tourism, ResolveAI, Industrial-IoT, ClaimsIQ) are example consumers — they happen to live in the same repo so we can demo end-to-end, but the contract they use is the same one a third party would use from a separate repo, a separate cluster, a separate company.
 
 This page is for the third party. It explains how to build a new vertical that talks to a running Abenix deployment without integrating into Abenix's own build, deploy, or release process.
 
@@ -342,7 +342,7 @@ The SDK has a `client.version()` check that confirms compatibility on first call
 
 ## A note on the example apps in this repo
 
-The six verticals in `/wingman`, `/contractiq`, `/sauditourism`, `/resolveai`, `/industrial-iot`, `/claimsiq` are deployed via `scripts/deploy-azure.sh` for the platform's own demo cluster. They share the platform's release pipeline because that is the simplest way to keep the demo healthy.
+The six verticals in `/wingman`, `/contractiq`, `/mideasttourism`, `/resolveai`, `/industrial-iot`, `/claimsiq` are deployed via `scripts/deploy-azure.sh` for the platform's own demo cluster. They share the platform's release pipeline because that is the simplest way to keep the demo healthy.
 
 If you build a vertical, **do not** add it to `deploy-azure.sh`. Your release cadence and the platform's are different. Your blast radius and the platform's are different. Keep them separated. Your deploy is your deploy.
 

@@ -251,7 +251,7 @@ test.describe('Abenix · UAT', () => {
       await trigger.click();
       await page.waitForTimeout(400);
       const text = (await page.textContent('body')) || '';
-      expect(text).toMatch(/ContractIQ|ResolveAI|Saudi Tourism|OracleNet|ClaimsIQ|Industrial IoT/i);
+      expect(text).toMatch(/ContractIQ|ResolveAI|Mideast Tourism|OracleNet|ClaimsIQ|Industrial IoT/i);
     }
   });
 

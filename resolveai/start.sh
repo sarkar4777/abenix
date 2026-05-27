@@ -40,8 +40,8 @@ if ! curl -sf http://localhost:8000/api/health >/dev/null 2>&1; then
 fi
 
 if [ -z "$RESOLVEAI_ABENIX_API_KEY" ]; then
-  # Fall back to the ContractIQ / Saudi Tourism key (same tenant, same AF).
-  : "${RESOLVEAI_ABENIX_API_KEY:=${CONTRACTIQ_ABENIX_API_KEY:-${SAUDITOURISM_ABENIX_API_KEY:-}}}"
+  # Fall back to the ContractIQ / Mideast Tourism key (same tenant, same AF).
+  : "${RESOLVEAI_ABENIX_API_KEY:=${CONTRACTIQ_ABENIX_API_KEY:-${MIDEASTTOURISM_ABENIX_API_KEY:-}}}"
   export RESOLVEAI_ABENIX_API_KEY
   [ -z "$RESOLVEAI_ABENIX_API_KEY" ] && warn "RESOLVEAI_ABENIX_API_KEY not set — pipeline calls will 503"
 fi

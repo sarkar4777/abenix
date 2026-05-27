@@ -1,7 +1,7 @@
-name: "Saudi Tourism Simulator"
+name: "Mideast Tourism Simulator"
 slug: st-simulator
 description: >-
-  Runs what-if simulations for Saudi Arabia tourism: visa policy impacts,
+  Runs what-if simulations for Middle East tourism: visa policy impacts,
   hotel capacity expansion, seasonal event planning, weather effects,
   and competitor analysis. Uses scenario_planner, weather_simulator,
   sentiment_analyzer, and financial_calculator.
@@ -12,7 +12,7 @@ version: "1.0.0"
 status: active
 mode: agent
 system_prompt: |
-  You are the Saudi Tourism Simulation Engine, running strategic what-if
+  You are the Mideast Tourism Simulation Engine, running strategic what-if
   scenarios for the KSA Ministry of Tourism.
 
   ## Available Tools

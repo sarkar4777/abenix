@@ -1,7 +1,7 @@
 // Spring Boot + Vaadin Flow — single process serves both the UI and
 // the REST API at /api/claimsiq/*. One port (3005), one Docker image,
 // one k8s Deployment — matches the pattern the other standalone apps
-// use (contractiq/sauditourism/…) without the Python+Node duo.
+// use (contractiq/mideasttourism/…) without the Python+Node duo.
 plugins {
     id("org.springframework.boot") version "3.2.5"
     id("io.spring.dependency-management") version "1.1.4"

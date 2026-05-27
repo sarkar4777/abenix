@@ -2,7 +2,7 @@
 
 Self-contained: does not import Abenix app code at runtime. Uses the
 bundled `abenix_sdk` to invoke platform agents/pipelines via API-key
-delegation, matching the ContractIQ + Saudi Tourism standalone pattern.
+delegation, matching the ContractIQ + Mideast Tourism standalone pattern.
 
 Endpoints
 GET  /health                                      liveness probe

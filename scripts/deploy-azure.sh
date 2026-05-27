@@ -83,7 +83,7 @@ Usage: $(basename "$0") <command> [flags]
 Commands:
   provision         Create RG + AKS + ACR; attach ACR to AKS; get kubectl creds.
   build             Build all Docker images and push to ACR. --only=... supported.
-  deploy            Helm-install Abenix + standalone apps (ContractIQ, Saudi Tourism).
+  deploy            Helm-install Abenix + standalone apps (ContractIQ, Mideast Tourism).
                     Incremental — safe to re-run. --only=... supported.
   redeploy          Alias: build (per --only) + rollout restart (per --only).
   seed              Re-run agent / portfolio / ML model seed scripts, then
@@ -91,7 +91,7 @@ Commands:
   seed-keys         Reconcile only the standalone ABENIX_API_KEYs (idempotent).
                     Mints any missing keys + patches secrets + restarts pods.
   test              Run all Playwright E2E suites against the AKS endpoints.
-                    E2E_PROJECT=abenix|contractiq|sauditourism to scope.
+                    E2E_PROJECT=abenix|contractiq|mideasttourism to scope.
                     E2E_ONLY=test1.spec.ts,test2.spec.ts to run specific files.
   status            Report cluster, pods, services, ingress, and health endpoints.
   destroy           Uninstall helm + namespace. With KEEP_CLUSTER=false (default) also
@@ -100,10 +100,10 @@ Commands:
 
 Flags:
   --only=<list>     Comma-separated list of groups/services to act on.
-                    Groups: abenix, contractiq, sauditourism, observability, livekit
+                    Groups: abenix, contractiq, mideasttourism, observability, livekit
                     Services: api, web, worker, agent-runtime, cognify-worker,
                               contractiq-api, contractiq-web,
-                              sauditourism-api, sauditourism-web
+                              mideasttourism-api, mideasttourism-web
   --keep-cluster    On destroy: keep AKS + RG, only remove helm + namespace.
   --skip-build      On deploy: don't rebuild images (use whatever is in ACR).
 
@@ -163,7 +163,7 @@ _expand_only() {
   case "${token}" in
     abenix)     echo "api web worker agent-runtime cognify-worker" ;;
     contractiq)     echo "contractiq-api contractiq-web" ;;
-    sauditourism)   echo "sauditourism-api sauditourism-web" ;;
+    mideasttourism)   echo "mideasttourism-api mideasttourism-web" ;;
     industrial-iot) echo "industrial-iot-api industrial-iot-web" ;;
     resolveai)      echo "resolveai-api resolveai-web" ;;
     wingman)        echo "wingman-api wingman-web" ;;
@@ -355,8 +355,8 @@ declare -A DOCKERFILES=(
   [agent-runtime]="docker/Dockerfile.agent-runtime"
   [contractiq-api]="contractiq/api/Dockerfile"
   [contractiq-web]="contractiq/web/Dockerfile"
-  [sauditourism-api]="sauditourism/api/Dockerfile"
-  [sauditourism-web]="sauditourism/web/Dockerfile"
+  [mideasttourism-api]="mideasttourism/api/Dockerfile"
+  [mideasttourism-web]="mideasttourism/web/Dockerfile"
   [industrial-iot-api]="industrial-iot/api/Dockerfile"
   [industrial-iot-web]="industrial-iot/web/Dockerfile"
   [resolveai-api]="resolveai/api/Dockerfile"
@@ -378,10 +378,10 @@ declare -A BUILD_CONTEXTS=(
   [cognify-worker]="${ROOT_DIR}"
   [contractiq-api]="${ROOT_DIR}/contractiq/api"
   [contractiq-web]="${ROOT_DIR}/contractiq/web"
-  # sauditourism-api: build context must include test-data/ for the seed endpoint,
-  # so we use the sauditourism/ directory rather than sauditourism/api/.
-  [sauditourism-api]="${ROOT_DIR}/sauditourism"
-  [sauditourism-web]="${ROOT_DIR}/sauditourism/web"
+  # mideasttourism-api: build context must include test-data/ for the seed endpoint,
+  # so we use the mideasttourism/ directory rather than mideasttourism/api/.
+  [mideasttourism-api]="${ROOT_DIR}/mideasttourism"
+  [mideasttourism-web]="${ROOT_DIR}/mideasttourism/web"
   [industrial-iot-api]="${ROOT_DIR}/industrial-iot/api"
   [industrial-iot-web]="${ROOT_DIR}/industrial-iot/web"
   [resolveai-api]="${ROOT_DIR}/resolveai/api"
@@ -442,7 +442,7 @@ build_and_push() {
   local all_svcs=(
     api web worker agent-runtime
     contractiq-api contractiq-web
-    sauditourism-api sauditourism-web
+    mideasttourism-api mideasttourism-web
     industrial-iot-api industrial-iot-web
     resolveai-api resolveai-web
     wingman-api wingman-web
@@ -1026,46 +1026,46 @@ print(yaml.safe_dump_all(out))
   ok "ContractIQ deployed"
 }
 
-deploy_sauditourism() {
-  if [ -n "${ONLY_CSV}" ] && ! _should_do "sauditourism-api" && ! _should_do "sauditourism-web"; then return 0; fi
-  local manifest="${ROOT_DIR}/sauditourism/k8s/sauditourism.yaml"
-  if [ ! -f "${manifest}" ]; then warn "Saudi Tourism manifest missing — skip"; return; fi
+deploy_mideasttourism() {
+  if [ -n "${ONLY_CSV}" ] && ! _should_do "mideasttourism-api" && ! _should_do "mideasttourism-web"; then return 0; fi
+  local manifest="${ROOT_DIR}/mideasttourism/k8s/mideasttourism.yaml"
+  if [ ! -f "${manifest}" ]; then warn "Mideast Tourism manifest missing — skip"; return; fi
 
-  step "Deploying Saudi Tourism"
-  local st_key="${SAUDITOURISM_ABENIX_API_KEY:-}"
+  step "Deploying Mideast Tourism"
+  local st_key="${MIDEASTTOURISM_ABENIX_API_KEY:-}"
   if [ -z "${st_key}" ]; then
     # Reuse the ContractIQ key if it was just minted (same tenant, same Abenix),
     # otherwise mint a fresh one for SauditTourism.
     st_key=$(kubectl get secret contractiq-secrets -n "${NAMESPACE}" \
       -o jsonpath='{.data.CONTRACTIQ_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
     if [ -z "${st_key}" ] || [ "${st_key}" = "PLACEHOLDER_CHANGE_ME" ]; then
-      log "  Minting Abenix API key for Saudi Tourism..."
+      log "  Minting Abenix API key for Mideast Tourism..."
       st_key=$(_generate_abenix_api_key || echo "PLACEHOLDER_CHANGE_ME")
     fi
   fi
-  local st_jwt="${SAUDITOURISM_JWT_SECRET:-saudi-tourism-dev-secret}"
+  local st_jwt="${MIDEASTTOURISM_JWT_SECRET:-mideast-tourism-dev-secret}"
 
   sed \
-    -e "s|localhost:5000/abenix/sauditourism-api:latest|${ACR_LOGIN_SERVER}/sauditourism-api:${IMAGE_TAG}|g" \
-    -e "s|localhost:5000/abenix/sauditourism-web:latest|${ACR_LOGIN_SERVER}/sauditourism-web:${IMAGE_TAG}|g" \
+    -e "s|localhost:5000/abenix/mideasttourism-api:latest|${ACR_LOGIN_SERVER}/mideasttourism-api:${IMAGE_TAG}|g" \
+    -e "s|localhost:5000/abenix/mideasttourism-web:latest|${ACR_LOGIN_SERVER}/mideasttourism-web:${IMAGE_TAG}|g" \
     -e "s|imagePullPolicy: IfNotPresent|imagePullPolicy: Always|g" \
     "${manifest}" | kubectl apply -f - 2>&1 | tail -5
 
-  kubectl create secret generic sauditourism-secrets \
+  kubectl create secret generic mideasttourism-secrets \
     --namespace="${NAMESPACE}" \
-    --from-literal=SAUDITOURISM_ABENIX_API_KEY="${st_key}" \
-    --from-literal=SAUDITOURISM_JWT_SECRET="${st_jwt}" \
+    --from-literal=MIDEASTTOURISM_ABENIX_API_KEY="${st_key}" \
+    --from-literal=MIDEASTTOURISM_JWT_SECRET="${st_jwt}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -2
 
   # Always restart both after the secret patch — see deploy_wingman comment.
-  kubectl -n "${NAMESPACE}" rollout restart deploy/sauditourism-api 2>&1 | tail -1 || true
-  kubectl -n "${NAMESPACE}" rollout restart deploy/sauditourism-web 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/mideasttourism-api 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/mideasttourism-web 2>&1 | tail -1 || true
 
-  kubectl -n "${NAMESPACE}" rollout status deploy/sauditourism-api --timeout=180s 2>&1 | tail -1 || true
-  kubectl -n "${NAMESPACE}" rollout status deploy/sauditourism-web --timeout=180s 2>&1 | tail -1 || true
-  _verify_standalone_envfrom sauditourism-api sauditourism-secrets sauditourism-config || exit 7
+  kubectl -n "${NAMESPACE}" rollout status deploy/mideasttourism-api --timeout=180s 2>&1 | tail -1 || true
+  kubectl -n "${NAMESPACE}" rollout status deploy/mideasttourism-web --timeout=180s 2>&1 | tail -1 || true
+  _verify_standalone_envfrom mideasttourism-api mideasttourism-secrets mideasttourism-config || exit 7
   # -web is a Next.js frontend; api carries the platform credentials.
-  ok "Saudi Tourism deployed"
+  ok "Mideast Tourism deployed"
 }
 
 deploy_industrial_iot() {
@@ -1107,7 +1107,7 @@ deploy_industrial_iot() {
   # industrial-iot-web is a Next.js frontend that proxies through
   # industrial-iot-api; it intentionally has no envFrom (only inline
   # INTERNAL_URL + NODE_ENV in the manifest). Skip the envFrom verifier
-  # — same shape as contractiq-web / resolveai-web / sauditourism-web.
+  # — same shape as contractiq-web / resolveai-web / mideasttourism-web.
   ok "Industrial-IoT deployed"
 }
 
@@ -1331,7 +1331,7 @@ spec:
         paths:
           - path: /
             pathType: Prefix
-            backend: { service: { name: sauditourism-web, port: { number: 3002 } } }
+            backend: { service: { name: mideasttourism-web, port: { number: 3002 } } }
     - host: iot.${host}
       http:
         paths:
@@ -1367,7 +1367,7 @@ spec:
         paths:
           - path: /
             pathType: Prefix
-            backend: { service: { name: sauditourism-api, port: { number: 8002 } } }
+            backend: { service: { name: mideasttourism-api, port: { number: 8002 } } }
     - host: grafana.${host}
       http:
         paths:
@@ -1394,7 +1394,7 @@ EOF
   # cross-app links ("/executions", "/code-runner") point at the abenix
   # web ingress rather than 404'ing on the standalone origin.
   local abenix_web_url="http://${host}"
-  for dep in industrial-iot-web contractiq-web sauditourism-web resolveai-web claimsiq; do
+  for dep in industrial-iot-web contractiq-web mideasttourism-web resolveai-web claimsiq; do
     if kubectl -n "${NAMESPACE}" get deploy "${dep}" >/dev/null 2>&1; then
       kubectl -n "${NAMESPACE}" set env deploy/"${dep}" \
         NEXT_PUBLIC_ABENIX_WEB_URL="${abenix_web_url}" 2>&1 | tail -1 || true
@@ -1438,7 +1438,7 @@ deploy_all() {
   _wire_abenix_platform_key || true
   deploy_livekit || warn "LiveKit deploy failed (non-fatal)"
   deploy_contractiq || warn "ContractIQ deploy failed (non-fatal)"
-  deploy_sauditourism || warn "Saudi Tourism deploy failed (non-fatal)"
+  deploy_mideasttourism || warn "Mideast Tourism deploy failed (non-fatal)"
   deploy_industrial_iot || warn "Industrial-IoT deploy failed (non-fatal)"
   deploy_resolveai || warn "ResolveAI deploy failed (non-fatal)"
   deploy_wingman || warn "Wingman deploy failed (non-fatal)"
@@ -1463,7 +1463,7 @@ seed_standalone_keys() {
     # When --only is set, only run the reseed if the user is touching
     # standalone-related groups.
     case "${ONLY_CSV}" in
-      *contractiq*|*sauditourism*|*industrial-iot*|*resolveai*|*claimsiq*) ;;
+      *contractiq*|*mideasttourism*|*industrial-iot*|*resolveai*|*claimsiq*) ;;
       *) return 0 ;;
     esac
   fi
@@ -1505,11 +1505,11 @@ deploy_status() {
   echo -e "\n${BOLD}Public URLs:${NC}"
   echo -e "  ${CYAN}Abenix Web${NC}    http://${host}"
   echo -e "  ${CYAN}ContractIQ Web${NC}    http://ciq.${host}"
-  echo -e "  ${CYAN}Saudi Tourism${NC}     http://tourism.${host}"
+  echo -e "  ${CYAN}Mideast Tourism${NC}     http://tourism.${host}"
   echo -e "  ${CYAN}ClaimsIQ${NC}          http://claims.${host}"
   echo -e "  ${CYAN}Abenix API${NC}    http://api.${host}/api/health"
   echo -e "  ${CYAN}ContractIQ API${NC}    http://ciq-api.${host}/api/health"
-  echo -e "  ${CYAN}Saudi Tourism API${NC} http://tourism-api.${host}/api/health"
+  echo -e "  ${CYAN}Mideast Tourism API${NC} http://tourism-api.${host}/api/health"
   echo -e "  ${CYAN}ClaimsIQ Health${NC}   http://claims.${host}/actuator/health"
 
   echo -e "\n${BOLD}Health checks:${NC}"
@@ -1568,8 +1568,8 @@ deploy_test() {
       -- --grep "^Wave 2" || true
   fi
 
-  if [ "${project}" = "all" ] || [ "${project}" = "sauditourism" ]; then
-    run_suite "sauditourism" "${ROOT_DIR}/sauditourism" \
+  if [ "${project}" = "all" ] || [ "${project}" = "mideasttourism" ]; then
+    run_suite "mideasttourism" "${ROOT_DIR}/mideasttourism" \
       BASE_URL="${st_base}" API_URL="${st_api}" \
       || true
   fi
@@ -1611,8 +1611,8 @@ deploy_destroy() {
     if helm status "${RELEASE_NAME}" -n "${NAMESPACE}" &>/dev/null; then
       helm uninstall "${RELEASE_NAME}" -n "${NAMESPACE}" --wait 2>&1 | tail -2 || true
     fi
-    kubectl delete -n "${NAMESPACE}" deploy/contractiq-api deploy/contractiq-web deploy/sauditourism-api deploy/sauditourism-web deploy/claimsiq 2>/dev/null || true
-    kubectl delete -n "${NAMESPACE}" svc/contractiq-api svc/contractiq-web svc/sauditourism-api svc/sauditourism-web svc/claimsiq 2>/dev/null || true
+    kubectl delete -n "${NAMESPACE}" deploy/contractiq-api deploy/contractiq-web deploy/mideasttourism-api deploy/mideasttourism-web deploy/claimsiq 2>/dev/null || true
+    kubectl delete -n "${NAMESPACE}" svc/contractiq-api svc/contractiq-web svc/mideasttourism-api svc/mideasttourism-web svc/claimsiq 2>/dev/null || true
     kubectl delete pvc --all -n "${NAMESPACE}" 2>/dev/null || true
     kubectl delete namespace "${NAMESPACE}" --timeout=120s 2>/dev/null || true
     ok "Namespace ${NAMESPACE} deleted"

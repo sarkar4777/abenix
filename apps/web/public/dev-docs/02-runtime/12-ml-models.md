@@ -2,7 +2,7 @@
 
 Beyond LLMs, Abenix has a first-class slot for classical ML models — sklearn pickles, ONNX, PyTorch state dicts. Agents call them as tools with the same ergonomics as any other tool node. The model itself is versioned, can be hot-deployed without redeploy, and gets per-tenant resource isolation in a dedicated `ml-model-<id>` k8s deployment.
 
-This is what powers Wingman's Bayesian fair-value model, ContractIQ's clause classifier and risk-tier predictor, Industrial-IoT's failure classifier, and Saudi Tourism's demand forecast.
+This is what powers Wingman's Bayesian fair-value model, ContractIQ's clause classifier and risk-tier predictor, Industrial-IoT's failure classifier, and Mideast Tourism's demand forecast.
 
 ## What a developer ships
 

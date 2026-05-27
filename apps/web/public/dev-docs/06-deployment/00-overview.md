@@ -80,7 +80,7 @@ Builds 15 images in parallel:
 - `edge-runtime`, `edge-runtime-rust`, `edge-runtime-c` — optional edge
 - `wingman-api`, `wingman-web` — Wingman
 - `contractiq-api`, `contractiq-web` — ContractIQ
-- `sauditourism-api`, `sauditourism-web` — Saudi Tourism
+- `mideasttourism-api`, `mideasttourism-web` — Mideast Tourism
 - `resolveai-api`, `resolveai-web` — ResolveAI
 - `industrial-iot-api`, `industrial-iot-web` — Industrial-IoT
 - `claimsiq-api`, `claimsiq-web` — ClaimsIQ

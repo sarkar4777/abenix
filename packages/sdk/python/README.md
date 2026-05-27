@@ -57,7 +57,7 @@ app's Docker image carries its own copy:
 | `contractiq/api/sdk/abenix_sdk/`           | Vendored into ContractIQ image.  |
 | `industrial-iot/api/sdk/abenix_sdk/`       | Vendored into Industrial-IoT.    |
 | `resolveai/api/sdk/abenix_sdk/`            | Vendored into ResolveAI.         |
-| `sauditourism/api/sdk/abenix_sdk/`         | Vendored into Saudi Tourism.     |
+| `mideasttourism/api/sdk/abenix_sdk/`         | Vendored into Mideast Tourism.     |
 
 After editing the canonical copy:
 

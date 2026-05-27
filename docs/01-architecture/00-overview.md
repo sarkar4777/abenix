@@ -17,7 +17,7 @@ flowchart TB
   subgraph PERIPHERY["Standalone vertical apps (thin)"]
     W[Wingman]
     C[ContractIQ]
-    S[Saudi Tourism]
+    S[Mideast Tourism]
     R[ResolveAI]
     I[Industrial-IoT]
   end

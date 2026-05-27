@@ -3,7 +3,7 @@
 # Abenix — Fast Demo Startup
 #
 # Ensures minikube is up, required pods are running, port-forwards are active,
-# and standalone apps (ContractIQ + Saudi Tourism) are started.
+# and standalone apps (ContractIQ + Mideast Tourism) are started.
 #
 #   bash scripts/dev-minikube.sh            Start everything
 #   bash scripts/dev-minikube.sh --status   Just show what's running
@@ -70,7 +70,7 @@ get_db_url() {
 show_status() {
   echo -e "\n${B}Services:${N}"
   for e in "8000:Abenix API" "3000:Abenix Web" "5432:PostgreSQL" "6379:Redis" \
-           "8001:ContractIQ API" "3001:ContractIQ Web" "8002:Saudi Tourism API" "3002:Saudi Tourism Web"; do
+           "8001:ContractIQ API" "3001:ContractIQ Web" "8002:Mideast Tourism API" "3002:Mideast Tourism Web"; do
     local p="${e%%:*}" l="${e##*:}"
     if listening "$p"; then
       echo -e "    ${G}●${N} ${l}  → localhost:${p}"
@@ -81,7 +81,7 @@ show_status() {
   echo -e "\n${B}Links:${N}"
   echo -e "    Abenix:     ${C}http://localhost:3000${N}"
   echo -e "    ContractIQ:     ${C}http://localhost:3001${N}  (test@contractiq.com / TestPass123!)"
-  echo -e "    Saudi Tourism:  ${C}http://localhost:3002${N}  (test@sauditourism.gov.sa / TestPass123!)"
+  echo -e "    Mideast Tourism:  ${C}http://localhost:3002${N}  (test@mideasttourism.gov.sa / TestPass123!)"
   echo -e "    Industrial IoT: ${C}http://localhost:3003${N}"
   echo -e "    ResolveAI:      ${C}http://localhost:3004${N}  — Customer-service agents"
   echo -e "    ClaimsIQ:       ${C}http://localhost:3005${N}  — Insurance FNOL (Java + Vaadin)"
@@ -131,8 +131,8 @@ pf abenix-redis-master  6379 6379
 # Standalone apps + extras (only if services exist in k8s)
 kubectl -n "$NS" get svc contractiq-api      &>/dev/null 2>&1 && pf contractiq-api      8001 8001
 kubectl -n "$NS" get svc contractiq-web      &>/dev/null 2>&1 && pf contractiq-web      3001 3001
-kubectl -n "$NS" get svc sauditourism-api    &>/dev/null 2>&1 && pf sauditourism-api    8002 8002
-kubectl -n "$NS" get svc sauditourism-web    &>/dev/null 2>&1 && pf sauditourism-web    3002 3002
+kubectl -n "$NS" get svc mideasttourism-api    &>/dev/null 2>&1 && pf mideasttourism-api    8002 8002
+kubectl -n "$NS" get svc mideasttourism-web    &>/dev/null 2>&1 && pf mideasttourism-web    3002 3002
 kubectl -n "$NS" get svc industrial-iot-api  &>/dev/null 2>&1 && pf industrial-iot-api  8003 8003
 kubectl -n "$NS" get svc industrial-iot-web  &>/dev/null 2>&1 && pf industrial-iot-web  3003 3003
 kubectl -n "$NS" get svc resolveai-api       &>/dev/null 2>&1 && pf resolveai-api       8004 8004
@@ -156,14 +156,14 @@ sleep 2
 env_val() { grep "^${1}=" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r'; }
 
 _start_st_api() {
-  mkdir -p "$ROOT/sauditourism/logs"
-  cd "$ROOT/sauditourism/api"
-  local st_key; st_key=$(env_val SAUDITOURISM_ABENIX_API_KEY)
+  mkdir -p "$ROOT/mideasttourism/logs"
+  cd "$ROOT/mideasttourism/api"
+  local st_key; st_key=$(env_val MIDEASTTOURISM_ABENIX_API_KEY)
   DATABASE_URL="$DB_URL" PORT=8002 ABENIX_API_URL="http://localhost:8000" \
-    SAUDITOURISM_ABENIX_API_KEY="$st_key" \
+    MIDEASTTOURISM_ABENIX_API_KEY="$st_key" \
     PGSSLMODE=disable \
-    $PYTHON main.py > "$ROOT/sauditourism/logs/api.log" 2>&1 &
-  ok "Saudi Tourism API (starting on :8002, SDK key ${st_key:+set}${st_key:-MISSING})"
+    $PYTHON main.py > "$ROOT/mideasttourism/logs/api.log" 2>&1 &
+  ok "Mideast Tourism API (starting on :8002, SDK key ${st_key:+set}${st_key:-MISSING})"
 }
 
 _start_ciq_api() {
@@ -198,15 +198,15 @@ elif ! listening 3001; then
   ok "ContractIQ Web (starting on :3001)"
 fi
 
-# Saudi Tourism API
+# Mideast Tourism API
 if curl -sf http://localhost:8002/api/health &>/dev/null; then
   # Verify SDK key is configured
   local sdk_ok
   sdk_ok=$(curl -sf http://localhost:8002/api/health 2>/dev/null | grep -o '"abenix_sdk_configured":true' || true)
   if [ -n "$sdk_ok" ]; then
-    ok "Saudi Tourism API (running, SDK configured)"
+    ok "Mideast Tourism API (running, SDK configured)"
   else
-    warn "Saudi Tourism API running but SDK key missing — restarting"
+    warn "Mideast Tourism API running but SDK key missing — restarting"
     local pid; pid=$(netstat -ano 2>/dev/null | grep ":8002.*LISTENING" | awk '{print $5}' | head -1)
     [ -n "$pid" ] && (taskkill //PID "$pid" //F 2>/dev/null || kill -9 "$pid" 2>/dev/null) || true
     sleep 1
@@ -216,14 +216,14 @@ else
   _start_st_api
 fi
 
-# Saudi Tourism Web
+# Mideast Tourism Web
 if listening 3002; then
-  ok "Saudi Tourism Web (already running)"
+  ok "Mideast Tourism Web (already running)"
 else
-  cd "$ROOT/sauditourism/web"
+  cd "$ROOT/mideasttourism/web"
   [ ! -d node_modules ] && npm install --silent &>/dev/null
-  NEXT_PUBLIC_API_URL="http://localhost:8002" nohup npm run dev > "$ROOT/sauditourism/logs/web.log" 2>&1 &
-  ok "Saudi Tourism Web (starting on :3002)"
+  NEXT_PUBLIC_API_URL="http://localhost:8002" nohup npm run dev > "$ROOT/mideasttourism/logs/web.log" 2>&1 &
+  ok "Mideast Tourism Web (starting on :3002)"
 fi
 
 # 5. Done

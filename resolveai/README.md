@@ -6,7 +6,7 @@ Customer-service AI standalone app on top of Abenix.
 
 Resolves tickets, cites the policy used, predicts CSAT, and surfaces
 tomorrow's problem tonight — peer app to `contractiq/` and
-`sauditourism/`, thin by design.
+`mideasttourism/`, thin by design.
 
 ## Anatomy
 

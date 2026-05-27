@@ -19,8 +19,8 @@ SERVICES=(
   "abenix-api:8000:8000:/api/health:Abenix API"
   "contractiq-web:3001:3001:/:ContractIQ Web"
   "contractiq-api:8001:8001:/api/health:ContractIQ API"
-  "sauditourism-web:3002:3002:/:Saudi Tourism Web"
-  "sauditourism-api:8002:8002:/api/health:Saudi Tourism API"
+  "mideasttourism-web:3002:3002:/:Mideast Tourism Web"
+  "mideasttourism-api:8002:8002:/api/health:Mideast Tourism API"
   "industrial-iot-web:3003:3003:/:Industrial IoT Web"
   "industrial-iot-api:8003:8003:/health:Industrial IoT API"
   "resolveai-web:3004:3004:/:ResolveAI Web"
@@ -234,7 +234,7 @@ print_urls() {
     Chat                http://localhost:3001/chat
     Agent Atlas (help)  http://localhost:3001/help
 
-  Saudi Tourism
+  Mideast Tourism
     Dashboard           http://localhost:3002/dashboard
     Upload              http://localhost:3002/upload
     Regional Analytics  http://localhost:3002/analytics/regional
@@ -271,7 +271,7 @@ URLS
   echo -e "${B}Credentials${N}"
   echo -e "  Abenix      ${Y}admin@abenix.dev${N} / ${Y}Admin123456${N}  (or demo@abenix.dev / Demo123456)"
   echo -e "  ContractIQ      ${Y}test@contractiq.com${N} / ${Y}TestPass123!${N}"
-  echo -e "  Saudi Tourism   use the 'demo credentials' button on the sign-in modal"
+  echo -e "  Mideast Tourism   use the 'demo credentials' button on the sign-in modal"
   echo ""
   echo -e "${B}Controls${N}"
   echo "  bash scripts/portforward-azure.sh status   # health check"
@@ -354,7 +354,7 @@ open_app_cmd() {
   case "${app}" in
     af|abenix)    open_url "http://localhost:3000" ;;
     ciq|contractiq)   open_url "http://localhost:3001" ;;
-    st|sauditourism|tourism) open_url "http://localhost:3002" ;;
+    st|mideasttourism|tourism) open_url "http://localhost:3002" ;;
     iot|industrial-iot) open_url "http://localhost:3003" ;;
     care|resolveai)   open_url "http://localhost:3004" ;;
     cq|claims|claimsiq) open_url "http://localhost:3005" ;;

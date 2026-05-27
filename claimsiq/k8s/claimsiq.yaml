@@ -109,7 +109,7 @@ metadata:
   namespace: abenix
 spec:
   # NodePort so minikube/AKS can expose it directly for the Use Cases
-  # dropdown. Matches the contractiq-web / sauditourism-web pattern
+  # dropdown. Matches the contractiq-web / mideasttourism-web pattern
   # (30301, 30302 already taken — ClaimsIQ gets 30305 to line up with
   # its 3005 port for easy mental mapping).
   type: NodePort

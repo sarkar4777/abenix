@@ -738,7 +738,7 @@ export default function ContractIQHelpPage() {
           <p className="text-slate-300">
             Each card in the Insights Hub is backed by one agent. They share the same generic platform tools; the
             <strong className="text-white"> domain knowledge is in the prompts, not the tools</strong>. This is why
-            the same platform can drive ContractIQ (energy contracts), Saudi Tourism (travel forecasting), OracleNet
+            the same platform can drive ContractIQ (energy contracts), Mideast Tourism (travel forecasting), OracleNet
             (intelligence analysis), and others with no platform-level changes.
           </p>
           <div className="space-y-3">
@@ -961,7 +961,7 @@ export default function ContractIQHelpPage() {
             <strong>Aspirational vs real today:</strong> the marketing names (LBMA, LPPM, COMEX) are aspirational — every preset currently resolves to a Yahoo Finance futures symbol via the friendly-alias map in the abenix tool. No API keys today. Promoting any preset to a paid feed (LBMA, ICE, Refinitiv) means editing the <code className="bg-slate-800 px-1 rounded">tool_slug</code> field to the new paid-feed tool (or editing the preset's <code className="bg-slate-800 px-1 rounded">config</code> to carry the API key) — <em>zero ContractIQ deploy</em>. The schema is built for it.
           </p>
           <p className="text-[12px] text-slate-400">
-            <strong>Why this architecture:</strong> the platform supports 60+ universal tools. Wrapping every instrument in its own tool class would mean dozens of one-line subclasses and a brittle catalog. With one generic tool + presets, every other app (Wingman, Industrial IoT, Saudi Tourism) gets the same metals feeds for free by importing the preset slugs.
+            <strong>Why this architecture:</strong> the platform supports 60+ universal tools. Wrapping every instrument in its own tool class would mean dozens of one-line subclasses and a brittle catalog. With one generic tool + presets, every other app (Wingman, Industrial IoT, Mideast Tourism) gets the same metals feeds for free by importing the preset slugs.
           </p>
         </Section>
 

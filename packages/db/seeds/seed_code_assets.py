@@ -45,7 +45,7 @@ DISCOVERY_ROOTS = [
     REPO_ROOT / "industrial-iot",
     REPO_ROOT / "wingman",
     REPO_ROOT / "contractiq",
-    REPO_ROOT / "sauditourism",
+    REPO_ROOT / "mideasttourism",
     REPO_ROOT / "resolveai",
     REPO_ROOT / "claimsiq",
     # Generic shared examples (kept for tenants that haven't enabled a

@@ -213,10 +213,10 @@ test.describe.serial('ResolveAI — end-user UAT', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
-// Saudi Tourism
+// Mideast Tourism
 // ─────────────────────────────────────────────────────────────────────
 
-test.describe.serial('Saudi Tourism — end-user UAT', () => {
+test.describe.serial('Mideast Tourism — end-user UAT', () => {
   let stToken: string | null = null;
 
   test('register OR login, capture JWT', async () => {

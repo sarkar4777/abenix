@@ -108,7 +108,7 @@ async def seed_users():
                 f"  Created: {acct['email']} / {acct['password']} ({acct['role'].value})"
             )
 
-        # These keys let ContractIQ and Saudi Tourism call the Abenix API.
+        # These keys let ContractIQ and Mideast Tourism call the Abenix API.
         # Read from .env file directly (env vars may not be set on Windows).
         env_vals: dict[str, str] = {}
         env_file = Path(__file__).resolve().parents[2] / ".env"
@@ -130,8 +130,8 @@ async def seed_users():
                     "env_var": "CONTRACTIQ_ABENIX_API_KEY",
                 },
                 {
-                    "name": "sauditourism-service",
-                    "env_var": "SAUDITOURISM_ABENIX_API_KEY",
+                    "name": "mideasttourism-service",
+                    "env_var": "MIDEASTTOURISM_ABENIX_API_KEY",
                 },
             ]
             for svc in SERVICE_KEYS:

@@ -18,7 +18,7 @@ flowchart TB
     AW[abenix-web]
     WW[wingman-web]
     CW[contractiq-web]
-    SW[sauditourism-web]
+    SW[mideasttourism-web]
     RW[resolveai-web]
     IW[industrial-iot-web]
     CIW[claimsiq-web]
@@ -28,7 +28,7 @@ flowchart TB
     AAPI[abenix-api]
     WAPI[wingman-api]
     CAPI[contractiq-api]
-    SAPI[sauditourism-api]
+    SAPI[mideasttourism-api]
     RAPI[resolveai-api]
     IAPI[industrial-iot-api]
     CIAPI[claimsiq-api]
@@ -170,7 +170,7 @@ Each vertical app deploys two services: `*-api` (FastAPI) and `*-web` (Next.js).
 |---|---|---|---|
 | **Wingman** | Energy commodity trading | `wingman-web`, `wingman-api` | 3006 / 8006 |
 | **ContractIQ** | Contract intelligence | `contractiq-web`, `contractiq-api` | 3007 / 8007 |
-| **Saudi Tourism** | Tourism analytics | `sauditourism-web`, `sauditourism-api` | 3002 / 8002 |
+| **Mideast Tourism** | Tourism analytics | `mideasttourism-web`, `mideasttourism-api` | 3002 / 8002 |
 | **ResolveAI** | Customer-support automation | `resolveai-web`, `resolveai-api` | 3008 / 8008 |
 | **Industrial-IoT** | Equipment health + alarm desk | `industrial-iot-web`, `industrial-iot-api` | 3009 / 8009 |
 | **ClaimsIQ** | Insurance claims triage | `claimsiq-web`, `claimsiq-api` | 3010 / 8010 |

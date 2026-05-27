@@ -217,7 +217,7 @@ Open http://localhost:3000 and sign in with `admin@abenix.dev` / `Admin123456`.
 | App | URL (local) | Credential |
 |---|---|---|
 | Abenix core | http://localhost:3000 | `admin@abenix.dev` / `Admin123456` |
-| Saudi Tourism | http://localhost:3002 | `test@sauditourism.gov.sa` / `TestPass123!` |
+| Mideast Tourism | http://localhost:3002 | `test@mideasttourism.gov.sa` / `TestPass123!` |
 | Industrial-IoT | http://localhost:3003 | platform login |
 | ResolveAI | http://localhost:3004 | `agent@resolveai.local` / `agent123` |
 | ClaimsIQ | http://localhost:3005 | platform login |
@@ -246,15 +246,15 @@ A 7-agent pipeline inside the main web app. Type a strategic decision in plain E
   <br/><em>OracleNet Decision Brief — confidence + recommendation card, 6 tabs</em>
 </p>
 
-### Saudi Tourism — Vision-2030 analytics
+### Mideast Tourism — Vision-2030 analytics
 
 A standalone analytics app for the Saudi Ministry of Tourism. 5 agents, 7 pages (Dashboard · Regional · Analytics · Chat NLQ · Reports · Simulations · Upload), 5 report templates, 5 simulator presets. Test data is baked into the API image — no manual seed.
 
 *Why it's interesting.* Vision-2030 ministries need to track 100M-visitor targets, regional revenue, and seasonal demand against the actual data they already have — without a year-long BI buildout.
 
 <p align="center">
-  <img src="docs/screenshots/usecases/sauditourism-dashboard.png" alt="Saudi Tourism dashboard" width="100%" />
-  <br/><em>Saudi Tourism dashboard — KPIs computed live from baked test data</em>
+  <img src="docs/screenshots/usecases/mideasttourism-dashboard.png" alt="Mideast Tourism dashboard" width="100%" />
+  <br/><em>Mideast Tourism dashboard — KPIs computed live from baked test data</em>
 </p>
 
 ### ClaimsIQ — insurance claim adjudication (Java)

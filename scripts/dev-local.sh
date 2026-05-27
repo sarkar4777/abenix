@@ -144,8 +144,8 @@ kill_processes() {
   kill_port 3000 "Web server"
   kill_port 8001 "ContractIQ API"
   kill_port 3001 "ContractIQ Web"
-  kill_port 8002 "Saudi Tourism API"
-  kill_port 3002 "Saudi Tourism Web"
+  kill_port 8002 "Mideast Tourism API"
+  kill_port 3002 "Mideast Tourism Web"
   kill_port 8003 "Industrial-IoT API"
   kill_port 3003 "Industrial-IoT Web"
   kill_port 8004 "ResolveAI API"
@@ -218,16 +218,16 @@ check_status() {
     warn "ContractIQ Web not responding on :3001"
   fi
 
-  # Saudi Tourism
+  # Mideast Tourism
   if curl -s --max-time 3 http://localhost:8002/api/health >/dev/null 2>&1; then
-    ok "Saudi Tourism API — http://localhost:8002"
+    ok "Mideast Tourism API — http://localhost:8002"
   else
-    warn "Saudi Tourism API not responding on :8002"
+    warn "Mideast Tourism API not responding on :8002"
   fi
   if curl -s --max-time 3 http://localhost:3002 -o /dev/null 2>&1; then
-    ok "Saudi Tourism Web — http://localhost:3002"
+    ok "Mideast Tourism Web — http://localhost:3002"
   else
-    warn "Saudi Tourism Web not responding on :3002"
+    warn "Mideast Tourism Web not responding on :3002"
   fi
 
   # Industrial IoT
@@ -632,7 +632,7 @@ from models.user import User
 
 WANT = {
     'CONTRACTIQ_ABENIX_API_KEY':   'standalone-contractiq',
-    'SAUDITOURISM_ABENIX_API_KEY': 'standalone-sauditourism',
+    'MIDEASTTOURISM_ABENIX_API_KEY': 'standalone-mideasttourism',
     'INDUSTRIALIOT_ABENIX_API_KEY':'standalone-industrial-iot',
     'RESOLVEAI_ABENIX_API_KEY':    'standalone-resolveai',
     'CLAIMSIQ_ABENIX_API_KEY':     'standalone-claimsiq',
@@ -694,7 +694,7 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
 " 2>/dev/null)
     ok "Standalone keys reconciled: $(echo "$STANDALONE_KEYS_JSON" | $PYTHON -c 'import sys,json; d=json.load(sys.stdin); print(len(d), "key(s) active")' 2>/dev/null)"
   else
-    warn "Could not reconcile standalone keys — chat in ContractIQ/Saudi Tourism/etc. may 401"
+    warn "Could not reconcile standalone keys — chat in ContractIQ/Mideast Tourism/etc. may 401"
   fi
 
   # ── Step 8: Start ContractIQ standalone application ──────────
@@ -704,11 +704,11 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
     bash "$ROOT_DIR/contractiq/start.sh" || warn "ContractIQ failed to start (non-fatal)"
   fi
 
-  # ── Step 9: Start Saudi Tourism standalone application ──────
-  if [ -f "$ROOT_DIR/sauditourism/start.sh" ]; then
+  # ── Step 9: Start Mideast Tourism standalone application ──────
+  if [ -f "$ROOT_DIR/mideasttourism/start.sh" ]; then
     echo ""
-    log "Step 9/11 — Starting Saudi Tourism standalone application..."
-    bash "$ROOT_DIR/sauditourism/start.sh" || warn "Saudi Tourism failed to start (non-fatal)"
+    log "Step 9/11 — Starting Mideast Tourism standalone application..."
+    bash "$ROOT_DIR/mideasttourism/start.sh" || warn "Mideast Tourism failed to start (non-fatal)"
   fi
 
   # ── Step 10: Start Industrial-IoT standalone application ────
@@ -746,14 +746,14 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   echo ""
   echo -e "  ${CYAN}Abenix App${NC}     http://localhost:3000"
   echo -e "  ${CYAN}ContractIQ App${NC}     http://localhost:3001"
-  echo -e "  ${CYAN}Saudi Tourism${NC}      http://localhost:3002"
+  echo -e "  ${CYAN}Mideast Tourism${NC}      http://localhost:3002"
   echo -e "  ${CYAN}Industrial IoT${NC}     http://localhost:3003"
   echo -e "  ${CYAN}ResolveAI${NC}          http://localhost:3004  (customer-service agents)"
   echo -e "  ${CYAN}ClaimsIQ${NC}           http://localhost:3005  (insurance FNOL, Java + Vaadin)"
   echo -e "  ${CYAN}Wingman${NC}            http://localhost:3006  (energy commodity trading)"
   echo -e "  ${CYAN}Abenix API${NC}     http://localhost:8000"
   echo -e "  ${CYAN}ContractIQ API${NC}     http://localhost:8001"
-  echo -e "  ${CYAN}Saudi Tourism API${NC}  http://localhost:8002"
+  echo -e "  ${CYAN}Mideast Tourism API${NC}  http://localhost:8002"
   echo -e "  ${CYAN}Industrial-IoT API${NC} http://localhost:8003"
   echo -e "  ${CYAN}ResolveAI API${NC}      http://localhost:8004"
   echo -e "  ${CYAN}Wingman API${NC}        http://localhost:8006"

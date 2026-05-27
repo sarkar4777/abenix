@@ -1,0 +1,161 @@
+# Mideast Tourism Analytics — Kubernetes manifests (standalone application)
+#
+# Deploys Mideast Tourism API (port 8002) and Web (port 3002) into the same
+# namespace as Abenix so they can share PostgreSQL and reach Abenix
+# via the cluster DNS.
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mideasttourism-secrets
+  namespace: abenix
+type: Opaque
+stringData:
+  MIDEASTTOURISM_ABENIX_API_KEY: "REPLACE_AT_DEPLOY_TIME"
+  MIDEASTTOURISM_JWT_SECRET: "REPLACE_AT_DEPLOY_TIME"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mideasttourism-config
+  namespace: abenix
+data:
+  ABENIX_API_URL: "http://abenix-api:8000"
+  DATABASE_URL: "postgresql+asyncpg://postgres:localpass@abenix-postgresql:5432/abenix"
+  PORT: "8002"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mideasttourism-api
+  namespace: abenix
+  labels:
+    app: mideasttourism-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mideasttourism-api
+  template:
+    metadata:
+      labels:
+        app: mideasttourism-api
+    spec:
+      containers:
+        - name: api
+          image: localhost:5000/abenix/mideasttourism-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8002
+              name: http
+          envFrom:
+            - secretRef:
+                name: mideasttourism-secrets
+            - configMapRef:
+                name: mideasttourism-config
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8002
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1500m"
+              memory: "1.5Gi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mideasttourism-api
+  namespace: abenix
+spec:
+  type: ClusterIP
+  selector:
+    app: mideasttourism-api
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mideasttourism-web
+  namespace: abenix
+  labels:
+    app: mideasttourism-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mideasttourism-web
+  template:
+    metadata:
+      labels:
+        app: mideasttourism-web
+    spec:
+      containers:
+        - name: web
+          image: localhost:5000/abenix/mideasttourism-web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3002
+              name: http
+          env:
+            - name: MIDEASTTOURISM_API_INTERNAL_URL
+              value: "http://mideasttourism-api:8002"
+            - name: NODE_ENV
+              value: "production"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3002
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mideasttourism-web
+  namespace: abenix
+spec:
+  type: NodePort
+  selector:
+    app: mideasttourism-web
+  ports:
+    - name: http
+      port: 3002
+      targetPort: 3002
+      nodePort: 30302

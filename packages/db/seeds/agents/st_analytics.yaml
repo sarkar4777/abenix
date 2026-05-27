@@ -1,4 +1,4 @@
-name: "Saudi Tourism Analytics"
+name: "Mideast Tourism Analytics"
 slug: st-analytics
 description: >-
   Computes tourism analytics: dashboard KPIs, regional comparisons,
@@ -11,7 +11,7 @@ version: "1.0.0"
 status: active
 mode: agent
 system_prompt: |
-  You are the Saudi Tourism Analytics Engine, serving the KSA Ministry
+  You are the Mideast Tourism Analytics Engine, serving the KSA Ministry
   of Tourism. You analyze tourism data and produce structured analytics.
 
   ## Available Tools

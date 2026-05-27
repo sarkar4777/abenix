@@ -1,0 +1,184 @@
+month,region,source_country,purpose,visitors
+2024-01,Riyadh,the Middle East,Domestic,285000
+2024-01,Riyadh,UAE,Leisure,42000
+2024-01,Riyadh,UK,Business,18500
+2024-01,Riyadh,India,Business,22000
+2024-01,Riyadh,China,Leisure,15000
+2024-01,Makkah,the Middle East,Religious,520000
+2024-01,Makkah,Indonesia,Religious,85000
+2024-01,Makkah,Pakistan,Religious,72000
+2024-01,Makkah,Egypt,Religious,45000
+2024-01,Makkah,Turkey,Religious,38000
+2024-01,Madinah,the Middle East,Religious,310000
+2024-01,Madinah,Indonesia,Religious,65000
+2024-01,Madinah,Pakistan,Religious,48000
+2024-01,Jeddah,the Middle East,Domestic,195000
+2024-01,Jeddah,UAE,Leisure,28000
+2024-01,Jeddah,UK,Leisure,22000
+2024-01,Eastern,the Middle East,Domestic,145000
+2024-01,Eastern,Kuwait,Leisure,35000
+2024-01,NEOM,Germany,Leisure,8500
+2024-01,NEOM,UK,Leisure,7200
+2024-01,Al-Ula,France,Leisure,12000
+2024-01,Al-Ula,USA,Leisure,9500
+2024-01,Asir,the Middle East,Domestic,95000
+2024-01,Tabuk,the Middle East,Domestic,65000
+2024-02,Riyadh,the Middle East,Domestic,278000
+2024-02,Riyadh,UAE,Leisure,39000
+2024-02,Riyadh,UK,Business,17800
+2024-02,Riyadh,India,Business,21500
+2024-02,Riyadh,China,Leisure,14200
+2024-02,Makkah,the Middle East,Religious,495000
+2024-02,Makkah,Indonesia,Religious,82000
+2024-02,Makkah,Pakistan,Religious,68000
+2024-02,Makkah,Egypt,Religious,42000
+2024-02,Madinah,the Middle East,Religious,295000
+2024-02,Madinah,Indonesia,Religious,62000
+2024-02,Jeddah,the Middle East,Domestic,188000
+2024-02,Jeddah,UAE,Leisure,25000
+2024-02,Eastern,the Middle East,Domestic,138000
+2024-02,Eastern,Kuwait,Leisure,32000
+2024-02,NEOM,Germany,Leisure,9200
+2024-02,Al-Ula,France,Leisure,14500
+2024-02,Asir,the Middle East,Domestic,92000
+2024-02,Tabuk,the Middle East,Domestic,62000
+2024-03,Riyadh,the Middle East,Domestic,310000
+2024-03,Riyadh,UAE,Leisure,48000
+2024-03,Riyadh,UK,Business,21000
+2024-03,Riyadh,India,Business,25000
+2024-03,Riyadh,China,Leisure,18000
+2024-03,Makkah,the Middle East,Religious,680000
+2024-03,Makkah,Indonesia,Religious,110000
+2024-03,Makkah,Pakistan,Religious,95000
+2024-03,Makkah,Egypt,Religious,58000
+2024-03,Madinah,the Middle East,Religious,420000
+2024-03,Madinah,Indonesia,Religious,82000
+2024-03,Jeddah,the Middle East,Domestic,225000
+2024-03,Jeddah,UK,Leisure,28000
+2024-03,Eastern,the Middle East,Domestic,155000
+2024-03,Eastern,Kuwait,Leisure,38000
+2024-03,NEOM,Germany,Leisure,12000
+2024-03,NEOM,UK,Leisure,10500
+2024-03,Al-Ula,France,Leisure,18000
+2024-03,Al-Ula,USA,Leisure,14000
+2024-03,Asir,the Middle East,Domestic,105000
+2024-03,Tabuk,the Middle East,Domestic,72000
+2024-04,Riyadh,the Middle East,Domestic,295000
+2024-04,Riyadh,UAE,Leisure,45000
+2024-04,Riyadh,India,Business,24000
+2024-04,Makkah,the Middle East,Religious,750000
+2024-04,Makkah,Indonesia,Religious,125000
+2024-04,Makkah,Pakistan,Religious,108000
+2024-04,Madinah,the Middle East,Religious,480000
+2024-04,Jeddah,the Middle East,Domestic,215000
+2024-04,Eastern,the Middle East,Domestic,148000
+2024-04,NEOM,UK,Leisure,11000
+2024-04,Al-Ula,France,Leisure,16000
+2024-04,Asir,the Middle East,Domestic,115000
+2024-04,Tabuk,the Middle East,Domestic,78000
+2024-05,Riyadh,the Middle East,Domestic,268000
+2024-05,Riyadh,UAE,Leisure,35000
+2024-05,Makkah,the Middle East,Religious,580000
+2024-05,Makkah,Indonesia,Religious,95000
+2024-05,Madinah,the Middle East,Religious,350000
+2024-05,Jeddah,the Middle East,Domestic,198000
+2024-05,Eastern,the Middle East,Domestic,132000
+2024-05,NEOM,Germany,Leisure,14000
+2024-05,Al-Ula,USA,Leisure,11000
+2024-05,Asir,the Middle East,Domestic,88000
+2024-05,Tabuk,the Middle East,Domestic,58000
+2024-06,Riyadh,the Middle East,Domestic,245000
+2024-06,Riyadh,UAE,Leisure,28000
+2024-06,Makkah,the Middle East,Religious,1250000
+2024-06,Makkah,Indonesia,Religious,185000
+2024-06,Makkah,Pakistan,Religious,165000
+2024-06,Makkah,Egypt,Religious,95000
+2024-06,Makkah,Turkey,Religious,72000
+2024-06,Madinah,the Middle East,Religious,780000
+2024-06,Madinah,Indonesia,Religious,120000
+2024-06,Jeddah,the Middle East,Domestic,285000
+2024-06,Jeddah,UAE,Leisure,42000
+2024-06,Eastern,the Middle East,Domestic,118000
+2024-06,NEOM,UK,Leisure,8000
+2024-06,Al-Ula,France,Leisure,6500
+2024-06,Asir,the Middle East,Domestic,135000
+2024-06,Tabuk,the Middle East,Domestic,45000
+2024-07,Riyadh,the Middle East,Domestic,235000
+2024-07,Makkah,the Middle East,Religious,480000
+2024-07,Makkah,Indonesia,Religious,78000
+2024-07,Madinah,the Middle East,Religious,290000
+2024-07,Jeddah,the Middle East,Domestic,175000
+2024-07,Eastern,the Middle East,Domestic,108000
+2024-07,NEOM,Germany,Leisure,6500
+2024-07,Asir,the Middle East,Domestic,148000
+2024-07,Tabuk,the Middle East,Domestic,42000
+2024-08,Riyadh,the Middle East,Domestic,242000
+2024-08,Makkah,the Middle East,Religious,510000
+2024-08,Madinah,the Middle East,Religious,305000
+2024-08,Jeddah,the Middle East,Domestic,182000
+2024-08,Eastern,the Middle East,Domestic,112000
+2024-08,Asir,the Middle East,Domestic,155000
+2024-08,Tabuk,the Middle East,Domestic,48000
+2024-09,Riyadh,the Middle East,Domestic,275000
+2024-09,Riyadh,UAE,Leisure,38000
+2024-09,Makkah,the Middle East,Religious,545000
+2024-09,Makkah,Indonesia,Religious,88000
+2024-09,Madinah,the Middle East,Religious,335000
+2024-09,Jeddah,the Middle East,Domestic,195000
+2024-09,Eastern,the Middle East,Domestic,135000
+2024-09,NEOM,UK,Leisure,10000
+2024-09,Al-Ula,France,Leisure,13000
+2024-09,Asir,the Middle East,Domestic,108000
+2024-09,Tabuk,the Middle East,Domestic,68000
+2024-10,Riyadh,the Middle East,Domestic,320000
+2024-10,Riyadh,UAE,Leisure,52000
+2024-10,Riyadh,UK,Business,24000
+2024-10,Riyadh,China,Leisure,22000
+2024-10,Makkah,the Middle East,Religious,590000
+2024-10,Makkah,Indonesia,Religious,98000
+2024-10,Madinah,the Middle East,Religious,365000
+2024-10,Jeddah,the Middle East,Domestic,228000
+2024-10,Jeddah,UK,Leisure,32000
+2024-10,Eastern,the Middle East,Domestic,152000
+2024-10,Eastern,Kuwait,Leisure,42000
+2024-10,NEOM,Germany,Leisure,15000
+2024-10,NEOM,UK,Leisure,13000
+2024-10,Al-Ula,France,Leisure,22000
+2024-10,Al-Ula,USA,Leisure,16000
+2024-10,Asir,the Middle East,Domestic,118000
+2024-10,Tabuk,the Middle East,Domestic,82000
+2024-11,Riyadh,the Middle East,Domestic,345000
+2024-11,Riyadh,UAE,Leisure,58000
+2024-11,Riyadh,UK,Business,26000
+2024-11,Riyadh,India,Business,28000
+2024-11,Riyadh,China,Leisure,25000
+2024-11,Makkah,the Middle East,Religious,620000
+2024-11,Makkah,Indonesia,Religious,105000
+2024-11,Madinah,the Middle East,Religious,390000
+2024-11,Jeddah,the Middle East,Domestic,245000
+2024-11,Jeddah,UK,Leisure,35000
+2024-11,Eastern,the Middle East,Domestic,162000
+2024-11,Eastern,Kuwait,Leisure,45000
+2024-11,NEOM,Germany,Leisure,18000
+2024-11,Al-Ula,France,Leisure,25000
+2024-11,Al-Ula,USA,Leisure,19000
+2024-11,Asir,the Middle East,Domestic,125000
+2024-11,Tabuk,the Middle East,Domestic,88000
+2024-12,Riyadh,the Middle East,Domestic,358000
+2024-12,Riyadh,UAE,Leisure,62000
+2024-12,Riyadh,UK,Business,22000
+2024-12,Riyadh,India,Business,26000
+2024-12,Makkah,the Middle East,Religious,645000
+2024-12,Makkah,Indonesia,Religious,112000
+2024-12,Makkah,Pakistan,Religious,88000
+2024-12,Madinah,the Middle East,Religious,405000
+2024-12,Jeddah,the Middle East,Domestic,255000
+2024-12,Jeddah,UAE,Leisure,38000
+2024-12,Eastern,the Middle East,Domestic,168000
+2024-12,Eastern,Kuwait,Leisure,48000
+2024-12,NEOM,Germany,Leisure,16000
+2024-12,NEOM,UK,Leisure,14000
+2024-12,Al-Ula,France,Leisure,20000
+2024-12,Al-Ula,USA,Leisure,15000
+2024-12,Asir,the Middle East,Domestic,130000
+2024-12,Tabuk,the Middle East,Domestic,92000

@@ -7,7 +7,7 @@ A map of the repo so a new contributor knows where to land.
 Five things ship from this monorepo:
 
 1. **Abenix platform** — the core product. API, web, agent-runtime workers, background worker, edge runtimes.
-2. **Standalone apps** — domain-specific UIs that proxy through the platform: `wingman/`, `industrial-iot/`, `sauditourism/`, `contractiq/`, `resolveai/`, `claimsiq/`.
+2. **Standalone apps** — domain-specific UIs that proxy through the platform: `wingman/`, `industrial-iot/`, `mideasttourism/`, `contractiq/`, `resolveai/`, `claimsiq/`.
 3. **SDKs** — `packages/sdk/python/` is canonical, copied into every standalone app's `api/sdk/` so they can talk to the platform without a vendored HTTP client.
 4. **Helm chart** — `infra/helm/abenix/` deploys the whole platform plus selected standalones to k8s.
 5. **The public mirror** — `scripts/publish-public.sh` strips sensitive pieces and rewrites history to the public repo on every release.
@@ -31,7 +31,7 @@ Five things ship from this monorepo:
 ├── contractiq/                # standalone ETRM/contracts app
 ├── wingman/                   # standalone commodities trading copilot
 ├── industrial-iot/            # standalone IoT/predictive maintenance app
-├── sauditourism/              # standalone Saudi Tourism app
+├── mideasttourism/              # standalone Mideast Tourism app
 ├── resolveai/                 # standalone customer-support app
 ├── claimsiq/                  # standalone insurance-claims app
 ├── infra/helm/abenix/         # the Helm chart that deploys everything

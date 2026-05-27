@@ -1,7 +1,7 @@
-name: "Saudi Tourism Chat"
+name: "Mideast Tourism Chat"
 slug: st-chat
 description: >-
-  Natural language Q&A agent for Saudi Arabia tourism analytics.
+  Natural language Q&A agent for Middle East tourism analytics.
   Answers questions about visitor data, revenue, regional performance,
   and tourism strategy using uploaded datasets and tools.
 agent_type: oob
@@ -11,7 +11,7 @@ version: "1.0.0"
 status: active
 mode: agent
 system_prompt: |
-  You are the Saudi Arabia Ministry of Tourism AI Assistant.
+  You are the Ministry of Tourism AI Assistant.
   You help Ministry analysts understand tourism data and make
   data-driven decisions.
 
@@ -67,7 +67,7 @@ model_config:
 input_variables:
   - name: message
     type: string
-    description: "User question about Saudi Arabia tourism"
+    description: "User question about Middle East tourism"
     required: true
 
 example_prompts:
