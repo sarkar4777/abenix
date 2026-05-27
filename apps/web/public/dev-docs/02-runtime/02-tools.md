@@ -210,7 +210,7 @@ There are ~100 built-in tools. They live in [`apps/agent-runtime/engine/tools/`]
 | Code & data | `code_executor`, `code_asset`, `file_reader`, `csv_parser`, `pdf_extractor` |
 | Web | `tavily_search`, `brave_search`, `web_fetch`, `web_screenshot` |
 | AI & analysis | `ml_model`, `llm_route`, `summarize`, `extract_entities`, `embedding_similarity` |
-| Knowledge | `kb_search`, `atlas_query`, `cypher_query`, `kb_grant_check` |
+| Knowledge | `kb_search`, `kb_grant_check`, `atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_search_grounded`, `atlas_cypher`, `atlas_as_of` |
 | Integrations | `slack_post`, `gmail_send`, `gcal_create_event`, `github_pr`, `notion_page` |
 | Data sources | `eia_open_data`, `yahoo_finance`, `open_meteo`, `ais_stream`, `bunker_fuel`, `freight_baltic_blpg`, `freight_worldscale`, `vessel_specs`, `options_data`, `current_time` |
 | Privacy & safety | `redact_pii`, `moderate_text`, `content_safety_check` |
@@ -218,6 +218,81 @@ There are ~100 built-in tools. They live in [`apps/agent-runtime/engine/tools/`]
 | Multi-modal | `image_caption`, `image_ocr` |
 
 Many of these have well-defined integration points — see [09-reference/00-rest-api](../09-reference/00-rest-api.md#tool-management).
+
+---
+
+## Atlas tool cookbook
+
+The six Atlas tools live in [`atlas_tools.py`](../../apps/agent-runtime/engine/tools/atlas_tools.py) (four pre-v2) and [`atlas_cypher.py`](../../apps/agent-runtime/engine/tools/atlas_cypher.py) (two added in v2.0). All six are visible in the **canvas tool palette** under the *Knowledge* category and can be picked into any agent or pipeline.
+
+### `atlas_describe` — read a node + its 1-hop neighbourhood
+
+```jsonc
+// input
+{ "graph_id": "9c1e…", "node_id": "counterparty-acme-corp" }
+// output
+{
+  "node": { "type": "Counterparty", "name": "ACME Corp", "properties": {...} },
+  "neighbours": [
+    { "edge_type": "PARTY_TO", "node": { "type": "Contract", "id": "..." } },
+    ...
+  ],
+  "citations": [ { "document_id": "...", "page": 4, "chunk_id": "..." } ]
+}
+```
+
+### `atlas_query` — parameterised typed query
+
+The agent picks an **operation** (`by_property`, `by_relationship`, `aggregate`) — never writes Cypher. Useful when the agent prompt should stay free of database syntax.
+
+```jsonc
+{ "graph_id": "...",
+  "operation": "by_property",
+  "node_type": "Contract",
+  "where": { "notional": { ">": 50_000_000 } },
+  "limit": 25 }
+```
+
+### `atlas_traverse` — N-hop walks
+
+```jsonc
+{ "graph_id": "...",
+  "start_node_id": "raw-material-XYZ",
+  "edge_types": ["TRANSFORMED_INTO", "ASSEMBLED_INTO"],
+  "max_hops": 4 }
+```
+
+Returns the visited path as an ordered list; the agent can render it as a supply-chain diagram or replay it for a follow-up question.
+
+### `atlas_search_grounded` — hybrid keyword + embedding over node properties
+
+```jsonc
+{ "graph_id": "...", "query": "late delivery clause", "node_types": ["Clause"], "limit": 10 }
+```
+
+Unlike `kb_search` this never returns free-text paragraphs — only node IDs + the property that matched. The agent then calls `atlas_describe` on the winners.
+
+### `atlas_cypher` — read-only Cypher for power agents *(v2.0)*
+
+```jsonc
+{ "graph_id": "...",
+  "cypher": "MATCH (a:Counterparty)-[r:PARTY_TO]->(c:Contract) WHERE c.notional > 50000000 AND a.kyc_status = 'unconfirmed' RETURN a.name, c.id",
+  "limit": 100 }
+```
+
+Server-side validator rejects any token in the write set (`CREATE`, `MERGE`, `DELETE`, `DETACH DELETE`, `SET`, `REMOVE`, `DROP`, `LOAD CSV`, `CALL apoc.*`, `CALL dbms.*`, `CALL db.*`, `FOREACH`, `;`). Length ≤ 8 KB, execution ≤ 10 s, rows ≤ 1000. `$abenix_tenant_id` and `$abenix_graph_id` are auto-injected so a hand-crafted query cannot escape the caller's scope.
+
+### `atlas_as_of` — bi-temporal snapshot *(v2.0)*
+
+```jsonc
+{ "graph_id": "...",
+  "as_of": "2025-01-15T00:00:00Z",
+  "match_clause": "(c:Contract)-[r:HAS_OBLIGATION]->(o)" }
+```
+
+Rewrites the WHERE clause to `r.valid_from <= ts AND (r.valid_to IS NULL OR r.valid_to > ts)`. Returns the graph state as it was on that date — answers questions like "what obligations did we recognise on 2025-01-15?" in one hop. Backed by the bi-temporal columns added in the v2.0 migration: `valid_from`, `valid_to`, `recorded_at`, `source_anchors`.
+
+See [`01-architecture/06-atlas-knowledge-engine.md`](../01-architecture/06-atlas-knowledge-engine.md) for the data model behind these tools, and [`02-runtime/15-v2-knowledge-enterprise.md`](15-v2-knowledge-enterprise.md) for the v2.0 capabilities reference.
 
 ---
 

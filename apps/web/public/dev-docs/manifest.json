@@ -57,6 +57,7 @@
       "title": "4. Data model",
       "docs": [
         {"slug": "04-data-model/00-overview", "title": "ERD + conventions"},
+        {"slug": "04-data-model/03-knowledge", "title": "Knowledge + Atlas + Cognify (incl. v2 bi-temporal + ACL + GDPR)"},
         {"slug": "04-data-model/04-resource-shares", "title": "Polymorphic resource_shares"}
       ]
     },

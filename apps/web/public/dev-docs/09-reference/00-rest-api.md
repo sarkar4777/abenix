@@ -131,6 +131,30 @@
 | `POST` | `/api/atlas/query` | Cypher query (admin only) |
 | `GET` | `/api/atlas/suggestions` | AI-suggested extensions |
 
+Agent-facing tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_search_grounded`, `atlas_cypher`, `atlas_as_of`) live in [`02-runtime/02-tools.md`](../02-runtime/02-tools.md#atlas-tool-cookbook).
+
+---
+
+## Knowledge v2 (cognify, conflicts, versioning, reembed) {#knowledge-v2}
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` / `PUT` | `/api/knowledge/cognify-config` | Per-tenant `auto_accept_threshold`, `conflict_action`, `max_parallel_docs`, `daily_budget_usd` |
+| `GET` | `/api/knowledge/cognify-conflicts` | List open conflicts where two sources disagree on the same entity property |
+| `POST` | `/api/knowledge/cognify-conflicts/{id}/resolve` | Body `{resolved_value}` — pick the value to keep |
+| `POST` | `/api/knowledge/{kb}/documents/{doc}/replace` | Upload a new version. Old row → `is_current=false, superseded_by=<new_id>` |
+| `POST` | `/api/knowledge/{kb}/reembed` | Body `{embedding_model, dry_run?}`. Enqueues kb_reembed worker, returns `job_id` + cost estimate + ETA |
+| `GET` / `POST` / `DELETE` | `/api/knowledge/{kb}/documents/{doc}/grants` | Document-level ACL: `(subject_type, subject_id, permission)`. Pre-filters candidates before similarity search; cached 60 s in Redis |
+
+### GDPR
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/gdpr/users/{user_id}/purge` | Five-store cascade: postgres, pinecone, neo4j, blob, trajectory |
+| `GET`  | `/api/gdpr/users/{user_id}/receipts` | Per-store audit trail (`gdpr_purge_log` rows) — provable to a regulator |
+
+See [`02-runtime/15-v2-knowledge-enterprise.md`](../02-runtime/15-v2-knowledge-enterprise.md) for the implementation details and [`04-data-model/03-knowledge.md`](../04-data-model/03-knowledge.md) for the data model.
+
 ---
 
 ## Resource sharing (polymorphic)
