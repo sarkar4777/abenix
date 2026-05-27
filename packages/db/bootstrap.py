@@ -185,9 +185,7 @@ def _bootstrap_sync(url: str) -> int:
                 "[bootstrap] Fresh DB detected — creating schema from ORM (sync driver)."
             )
             Base.metadata.create_all(bind=conn)
-    _run_alembic_stamp_heads()
-    print("[bootstrap] Schema created and alembic stamped at heads.")
-    return 0
+    return 2  # caller stamps after this returns
 
 
 async def _bootstrap_async(url: str) -> int:
@@ -236,16 +234,20 @@ async def _bootstrap_async(url: str) -> int:
     finally:
         await engine.dispose()
 
-    _run_alembic_stamp_heads()
-    print("[bootstrap] Schema created and alembic stamped at heads.")
-    return 0
+    return 2  # caller stamps once asyncio.run has returned
 
 
 def main() -> int:
     url, mode = _resolve_database_url()
     if mode == "sync":
-        return _bootstrap_sync(url)
-    return asyncio.run(_bootstrap_async(url))
+        rc = _bootstrap_sync(url)
+    else:
+        rc = asyncio.run(_bootstrap_async(url))
+    if rc == 2:
+        _run_alembic_stamp_heads()
+        print("[bootstrap] Schema created and alembic stamped at heads.")
+        rc = 0
+    return rc
 
 
 if __name__ == "__main__":

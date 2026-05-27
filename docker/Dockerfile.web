@@ -5,10 +5,11 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY apps/web/package.json ./apps/web/
 COPY packages/shared/package.json ./packages/shared/
-RUN npm ci --workspace=@abenix/web --include-workspace-root 2>/dev/null || npm install
+RUN npm ci --workspace=@abenix/web --include-workspace-root --include=optional 2>/dev/null || npm install --include=optional
 
 FROM base AS builder
 WORKDIR /app
+RUN rm -f /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-* -rf 2>/dev/null; true
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build --workspace=@abenix/web

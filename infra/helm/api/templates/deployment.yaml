@@ -69,7 +69,7 @@ spec:
         - name: db-migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ['sh', '-c', 'cd /app/packages/db && python -m bootstrap && alembic upgrade head']
+          command: ['sh', '-c', 'cd /app/packages/db && python -m bootstrap && alembic upgrade heads']
           envFrom:
             - configMapRef:
                 name: {{ .Release.Name }}-config
