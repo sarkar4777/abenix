@@ -10,6 +10,9 @@ import {
   ChevronDown, Diamond, AlertTriangle, Truck, Globe, Radar, Compass,
   Database, Lock, Flame, Zap, Ship, Leaf, BrainCircuit, BellRing, Search,
 } from 'lucide-react';
+import { ContractIQExecutionsProvider, useContractIQExecutions } from './components/ContractIQExecutionsProvider';
+import LiveActivityRail from './components/LiveActivityRail';
+import DagDrawer from './components/DagDrawer';
 
 function getToken() { if (typeof window === 'undefined') return null; return localStorage.getItem('contractiq_token'); }
 function getUser() { if (typeof window === 'undefined') return null; try { return JSON.parse(localStorage.getItem('contractiq_user') || 'null'); } catch { return null; } }
@@ -119,6 +122,15 @@ const NAV_SECTIONS: NavSection[] = [
 ];
 
 export default function ContractIQLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ContractIQExecutionsProvider>
+      <ContractIQLayoutInner>{children}</ContractIQLayoutInner>
+    </ContractIQExecutionsProvider>
+  );
+}
+
+function ContractIQLayoutInner({ children }: { children: React.ReactNode }) {
+  const { drawerExecutionId, selectExecutionForDrawer } = useContractIQExecutions();
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
@@ -291,6 +303,8 @@ export default function ContractIQLayout({ children }: { children: React.ReactNo
       <main className="flex-1 overflow-y-auto">
         {children}
       </main>
+      <LiveActivityRail />
+      <DagDrawer executionId={drawerExecutionId} onClose={() => selectExecutionForDrawer(null)} />
     </div>
   );
 }
