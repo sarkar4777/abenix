@@ -187,6 +187,7 @@ from app.routers import whatif as ciq_whatif
 from app.routers import rbac as ciq_rbac
 from app.routers import rules as ciq_rules
 from app.routers import audit as ciq_audit
+from app.routers import executions as ciq_executions
 
 app.include_router(ciq_auth.router)
 app.include_router(ciq_contracts.router)
@@ -200,6 +201,7 @@ app.include_router(ciq_whatif.router)
 app.include_router(ciq_rbac.router)
 app.include_router(ciq_rules.router)
 app.include_router(ciq_audit.router)
+app.include_router(ciq_executions.router)
 
 
 @app.exception_handler(Exception)
