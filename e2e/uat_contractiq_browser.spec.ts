@@ -170,8 +170,14 @@ test.describe('ContractIQ · UAT', () => {
   // ─── Endur Templates feature ───────────────────────────────────────
   test('Endur Templates panel renders + 12 starter templates listed', async ({ page }) => {
     await gotoOk(page, '/deal-clusters');
-    await expect(page.getByTestId('endur-templates')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('upload-template-btn')).toBeVisible();
+    const panel = page.getByTestId('endur-templates');
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    const toggle = panel.locator('button').first();
+    if (await toggle.isVisible()) {
+      await toggle.click();
+      await page.waitForTimeout(400);
+    }
+    await expect(page.getByTestId('upload-template-btn')).toBeVisible({ timeout: 5_000 });
     const text = (await page.textContent('body')) || '';
     // Each starter is "Starter · <CategoryLabel>"
     expect(text).toMatch(/Starter · Power Physical\b/);
@@ -182,20 +188,24 @@ test.describe('ContractIQ · UAT', () => {
 
   test('Endur Template upload modal opens + JSON validation', async ({ page }) => {
     await gotoOk(page, '/deal-clusters');
-    await expect(page.getByTestId('endur-templates')).toBeVisible({ timeout: 15_000 });
+    const panel = page.getByTestId('endur-templates');
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    const toggle = panel.locator('button').first();
+    if (await toggle.isVisible()) {
+      await toggle.click();
+      await page.waitForTimeout(400);
+    }
     await page.getByTestId('upload-template-btn').click();
-    await expect(page.getByTestId('upload-template-modal')).toBeVisible();
-    // Type an obviously broken JSON and try to save → modal stays open with error.
-    const textarea = page.locator('textarea').first();
+    const modal = page.getByTestId('upload-template-modal');
+    await expect(modal).toBeVisible();
+    const textarea = modal.locator('textarea').first();
     await textarea.fill('not json at all');
-    await page.getByRole('button', { name: /save template/i }).click();
-    await expect(page.locator('text=/Invalid JSON/i')).toBeVisible({ timeout: 5_000 });
-    // Now provide a valid template + name and save.
+    await modal.getByRole('button', { name: /save template/i }).click();
+    await expect(modal.locator('text=/Invalid JSON/i')).toBeVisible({ timeout: 5_000 });
     await textarea.fill('{"deal_type": "Test", "field": "${value}"}');
-    await page.locator('input').first().fill(`UAT Template ${Date.now()}`);
-    await page.getByRole('button', { name: /save template/i }).click();
-    // Modal closes when save succeeds.
-    await expect(page.getByTestId('upload-template-modal')).toBeHidden({ timeout: 10_000 });
+    await modal.locator('input').nth(0).fill(`UAT Template ${Date.now()}`);
+    await modal.getByRole('button', { name: /save template/i }).click();
+    await expect(modal).toBeHidden({ timeout: 10_000 });
   });
 
   test('Generate Endur JSON modal opens for a cluster', async ({ page }) => {

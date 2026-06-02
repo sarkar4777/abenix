@@ -1,0 +1,66 @@
+{
+  "name": "offtake_industrial",
+  "family": "HistGradientBoostingRegressor (LSTM-substitute)",
+  "version": "1.0.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "sector_pmi": {
+        "type": "number"
+      },
+      "plant_utilisation": {
+        "type": "number"
+      },
+      "cluster_id": {
+        "type": "number"
+      },
+      "last_quarter_avg": {
+        "type": "number"
+      },
+      "power_price_eur_mwh": {
+        "type": "number"
+      },
+      "maintenance_flag": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "sector_pmi",
+      "plant_utilisation",
+      "cluster_id",
+      "last_quarter_avg",
+      "power_price_eur_mwh",
+      "maintenance_flag"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "baseload_gwh_day": {
+        "type": "number"
+      }
+    }
+  },
+  "training_metrics": {
+    "mae_gwh": 8.886824389068247,
+    "rmse_gwh": 11.142912661140448,
+    "mape_pct": 1.9935809913944602,
+    "n_train": 1551,
+    "n_test": 274
+  },
+  "tags": [
+    "contractiq",
+    "forecaster",
+    "industrial",
+    "baseload"
+  ],
+  "feature_columns": [
+    "sector_pmi",
+    "plant_utilisation",
+    "cluster_id",
+    "last_quarter_avg",
+    "power_price_eur_mwh",
+    "maintenance_flag"
+  ],
+  "training_set_description": "5y daily synthesis approximating industrial baseload patterns across 6 cluster profiles, driven by sector PMI + plant utilisation + power-price elasticity. Substitute training set; production should retrain on real customer baseload curves."
+}

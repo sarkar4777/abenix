@@ -13,6 +13,8 @@ import {
 import { ContractIQExecutionsProvider, useContractIQExecutions } from './components/ContractIQExecutionsProvider';
 import LiveActivityRail from './components/LiveActivityRail';
 import DagDrawer from './components/DagDrawer';
+import PageExplainer from './components/PageExplainer';
+import { getPageDoc } from './components/page-docs';
 
 function getToken() { if (typeof window === 'undefined') return null; return localStorage.getItem('contractiq_token'); }
 function getUser() { if (typeof window === 'undefined') return null; try { return JSON.parse(localStorage.getItem('contractiq_user') || 'null'); } catch { return null; } }
@@ -300,7 +302,15 @@ function ContractIQLayoutInner({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </aside>
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto relative">
+        {(() => {
+          const doc = pathname ? getPageDoc(pathname) : undefined;
+          return doc ? (
+            <div className="absolute top-3 right-4 z-30">
+              <PageExplainer doc={doc} />
+            </div>
+          ) : null;
+        })()}
         {children}
       </main>
       <LiveActivityRail />

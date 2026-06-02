@@ -1,0 +1,80 @@
+{
+  "name": "offtake_residential",
+  "family": "GradientBoostingRegressor (Prophet-substitute)",
+  "version": "1.0.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "hdd_7d": {
+        "type": "number"
+      },
+      "cdd_7d": {
+        "type": "number"
+      },
+      "weekday_idx": {
+        "type": "number"
+      },
+      "weekend_flag": {
+        "type": "number"
+      },
+      "churn_rate": {
+        "type": "number"
+      },
+      "customer_mix_shift": {
+        "type": "number"
+      },
+      "base_volume": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "hdd_7d",
+      "cdd_7d",
+      "weekday_idx",
+      "weekend_flag",
+      "churn_rate",
+      "customer_mix_shift",
+      "base_volume"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "forecast_p50": {
+        "type": "number",
+        "description": "Median offtake GWh/day"
+      },
+      "forecast_p10": {
+        "type": "number"
+      },
+      "forecast_p90": {
+        "type": "number"
+      }
+    }
+  },
+  "training_metrics": {
+    "mae_gwh": 6.430136492837036,
+    "rmse_gwh": 7.9725779048994045,
+    "mape_pct": 1.7073591840564575,
+    "p10_residual": -9.243407614943607,
+    "p90_residual": 11.345215694711179,
+    "n_train": 1551,
+    "n_test": 274
+  },
+  "tags": [
+    "contractiq",
+    "forecaster",
+    "residential",
+    "offtake"
+  ],
+  "feature_columns": [
+    "hdd_7d",
+    "cdd_7d",
+    "weekday_idx",
+    "weekend_flag",
+    "churn_rate",
+    "customer_mix_shift",
+    "base_volume"
+  ],
+  "training_set_description": "5y daily synthesis approximating ENTSO-E residential gas offtake patterns across GB/DE/NL: temperature-driven HDD/CDD + calendar + customer churn + mix shift. Substitute training set; production deployments should retrain on the customer's actual smart-meter load series."
+}

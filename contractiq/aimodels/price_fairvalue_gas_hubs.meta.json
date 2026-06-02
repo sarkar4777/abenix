@@ -1,0 +1,83 @@
+{
+  "name": "price_fairvalue_gas_hubs",
+  "family": "BayesianRidge + IsolationForest residual",
+  "version": "1.0.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "storage_eu_pct": {
+        "type": "number"
+      },
+      "ttf_basis_eur": {
+        "type": "number"
+      },
+      "hh_eur_equiv": {
+        "type": "number"
+      },
+      "brent_eur": {
+        "type": "number"
+      },
+      "weather_anomaly_c": {
+        "type": "number"
+      },
+      "lng_send_out_gwh": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "storage_eu_pct",
+      "ttf_basis_eur",
+      "hh_eur_equiv",
+      "brent_eur",
+      "weather_anomaly_c",
+      "lng_send_out_gwh"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "fair_value_eur_mwh": {
+        "type": "number"
+      },
+      "sigma": {
+        "type": "number"
+      },
+      "z_score": {
+        "type": "number"
+      },
+      "anomaly_flag": {
+        "type": "boolean"
+      }
+    }
+  },
+  "training_metrics": {
+    "mae_eur_mwh": 1.782184403377115,
+    "rmse_eur_mwh": 2.1839879641382454,
+    "avg_sigma": 2.335207884926297,
+    "n_train": 1551,
+    "n_test": 274
+  },
+  "tags": [
+    "contractiq",
+    "price-engine",
+    "gas",
+    "fair-value"
+  ],
+  "feature_columns": [
+    "storage_eu_pct",
+    "ttf_basis_eur",
+    "hh_eur_equiv",
+    "brent_eur",
+    "weather_anomaly_c",
+    "lng_send_out_gwh"
+  ],
+  "applies_to_hubs": [
+    "TTF",
+    "NBP",
+    "THE",
+    "PEG",
+    "PSV",
+    "CEGH"
+  ],
+  "training_set_description": "5y daily synthesis of EU hub fundamentals: storage, TTF basis, HH equiv, Brent, weather, LNG send-out. Substitute training set; production retrains on ICE settlements + GIE storage + EIA HH + ENTSOG."
+}

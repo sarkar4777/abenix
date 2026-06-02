@@ -1,0 +1,87 @@
+{
+  "name": "price_fairvalue_power_hubs",
+  "family": "BayesianRidge + IsolationForest residual",
+  "version": "1.0.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "ttf_eur_mwh": {
+        "type": "number"
+      },
+      "eua_eur_t": {
+        "type": "number"
+      },
+      "residual_load_gw": {
+        "type": "number"
+      },
+      "wind_capf": {
+        "type": "number"
+      },
+      "solar_capf": {
+        "type": "number"
+      },
+      "hydro_reservoir_pct": {
+        "type": "number"
+      },
+      "hour_of_day_idx": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "ttf_eur_mwh",
+      "eua_eur_t",
+      "residual_load_gw",
+      "wind_capf",
+      "solar_capf",
+      "hydro_reservoir_pct",
+      "hour_of_day_idx"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "fair_value_eur_mwh": {
+        "type": "number"
+      },
+      "sigma": {
+        "type": "number"
+      },
+      "z_score": {
+        "type": "number"
+      },
+      "anomaly_flag": {
+        "type": "boolean"
+      }
+    }
+  },
+  "training_metrics": {
+    "mae_eur_mwh": 4.32165568722747,
+    "rmse_eur_mwh": 5.401452430829756,
+    "avg_sigma": 5.273401280775545,
+    "n_train": 22338,
+    "n_test": 3942
+  },
+  "tags": [
+    "contractiq",
+    "price-engine",
+    "power",
+    "fair-value"
+  ],
+  "feature_columns": [
+    "ttf_eur_mwh",
+    "eua_eur_t",
+    "residual_load_gw",
+    "wind_capf",
+    "solar_capf",
+    "hydro_reservoir_pct",
+    "hour_of_day_idx"
+  ],
+  "applies_to_hubs": [
+    "DE",
+    "FR",
+    "NL",
+    "BE",
+    "AT"
+  ],
+  "training_set_description": "3y hourly synthesis of EU power formation: gas+EUA marginal-cost stack + wind/solar capf + residual load + hydro. Substitute training set; production retrains on ENTSO-E + EEX settlements + day-ahead prints."
+}

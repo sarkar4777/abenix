@@ -9,8 +9,11 @@
 //
 const INTERNAL_API = process.env.CONTRACTIQ_API_INTERNAL_URL || 'http://localhost:8001';
 
+const path = require('path');
+
 const nextConfig = {
   reactStrictMode: true,
+  outputFileTracingRoot: path.join(__dirname),
   env: {
     NEXT_PUBLIC_API_URL: '',
   },

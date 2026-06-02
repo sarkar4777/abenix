@@ -189,41 +189,36 @@ test('price-engine — layer weights + stress + hub switch', async ({ page }) =>
   if (await stressBtns.count()) await stressBtns.first().click();
 });
 
-test('workbench — pick forecast + submit override (no false success)', async ({ page }) => {
+test('workbench — pick a model, edit features, run SHAP', async ({ page }) => {
   await gotoOk(page, '/workbench');
   await expect(page.getByText(/Analyst Workbench/i).first()).toBeVisible({ timeout: 10000 });
 
-  const forecastBtns = page.locator('button').filter({ hasText: /TTF M\+1|Residential 14d|Storage cycling|DE-Power Cal\+1/i });
-  if (await forecastBtns.count()) {
-    await forecastBtns.nth(1).click();
-    await page.waitForTimeout(500);
+  const modelBtns = page.locator('aside button').filter({ hasText: /offtake_|price_fairvalue_/i });
+  if (await modelBtns.count() > 1) {
+    await modelBtns.nth(1).click();
+    await page.waitForTimeout(800);
   }
 
   const numInput = page.locator('input[type=number]').first();
-  if (await numInput.isVisible()) {
-    await numInput.fill('330.5');
-    const reason = page.locator('textarea').first();
-    if (await reason.isVisible()) await reason.fill('Override rationale — recent HDD outlook tightens upside.');
-    const submit = page.getByRole('button', { name: /Submit override/i });
-    if (await submit.isEnabled()) await submit.click();
+  if (await numInput.isVisible()) await numInput.fill('0.55');
+
+  const runBtn = page.getByRole('button', { name: /Run SHAP/i });
+  if (await runBtn.isEnabled()) {
+    await runBtn.click();
+    await page.waitForTimeout(2500);
   }
+
+  await expect(page.getByText(/Feature attributions/i).first()).toBeVisible({ timeout: 10000 });
 });
 
-test('model-performance — table selectable, backtest button works', async ({ page }) => {
+test('model-performance — reads live Abenix registry', async ({ page }) => {
   await gotoOk(page, '/model-performance');
-  await expect(page.getByText(/Performance & Backtest/i).first()).toBeVisible({ timeout: 10000 });
-  const tableRows = page.locator('table tbody tr');
-  const n = await tableRows.count();
-  if (n) {
-    await tableRows.nth(Math.min(2, n - 1)).click();
-    await page.waitForTimeout(500);
-  }
-  const backtest = page.getByRole('button', { name: /365-day backtest|Running 365-day/i });
-  if (await backtest.count()) {
-    await backtest.first().click();
-    await page.waitForTimeout(2500);
-    await expect(page.getByText(/MAE|RMSE|MAPE/).first()).toBeVisible();
-  }
+  await expect(page.getByText(/Performance & Backtest|Model Performance/i).first()).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText(/Registered models/i).first()).toBeVisible({ timeout: 15000 });
+  const sidebar = page.locator('aside button');
+  await page.waitForTimeout(2500);
+  const n = await sidebar.count();
+  expect(n, 'at least one registered model').toBeGreaterThan(0);
 });
 
 test('recommendations — desk filter cards', async ({ page }) => {
@@ -245,16 +240,11 @@ test('commodity hubs · 4 desks · each renders curve + signals + contracts', as
   }
 });
 
-test('data-fabric · 22 connectors table renders + category filter works', async ({ page }) => {
+test('data-fabric · live telemetry — sources panel renders', async ({ page }) => {
   await gotoOk(page, '/data-fabric');
   await expect(page.getByText(/Data Fabric/i).first()).toBeVisible({ timeout: 10000 });
-  const rows = page.locator('tbody tr');
-  expect(await rows.count(), 'connector rows').toBeGreaterThanOrEqual(10);
-  const tsoBtn = page.getByRole('button', { name: /TSO/i });
-  if (await tsoBtn.count()) {
-    await tsoBtn.first().click();
-    await page.waitForTimeout(500);
-  }
+  await expect(page.getByText(/Connected sources/i).first()).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText(/ML models|Recent executions/i).first()).toBeVisible({ timeout: 10000 });
 });
 
 test('live activity rail · visible + has Live activity title', async ({ page }) => {

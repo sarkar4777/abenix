@@ -132,6 +132,140 @@ async def narration_passthrough(execution_id: str) -> StreamingResponse:
     )
 
 
+@router.get("/ml-models/registry")
+async def ml_model_registry():
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{ABENIX_URL}/api/ml-models", headers=_headers())
+            if r.status_code >= 400:
+                return JSONResponse({"data": [], "error": f"abenix returned {r.status_code}"})
+            j = r.json()
+            items = j.get("data") or j.get("items") or j or []
+        return JSONResponse({"data": items})
+    except Exception as e:
+        return JSONResponse({"data": [], "error": str(e)})
+
+
+async def _execute_agent(slug: str, payload: dict) -> dict:
+    """Fire-and-collect: call Abenix /api/agents/<slug>/execute and return final_output."""
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.post(
+                f"{ABENIX_URL}/api/agents/{slug}/execute",
+                headers={**_headers(), "Content-Type": "application/json"},
+                json={"input": payload},
+            )
+            if r.status_code >= 400:
+                return {"status": "failed", "error": f"abenix returned {r.status_code}", "body": r.text[:600]}
+            j = r.json()
+            return j.get("data") or j
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+
+@router.post("/forecaster/run")
+async def run_forecaster(payload: dict):
+    return JSONResponse(await _execute_agent("ciq-offtake-forecaster", payload))
+
+
+@router.post("/price-engine/run")
+async def run_price_engine(payload: dict):
+    return JSONResponse(await _execute_agent("ciq-price-engine", payload))
+
+
+@router.post("/recommendations/run")
+async def run_recommendations(payload: dict):
+    return JSONResponse(await _execute_agent("ciq-recommendation-engine", payload))
+
+
+@router.post("/workbench/explain")
+async def run_workbench_explain(payload: dict):
+    """Run the SHAP code-asset for one (model_name, feature_vector).
+    Calls Abenix /api/code-assets/shap_explainer/run. Falls back to ml_model.explain
+    if the code-asset isn't registered yet."""
+    body = {"input": payload}
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(
+                f"{ABENIX_URL}/api/code-assets/shap_explainer/run",
+                headers={**_headers(), "Content-Type": "application/json"},
+                json=body,
+            )
+            if r.status_code < 400:
+                j = r.json()
+                return JSONResponse(j.get("data") or j)
+            r2 = await client.post(
+                f"{ABENIX_URL}/api/ml-models/{payload.get('model_name', '')}/explain",
+                headers={**_headers(), "Content-Type": "application/json"},
+                json={"feature_vector": payload.get("feature_vector", {})},
+            )
+            if r2.status_code < 400:
+                j2 = r2.json()
+                return JSONResponse(j2.get("data") or j2)
+        return JSONResponse({"ok": False, "error": "shap_explainer not registered + ml-models explain unavailable"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.get("/data-fabric/sources")
+async def data_fabric_sources():
+    """Live telemetry for the Data Fabric page. Pulls real Abenix telemetry:
+    market_data_sources + recent ml_model_invocations + execution counts.
+    Returns shape consumed by /data-fabric page; no hardcoded connectors."""
+    out: dict = {"sources": [], "summary": {}, "errors": []}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            try:
+                r = await client.get(f"{ABENIX_URL}/api/market-data/sources", headers=_headers())
+                if r.status_code < 400:
+                    j = r.json()
+                    items = j.get("data") or j.get("items") or j or []
+                    if isinstance(items, list):
+                        out["sources"].extend([
+                            {**i, "kind": i.get("kind") or "market-data"} for i in items
+                        ])
+            except Exception as e:
+                out["errors"].append(f"market-data: {e}")
+
+            try:
+                r = await client.get(f"{ABENIX_URL}/api/ml-models", headers=_headers())
+                if r.status_code < 400:
+                    j = r.json()
+                    items = j.get("data") or j.get("items") or j or []
+                    if isinstance(items, list):
+                        out["summary"]["ml_models_registered"] = len(items)
+                        out["summary"]["ml_models"] = [
+                            {"name": m.get("name"), "version": m.get("version"),
+                             "status": m.get("status"), "framework": m.get("framework")}
+                            for m in items[:50]
+                        ]
+            except Exception as e:
+                out["errors"].append(f"ml-models: {e}")
+
+            try:
+                r = await client.get(
+                    f"{ABENIX_URL}/api/executions",
+                    headers=_headers(),
+                    params={"limit": "200"},
+                )
+                if r.status_code < 400:
+                    j = r.json()
+                    items = j.get("data") or j.get("items") or j or []
+                    if isinstance(items, list):
+                        by_status: dict = {}
+                        for it in items:
+                            s = (it.get("status") or "unknown").lower()
+                            by_status[s] = by_status.get(s, 0) + 1
+                        out["summary"]["recent_executions_by_status"] = by_status
+                        out["summary"]["recent_executions_total"] = len(items)
+            except Exception as e:
+                out["errors"].append(f"executions: {e}")
+    except Exception as e:
+        out["errors"].append(str(e))
+
+    return JSONResponse(out)
+
+
 @router.get("/ml-models/invocations")
 async def list_ml_invocations(
     status: str | None = Query(None),

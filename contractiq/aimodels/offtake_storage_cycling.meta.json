@@ -1,0 +1,60 @@
+{
+  "name": "offtake_storage_cycling",
+  "family": "GradientBoostingRegressor (paired with downstream LP optimiser)",
+  "version": "1.0.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "front_winter_spread": {
+        "type": "number"
+      },
+      "days_to_withdrawal": {
+        "type": "number"
+      },
+      "inj_capacity_left": {
+        "type": "number"
+      },
+      "linepack": {
+        "type": "number"
+      },
+      "ttf_the_basis": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "front_winter_spread",
+      "days_to_withdrawal",
+      "inj_capacity_left",
+      "linepack",
+      "ttf_the_basis"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "optimal_cycle_gwh": {
+        "type": "number"
+      }
+    }
+  },
+  "training_metrics": {
+    "mae_gwh": 0.8577076123727373,
+    "rmse_gwh": 1.1124921678304736,
+    "n_train": 1551,
+    "n_test": 274
+  },
+  "tags": [
+    "contractiq",
+    "forecaster",
+    "storage",
+    "cycling"
+  ],
+  "feature_columns": [
+    "front_winter_spread",
+    "days_to_withdrawal",
+    "inj_capacity_left",
+    "linepack",
+    "ttf_the_basis"
+  ],
+  "training_set_description": "5y daily synthesis of storage-cycling decisions vs front-winter spread + days-to-withdrawal + injection capacity left. Substitute training set; production retrains on the customer's actual storage book + hub spreads."
+}
