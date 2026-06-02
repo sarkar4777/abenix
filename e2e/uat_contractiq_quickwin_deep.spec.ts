@@ -108,7 +108,7 @@ const ALL_PAGES = [
   '/insights/reconciliation', '/insights/families', '/insights/anomalies',
   '/insights/version-diff', '/insights/stress-test', '/insights/hedge', '/insights/benchmark',
   '/clauses', '/deal-clusters', '/timeline', '/valuation', '/simulations',
-  '/what-if', '/market', '/compare', '/chat',
+  '/market', '/compare', '/chat',
   '/data-fabric', '/forecaster', '/price-engine', '/workbench', '/model-performance', '/recommendations',
   '/commodities/gas', '/commodities/power', '/commodities/lng', '/commodities/environmental',
   '/metals', '/metals/extract', '/metals/compliance', '/metals/disputes',
@@ -120,7 +120,7 @@ const ALL_PAGES = [
 for (const p of ALL_PAGES) {
   test(`page renders 200 + has main · ${p}`, async ({ page }) => {
     await gotoOk(page, p);
-    await expect(page.locator('main, [role=main], aside')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('main').first()).toBeVisible({ timeout: 10000 });
   });
 }
 

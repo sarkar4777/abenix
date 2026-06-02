@@ -27,12 +27,12 @@ COUNTERPARTIES: list[dict] = [
     {"legal_name": "TotalEnergies SE",     "ticker": "TTE",  "sector": "Integrated Oil & Gas", "country": "France",   "incorporation_year": 1924, "credit_rating": "A+",   "agency": "S&P", "score": 79, "limit_usd": 260_000_000},
     {"legal_name": "Exxon Mobil Corp",     "ticker": "XOM",  "sector": "Integrated Oil & Gas", "country": "USA",      "incorporation_year": 1999, "credit_rating": "AA-",  "agency": "S&P", "score": 84, "limit_usd": 300_000_000},
     {"legal_name": "Vitol Group",          "ticker": None,   "sector": "Commodity Trading",   "country": "Switzerland","incorporation_year": 1966,"credit_rating": "BBB+", "agency": "Fitch","score": 62,"limit_usd": 150_000_000},
-    {"legal_name": "Trafigura Group",      "ticker": None,   "sector": "Commodity Trading",   "country": "Singapore","incorporation_year": 1993, "credit_rating": "BBB-", "agency": "Fitch","score": 56,"limit_usd": 120_000_000},
+    {"legal_name": "Trafigura Group",      "ticker": None,   "sector": "Commodity Trading",   "country": "Singapore","incorporation_year": 1993, "credit_rating": "BB+",  "agency": "Fitch","score": 48,"limit_usd": 120_000_000},
     {"legal_name": "RWE AG",               "ticker": "RWE",  "sector": "Utilities",            "country": "Germany",  "incorporation_year": 1898, "credit_rating": "BBB+", "agency": "S&P", "score": 64, "limit_usd": 170_000_000},
     {"legal_name": "Iberdrola SA",         "ticker": "IBE",  "sector": "Utilities",            "country": "Spain",    "incorporation_year": 1992, "credit_rating": "BBB+", "agency": "S&P", "score": 67, "limit_usd": 180_000_000},
     {"legal_name": "Engie SA",             "ticker": "ENGI", "sector": "Utilities",            "country": "France",   "incorporation_year": 2008, "credit_rating": "BBB+", "agency": "S&P", "score": 65, "limit_usd": 175_000_000},
     {"legal_name": "Glencore plc",         "ticker": "GLEN", "sector": "Commodity Trading",   "country": "Switzerland","incorporation_year": 1974,"credit_rating": "BBB",  "agency": "S&P", "score": 58, "limit_usd": 140_000_000},
-    {"legal_name": "Mercuria Energy Group","ticker": None,   "sector": "Commodity Trading",   "country": "Switzerland","incorporation_year": 2004,"credit_rating": "BBB-", "agency": "Fitch","score": 54,"limit_usd": 110_000_000},
+    {"legal_name": "Mercuria Energy Group","ticker": None,   "sector": "Commodity Trading",   "country": "Switzerland","incorporation_year": 2004,"credit_rating": "BB+",  "agency": "Fitch","score": 42,"limit_usd": 110_000_000},
 ]
 
 
@@ -159,6 +159,14 @@ async def _get_or_create_counterparty(db: AsyncSession, payload: dict) -> Contra
     ))
     cp = existing.scalar_one_or_none()
     if cp:
+        cp.credit_score_1_100 = payload.get("score")
+        cp.credit_rating = payload.get("credit_rating") or cp.credit_rating
+        cp.credit_rating_agency = payload.get("agency") or cp.credit_rating_agency
+        cp.risk_tier = (
+            "green" if (payload.get("score") or 0) >= 70
+            else "amber" if (payload.get("score") or 0) >= 50
+            else "red"
+        )
         return cp
     cp = ContractIQCounterparty(
         legal_name=payload["legal_name"],
@@ -233,15 +241,10 @@ async def seed_quickwin_data(db: AsyncSession) -> dict:
     cp_lookup: dict[str, ContractIQCounterparty] = {}
 
     for cp_payload in COUNTERPARTIES:
-        existing = await db.execute(select(ContractIQCounterparty).where(
-            ContractIQCounterparty.legal_name == cp_payload["legal_name"]
-        ))
-        if existing.scalar_one_or_none():
-            cp_lookup[cp_payload["legal_name"]] = existing.scalar_one_or_none()
-            continue
         cp = await _get_or_create_counterparty(db, cp_payload)
         cp_lookup[cp.legal_name] = cp
-        summary["counterparties"] += 1
+        if cp not in db.new:
+            summary["counterparties"] += 1
 
     for cp_payload in COUNTERPARTIES:
         cp = cp_lookup[cp_payload["legal_name"]] = (

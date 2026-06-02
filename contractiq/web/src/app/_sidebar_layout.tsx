@@ -79,7 +79,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Market Risk (VaR/CVaR)', icon: Activity, href: '/risk' },
       { label: 'Valuation', icon: Wallet, href: '/valuation' },
       { label: 'Simulations', icon: Gauge, href: '/simulations' },
-      { label: 'What-If', icon: FlaskConical, href: '/what-if' },
+      { label: 'What-If (pick contract)', icon: FlaskConical, href: '/contracts' },
       { label: 'Market', icon: Activity, href: '/market' },
     ],
   },
