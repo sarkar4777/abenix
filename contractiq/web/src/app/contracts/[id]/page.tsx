@@ -135,7 +135,7 @@ function FunctionalAnalysisTab({ contractId }: { contractId: string }) {
         <GitBranch className="w-10 h-10 text-emerald-400/30 mx-auto mb-3" />
         <h3 className="text-sm font-semibold text-white mb-2">Functional Analysis</h3>
         <p className="text-xs text-slate-400 max-w-md mx-auto mb-4">
-          Extracts the MET/SEE-BV 11-section template (Electricity / Certificate / Gas delivery, Payment,
+          Extracts the SEE-BV 11-section taxonomy (Electricity / Certificate / Gas delivery, Payment,
           Volumetric, Price, Imbalance, Termination, Credit &amp; Collateral, Force Majeur, Constraint) plus
           per-clause contract events, linked into two dependency DAGs.
         </p>

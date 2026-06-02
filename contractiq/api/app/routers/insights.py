@@ -2001,7 +2001,7 @@ async def assess_all_counterparties(
     return success({"assessed": len(results), "counterparties": results})
 
 
-# 11. KYC STANDARD CHECK (MET-template format)
+# 11. KYC STANDARD CHECK (industry-standard template format)
 
 
 def _serialize_kyc(r: ContractIQKycCheck) -> dict:

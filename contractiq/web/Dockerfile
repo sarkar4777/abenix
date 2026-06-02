@@ -2,10 +2,11 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --include=optional
 
 FROM node:20-alpine AS builder
 WORKDIR /app
+RUN rm -f /usr/local/bin/yarn /usr/local/bin/yarnpkg && rm -rf /opt/yarn-* 2>/dev/null || true
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Create empty public dir if missing (Next.js expects it)
@@ -24,6 +25,7 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 # for local dev the default fallback in next.config.js handles it.
 ARG CONTRACTIQ_API_INTERNAL_URL=http://contractiq-api:8001
 ENV CONTRACTIQ_API_INTERNAL_URL=$CONTRACTIQ_API_INTERNAL_URL
+ENV NODE_OPTIONS=--max-old-space-size=6144
 RUN npm run build
 
 FROM node:20-alpine AS runner

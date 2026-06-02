@@ -9,6 +9,9 @@ import {
   Building2, BarChart3, Target, Clock, Zap, DollarSign,
   ArrowRight, CheckCircle2, XCircle, Activity, FileCheck2,
 } from 'lucide-react';
+import TrafficLightDashboard from './components/TrafficLightDashboard';
+import ComplianceAlertsTicker from './components/ComplianceAlertsTicker';
+import DataSourcePanel from '../components/DataSourcePanel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return localStorage.getItem('contractiq_token') || ''; }
@@ -246,12 +249,53 @@ export default function CreditRiskPage() {
             <div className="flex-1">
               <p className="text-sm font-semibold text-cyan-100">KYC Standard Check Reports</p>
               <p className="text-xs text-slate-400 mt-0.5">
-                Full MET-style KYC report with sanctions, PEP, UBO, adverse media, enforcement and country-risk screening — all agent-driven, all traceable to primary sources.
+                Full KYC report with sanctions, PEP, UBO, adverse media, enforcement and country-risk screening — all agent-driven, all traceable to primary sources.
               </p>
             </div>
             <ArrowRight className="w-5 h-5 text-cyan-400" />
           </div>
         </a>
+
+        <TrafficLightDashboard />
+        <ComplianceAlertsTicker />
+        <DataSourcePanel
+          title="Where this data comes from in production"
+          description="Counterparty risk + KYC + permits + alerts blend deterministic seed rows with Abenix-agent-driven feeds against the systems below. Live-tier sources execute through Abenix tools so credentials, rate limits, and audit trails live in one place."
+          groups={[
+            {
+              category: 'Sanctions + PEP screening',
+              sources: [
+                { name: 'OFAC SDN List',  role: 'US Treasury — daily refresh, primary sanctions list', status: 'live', url: 'https://sanctionslist.ofac.treas.gov' },
+                { name: 'EU Consolidated Sanctions', role: 'European Council restrictive measures', status: 'live', url: 'https://data.europa.eu/euodp/en/data/dataset/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions' },
+                { name: 'UN Consolidated List', role: 'UN Security Council resolutions', status: 'live', url: 'https://www.un.org/securitycouncil/content/un-sc-consolidated-list' },
+                { name: 'HMT (UK) Consolidated List', role: 'UK OFSI sanctions register', status: 'live' },
+                { name: 'OpenSanctions', role: 'Aggregator across 100+ lists, used for breadth', status: 'live', url: 'https://www.opensanctions.org' },
+                { name: 'World-Check (Refinitiv)', role: 'Premium PEP + adverse-media — keyed in Abenix', status: 'configurable' },
+                { name: 'LexisNexis Risk Solutions', role: 'Identity + PEP fallback', status: 'configurable' },
+              ],
+            },
+            {
+              category: 'Credit ratings + bureau',
+              sources: [
+                { name: "S&P Global Ratings", role: 'Long-term issuer ratings via Rating Xpress API', status: 'configurable' },
+                { name: "Moody's Investors Service", role: 'Issuer ratings + outlooks via Moody\'s API', status: 'configurable' },
+                { name: 'Fitch Connect', role: 'Fitch sovereign + corporate ratings', status: 'configurable' },
+                { name: 'Dun & Bradstreet', role: 'Private-company D-U-N-S + paydex', status: 'planned' },
+                { name: 'Creditsafe', role: 'EU SME bureau coverage', status: 'planned' },
+              ],
+            },
+            {
+              category: 'Regulatory + adverse media',
+              sources: [
+                { name: 'FERC eLibrary', role: 'Market-Based Rate authorities + filings', status: 'configurable', url: 'https://elibrary.ferc.gov' },
+                { name: 'EPA ECHO', role: 'Enforcement & compliance history', status: 'configurable', url: 'https://echo.epa.gov' },
+                { name: 'PHMSA Operator Search', role: 'US pipeline operator permit + incident data', status: 'configurable' },
+                { name: 'Companies House / Bundesanzeiger / RCS', role: 'Beneficial-ownership + filings in UK/DE/FR', status: 'configurable' },
+                { name: 'GDELT + Reuters Connect', role: 'Adverse-media event stream', status: 'planned' },
+              ],
+            },
+          ]}
+        />
 
         {/* KPI Strip */}
         <div className="grid grid-cols-5 gap-4">

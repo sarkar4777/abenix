@@ -913,6 +913,216 @@ export default function ContractIQHelpPage() {
           </ol>
         </Section>
 
+        {/* ── Counterparty data — where every number comes from ── */}
+        <Section title="Counterparty data — how every number on the credit-risk pages stays live" icon={ShieldCheck} defaultOpen={true}>
+          <p>
+            E&amp;C-Copilot never carries third-party API keys and never invents numbers. Every counterparty figure (financials,
+            ratios, ratings, permits, sanctions hits, adverse-media) is either: (a) a stored row from a previous agent refresh,
+            with a visible <em>Source · timestamp</em> badge, or (b) explicitly empty with a <em>&quot;configure API key&quot;</em>
+            panel. There is no third state — no &quot;loading…&quot; that secretly shows fake data.
+          </p>
+
+          <h4 className="text-white font-semibold pt-3">The refresh pipeline (one click → eight tools)</h4>
+          <p>
+            Hit <strong>Refresh from sources</strong> on any counterparty. The contractiq-api routes the request to Abenix,
+            which fires the <code>ciq-counterparty-refresher</code> orchestrator. That agent fans out to three specialists,
+            each of which calls one or more deterministic tools. Every tool result is written back to Postgres with a
+            provenance row; the page polls + re-renders with fresh data + freshly stamped badges.
+          </p>
+
+          <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 p-4 my-2 overflow-x-auto">
+            <svg viewBox="0 0 1100 380" className="w-full h-auto min-w-[900px]">
+              <defs>
+                <marker id="cprov-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+                </marker>
+              </defs>
+              <text x="550" y="20" textAnchor="middle" fill="#94a3b8" fontSize="11" fontWeight="bold">REFRESH FLOW — END TO END</text>
+
+              <rect x="20" y="40" width="180" height="64" rx="10" fill="#0f172a" stroke="#34d399" />
+              <text x="110" y="64" textAnchor="middle" fill="#a7f3d0" fontSize="12" fontWeight="bold">User</text>
+              <text x="110" y="84" textAnchor="middle" fill="#94a3b8" fontSize="10">clicks &quot;Refresh from sources&quot;</text>
+
+              <rect x="220" y="40" width="180" height="64" rx="10" fill="#0f172a" stroke="#06b6d4" />
+              <text x="310" y="62" textAnchor="middle" fill="#a5f3fc" fontSize="12" fontWeight="bold">contractiq-api</text>
+              <text x="310" y="80" textAnchor="middle" fill="#94a3b8" fontSize="10">POST /counterparties/{`{id}`}/refresh</text>
+              <text x="310" y="94" textAnchor="middle" fill="#94a3b8" fontSize="10">→ Abenix.execute()</text>
+
+              <rect x="420" y="40" width="200" height="64" rx="10" fill="#0f172a" stroke="#a78bfa" strokeWidth="2" />
+              <text x="520" y="62" textAnchor="middle" fill="#ddd6fe" fontSize="12" fontWeight="bold">ciq-counterparty-refresher</text>
+              <text x="520" y="80" textAnchor="middle" fill="#94a3b8" fontSize="10">orchestrator agent (Abenix)</text>
+              <text x="520" y="94" textAnchor="middle" fill="#94a3b8" fontSize="10">fans out 3 specialists</text>
+
+              <line x1="200" y1="72" x2="220" y2="72" stroke="#475569" markerEnd="url(#cprov-arr)" />
+              <line x1="400" y1="72" x2="420" y2="72" stroke="#475569" markerEnd="url(#cprov-arr)" />
+
+              <rect x="660" y="40" width="180" height="64" rx="10" fill="#0f172a" stroke="#10b981" />
+              <text x="750" y="62" textAnchor="middle" fill="#a7f3d0" fontSize="12" fontWeight="bold">ciq-financial-extractor</text>
+              <text x="750" y="80" textAnchor="middle" fill="#94a3b8" fontSize="10">edgar_filings · companies_house</text>
+              <text x="750" y="94" textAnchor="middle" fill="#94a3b8" fontSize="10">bundesanzeiger_filings</text>
+
+              <rect x="660" y="120" width="180" height="64" rx="10" fill="#0f172a" stroke="#f59e0b" />
+              <text x="750" y="142" textAnchor="middle" fill="#fde68a" fontSize="12" fontWeight="bold">ciq-permit-checker</text>
+              <text x="750" y="160" textAnchor="middle" fill="#94a3b8" fontSize="10">ferc_elibrary · epa_echo</text>
+              <text x="750" y="174" textAnchor="middle" fill="#94a3b8" fontSize="10">phmsa_lookup</text>
+
+              <rect x="660" y="200" width="180" height="64" rx="10" fill="#0f172a" stroke="#06b6d4" />
+              <text x="750" y="222" textAnchor="middle" fill="#a5f3fc" fontSize="12" fontWeight="bold">ciq-rating-fetcher</text>
+              <text x="750" y="240" textAnchor="middle" fill="#94a3b8" fontSize="10">spg_ratings · moodys_api</text>
+              <text x="750" y="254" textAnchor="middle" fill="#94a3b8" fontSize="10">fitch_connect</text>
+
+              <line x1="620" y1="72" x2="660" y2="72" stroke="#475569" markerEnd="url(#cprov-arr)" />
+              <line x1="620" y1="72" x2="660" y2="152" stroke="#475569" markerEnd="url(#cprov-arr)" />
+              <line x1="620" y1="72" x2="660" y2="232" stroke="#475569" markerEnd="url(#cprov-arr)" />
+
+              <rect x="880" y="40" width="200" height="224" rx="10" fill="#0f172a" stroke="#7c3aed" strokeWidth="2" />
+              <text x="980" y="64" textAnchor="middle" fill="#ddd6fe" fontSize="12" fontWeight="bold">Postgres writeback</text>
+              <text x="980" y="92" textAnchor="middle" fill="#94a3b8" fontSize="10">contractiq_financial_statements</text>
+              <text x="980" y="108" textAnchor="middle" fill="#94a3b8" fontSize="10">contractiq_financial_ratios</text>
+              <text x="980" y="124" textAnchor="middle" fill="#94a3b8" fontSize="10">contractiq_regulatory_permits</text>
+              <text x="980" y="140" textAnchor="middle" fill="#94a3b8" fontSize="10">contractiq_counterparties.credit_rating</text>
+              <text x="980" y="170" textAnchor="middle" fill="#bbf7d0" fontSize="10">+ provenance row per write</text>
+              <text x="980" y="186" textAnchor="middle" fill="#94a3b8" fontSize="10">{`{ tool, source_url, fetched_at,`}</text>
+              <text x="980" y="200" textAnchor="middle" fill="#94a3b8" fontSize="10">{`  raw_response_id, confidence }`}</text>
+              <text x="980" y="232" textAnchor="middle" fill="#fbbf24" fontSize="10">UI polls + paints provenance</text>
+              <text x="980" y="248" textAnchor="middle" fill="#fbbf24" fontSize="10">badge on every cell</text>
+
+              <line x1="840" y1="72"  x2="880" y2="100" stroke="#475569" markerEnd="url(#cprov-arr)" />
+              <line x1="840" y1="152" x2="880" y2="160" stroke="#475569" markerEnd="url(#cprov-arr)" />
+              <line x1="840" y1="232" x2="880" y2="200" stroke="#475569" markerEnd="url(#cprov-arr)" />
+
+              <rect x="20" y="300" width="1060" height="60" rx="10" fill="#0f172a" stroke="#34d399" strokeDasharray="4 3" />
+              <text x="550" y="324" textAnchor="middle" fill="#a7f3d0" fontSize="12" fontWeight="bold">DAG drawer (right rail on every page) shows the orchestrator + 3 specialists + every tool call live · click any node for the raw response</text>
+              <text x="550" y="346" textAnchor="middle" fill="#94a3b8" fontSize="10">All agent + tool logs are persisted in Abenix; E&amp;C-Copilot is a read-only viewer over the Abenix execution stream</text>
+            </svg>
+          </div>
+
+          <h4 className="text-white font-semibold pt-3">The 8 tools — what each does, where it pulls from</h4>
+          <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-900/60 text-slate-400 text-[10px] uppercase tracking-wider">
+                <tr>
+                  <th className="text-left px-3 py-2">Tool</th>
+                  <th className="text-left px-3 py-2">Source</th>
+                  <th className="text-left px-3 py-2">Cost</th>
+                  <th className="text-left px-3 py-2">What it returns</th>
+                  <th className="text-left px-3 py-2">Coverage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ['edgar_filings',          'SEC EDGAR XBRL · companyfacts.json', 'Free',         'Last 5y B/S + IS + CF as a structured dict; cites CIK + filing accession', 'US listed / ADRs (6 of 12 demo CPs)'],
+                  ['companies_house',        'UK Companies House REST',            'Free w/ key',  'Filings index + financial-overview + officer list',                     'UK-incorporated CPs'],
+                  ['bundesanzeiger_filings', 'Bundesanzeiger publication portal',  'Free (scrape)', 'German Annual Reports (Jahresabschluss)',                              'DE-incorporated CPs (RWE, etc.)'],
+                  ['ferc_elibrary',          'FERC eLibrary search',               'Free',         'MBR authority + tariff filings + dockets + expiry',                    'US power + gas market participants'],
+                  ['epa_echo',               'EPA ECHO REST',                       'Free',         'Title-V permits + enforcement history + violations',                   'US-permitted CPs'],
+                  ['phmsa_lookup',           'PHMSA Operator Search',              'Free',         'Pipeline operator ID + incident history',                              'US pipeline operators'],
+                  ['spg_ratings_api',        "S&P Global Capital IQ",              'Paid · keyed', 'Issuer rating + outlook + last action date',                           'Any rated entity'],
+                  ['moodys_api',             "Moody's Issuer API",                 'Paid · keyed', 'Issuer rating + outlook + credit opinion link',                         'Any rated entity'],
+                ].map(r => (
+                  <tr key={r[0]} className="border-t border-slate-800/60 hover:bg-slate-800/30">
+                    <td className="px-3 py-2 font-mono text-emerald-300 text-[11px]">{r[0]}</td>
+                    <td className="px-3 py-2 text-slate-300">{r[1]}</td>
+                    <td className="px-3 py-2 text-slate-400">{r[2]}</td>
+                    <td className="px-3 py-2 text-slate-300">{r[3]}</td>
+                    <td className="px-3 py-2 text-slate-400">{r[4]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-slate-500 italic mt-2">
+            Tools live in <Code>apps/agent-runtime/engine/tools/contractiq_*.py</Code>. Agents in <Code>packages/db/seeds/agents/ciq_counterparty_*.yaml</Code>.
+            Paid-API tools read keys from <Code>$CONTRACTIQ_SPG_API_KEY</Code> / <Code>$CONTRACTIQ_MOODYS_API_KEY</Code> in the abenix-secrets ConfigMap;
+            without the key set, the tool returns <code>{`{ status: "needs_configuration", instructions: "..." }`}</code> — there is no fallback to mock data.
+          </p>
+
+          <h4 className="text-white font-semibold pt-3">Why this design lands a demo</h4>
+          <ul className="list-disc pl-5 space-y-1 text-[13px]">
+            <li><strong>Every number is auditable.</strong> Click any cell → see source URL + fetched-at + raw-response ID. Pass a regulator audit on Tuesday.</li>
+            <li><strong>Free sources go live immediately.</strong> 5 of 8 tools are EDGAR / Companies House / Bundesanzeiger / FERC / EPA / PHMSA — no contract negotiation, no API key procurement.</li>
+            <li><strong>Paid sources fail loud, not silent.</strong> If S&amp;P key isn&apos;t set, the page shows &quot;Configure your S&amp;P key in Abenix Integrations&quot;. No mocked &quot;A+ · S&amp;P&quot; that&apos;s actually fake.</li>
+            <li><strong>Refresh is observable.</strong> The DAG drawer on the right rail shows the orchestrator + 3 specialists + every tool call as it runs — the demo viewer literally sees the agent fan-out.</li>
+            <li><strong>Re-runs are cheap.</strong> Each tool caches by (entity, source-version) so re-clicking Refresh within 24h returns cached results without re-hitting the source.</li>
+          </ul>
+
+          <h4 className="text-white font-semibold pt-3">Coverage matrix per counterparty</h4>
+          <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-900/60 text-slate-400 text-[10px] uppercase tracking-wider">
+                <tr>
+                  <th className="text-left px-3 py-2">Counterparty</th>
+                  <th className="text-left px-3 py-2">Financials</th>
+                  <th className="text-left px-3 py-2">Permits</th>
+                  <th className="text-left px-3 py-2">Ratings</th>
+                  <th className="text-left px-3 py-2">Sanctions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ['Shell plc',            'EDGAR (20-F)',         'FERC + EPA',      "S&P · Moody's (paid)",  'OFAC · EU · UN · OpenSanctions'],
+                  ['BP plc',               'EDGAR + Companies H.', 'FERC + EPA',      "S&P · Moody's (paid)",  'OFAC · EU · UN · OpenSanctions'],
+                  ['Equinor ASA',          'EDGAR (20-F)',         'FERC + EPA',      "S&P · Moody's (paid)",  'OFAC · EU · UN · OpenSanctions'],
+                  ['TotalEnergies SE',     'EDGAR (20-F)',         'FERC + EPA',      "S&P · Moody's (paid)",  'OFAC · EU · UN · OpenSanctions'],
+                  ['Exxon Mobil Corp',     'EDGAR (10-K)',         'FERC + EPA + PHMSA','S&P · Moody\'s (paid)','OFAC · EU · UN · OpenSanctions'],
+                  ['Chevron Corp',         'EDGAR (10-K)',         'FERC + EPA + PHMSA','S&P · Moody\'s (paid)','OFAC · EU · UN · OpenSanctions'],
+                  ['RWE AG',               'Bundesanzeiger',       'EPA (US subsidiaries)','S&P (paid)',        'OFAC · EU · UN · OpenSanctions'],
+                  ['Iberdrola SA',         'EDGAR ADR + ES filings','FERC + EPA',      "S&P · Moody's (paid)",  'OFAC · EU · UN · OpenSanctions'],
+                  ['Engie SA',             'FR Greffe (planned)',  'FERC + EPA',      "S&P · Moody's (paid)",  'OFAC · EU · UN · OpenSanctions'],
+                  ['Glencore plc',         'EDGAR + Companies H.', 'FERC + EPA',      "S&P · Moody's (paid)",  'OFAC · EU · UN · OpenSanctions'],
+                  ['Vitol Group',          'Private — no filings', 'FERC only',       'Private (paid bureaus)', 'OFAC · EU · UN · OpenSanctions'],
+                  ['Trafigura Group',      'Private — no filings', 'FERC only',       'Private (paid bureaus)', 'OFAC · EU · UN · OpenSanctions'],
+                  ['Mercuria Energy Group','Private — no filings', 'FERC only',       'Private (paid bureaus)', 'OFAC · EU · UN · OpenSanctions'],
+                ].map(r => (
+                  <tr key={r[0]} className="border-t border-slate-800/60">
+                    <td className="px-3 py-2 text-white">{r[0]}</td>
+                    <td className="px-3 py-2 text-slate-300">{r[1]}</td>
+                    <td className="px-3 py-2 text-slate-300">{r[2]}</td>
+                    <td className="px-3 py-2 text-slate-300">{r[3]}</td>
+                    <td className="px-3 py-2 text-slate-300">{r[4]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-slate-500 italic mt-2">
+            Private trading houses (Vitol, Trafigura, Mercuria, partly Glencore) have no public filings.
+            For those CPs the financials tab shows the disclaimer <em>&quot;Private entity. Financials not available from public filings.&quot;</em> with a link to configure D&amp;B / Creditsafe / a TFCS feed.
+            We never invent a balance sheet for a private firm.
+          </p>
+
+          <h4 className="text-white font-semibold pt-3">Provenance schema (what gets written back)</h4>
+          <p>
+            Every tool call result writes one row to <Code>contractiq_data_provenance</Code> in addition to the
+            domain row (statement / permit / rating). Fields:
+          </p>
+          <pre className="text-xs bg-slate-950/60 border border-slate-800 rounded p-3 overflow-x-auto">{`{
+  target_table:      "contractiq_financial_statements",
+  target_row_id:     "5f1e...",
+  counterparty_id:   "9add...",
+  source_tool:       "edgar_filings",
+  source_url:        "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000034088&type=10-K&dateb=&owner=include&count=40",
+  source_identifier: "EDGAR · 10-K · 2024-12-31 · accn 0000034088-25-000004",
+  fetched_at:        "2026-06-02T08:14:31Z",
+  fetched_by_agent:  "ciq-financial-extractor",
+  execution_id:      "07a4...",            # links to abenix execution
+  raw_response_id:   "raw_8f2e...",        # raw payload archived for audit
+  confidence:        1.00                  # 1.0 for primary filings, <1 for parsed/derived
+}`}</pre>
+          <p className="text-[11px] text-slate-500 italic mt-2">
+            The counterparty detail page reads provenance rows alongside the data; each cell carries a small &quot;<em>EDGAR · 10-K · 2024</em>&quot; chip in the bottom-right.
+            Click it → opens the source URL in a new tab. Click the agent name → opens the live DAG in the right rail.
+          </p>
+
+          <h4 className="text-white font-semibold pt-3">How to add a new source</h4>
+          <ol className="list-decimal pl-5 space-y-1 text-[13px]">
+            <li>Drop a new tool file at <Code>apps/agent-runtime/engine/tools/contractiq_yoursource.py</Code> implementing <code>BaseTool</code>. Network calls, parsing, retry, rate-limit all live here.</li>
+            <li>Add the tool to <Code>ciq-counterparty-refresher.yaml</Code> under <code>tools:</code> and (if topical) one of the specialists.</li>
+            <li>If the source needs a key, add the env var to <Code>contractiq-secrets</Code> and document under <em>Settings → Integrations → Counterparty data sources</em>.</li>
+            <li>Re-seed agents (<Code>scripts/seed-agents.sh</Code>) — no code change needed in contractiq-api or web.</li>
+          </ol>
+        </Section>
+
         {/* ── Forecasting & Trading platform — 5 modules ── */}
         <Section title="Forecasting & Trading platform — the 5-module suite" icon={TrendingUp} defaultOpen={true}>
           <p className="text-slate-300">

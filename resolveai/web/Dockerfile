@@ -2,17 +2,18 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --include=optional
 
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
+RUN chmod -R u+rwx node_modules/.bin 2>/dev/null || true
 COPY . .
 RUN mkdir -p public
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG RESOLVEAI_API_INTERNAL_URL=http://resolveai-api:8004
 ENV RESOLVEAI_API_INTERNAL_URL=$RESOLVEAI_API_INTERNAL_URL
-RUN npm run build
+RUN npx next build
 
 FROM node:20-alpine AS runner
 WORKDIR /app

@@ -82,6 +82,21 @@ async def lifespan(app: FastAPI):
         logger.exception("Startup bootstrap failed: %s", e)
 
     try:
+        from app.core.quickwin_seed import seed_quickwin_data
+        async with SessionLocal() as db:
+            summary = await seed_quickwin_data(db)
+            logger.info(
+                "QuickWin seed: counterparties=%s statements=%s ratios=%s permits=%s alerts=%s",
+                summary.get("counterparties"),
+                summary.get("statements"),
+                summary.get("ratios"),
+                summary.get("permits"),
+                summary.get("alerts"),
+            )
+    except Exception as e:
+        logger.warning("QuickWin seed failed (non-fatal): %s", e)
+
+    try:
         api_key = os.environ.get("CONTRACTIQ_ABENIX_API_KEY", "")
         api_base = os.environ.get("ABENIX_API_URL", "http://localhost:8000")
         if api_key:
@@ -114,6 +129,15 @@ async def lifespan(app: FastAPI):
             logger.info("Skipping KB v2 bootstrap (CONTRACTIQ_ABENIX_API_KEY not set)")
     except Exception as e:
         logger.warning("KB v2 bootstrap failed (non-fatal): %s", e)
+
+    try:
+        from app.core.deps import SessionLocal
+        from app.core.quickwin_seed import seed_quickwin_data
+        async with SessionLocal() as db:
+            summary = await seed_quickwin_data(db)
+            logger.info("Quickwin seed: %s", summary)
+    except Exception as e:
+        logger.warning("Quickwin seed failed (non-fatal): %s", e)
 
     # ── Reconcile stuck extractions (pod-restart / torn SSE recovery) ──
     reconciler_task = None
@@ -188,6 +212,7 @@ from app.routers import rbac as ciq_rbac
 from app.routers import rules as ciq_rules
 from app.routers import audit as ciq_audit
 from app.routers import executions as ciq_executions
+from app.routers import quickwin as ciq_quickwin
 
 app.include_router(ciq_auth.router)
 app.include_router(ciq_contracts.router)
@@ -202,6 +227,7 @@ app.include_router(ciq_rbac.router)
 app.include_router(ciq_rules.router)
 app.include_router(ciq_audit.router)
 app.include_router(ciq_executions.router)
+app.include_router(ciq_quickwin.router)
 
 
 @app.exception_handler(Exception)

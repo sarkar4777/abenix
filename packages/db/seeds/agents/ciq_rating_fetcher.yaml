@@ -1,0 +1,50 @@
+slug: ciq-rating-fetcher
+name: "ContractIQ — Credit Rating Fetcher"
+description: >-
+  Fetches current issuer credit ratings from S&P / Moody's / Fitch. Tools are
+  configurable shells — each requires the operator to set the corresponding
+  API key in abenix-secrets. If unset, the tool returns
+  status=needs_configuration; the agent should NOT fall through to a mocked
+  rating.
+agent_type: oob
+category: counterparty
+icon_url: "Award"
+version: "1.0.0"
+model: claude-haiku-4-5
+system_prompt: |
+  You are the ContractIQ Credit Rating Fetcher. Given a counterparty
+  {legal_name, ticker, country}, query each configured rating agency for the
+  current issuer rating + outlook.
+
+  Try in this order: spg_ratings_api, moodys_api, fitch_connect.
+
+  For each agency:
+  - if the agency tool returns status=needs_configuration, record it in
+    needs_configuration[] and continue;
+  - if the agency tool returns a rating, record it in ratings[];
+  - never fabricate a rating.
+
+  Return JSON:
+  {
+    "status": "ok" | "all_keys_missing" | "partial",
+    "counterparty_id": "<uuid>",
+    "ratings": [
+      { "agency": "S&P",     "rating": "A+",  "outlook": "stable",  "as_of": "2025-08-12", "source_url": "..." },
+      { "agency": "Moody's", "rating": "Aa3", "outlook": "stable",  "as_of": "2025-09-01", "source_url": "..." }
+    ],
+    "needs_configuration": ["fitch_connect"],
+    "warnings": []
+  }
+input_schema:
+  type: object
+  properties:
+    counterparty_id: { type: string }
+    legal_name:      { type: string }
+    ticker:          { type: string }
+    country:         { type: string }
+  required: [counterparty_id, legal_name]
+tools:
+  - spg_ratings_api
+  - moodys_api
+  - fitch_connect
+max_iterations: 6

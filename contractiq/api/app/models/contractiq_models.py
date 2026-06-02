@@ -532,7 +532,7 @@ class ContractIQCreditRisk(UUIDMixin, Base):
 
 
 class ContractIQKycCheck(UUIDMixin, Base):
-    """KYC Standard Check Report — mirrors the MET Group template."""
+    """KYC Standard Check Report — mirrors the industry-standard KYC template."""
     __tablename__ = "contractiq_kyc_checks"
     __table_args__ = (
         Index("ix_contractiq_kyc_user", "user_id"),
@@ -1075,3 +1075,146 @@ class ContractIQMarketDataPoint(UUIDMixin, Base):
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     payload: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Quick-Win demo features: Unified Financial Data + Regulatory Permits +
+# Compliance Warnings. All persisted locally; agentic + tool logic for
+# any analysis on top of these rows lives in Abenix (not here).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class ContractIQCounterparty(UUIDMixin, Base):
+    """Canonical counterparty record. KYC + financials + permits hang off this."""
+
+    __tablename__ = "contractiq_counterparties"
+
+    legal_name: Mapped[str] = mapped_column(String(300), unique=True, index=True)
+    ticker: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    sector: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    incorporation_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    credit_rating: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    credit_rating_agency: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    credit_score_1_100: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    risk_tier: Mapped[str | None] = mapped_column(String(20), nullable=True)  # green / amber / red
+    credit_limit_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    credit_utilisation_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_kyc_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContractIQFinancialStatement(UUIDMixin, Base):
+    """Per-counterparty per-period financial statement. 5 years of history per CP."""
+
+    __tablename__ = "contractiq_financial_statements"
+    __table_args__ = (
+        Index("ix_ciq_fs_cp_period", "counterparty_id", "fiscal_year"),
+    )
+
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contractiq_counterparties.id", ondelete="CASCADE"), index=True
+    )
+    fiscal_year: Mapped[int] = mapped_column(Integer)
+    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
+    statement_type: Mapped[str] = mapped_column(String(40))  # balance_sheet | income | cash_flow
+    line_items: Mapped[dict] = mapped_column(JSONB)  # {line_label: value, ...}
+    source: Mapped[str | None] = mapped_column(String(200), nullable=True)  # "10-K 2024" / "Annual Report"
+    extracted_by: Mapped[str | None] = mapped_column(String(40), nullable=True)  # abenix agent slug if agent-ingested
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContractIQFinancialRatio(UUIDMixin, Base):
+    """Computed-deterministically ratios derived from FinancialStatement line items.
+    Persisted for change-detection + benchmarking; never LLM-guessed."""
+
+    __tablename__ = "contractiq_financial_ratios"
+    __table_args__ = (
+        Index("ix_ciq_fr_cp_year", "counterparty_id", "fiscal_year"),
+    )
+
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contractiq_counterparties.id", ondelete="CASCADE"), index=True
+    )
+    fiscal_year: Mapped[int] = mapped_column(Integer)
+    current_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quick_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    debt_to_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interest_coverage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_margin_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    return_on_assets_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    return_on_equity_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    revenue_growth_yoy_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    altman_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContractIQRegulatoryPermit(UUIDMixin, Base):
+    """Counterparty regulatory permit (FERC MBR authority, RTO membership, NRC, EPA permits, etc.)."""
+
+    __tablename__ = "contractiq_regulatory_permits"
+    __table_args__ = (
+        Index("ix_ciq_perm_cp", "counterparty_id"),
+        Index("ix_ciq_perm_expiry", "valid_to"),
+    )
+
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contractiq_counterparties.id", ondelete="CASCADE"), index=True
+    )
+    license_type: Mapped[str] = mapped_column(String(120))  # FERC_MBR | RTO_MISO | EPA_TITLE_V | ...
+    issuer: Mapped[str] = mapped_column(String(120))         # FERC / EPA / MISO / PJM / CAISO ...
+    identifier: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active | expired | revoked | pending
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContractIQComplianceAlert(UUIDMixin, Base):
+    """Real-time compliance + credit-limit alerts surfaced on the dashboard."""
+
+    __tablename__ = "contractiq_compliance_alerts"
+    __table_args__ = (
+        Index("ix_ciq_calert_cp", "counterparty_id"),
+        Index("ix_ciq_calert_active", "status", "severity"),
+    )
+
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contractiq_counterparties.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    alert_type: Mapped[str] = mapped_column(String(60))
+    # LICENSE_EXPIRING | SANCTION_LIST_ADDED | KYC_OVERDUE | CREDIT_LIMIT_BREACHED
+    # | RATING_DOWNGRADE | DOCUMENT_GAP | REGULATORY_CHANGE
+    severity: Mapped[str] = mapped_column(String(20), default="warning")  # info | warning | critical
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="open")  # open | acknowledged | resolved
+    raised_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+
+class ContractIQDataProvenance(UUIDMixin, Base):
+    __tablename__ = "contractiq_data_provenance"
+    __table_args__ = (
+        Index("ix_ciq_prov_target", "target_table", "target_row_id"),
+        Index("ix_ciq_prov_cp", "counterparty_id", "fetched_at"),
+    )
+
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contractiq_counterparties.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    target_table: Mapped[str] = mapped_column(String(80))
+    target_row_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    target_field: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_tool: Mapped[str] = mapped_column(String(80))
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    source_identifier: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    fetched_by_agent: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    raw_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

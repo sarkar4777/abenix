@@ -226,7 +226,7 @@ export default function NewKycCheckPage() {
             The agent screens sanctions (OFAC/EU/UN/UK/CA), PEPs (OpenSanctions/Wikidata),
             adverse media (GDELT/Google News/Tavily), UBOs (GLEIF/OpenCorporates/UK PSC),
             country risk (TI&nbsp;CPI/FATF/EU), and enforcement (SEC/DOJ/FCA) — scored against the
-            MET/SEE-BV standard template.
+            SEE-BV standard taxonomy.
           </p>
         </div>
 

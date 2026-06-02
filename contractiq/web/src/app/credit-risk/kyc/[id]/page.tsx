@@ -476,7 +476,7 @@ export default function KycDetailPage() {
               </section>
             )}
 
-            {/* Intermediate checks — the 10-row MET table, dark-styled */}
+            {/* Intermediate checks — the 10-row standard-template table, dark-styled */}
             <section className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">
               <header className="px-4 py-3 border-b border-slate-700/50 flex items-center justify-between">
                 <div className="flex items-center gap-2">
