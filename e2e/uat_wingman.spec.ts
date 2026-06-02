@@ -25,10 +25,10 @@ async function gotoOk(page: Page, path: string) {
 }
 
 test.describe.serial('Wingman — full browser UAT', () => {
-  test('shell renders, sidebar has all 5 use-case links', async ({ page }) => {
+  test('shell renders, sidebar exposes the surface links', async ({ page }) => {
     await gotoOk(page, '/');
-    expect(page.url()).toContain('/workbench');
-    for (const label of ['Arbitrage Workbench', 'Broker Inbox', 'Operations Watch', 'Strategy Lab', 'Knowledge Graph']) {
+    expect(page.url()).toMatch(/\/(home|workbench)$/);
+    for (const label of ['Arbitrage Workbench', 'Broker Inbox', 'Operations Watch', 'Strategy Lab', 'Knowledge Graph', 'Forward Scenarios', 'Approvals']) {
       await expect(page.getByText(label).first()).toBeVisible({ timeout: 10_000 });
     }
   });
@@ -43,7 +43,7 @@ test.describe.serial('Wingman — full browser UAT', () => {
 
   test('workbench renders the corridor cards', async ({ page }) => {
     await gotoOk(page, '/workbench');
-    await expect(page.getByText('Trading Strategies').first()).toBeVisible();
+    await expect(page.getByText(/Forward net-arb|ARBITRAGE WORKBENCH/i).first()).toBeVisible();
     await expect(page.getByText(/US Gulf Coast.*North West Europe/i).first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(/US Gulf Coast.*Far East/i).first()).toBeVisible();
     // Data-honesty badge present.

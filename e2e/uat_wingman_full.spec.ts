@@ -127,10 +127,10 @@ test.describe('Wingman — full browser UAT', () => {
 
   test('scenarios: page renders selector + run button + Bayesian-prior pipeline label', async ({ page }) => {
     await gotoOk(page, '/scenarios');
-    await expect(page.getByText(/What might happen, weighted/i).first()).toBeVisible();
+    await expect(page.getByText(/Forward Weighted Scenario Curves|FORWARD SCENARIOS/i).first()).toBeVisible();
     await expect(page.locator('[data-testid^="corridor-chip-"]').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('run-forecast')).toBeVisible();
-    await expect(page.getByText(/Bayesian prior/i).first()).toBeVisible();
+    await expect(page.getByText(/Bayesian|GaussianNB/i).first()).toBeVisible();
     await shot(page, 'scenarios-landing');
   });
 
@@ -163,9 +163,15 @@ test.describe('Wingman — full browser UAT', () => {
 
   test('inbox: parse one email → structured offer', async ({ page }) => {
     await gotoOk(page, '/inbox');
-    const parseButton = page.getByRole('button', { name: /Extract structured offer/i }).first();
-    await expect(parseButton).toBeVisible({ timeout: 10_000 });
-    await parseButton.click();
+    const buttons = page.getByRole('button', { name: /Extract structured offer/i });
+    await expect(buttons.first()).toBeVisible({ timeout: 10_000 });
+    const count = await buttons.count();
+    let clicked = false;
+    for (let i = 0; i < count; i++) {
+      const b = buttons.nth(i);
+      if (await b.isEnabled().catch(() => false)) { await b.click(); clicked = true; break; }
+    }
+    expect(clicked, 'at least one Extract structured offer button enabled').toBeTruthy();
     await expect(page.getByText('Volume').first()).toBeVisible({ timeout: 180_000 });
     await expect(page.getByText('Grade').first()).toBeVisible();
     await expect(page.getByText('Port').first()).toBeVisible();

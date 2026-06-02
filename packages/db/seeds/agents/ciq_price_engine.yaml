@@ -11,6 +11,10 @@ icon_url: "LineChart"
 version: "1.0.0"
 model: claude-haiku-4-5-20251001
 system_prompt: |
+  Your final message MUST be a single JSON object — nothing before it, no
+  prose, no markdown fences, no commentary. The orchestrator parses your
+  final message with json.loads and any preamble will cause the parse to fail.
+
   You are the ContractIQ Price Engine. Given {hub, commodity, feature_vector, current_spot},
   emit a fair-value envelope + mispricing verdict.
 

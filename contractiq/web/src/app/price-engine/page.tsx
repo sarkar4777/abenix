@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { LineChart, AlertOctagon, Loader2, AlertTriangle } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
+import { useContractIQExecutions } from '../components/ContractIQExecutionsProvider';
 
 type Hub = 'TTF' | 'NBP' | 'THE' | 'PEG' | 'PSV' | 'CEGH' | 'DE' | 'FR' | 'NL' | 'BE' | 'AT';
 type Commodity = 'gas' | 'power';
@@ -33,6 +34,7 @@ const POWER_FV: Record<string, number> = {
 type EngineResult = {
   hub?: string;
   model_used?: string;
+  execution_id?: string;
   current_spot?: number;
   fair_value_eur_mwh?: number;
   sigma?: number;
@@ -49,6 +51,7 @@ export default function PriceEnginePage() {
   const [stress, setStress] = useState(0);
   const [result, setResult] = useState<EngineResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const { selectExecutionForDrawer } = useContractIQExecutions();
 
   const hubDef = HUB_DEFS.find(h => h.id === hubId)!;
 
@@ -71,7 +74,9 @@ export default function PriceEnginePage() {
           current_spot: currentSpot,
         }),
       });
-      setResult(await res.json());
+      const j = await res.json();
+      setResult(j);
+      if (j?.execution_id) selectExecutionForDrawer(j.execution_id);
     } catch (e: any) {
       setResult({ error: String(e), summary: { warnings: [String(e)] } });
     } finally {

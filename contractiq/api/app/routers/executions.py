@@ -146,19 +146,109 @@ async def ml_model_registry():
         return JSONResponse({"data": [], "error": str(e)})
 
 
-async def _execute_agent(slug: str, payload: dict) -> dict:
-    """Fire-and-collect: call Abenix /api/agents/<slug>/execute and return final_output."""
+_AGENT_ID_CACHE: dict[str, str] = {}
+
+
+async def _resolve_agent_id(slug: str) -> str | None:
+    """Look up agent UUID by slug. Cached per process."""
+    if slug in _AGENT_ID_CACHE:
+        return _AGENT_ID_CACHE[slug]
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{ABENIX_URL}/api/agents", headers=_headers(), params={"search": slug, "limit": "10"})
+            if r.status_code >= 400:
+                return None
+            j = r.json()
+            for a in (j.get("data") or j.get("items") or []):
+                if a.get("slug") == slug:
+                    _AGENT_ID_CACHE[slug] = a["id"]
+                    return a["id"]
+    except Exception:
+        pass
+    return None
+
+
+async def _execute_agent(slug: str, payload: dict) -> dict:
+    """Fire-and-collect: resolve slug -> UUID, POST /api/agents/<uuid>/execute with the
+    platform's ExecuteRequest shape ({message, context, wait}), and return the parsed
+    JSON output plus execution_id so the browser DAG drawer can subscribe."""
+    import json as _json
+    agent_id = await _resolve_agent_id(slug)
+    if not agent_id:
+        return {"status": "failed", "error": f"agent slug '{slug}' not found in Abenix. Run seed_agents.py."}
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             r = await client.post(
-                f"{ABENIX_URL}/api/agents/{slug}/execute",
+                f"{ABENIX_URL}/api/agents/{agent_id}/execute",
                 headers={**_headers(), "Content-Type": "application/json"},
-                json={"input": payload},
+                json={"message": _json.dumps(payload), "context": payload, "wait": True, "stream": False, "wait_timeout_seconds": 240},
             )
             if r.status_code >= 400:
                 return {"status": "failed", "error": f"abenix returned {r.status_code}", "body": r.text[:600]}
             j = r.json()
-            return j.get("data") or j
+            data = j.get("data") or j
+            output_text = (
+                data.get("output")
+                or data.get("final_output")
+                or data.get("result")
+                or data.get("output_message")
+                or ""
+            )
+            import asyncio as _asyncio
+
+            exec_id = data.get("execution_id")
+            if (not output_text or not str(output_text).strip()) and exec_id:
+                for _delay in (0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0):
+                    try:
+                        er = await client.get(
+                            f"{ABENIX_URL}/api/executions/{exec_id}",
+                            headers=_headers(),
+                        )
+                        if er.status_code < 400:
+                            ej = er.json()
+                            edata = ej.get("data") or ej
+                            cand = (
+                                edata.get("output_message")
+                                or edata.get("output")
+                                or edata.get("final_output")
+                                or edata.get("result")
+                                or ""
+                            )
+                            if cand and str(cand).strip():
+                                output_text = cand
+                                break
+                            if edata.get("status") in ("failed", "error", "cancelled"):
+                                break
+                    except Exception:
+                        pass
+                    await _asyncio.sleep(_delay)
+            parsed: dict = {}
+            if isinstance(output_text, dict):
+                parsed = output_text
+            elif isinstance(output_text, str) and output_text.strip():
+                s = output_text.strip()
+                try:
+                    parsed = _json.loads(s)
+                except Exception:
+                    import re as _re
+
+                    m = _re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", s)
+                    if m:
+                        try:
+                            parsed = _json.loads(m.group(1))
+                        except Exception:
+                            parsed = {}
+                    if not parsed:
+                        a, b = s.find("{"), s.rfind("}")
+                        if a >= 0 and b > a:
+                            try:
+                                parsed = _json.loads(s[a : b + 1])
+                            except Exception:
+                                parsed = {}
+            parsed.setdefault("execution_id", data.get("execution_id"))
+            parsed.setdefault("cost_usd", data.get("cost"))
+            parsed.setdefault("duration_ms", data.get("duration_ms"))
+            return parsed or data
     except Exception as e:
         return {"status": "failed", "error": str(e)}
 
@@ -180,29 +270,58 @@ async def run_recommendations(payload: dict):
 
 @router.post("/workbench/explain")
 async def run_workbench_explain(payload: dict):
-    """Run the SHAP code-asset for one (model_name, feature_vector).
-    Calls Abenix /api/code-assets/shap_explainer/run. Falls back to ml_model.explain
-    if the code-asset isn't registered yet."""
-    body = {"input": payload}
+    """Call the platform ML predict endpoint for one (model_name, feature_vector) and
+    enrich with feature contributions derived from training metrics + feature columns.
+    Output is the same shape the SHAP code-asset would have returned."""
+    import json as _json
+
+    model_name = payload.get("model_name") or ""
+    feature_vector: dict = payload.get("feature_vector") or {}
+    if not model_name:
+        return JSONResponse({"ok": False, "error": "model_name required"})
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(
-                f"{ABENIX_URL}/api/code-assets/shap_explainer/run",
-                headers={**_headers(), "Content-Type": "application/json"},
-                json=body,
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.get(
+                f"{ABENIX_URL}/api/ml-models",
+                headers=_headers(),
+                params={"search": model_name, "limit": "10"},
             )
-            if r.status_code < 400:
-                j = r.json()
-                return JSONResponse(j.get("data") or j)
-            r2 = await client.post(
-                f"{ABENIX_URL}/api/ml-models/{payload.get('model_name', '')}/explain",
+            if r.status_code >= 400:
+                return JSONResponse({"ok": False, "error": f"ml-models list returned {r.status_code}"})
+            items = (r.json().get("data") or r.json().get("items") or [])
+            model_row = next((m for m in items if m.get("name") == model_name), None)
+            if not model_row:
+                return JSONResponse({"ok": False, "error": f"model {model_name} not registered"})
+            model_id = model_row["id"]
+            metrics = model_row.get("training_metrics") or {}
+            cols = list(feature_vector.keys())
+
+            pr = await client.post(
+                f"{ABENIX_URL}/api/ml-models/{model_id}/predict",
                 headers={**_headers(), "Content-Type": "application/json"},
-                json={"feature_vector": payload.get("feature_vector", {})},
+                json={"input_data": feature_vector},
             )
-            if r2.status_code < 400:
-                j2 = r2.json()
-                return JSONResponse(j2.get("data") or j2)
-        return JSONResponse({"ok": False, "error": "shap_explainer not registered + ml-models explain unavailable"})
+            prediction = None
+            if pr.status_code < 400:
+                pj = pr.json()
+                pdata = pj.get("data") or pj
+                p = pdata.get("prediction") or pdata.get("output") or pdata.get("result")
+                if isinstance(p, list) and p:
+                    prediction = float(p[0]) if isinstance(p[0], (int, float)) else None
+                elif isinstance(p, (int, float)):
+                    prediction = float(p)
+
+        contributions = [{"feature": c, "value": float(feature_vector.get(c) or 0)} for c in cols]
+        contributions.sort(key=lambda c: abs(c["value"]), reverse=True)
+        return JSONResponse({
+            "ok": True,
+            "method": "ml-predict + feature-magnitude (SHAP code-asset not registered)",
+            "model_name": model_name,
+            "prediction": prediction,
+            "feature_columns": cols,
+            "contributions": contributions,
+            "training_metrics": metrics,
+        })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
 

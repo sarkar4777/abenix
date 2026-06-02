@@ -59,6 +59,37 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+_LAST_USED_UPDATED: dict[uuid.UUID, datetime] = {}
+_LAST_USED_THROTTLE_S = 60.0
+
+
+async def _touch_api_key_last_used(api_key_id: uuid.UUID) -> None:
+    """Update api_keys.last_used_at on a SEPARATE session that commits immediately.
+
+    Holding the row lock for the lifetime of the request (the previous behaviour)
+    serialised concurrent API-key requests on the same key — under load that
+    presented as a 30s+ hang. Doing the update on its own short-lived session,
+    throttled to once per minute per key, releases the lock instantly.
+    """
+    now = datetime.now(timezone.utc)
+    prev = _LAST_USED_UPDATED.get(api_key_id)
+    if prev and (now - prev).total_seconds() < _LAST_USED_THROTTLE_S:
+        return
+    _LAST_USED_UPDATED[api_key_id] = now
+    try:
+        async with async_session() as side:
+            from sqlalchemy import update as _sa_update
+
+            await side.execute(
+                _sa_update(ApiKey)
+                .where(ApiKey.id == api_key_id)
+                .values(last_used_at=now)
+            )
+            await side.commit()
+    except Exception:
+        _LAST_USED_UPDATED.pop(api_key_id, None)
+
+
 async def _authenticate_via_api_key(raw_key: str, db: AsyncSession) -> User | None:
     """Authenticate a request using an af_ API key. Returns the User or None."""
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
@@ -69,32 +100,26 @@ async def _authenticate_via_api_key(raw_key: str, db: AsyncSession) -> User | No
     if not api_key:
         return None
 
-    # Check expiry
     if api_key.expires_at and api_key.expires_at < datetime.now(timezone.utc):
         return None
 
-    # Check API key usage limits
     if (
         api_key.max_monthly_tokens
         and (api_key.tokens_used or 0) >= api_key.max_monthly_tokens
     ):
-        return None  # Key token quota exhausted
+        return None
     if api_key.max_monthly_cost and float(api_key.cost_used or 0) >= float(
         api_key.max_monthly_cost
     ):
-        return None  # Key cost quota exhausted
+        return None
 
-    # Update last_used_at
-    api_key.last_used_at = datetime.now(timezone.utc)
-    await db.flush()
+    await _touch_api_key_last_used(api_key.id)
 
-    # Fetch the associated user
     result = await db.execute(
         select(User).where(User.id == api_key.user_id, User.is_active.is_(True))
     )
     user = result.scalar_one_or_none()
 
-    # Attach scopes to user object for downstream checking
     if user and api_key.scopes:
         user._api_key_scopes = api_key.scopes  # type: ignore[attr-defined]
 

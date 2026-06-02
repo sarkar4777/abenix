@@ -73,6 +73,11 @@ test.describe.serial('Wingman Mispricing Lens — end-to-end', () => {
     test.setTimeout(60_000);
     await afLogin(page);
     await gotoOk(page, `${BASE_AF}/agents`, 3500);
+    const search = page.getByPlaceholder(/search/i).first();
+    if (await search.isVisible().catch(() => false)) {
+      await search.fill('mispricing');
+      await page.waitForTimeout(900);
+    }
     const text = page.getByText(/Wingman Mispricing Extractor/i).first();
     await expect(text).toBeVisible({ timeout: 20_000 });
   });

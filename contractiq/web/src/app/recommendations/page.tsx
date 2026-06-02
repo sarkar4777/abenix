@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { BellRing, ArrowUpRight, ShieldCheck, FileText, Sparkles, Loader2, AlertTriangle } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
+import { useContractIQExecutions } from '../components/ContractIQExecutionsProvider';
 
 type Evidence = { kind: string; source: string; value: any };
 type Rec = {
@@ -19,6 +20,7 @@ type Rec = {
 
 type EngineOut = {
   recommendations?: Rec[];
+  execution_id?: string;
   summary?: { live_sources?: string[]; needs_configuration?: string[]; warnings?: string[] };
   error?: string;
 };
@@ -27,6 +29,7 @@ export default function RecommendationsPage() {
   const [out, setOut] = useState<EngineOut | null>(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | Rec['category']>('all');
+  const { selectExecutionForDrawer } = useContractIQExecutions();
 
   const run = async () => {
     setLoading(true);
@@ -39,7 +42,9 @@ export default function RecommendationsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenant_id }),
       });
-      setOut(await res.json());
+      const j = await res.json();
+      setOut(j);
+      if (j?.execution_id) selectExecutionForDrawer(j.execution_id);
     } catch (e: any) {
       setOut({ error: String(e), summary: { warnings: [String(e)] } });
     } finally {

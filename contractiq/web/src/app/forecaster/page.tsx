@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TrendingUp, Factory, Users, Database, Sparkles, Loader2, AlertTriangle } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
+import { useContractIQExecutions } from '../components/ContractIQExecutionsProvider';
 
 type Surface = 'residential' | 'industrial' | 'storage';
 
@@ -18,6 +19,7 @@ type Driver = { feature: string; importance?: number; coef?: number; rank: numbe
 type ForecastResult = {
   status?: string;
   model_used?: string;
+  execution_id?: string;
   forecast?: Point[];
   drivers?: Driver[];
   model_metrics?: { mae?: number; rmse?: number; mape?: number };
@@ -33,6 +35,7 @@ export default function ForecasterPage() {
   const [result, setResult] = useState<ForecastResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [counterpartyId, setCounterpartyId] = useState<string>('');
+  const { selectExecutionForDrawer } = useContractIQExecutions();
 
   useEffect(() => {
     authFetch('/api/contractiq/counterparties').then(r => r.json()).then(j => {
@@ -63,6 +66,7 @@ export default function ForecasterPage() {
       });
       const j = await res.json();
       setResult(j);
+      if (j?.execution_id) selectExecutionForDrawer(j.execution_id);
     } catch (e: any) {
       setResult({ status: 'failed', error: String(e), summary: { warnings: [String(e)] } });
     } finally {

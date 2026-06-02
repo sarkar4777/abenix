@@ -18,6 +18,7 @@ type ShapResult = {
   ok?: boolean;
   method?: string;
   model_name?: string;
+  execution_id?: string;
   prediction?: number;
   feature_columns?: string[];
   contributions?: { feature: string; value: number }[];

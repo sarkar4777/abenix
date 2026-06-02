@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-const BASE = process.env.WINGMAN_BASE || 'http://localhost:3001';
+const BASE = process.env.WINGMAN_BASE || process.env.BASE_WM || 'http://localhost:3006';
 const ABENIX_BASE = process.env.BASE || 'http://localhost:3000';
 const API = process.env.API || 'http://localhost:8000';
 const EMAIL = process.env.AF_EMAIL || 'admin@abenix.dev';
@@ -26,7 +26,7 @@ async function loginViaApi(page: Page) {
 test.describe.serial('Wingman Phase 1-5 + Home', () => {
   test('home page renders with hero, pillars, ML cards, toolbox', async ({ page }) => {
     await page.goto(`${BASE}/home`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText('Energy arbitrage you can actually trust')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-testid="home-cta-desk"], [data-testid="home-cta-workbench"]').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole('link', { name: /Arbitrage Workbench/i }).first()).toBeVisible();
     // Pillar cards (in main, not sidebar)
     await expect(page.getByRole('main').getByText('Arbitrage Workbench').first()).toBeVisible();
