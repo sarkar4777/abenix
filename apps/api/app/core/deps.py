@@ -120,8 +120,10 @@ async def _authenticate_via_api_key(raw_key: str, db: AsyncSession) -> User | No
     )
     user = result.scalar_one_or_none()
 
-    if user and api_key.scopes:
-        user._api_key_scopes = api_key.scopes  # type: ignore[attr-defined]
+    if user:
+        user._api_key_id = api_key.id  # type: ignore[attr-defined]
+        if api_key.scopes:
+            user._api_key_scopes = api_key.scopes  # type: ignore[attr-defined]
 
     return user
 

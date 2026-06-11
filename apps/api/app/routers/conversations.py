@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent
+from models.agent import Agent, AgentType
 from models.conversation import Conversation, Message
 from models.user import User
 
@@ -72,10 +72,17 @@ def _derive_title(text: str) -> str:
     return (s[:80] + "…") if len(s) > 80 else (s or "New Chat")
 
 
-async def _resolve_agent_by_slug(db: AsyncSession, slug: str) -> Agent | None:
+async def _resolve_agent_by_slug(
+    db: AsyncSession, slug: str, tenant_id: uuid.UUID
+) -> Agent | None:
     if not slug:
         return None
-    row = await db.execute(select(Agent).where(Agent.slug == slug))
+    row = await db.execute(
+        select(Agent).where(
+            Agent.slug == slug,
+            or_(Agent.tenant_id == tenant_id, Agent.agent_type == AgentType.OOB),
+        )
+    )
     return row.scalar_one_or_none()
 
 
@@ -164,13 +171,21 @@ async def create_conversation(
         except (ValueError, TypeError):
             return error("Invalid agent_id", 400)
         agent_row = (
-            await db.execute(select(Agent).where(Agent.id == agent_uuid))
+            await db.execute(
+                select(Agent).where(
+                    Agent.id == agent_uuid,
+                    or_(
+                        Agent.tenant_id == user.tenant_id,
+                        Agent.agent_type == AgentType.OOB,
+                    ),
+                )
+            )
         ).scalar_one_or_none()
         if not agent_row:
             return error("Agent not found", 404)
         agent_slug = agent_slug or agent_row.slug
     elif agent_slug:
-        agent_row = await _resolve_agent_by_slug(db, agent_slug)
+        agent_row = await _resolve_agent_by_slug(db, agent_slug, user.tenant_id)
         if agent_row:
             agent_uuid = agent_row.id
 
@@ -273,7 +288,7 @@ async def send_turn(
 
     # Refresh agent_id when the slug was re-seeded
     if not conv.agent_id or body.get("agent_slug"):
-        agent_row = await _resolve_agent_by_slug(db, agent_slug)
+        agent_row = await _resolve_agent_by_slug(db, agent_slug, user.tenant_id)
         if agent_row:
             conv.agent_id = agent_row.id
             conv.agent_slug = agent_row.slug

@@ -222,7 +222,10 @@ async def sweep_stale_executions() -> None:
 
             await db.execute(
                 update(Execution)
-                .where(Execution.id.in_(ids))
+                .where(
+                    Execution.id.in_(ids),
+                    Execution.status == ExecutionStatus.RUNNING,
+                )
                 .values(
                     status=ExecutionStatus.FAILED,
                     error_message=(

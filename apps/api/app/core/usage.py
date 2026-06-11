@@ -150,12 +150,34 @@ async def check_user_quota(user: "User") -> str | None:
 
 
 async def update_user_usage(
-    db: "AsyncSession", user: "User", input_tokens: int, output_tokens: int, cost: float
+    db: "AsyncSession",
+    user: "User",
+    input_tokens: int,
+    output_tokens: int,
+    cost: float,
+    api_key_id: "uuid.UUID | None" = None,
 ) -> None:
-    """Update user's monthly usage counters after an execution."""
     total_tokens = (input_tokens or 0) + (output_tokens or 0)
     user.tokens_used_this_month = (user.tokens_used_this_month or 0) + total_tokens
     user.cost_used_this_month = float(user.cost_used_this_month or 0) + (cost or 0)
+    if api_key_id is None:
+        api_key_id = getattr(user, "_api_key_id", None)
+    if api_key_id is not None:
+        from sqlalchemy import update as _sa_update
+
+        from models.api_key import ApiKey
+
+        try:
+            await db.execute(
+                _sa_update(ApiKey)
+                .where(ApiKey.id == api_key_id)
+                .values(
+                    tokens_used=ApiKey.tokens_used + total_tokens,
+                    cost_used=ApiKey.cost_used + (cost or 0),
+                )
+            )
+        except Exception:
+            pass
     await db.flush()
 
 

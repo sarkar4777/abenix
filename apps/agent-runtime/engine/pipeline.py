@@ -7,6 +7,7 @@ import copy
 import inspect
 import json
 import logging
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -388,6 +389,43 @@ def _resolve_templates(
             resolved[key] = value
 
     return resolved
+
+
+_engine_cache: dict[str, Any] = {}
+_engine_cache_lock: asyncio.Lock | None = None
+
+
+def _get_engine_lock() -> asyncio.Lock:
+    global _engine_cache_lock
+    if _engine_cache_lock is None:
+        _engine_cache_lock = asyncio.Lock()
+    return _engine_cache_lock
+
+
+async def _get_pipeline_engine(db_url: str) -> Any:
+    if not db_url:
+        return None
+    cached = _engine_cache.get(db_url)
+    if cached is not None:
+        return cached
+    async with _get_engine_lock():
+        cached = _engine_cache.get(db_url)
+        if cached is not None:
+            return cached
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        pool_size = int(os.environ.get("PIPELINE_DB_POOL_SIZE", "10"))
+        max_overflow = int(os.environ.get("PIPELINE_DB_MAX_OVERFLOW", "5"))
+        engine = create_async_engine(
+            db_url,
+            echo=False,
+            pool_pre_ping=True,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_recycle=3600,
+        )
+        _engine_cache[db_url] = engine
+        return engine
 
 
 class PipelineExecutor:
@@ -1105,10 +1143,12 @@ class PipelineExecutor:
         if slug in cache:
             return cache[slug]
         try:
-            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+            from sqlalchemy.ext.asyncio import AsyncSession
             from sqlalchemy import text as _t
 
-            engine = create_async_engine(self._db_url, echo=False)
+            engine = await _get_pipeline_engine(self._db_url)
+            if engine is None:
+                return None
             async with AsyncSession(engine) as session:
                 res = await session.execute(
                     _t(
@@ -1136,10 +1176,12 @@ class PipelineExecutor:
         if not self._db_url or not self._agent_id:
             return None
         try:
-            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+            from sqlalchemy.ext.asyncio import AsyncSession
             from sqlalchemy import select
 
-            engine = create_async_engine(self._db_url, echo=False)
+            engine = await _get_pipeline_engine(self._db_url)
+            if engine is None:
+                return None
             async with AsyncSession(engine) as session:
                 # Import here to avoid circular deps
                 import sys
@@ -1167,10 +1209,12 @@ class PipelineExecutor:
         if not self._db_url or not self._agent_id:
             return
         try:
-            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+            from sqlalchemy.ext.asyncio import AsyncSession
             from sqlalchemy import select
 
-            engine = create_async_engine(self._db_url, echo=False)
+            engine = await _get_pipeline_engine(self._db_url)
+            if engine is None:
+                return
             async with AsyncSession(engine) as session:
                 import sys
                 from pathlib import Path

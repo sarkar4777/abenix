@@ -232,6 +232,44 @@ async def code_asset_stats(
     )
 
 
+@router.get("/api/ml-models/invocations")
+async def list_all_ml_invocations(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    status: str | None = Query(None, pattern="^(ok|error)$"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    q = (
+        select(MLModelInvocation)
+        .join(MLModel, MLModelInvocation.ml_model_id == MLModel.id)
+        .where(MLModel.tenant_id == user.tenant_id)
+    )
+    if status == "ok":
+        q = q.where(MLModelInvocation.is_error.is_(False))
+    elif status == "error":
+        q = q.where(MLModelInvocation.is_error.is_(True))
+    q = q.order_by(MLModelInvocation.created_at.desc()).limit(limit).offset(offset)
+    rows = (await db.execute(q)).scalars().all()
+    items = [
+        {
+            "id": str(r.id),
+            "ml_model_id": str(r.ml_model_id),
+            "execution_id": str(r.execution_id) if r.execution_id else None,
+            "agent_id": str(r.agent_id) if r.agent_id else None,
+            "operation": r.operation,
+            "duration_ms": r.duration_ms,
+            "is_error": r.is_error,
+            "error_message": r.error_message,
+            "deployment_type": r.deployment_type,
+            "cost_usd": float(r.cost_usd) if r.cost_usd is not None else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+    return success({"items": items, "total": len(items)})
+
+
 @router.get("/api/ml-models/{model_id}/invocations")
 async def list_ml_model_invocations(
     model_id: uuid.UUID,

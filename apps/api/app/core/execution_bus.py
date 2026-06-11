@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, AsyncIterator
@@ -83,12 +84,23 @@ async def subscribe_events(
         except Exception as e:
             logger.debug("execution_bus replay failed: %s", e)
 
-    # 2. Live subscription
+    # 2. Live subscription via poll + heartbeat. listen() raises on the
+    # underlying socket_timeout so we swap to get_message() and treat the
+    # timeout as a beat.
     pubsub = r.pubsub()
     try:
         await pubsub.subscribe(_channel(execution_id))
-        async for msg in pubsub.listen():
-            if msg.get("type") != "message":
+        while True:
+            try:
+                msg = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=15.0
+                )
+            except (asyncio.TimeoutError, ConnectionError) as e:
+                logger.debug("execution_bus subscribe poll error: %s", e)
+                yield {"event": "heartbeat"}
+                continue
+            if msg is None:
+                yield {"event": "heartbeat"}
                 continue
             raw = msg.get("data")
             if not raw:
@@ -98,7 +110,6 @@ async def subscribe_events(
             except Exception:
                 continue
             yield evt
-            # Terminal — the consumer has signalled end-of-stream.
             if evt.get("event") in ("done", "error"):
                 return
     finally:

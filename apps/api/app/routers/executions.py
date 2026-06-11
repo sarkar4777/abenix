@@ -141,26 +141,42 @@ async def approve_execution_gate(
     body: ApprovalRequest,
     gate_id: str = Query(..., description="The gate ID to approve/reject"),
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Approve or reject a Human-in-the-Loop gate."""
     if body.decision not in ("approved", "rejected"):
         return error("Decision must be 'approved' or 'rejected'", 400)
 
+    exec_row = (
+        await db.execute(
+            select(Execution).where(
+                Execution.id == execution_id,
+                Execution.tenant_id == user.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not exec_row:
+        return error("Execution not found", 404)
+
+    import time
     import redis.asyncio as aioredis
     from app.core.config import settings as app_cfg
 
     r = aioredis.from_url(app_cfg.redis_url, decode_responses=True)
     approval_key = f"hitl:approval:{execution_id}:{gate_id}"
-    result = json.dumps(
+    payload = json.dumps(
         {
             "decision": body.decision,
             "reviewer": user.full_name or user.email,
+            "reviewer_id": str(user.id),
+            "tenant_id": str(user.tenant_id),
             "comment": body.comment,
-            "decided_at": __import__("time").time(),
+            "decided_at": time.time(),
         }
     )
-    await r.set(approval_key, result, ex=7200)
+    set_ok = await r.set(approval_key, payload, ex=7200, nx=True)
     await r.aclose()
+    if not set_ok:
+        return error("Gate already decided", 409)
 
     return success(
         {

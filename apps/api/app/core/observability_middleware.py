@@ -11,6 +11,24 @@ from starlette.responses import Response
 from app.core.telemetry import http_request_duration_seconds, http_requests_total
 
 
+def _route_template(request: Request) -> str:
+    route = request.scope.get("route")
+    tmpl = getattr(route, "path", None) if route else None
+    return tmpl or "other"
+
+
+def _status_family(status: int) -> str:
+    if 200 <= status < 300:
+        return "2xx"
+    if 300 <= status < 400:
+        return "3xx"
+    if 400 <= status < 500:
+        return "4xx"
+    if 500 <= status < 600:
+        return "5xx"
+    return "other"
+
+
 class ObservabilityMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
@@ -37,8 +55,12 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         duration_ms = int(duration_s * 1000)
         status = response.status_code
 
-        http_requests_total.labels(method=method, path=path, status=status).inc()
-        http_request_duration_seconds.labels(method=method, path=path).observe(
+        route_path = _route_template(request)
+        status_family = _status_family(status)
+        http_requests_total.labels(
+            method=method, path=route_path, status=status_family
+        ).inc()
+        http_request_duration_seconds.labels(method=method, path=route_path).observe(
             duration_s
         )
 

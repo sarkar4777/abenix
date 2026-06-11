@@ -29,22 +29,47 @@ sys.path.insert(0, str(_REPO / "packages" / "db"))
 sys.path.insert(0, str(_HERE))
 
 
+_engine = None
+_session_factory = None
+_engine_lock = asyncio.Lock()
+
+
+async def _get_session_factory():
+    global _engine, _session_factory
+    if _session_factory is not None:
+        return _session_factory
+    async with _engine_lock:
+        if _session_factory is not None:
+            return _session_factory
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+        from sqlalchemy.orm import sessionmaker
+
+        db_url = os.environ.get("DATABASE_URL") or os.environ.get(
+            "DATABASE_URL_ASYNC",
+            "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix",
+        )
+        pool_size = int(os.environ.get("CONSUMER_DB_POOL_SIZE", "10"))
+        max_overflow = int(os.environ.get("CONSUMER_DB_MAX_OVERFLOW", "5"))
+        _engine = create_async_engine(
+            db_url,
+            pool_pre_ping=True,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_recycle=3600,
+        )
+        _session_factory = sessionmaker(
+            _engine, class_=AsyncSession, expire_on_commit=False
+        )
+        return _session_factory
+
+
 async def _load_execution(execution_id: str) -> dict[str, Any] | None:
-    """Load the agent + execution row using a fresh SQLAlchemy session."""
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-    from sqlalchemy.orm import sessionmaker
 
     from models.agent import Agent  # type: ignore
     from models.execution import Execution  # type: ignore
 
-    db_url = os.environ.get("DATABASE_URL") or os.environ.get(
-        "DATABASE_URL_ASYNC",
-        "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix",
-    )
-    engine = create_async_engine(db_url, pool_pre_ping=True)
-    Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
+    Session = await _get_session_factory()
     async with Session() as db:
         res = await db.execute(
             select(Execution).where(Execution.id == uuid.UUID(execution_id))
@@ -85,16 +110,9 @@ async def _mark_done(
 ) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import update
-    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-    from sqlalchemy.orm import sessionmaker
     from models.execution import Execution, ExecutionStatus  # type: ignore
 
-    db_url = os.environ.get("DATABASE_URL") or os.environ.get(
-        "DATABASE_URL_ASYNC",
-        "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix",
-    )
-    engine = create_async_engine(db_url, pool_pre_ping=True)
-    Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    Session = await _get_session_factory()
 
     target_status = (
         ExecutionStatus.COMPLETED if status == "completed" else ExecutionStatus.FAILED
@@ -617,17 +635,34 @@ async def main() -> None:
         await stop.wait()
         return
 
-    # NATS: drain the per-pool subject.
+    max_concurrency = int(
+        os.environ.get("AGENT_CONCURRENCY")
+        or os.environ.get("CONSUMER_MAX_CONCURRENCY")
+        or "8"
+    )
+    concurrency_gate = asyncio.Semaphore(max_concurrency)
+    in_flight: set[asyncio.Task[Any]] = set()
+    logger.info("consumer: concurrency cap = %d", max_concurrency)
+
+    async def _bounded(p: dict[str, Any]) -> None:
+        async with concurrency_gate:
+            try:
+                await _run_one(p)
+            except Exception:
+                logger.exception("consumer: _run_one crashed")
+
     try:
         async for msg in backend.stream(pool):
             if stop.is_set():
                 break
             task_id = msg.get("task_id", "?")
             payload = msg.get("payload") or msg
+            await concurrency_gate.acquire()
+            concurrency_gate.release()
             logger.info("consumer: picked task %s from agents.%s", task_id, pool)
-            # Run each job inside a task so the loop can keep pulling while
-            # long jobs run (bounded by concurrency env in the Helm chart).
-            asyncio.create_task(_run_one(payload))
+            t = asyncio.create_task(_bounded(payload))
+            in_flight.add(t)
+            t.add_done_callback(in_flight.discard)
     except Exception as e:
         logger.exception("consumer: stream loop crashed: %s", e)
         raise

@@ -866,7 +866,15 @@ async def list_revisions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """List change history for an agent."""
+    agent_check = await db.execute(
+        select(Agent.id).where(
+            Agent.id == agent_id,
+            or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB),
+        )
+    )
+    if agent_check.scalar_one_or_none() is None:
+        return error("Agent not found", 404)
+
     result = await db.execute(
         select(AgentRevision)
         .where(AgentRevision.agent_id == agent_id)
@@ -896,7 +904,20 @@ async def revert_to_revision(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Revert agent to a previous revision."""
+    agent_result = await db.execute(
+        select(Agent).where(
+            Agent.id == agent_id,
+            Agent.tenant_id == user.tenant_id,
+        )
+    )
+    agent = agent_result.scalar_one_or_none()
+    if not agent:
+        return error("Agent not found", 404)
+    if agent.agent_type == AgentType.OOB:
+        return error("Cannot revert an OOB agent", 403)
+    if user.role not in ("admin", "owner") and agent.created_by != user.id:
+        return error("Only the agent creator or a tenant admin may revert", 403)
+
     rev_result = await db.execute(
         select(AgentRevision).where(
             AgentRevision.id == revision_id, AgentRevision.agent_id == agent_id
@@ -905,11 +926,6 @@ async def revert_to_revision(
     revision = rev_result.scalar_one_or_none()
     if not revision or not revision.previous_state:
         return error("Revision not found", 404)
-
-    agent_result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = agent_result.scalar_one_or_none()
-    if not agent:
-        return error("Agent not found", 404)
 
     # Apply previous state
     prev = revision.previous_state
@@ -1413,7 +1429,7 @@ async def execute_agent(
     except Exception:
         pass  # DLP failure should not block execution
 
-    mcp_connections = await _fetch_mcp_connections(db, agent.id)
+    mcp_connections = await _fetch_mcp_connections(db, agent.id, user.tenant_id)
 
     execution = Execution(
         tenant_id=user.tenant_id,
@@ -2322,8 +2338,8 @@ async def _non_stream_pipeline_execution(
 async def _fetch_mcp_connections(
     db: AsyncSession,
     agent_id: uuid.UUID,
+    tenant_id: uuid.UUID,
 ) -> list[dict[str, Any]]:
-    """Fetch MCP server connections attached to an agent for tool resolution."""
     result = await db.execute(
         select(AgentMCPTool).where(AgentMCPTool.agent_id == agent_id)
     )
@@ -2335,6 +2351,7 @@ async def _fetch_mcp_connections(
     conn_result = await db.execute(
         select(UserMCPConnection).where(
             UserMCPConnection.id.in_(conn_ids),
+            UserMCPConnection.tenant_id == tenant_id,
             UserMCPConnection.is_enabled,
         )
     )

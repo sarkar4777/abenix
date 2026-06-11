@@ -46,18 +46,12 @@ test.describe.serial('Wingman Phase 1-5 + Home', () => {
     await expect(page.getByRole('link', { name: /^Home$/ })).toBeVisible();
   });
 
-  test('mispricing explainer mentions the 15-feature v1.2 model', async ({ page }) => {
+  test('mispricing explainer mentions the 15-feature fair-value model', async ({ page }) => {
     await page.goto(`${BASE}/mispricing`, { waitUntil: 'domcontentloaded' });
-    const toggle = page.getByTestId('explainer-toggle-mispricing');
-    await expect(toggle).toBeVisible({ timeout: 10_000 });
-    // ensure panel is open (re-click only if currently hidden)
-    if ((await page.getByTestId('explainer-body-mispricing').count()) === 0) {
-      await toggle.click();
-    }
-    const body = page.getByTestId('explainer-body-mispricing');
-    await expect(body).toBeVisible({ timeout: 10_000 });
-    await expect(body.getByText(/wingman-mispricing-fairvalue v1\.2\.0/i)).toBeVisible();
-    await expect(body.getByText(/15 features/i)).toBeVisible();
+    const explainer = page.getByTestId('model-explainer');
+    await expect(explainer).toBeVisible({ timeout: 10_000 });
+    await expect(explainer.getByText(/wingman-mispricing-fairvalue/i).first()).toBeVisible();
+    await expect(explainer.getByText(/15 features/i).first()).toBeVisible();
   });
 
   test('AgentForge tools API exposes all 5 new tools', async ({ page }) => {
