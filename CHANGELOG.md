@@ -2,6 +2,14 @@
 
 ## v2.1.0 — 2026-06-11
 
+### Added
+
+### Changed
+
+### Fixed
+
+## v2.1.0 — 2026-06-11
+
 ## v2.0.0 — enterprise knowledge stack
 
 Sixteen features that move Knowledge Bases, Atlas, and PersonaKB from demo-grade to Fortune-500-grade for indexing tens of thousands of documents and serving dozens of agents.
