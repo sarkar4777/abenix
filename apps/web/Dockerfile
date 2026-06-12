@@ -4,9 +4,10 @@ COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
 COPY packages/shared/package.json ./packages/shared/
 RUN npm ci --workspace=@abenix/web --include-workspace-root --include=optional
-# Ensure the alpine-native SWC binary is present even if the lockfile
-# was generated on a non-linux dev machine and skipped optional natives.
-RUN npm install --no-save --workspace=@abenix/web @next/swc-linux-x64-musl
+# Lockfile was generated on Windows so Linux-native optionals like
+# @next/swc-linux-x64-musl have no resolved tarball URL. Add them by
+# name at the root so npm fetches the right artifact.
+RUN npm install --no-save --no-package-lock @next/swc-linux-x64-musl
 
 FROM node:20-alpine AS builder
 WORKDIR /app
