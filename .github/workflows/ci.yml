@@ -55,12 +55,16 @@ jobs:
 
   web-lint-typecheck-build:
     runs-on: ubuntu-latest
+    env:
+      COREPACK_ENABLE_STRICT: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+      - name: Pin npm to packageManager version
+        run: npm install -g npm@10.8.2
       - run: npm ci
       - name: ESLint
         run: npm run lint
@@ -72,10 +76,13 @@ jobs:
           cd apps/web && npm run build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+          COREPACK_ENABLE_STRICT: "0"
 
   e2e-smoke:
     needs: [python-lint, python-test, web-lint-typecheck-build]
     runs-on: ubuntu-latest
+    env:
+      COREPACK_ENABLE_STRICT: "0"
     # Quick browser-driven smoke against a docker-compose stack. Runs
     # only the headline UAT files to keep CI under 8 min while still
     # catching regressions in real user flows.
@@ -85,6 +92,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm install -g npm@10.8.2
       - run: npm ci
       - name: Boot stack (postgres + redis only — API + web run locally)
         run: docker compose up -d postgres redis
