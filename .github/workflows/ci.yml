@@ -65,7 +65,9 @@ jobs:
           cache: npm
       - name: Pin npm to packageManager version
         run: npm install -g npm@10.8.2
-      - run: npm ci
+      - run: npm ci --include=optional
+      - name: Ensure Next.js linux SWC binary is present
+        run: npm install --no-save --workspace=@abenix/web @next/swc-linux-x64-gnu
       - name: ESLint
         run: npm run lint
       - name: TypeScript typecheck (web)
@@ -93,7 +95,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm install -g npm@10.8.2
-      - run: npm ci
+      - run: npm ci --include=optional
       - name: Boot stack (postgres + redis only — API + web run locally)
         run: docker compose up -d postgres redis
       - name: Wait for db ready
