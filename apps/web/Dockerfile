@@ -3,7 +3,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
 COPY packages/shared/package.json ./packages/shared/
-RUN npm ci --workspace=@abenix/web --include-workspace-root
+RUN npm ci --workspace=@abenix/web --include-workspace-root --include=optional
+# Ensure the alpine-native SWC binary is present even if the lockfile
+# was generated on a non-linux dev machine and skipped optional natives.
+RUN npm install --no-save --workspace=@abenix/web @next/swc-linux-x64-musl
 
 FROM node:20-alpine AS builder
 WORKDIR /app
