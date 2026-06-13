@@ -90,10 +90,8 @@ async def list_code_asset_invocations(
     ).scalar_one_or_none()
     if not asset:
         return error("Code asset not found", 404)
-    if asset.tenant_id != user.tenant_id and (
-        getattr(user.role, "value", str(user.role)).lower() != "admin"
-    ):
-        return error("Forbidden", 403)
+    if asset.tenant_id != user.tenant_id:
+        return error("Code asset not found", 404)
 
     q = select(CodeAssetInvocation).where(CodeAssetInvocation.code_asset_id == asset_id)
     if status == "ok":
@@ -175,10 +173,8 @@ async def code_asset_stats(
     ).scalar_one_or_none()
     if not asset:
         return error("Code asset not found", 404)
-    if asset.tenant_id != user.tenant_id and (
-        getattr(user.role, "value", str(user.role)).lower() != "admin"
-    ):
-        return error("Forbidden", 403)
+    if asset.tenant_id != user.tenant_id:
+        return error("Code asset not found", 404)
 
     since = datetime.now(timezone.utc) - _window_to_delta(window)
     base = select(CodeAssetInvocation).where(
@@ -284,10 +280,8 @@ async def list_ml_model_invocations(
     ).scalar_one_or_none()
     if not m:
         return error("Model not found", 404)
-    if m.tenant_id != user.tenant_id and (
-        getattr(user.role, "value", str(user.role)).lower() != "admin"
-    ):
-        return error("Forbidden", 403)
+    if m.tenant_id != user.tenant_id:
+        return error("Model not found", 404)
 
     q = select(MLModelInvocation).where(MLModelInvocation.ml_model_id == model_id)
     if status == "ok":
@@ -370,10 +364,8 @@ async def ml_model_stats(
     ).scalar_one_or_none()
     if not m:
         return error("Model not found", 404)
-    if m.tenant_id != user.tenant_id and (
-        getattr(user.role, "value", str(user.role)).lower() != "admin"
-    ):
-        return error("Forbidden", 403)
+    if m.tenant_id != user.tenant_id:
+        return error("Model not found", 404)
 
     since = datetime.now(timezone.utc) - _window_to_delta(window)
     where = [

@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent
+from models.agent import Agent, AgentType
 from models.agent_favorite import AgentFavorite
 from models.user import User
 
@@ -32,7 +32,19 @@ async def add_favorite(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     body = body or {}
-    # Check if already favorited
+    from sqlalchemy import or_
+
+    agent_check = await db.execute(
+        select(Agent).where(
+            Agent.id == agent_id,
+            or_(
+                Agent.tenant_id == user.tenant_id,
+                Agent.agent_type == AgentType.OOB,
+            ),
+        )
+    )
+    if not agent_check.scalar_one_or_none():
+        return error("Agent not found", 404)
     existing = await db.execute(
         select(AgentFavorite).where(
             AgentFavorite.user_id == user.id,
@@ -81,10 +93,18 @@ async def list_favorites(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
+    from sqlalchemy import or_
+
     result = await db.execute(
         select(AgentFavorite, Agent)
         .join(Agent, AgentFavorite.agent_id == Agent.id)
-        .where(AgentFavorite.user_id == user.id)
+        .where(
+            AgentFavorite.user_id == user.id,
+            or_(
+                Agent.tenant_id == user.tenant_id,
+                Agent.agent_type == AgentType.OOB,
+            ),
+        )
         .order_by(AgentFavorite.created_at.desc())
     )
     rows = result.all()

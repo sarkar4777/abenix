@@ -81,6 +81,18 @@ async def list_memories(
     )
 
 
+async def _verify_agent_access(
+    db: AsyncSession, agent_id: uuid.UUID, user: User
+) -> bool:
+    agent_result = await db.execute(
+        select(Agent).where(
+            Agent.id == agent_id,
+            or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == "oob"),
+        )
+    )
+    return agent_result.scalar_one_or_none() is not None
+
+
 @router.delete("/{agent_id}/memories/{memory_id}")
 async def delete_memory(
     agent_id: uuid.UUID,
@@ -89,6 +101,8 @@ async def delete_memory(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Delete a specific memory."""
+    if not await _verify_agent_access(db, agent_id, user):
+        return error("Agent not found", 404)
     result = await db.execute(
         select(AgentMemory).where(
             AgentMemory.id == memory_id,
@@ -114,6 +128,8 @@ async def bulk_delete_memories(
     """Delete all memories for an agent."""
     if not all:
         return error("Set all=true to confirm bulk deletion", 400)
+    if not await _verify_agent_access(db, agent_id, user):
+        return error("Agent not found", 404)
 
     from sqlalchemy import delete
 

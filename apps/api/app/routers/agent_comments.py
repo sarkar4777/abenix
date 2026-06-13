@@ -18,11 +18,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent
+from models.agent import Agent, AgentType
 from models.agent_comment import AgentComment
 from models.user import User
 
 router = APIRouter(prefix="/api/agents", tags=["agent-comments"])
+
+
+async def _load_agent_for_caller(
+    db: AsyncSession, agent_id: uuid.UUID, user: User
+) -> Agent | None:
+    from sqlalchemy import or_
+
+    result = await db.execute(
+        select(Agent).where(
+            Agent.id == agent_id,
+            or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB),
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 @router.post("/{agent_id}/comments")
@@ -36,6 +50,10 @@ async def add_comment(
     if not content:
         return error("Comment content is required", 400)
 
+    agent = await _load_agent_for_caller(db, agent_id, user)
+    if not agent:
+        return error("Agent not found", 404)
+
     comment = AgentComment(
         id=uuid.uuid4(),
         agent_id=agent_id,
@@ -47,10 +65,7 @@ async def add_comment(
     db.add(comment)
     await db.commit()
 
-    # Notify agent owner
-    agent_result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = agent_result.scalar_one_or_none()
-    if agent and agent.creator_id != user.id:
+    if agent.creator_id != user.id:
         try:
             await create_notification(
                 db,
@@ -74,6 +89,8 @@ async def list_comments(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
+    if not await _load_agent_for_caller(db, agent_id, user):
+        return error("Agent not found", 404)
     result = await db.execute(
         select(AgentComment, User.full_name, User.email)
         .join(User, AgentComment.user_id == User.id)
@@ -106,6 +123,8 @@ async def update_comment(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
+    if not await _load_agent_for_caller(db, agent_id, user):
+        return error("Agent not found", 404)
     result = await db.execute(
         select(AgentComment).where(
             AgentComment.id == comment_id, AgentComment.agent_id == agent_id

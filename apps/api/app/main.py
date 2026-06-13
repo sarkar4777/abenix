@@ -23,6 +23,9 @@ from sqlalchemy import text
 
 from app.core.config import settings as app_settings
 from app.core.logging import setup_logging
+from app.core.middleware import (  # noqa: F401
+    SecurityHeadersMiddleware,
+)
 from app.core.middleware import (
     BodySizeLimitMiddleware,
     RateLimitMiddleware,
@@ -96,8 +99,39 @@ setup_telemetry(
     otel_endpoint=app_settings.otel_endpoint,
 )
 
+
+def _custom_openapi() -> dict:
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {}).setdefault("securitySchemes", {})
+    schema["components"]["securitySchemes"]["BearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+    }
+    schema["components"]["securitySchemes"]["ApiKeyAuth"] = {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+    }
+    schema["security"] = [{"BearerAuth": []}, {"ApiKeyAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi
+
 from app.core.ip_whitelist import IPWhitelistMiddleware
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(IPWhitelistMiddleware)
 # NOTE: GZipMiddleware removed — it buffers SSE streams and breaks real-time events.
 # SSE responses (text/event-stream) need unbuffered chunk delivery.

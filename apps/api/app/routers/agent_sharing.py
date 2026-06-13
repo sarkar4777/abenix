@@ -119,6 +119,11 @@ async def list_shares(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """List all users this agent is shared with."""
+    agent_check = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenant_id == user.tenant_id)
+    )
+    if not agent_check.scalar_one_or_none():
+        return error("Agent not found", 404)
     result = await db.execute(select(AgentShare).where(AgentShare.agent_id == agent_id))
     shares = result.scalars().all()
     return success(
@@ -146,6 +151,11 @@ async def revoke_share(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Revoke a user's access to a shared agent."""
+    agent_check = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenant_id == user.tenant_id)
+    )
+    if not agent_check.scalar_one_or_none():
+        return error("Agent not found", 404)
     result = await db.execute(
         select(AgentShare).where(
             AgentShare.id == share_id, AgentShare.agent_id == agent_id
