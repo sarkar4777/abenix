@@ -1,0 +1,176 @@
+{
+  "login_status": 200,
+  "activity_before_count": 50,
+  "activity_before_top5": [
+    [
+      "user.login",
+      "2026-06-13T11:14:55.522349+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:54.114673+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:53.881929+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:24.103223+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:13:47.528778+00:00"
+    ]
+  ],
+  "retention_get_before": [
+    200,
+    {
+      "data": {
+        "execution_retention_days": 75,
+        "message_retention_days": 365,
+        "audit_log_retention_days": 800
+      },
+      "error": null,
+      "meta": null
+    }
+  ],
+  "retention_put_status": 200,
+  "retention_put_body": {
+    "data": {
+      "execution_retention_days": 75,
+      "message_retention_days": 365,
+      "audit_log_retention_days": 800
+    },
+    "error": null,
+    "meta": null
+  },
+  "dlp_get_before": [
+    200,
+    {
+      "data": {
+        "mode": "mask",
+        "enabled": true,
+        "custom_patterns": {}
+      },
+      "error": null,
+      "meta": null
+    }
+  ],
+  "dlp_put_status": 200,
+  "dlp_put_body": {
+    "data": {
+      "mode": "mask",
+      "enabled": true,
+      "custom_patterns": {}
+    },
+    "error": null,
+    "meta": null
+  },
+  "activity_after_count": 50,
+  "activity_after_top10": [
+    [
+      "tenant_settings_updated",
+      "2026-06-13T11:14:59.442062+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:55.522349+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:54.114673+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:53.881929+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:24.103223+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:13:47.528778+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:13:31.244538+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:13:24.646655+00:00"
+    ],
+    [
+      "moderation_policy_updated",
+      "2026-06-13T11:13:21.325736+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:13:20.683715+00:00"
+    ]
+  ],
+  "tenant_put_status": 200,
+  "tenant_put_body": {
+    "data": {
+      "tenant_id": "70e7549a-9803-4692-ba13-032ee6f7175e",
+      "name": "Abenix",
+      "slug": "abenix-d60d6c",
+      "slack_webhook_url": "",
+      "slack_webhook_url_source": "env_fallback"
+    },
+    "error": null,
+    "meta": null
+  },
+  "activity_after_tenant_count": 50,
+  "activity_after_tenant_top10": [
+    [
+      "tenant_settings_updated",
+      "2026-06-13T11:15:00.721367+00:00"
+    ],
+    [
+      "tenant_settings_updated",
+      "2026-06-13T11:14:59.442062+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:55.522349+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:54.114673+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:53.881929+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:14:24.103223+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:13:47.528778+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:13:31.244538+00:00"
+    ],
+    [
+      "user.login",
+      "2026-06-13T11:13:24.646655+00:00"
+    ],
+    [
+      "moderation_policy_updated",
+      "2026-06-13T11:13:21.325736+00:00"
+    ]
+  ],
+  "any_retention_action": [],
+  "distinct_actions": [
+    "gdpr.purge_executed",
+    "mcp.connected",
+    "moderation_policy_updated",
+    "tenant_settings_updated",
+    "user.login"
+  ]
+}

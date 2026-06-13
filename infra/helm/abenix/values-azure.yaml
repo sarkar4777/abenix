@@ -122,6 +122,11 @@ cognifyWorker:
 postgresql:
   enabled: true
   architecture: standalone            # Service name "abenix-postgresql" expected by API init
+  # TODO(deploy): the bitnamilegacy image does NOT ship pgvector. KB ingest
+  # silently fails to write embeddings until this is swapped to the custom
+  # bitnami+pgvector image (see values.yaml + infra/docker/Dockerfile.postgres-pgvector
+  # for the build pattern). Don't swap to plain pgvector/pgvector:pg16 — the
+  # bitnami chart expects bitnami-shaped images.
   image:
     registry: docker.io
     repository: bitnamilegacy/postgresql
