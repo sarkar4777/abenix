@@ -345,13 +345,20 @@ async def execute_pipeline_stream(
         await event_queue.put(f"event: node_start\ndata: {event_data}\n\n")
 
     async def on_node_complete(
-        node_id: str, status: str, duration_ms: int, output: Any
+        node_id: str,
+        status: str,
+        duration_ms: int,
+        output: Any,
+        error_message: str | None = None,
+        error_type: str | None = None,
     ) -> None:
         event_data = json_module.dumps(
             {
                 "node_id": node_id,
                 "status": status,
                 "duration_ms": duration_ms,
+                "error_message": error_message,
+                "error_type": error_type,
             },
             default=str,
         )
@@ -547,20 +554,33 @@ async def replay_pipeline(
     raw_nodes = pipeline_config["nodes"]
     pipeline_nodes = parse_pipeline_nodes(raw_nodes)
 
-    # Pre-populate node_outputs from the original execution's node_results
+    downstream_ids: set[str] = {start_from}
+    adjacency: dict[str, list[str]] = {}
+    for n in pipeline_nodes:
+        for dep in n.depends_on:
+            adjacency.setdefault(dep, []).append(n.id)
+    frontier = [start_from]
+    while frontier:
+        nxt: list[str] = []
+        for nid in frontier:
+            for child in adjacency.get(nid, []):
+                if child not in downstream_ids:
+                    downstream_ids.add(child)
+                    nxt.append(child)
+        frontier = nxt
+
     cached_outputs: dict = {}
     if original.node_results:
         for nid, nr in original.node_results.items():
-            if nid != start_from and nr.get("status") == "completed":
+            if nid not in downstream_ids and nr.get("status") == "completed":
                 cached_outputs[nid] = nr.get("output")
 
-    # Merge with override context
     cached_outputs.update(override_context)
     if original.input_message:
         cached_outputs.setdefault("user_message", original.input_message)
 
-    # Filter nodes: only execute start_from_node and its downstream
-    # For simplicity, execute the full pipeline but with cached outputs pre-loaded
+    pipeline_nodes = [n for n in pipeline_nodes if n.id in downstream_ids]
+
     executor = PipelineExecutor(tool_registry=tool_registry, timeout_seconds=120)
     result = await executor.execute(pipeline_nodes, cached_outputs)
     serialized = serialize_pipeline_result(result)

@@ -660,6 +660,16 @@ async def main() -> None:
     health_port = int(os.environ.get("HEALTH_PORT", "8001"))
     health_task = asyncio.create_task(_serve_health(health_port))
 
+    tool_worker_task: asyncio.Task | None = None
+    if os.environ.get("TOOL_WORKER_ENABLED", "1") == "1":
+        try:
+            from tool_stream_consumer import consumer_loop as _tool_consumer_loop  # type: ignore
+
+            tool_worker_task = asyncio.create_task(_tool_consumer_loop())
+            logger.info("tool_stream_consumer task launched alongside NATS consumer")
+        except Exception as e:
+            logger.warning("tool_stream_consumer launch failed: %s", e)
+
     from engine.queue_backend import get_queue_backend  # type: ignore
 
     backend = get_queue_backend()

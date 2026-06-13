@@ -765,7 +765,18 @@ class PipelineExecutor:
                     duration_ms=int((time.monotonic() - node_start) * 1000),
                 )
 
-        # Evaluate condition
+        for dep_id in node.depends_on:
+            dep_result = prior_results.get(dep_id)
+            if dep_result is None or dep_result.tool_name != "__switch__":
+                continue
+            if not node_outputs.get(f"__switch_activated_{node.id}"):
+                return NodeResult(
+                    node_id=node.id,
+                    status="skipped",
+                    tool_name=node.tool_name,
+                    duration_ms=int((time.monotonic() - node_start) * 1000),
+                )
+
         if node.condition is not None:
             met = node.condition.evaluate(node_outputs)
             if not met:
@@ -935,7 +946,17 @@ class PipelineExecutor:
         # Built-in "wait" tool — no registry lookup needed
         if node.tool_name == "wait":
             seconds = min(float(resolved_args.get("seconds", 1)), 300)
-            await asyncio.sleep(seconds)
+            node_timeout = node.timeout_seconds or self.timeout_seconds
+            try:
+                await asyncio.wait_for(asyncio.sleep(seconds), timeout=node_timeout)
+            except asyncio.TimeoutError:
+                return NodeResult(
+                    node_id=node.id,
+                    status="timeout",
+                    error=f"wait timeout after {node_timeout}s",
+                    tool_name="wait",
+                    duration_ms=int(node_timeout * 1000),
+                )
             return NodeResult(
                 node_id=node.id,
                 status="completed",

@@ -131,13 +131,19 @@ async def _extract_and_analyze(
                     for m in members
                 )
             if has_real_subtree:
+                tmp_root = tmp.resolve()
                 for m in members:
                     if m == first or m == first + "/":
                         continue
                     rel = m[len(first) + 1 :]
                     if not rel:
                         continue
-                    dest = tmp / rel
+                    dest = (tmp / rel).resolve()
+                    if (
+                        not str(dest).startswith(str(tmp_root) + os.sep)
+                        and dest != tmp_root
+                    ):
+                        raise ValueError(f"zip-slip blocked: {m!r}")
                     if m.endswith("/"):
                         dest.mkdir(parents=True, exist_ok=True)
                     else:
@@ -145,8 +151,14 @@ async def _extract_and_analyze(
                         with z.open(m) as src, open(dest, "wb") as out:
                             shutil.copyfileobj(src, out)
             else:
-                # Either flat zip (files at top level) OR single-file
-                # archive — both extract safely to tmp with no stripping.
+                tmp_root = tmp.resolve()
+                for m in members:
+                    dest = (tmp / m).resolve()
+                    if (
+                        not str(dest).startswith(str(tmp_root) + os.sep)
+                        and dest != tmp_root
+                    ):
+                        raise ValueError(f"zip-slip blocked: {m!r}")
                 z.extractall(tmp)
         analysis = analyze_directory(tmp)
         return analysis.to_dict(), size
