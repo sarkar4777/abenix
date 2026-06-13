@@ -37,16 +37,51 @@ VALID_EVENTS = {
 
 def _validate_url(url: str) -> str | None:
     """Validate webhook URL. Returns error message or None if valid."""
+    import ipaddress
+
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             return "URL must use http or https"
         if not parsed.netloc:
             return "URL must have a valid hostname"
-        # Block common internal addresses
-        hostname = parsed.hostname or ""
-        if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
-            return "Localhost URLs are not allowed for webhooks"
+        hostname = (parsed.hostname or "").lower()
+        if hostname in (
+            "localhost",
+            "host.docker.internal",
+            "host.minikube.internal",
+            "metadata.google.internal",
+            "metadata",
+            "kubernetes.default.svc",
+            "kubernetes",
+        ):
+            return f"Internal hostname not allowed ({hostname})"
+        if (
+            hostname.endswith(".svc.cluster.local")
+            or hostname.endswith(".cluster.local")
+            or hostname.endswith(".internal")
+            or hostname.endswith(".local")
+        ):
+            return "Cluster-internal DNS not allowed"
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                return f"Private/loopback IP not allowed ({hostname})"
+        except ValueError:
+            pass
+        try:
+            as_int = int(hostname)
+            packed = ipaddress.ip_address(as_int)
+            if packed.is_private or packed.is_loopback or packed.is_link_local:
+                return f"IP-literal encoding not allowed ({hostname})"
+        except (ValueError, ipaddress.AddressValueError):
+            pass
         return None
     except Exception:
         return "Invalid URL format"

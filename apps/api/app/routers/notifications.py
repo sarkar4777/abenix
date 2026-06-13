@@ -11,9 +11,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from typing import Any
+
 from app.core.deps import get_current_user, get_db
 from app.core.notifications import _serialize_notification
-from app.core.responses import success
+from app.core.responses import error, success
 from app.core.security import verify_token
 from app.core.ws_manager import ws_manager
 
@@ -218,3 +220,32 @@ async def stream_notifications(
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post("/api/admin/notification-channels/{channel}/test")
+async def test_notification_channel(
+    channel: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    from app.core import notifications as _notif
+
+    role_val = getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))
+    if str(role_val).lower() != "admin":
+        return error("Forbidden", 403)
+
+    sample_title = "Abenix test notification"
+    sample_body = (
+        f"Test send from tenant={user.tenant_id} by {user.email} via channel={channel}"
+    )
+    if channel == "slack":
+        ok = await _notif._post_slack(
+            tenant_id=user.tenant_id, title=sample_title, body=sample_body
+        )
+        return success({"channel": "slack", "delivered": bool(ok)})
+    if channel == "email":
+        ok = await _notif._send_email(
+            to=user.email, subject=sample_title, body=sample_body
+        )
+        return success({"channel": "email", "delivered": bool(ok)})
+    return error("Unknown channel; use slack|email", 400)

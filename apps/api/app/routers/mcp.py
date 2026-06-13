@@ -43,23 +43,74 @@ from models.user import User
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
-TOKEN_ENCRYPT_KEY = os.environ.get("MCP_TOKEN_KEY", "abenix-mcp-default-key-32b!")
+
+def _encrypt_token(token: str, tenant_id: Any = None) -> str:
+    from app.core import crypto as _crypto
+
+    return _crypto.encrypt(tenant_id or _crypto.get_tenant() or "global", token)
 
 
-def _encrypt_token(token: str) -> str:
-    """Simple XOR obfuscation for stored OAuth tokens."""
-    key = hashlib.sha256(TOKEN_ENCRYPT_KEY.encode()).digest()
-    encrypted = bytes(
-        a ^ b for a, b in zip(token.encode(), key * (len(token) // len(key) + 1))
-    )
-    return base64.b64encode(encrypted).decode()
+def _decrypt_token(encrypted: str, tenant_id: Any = None) -> str:
+    from app.core import crypto as _crypto
+
+    return _crypto.decrypt(tenant_id or _crypto.get_tenant() or "global", encrypted)
 
 
-def _decrypt_token(encrypted: str) -> str:
-    key = hashlib.sha256(TOKEN_ENCRYPT_KEY.encode()).digest()
-    data = base64.b64decode(encrypted)
-    decrypted = bytes(a ^ b for a, b in zip(data, key * (len(data) // len(key) + 1)))
-    return decrypted.decode()
+_SECRET_KEYS = (
+    "api_key",
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "password",
+    "token",
+    "bearer",
+)
+
+
+def _encrypt_auth_config(
+    tenant_id: Any, cfg: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    if not cfg or not isinstance(cfg, dict):
+        return cfg
+    from app.core import crypto as _crypto
+
+    out: dict[str, Any] = {}
+    for k, v in cfg.items():
+        if (
+            isinstance(v, str)
+            and v
+            and k.lower() in _SECRET_KEYS
+            and not v.startswith("v")
+        ):
+            out[k] = _crypto.encrypt(tenant_id, v)
+        else:
+            out[k] = v
+    return out
+
+
+def _decrypt_auth_config(
+    tenant_id: Any, cfg: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    if not cfg or not isinstance(cfg, dict):
+        return cfg
+    from app.core import crypto as _crypto
+
+    out: dict[str, Any] = {}
+    for k, v in cfg.items():
+        if isinstance(v, str) and v.startswith("v") and k.lower() in _SECRET_KEYS:
+            out[k] = _crypto.decrypt(tenant_id, v)
+        else:
+            out[k] = v
+    return out
+
+
+def _redact_auth_config(cfg: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not cfg or not isinstance(cfg, dict):
+        return cfg
+    return {
+        k: ("***" if (isinstance(v, str) and k.lower() in _SECRET_KEYS and v) else v)
+        for k, v in cfg.items()
+    }
 
 
 def _serialize_connection(c: UserMCPConnection) -> dict[str, Any]:
@@ -69,6 +120,7 @@ def _serialize_connection(c: UserMCPConnection) -> dict[str, Any]:
         "server_url": c.server_url,
         "transport_type": c.transport_type,
         "auth_type": c.auth_type,
+        "auth_config": _redact_auth_config(c.auth_config),
         "discovered_tools": c.discovered_tools,
         "health_status": c.health_status,
         "is_enabled": c.is_enabled,
@@ -184,10 +236,34 @@ def _validate_mcp_url(url: str) -> tuple[bool, str]:
             return True, ""
         return False, f"host '{host}' not in MCP_ALLOWED_HOSTS"
     # Block hostnames that resolve inside the cluster or to localhost
-    if lowered in ("localhost", "host.docker.internal", "host.minikube.internal"):
+    if lowered in (
+        "localhost",
+        "host.docker.internal",
+        "host.minikube.internal",
+        "metadata.google.internal",
+        "metadata",
+        "kubernetes.default.svc",
+        "kubernetes",
+    ):
         return False, f"internal hostname blocked ({host})"
-    if lowered.endswith(".svc.cluster.local") or lowered.endswith(".cluster.local"):
+    if (
+        lowered.endswith(".svc.cluster.local")
+        or lowered.endswith(".cluster.local")
+        or lowered.endswith(".internal")
+        or lowered.endswith(".local")
+    ):
         return False, "cluster-internal DNS blocked"
+    try:
+        as_int = int(lowered)
+    except ValueError:
+        as_int = None
+    if as_int is not None:
+        try:
+            packed = ipaddress.ip_address(as_int)
+            if packed.is_private or packed.is_loopback or packed.is_link_local:
+                return False, f"IP-literal encoding blocked ({host})"
+        except (ValueError, ipaddress.AddressValueError):
+            pass
     return True, ""
 
 
@@ -207,7 +283,7 @@ async def create_connection(
         server_url=body.server_url,
         transport_type="streamable_http",
         auth_type=body.auth_type,
-        auth_config=body.auth_config,
+        auth_config=_encrypt_auth_config(user.tenant_id, body.auth_config),
         health_status="unknown",
     )
     db.add(conn)
@@ -268,7 +344,7 @@ async def update_connection(
     if body.auth_type is not None:
         conn.auth_type = body.auth_type
     if body.auth_config is not None:
-        conn.auth_config = body.auth_config
+        conn.auth_config = _encrypt_auth_config(user.tenant_id, body.auth_config)
     if body.is_enabled is not None:
         conn.is_enabled = body.is_enabled
 
@@ -325,7 +401,7 @@ async def discover_tools(
     client = MCPClient(
         server_url=conn.server_url,
         auth_type=conn.auth_type,
-        auth_config=conn.auth_config or {},
+        auth_config=_decrypt_auth_config(conn.tenant_id, conn.auth_config) or {},
     )
 
     try:
@@ -371,6 +447,9 @@ async def discover_url(
     _user: User = Depends(get_current_user),
 ) -> JSONResponse:
     """Inline discover: probe a URL without saving a connection."""
+    ok, reason = _validate_mcp_url(body.server_url)
+    if not ok:
+        return error(f"server_url rejected: {reason}", 400)
     from engine.mcp_client import MCPClient
 
     client = MCPClient(
@@ -458,7 +537,7 @@ async def check_health(
     client = MCPClient(
         server_url=conn.server_url,
         auth_type=conn.auth_type,
-        auth_config=conn.auth_config or {},
+        auth_config=_decrypt_auth_config(conn.tenant_id, conn.auth_config) or {},
     )
 
     healthy = await client.health_check()
@@ -499,7 +578,7 @@ async def list_resources(
     client = MCPClient(
         server_url=conn.server_url,
         auth_type=conn.auth_type,
-        auth_config=conn.auth_config or {},
+        auth_config=_decrypt_auth_config(conn.tenant_id, conn.auth_config) or {},
     )
 
     try:
@@ -545,7 +624,7 @@ async def read_resource(
     client = MCPClient(
         server_url=conn.server_url,
         auth_type=conn.auth_type,
-        auth_config=conn.auth_config or {},
+        auth_config=_decrypt_auth_config(conn.tenant_id, conn.auth_config) or {},
     )
 
     try:
@@ -588,7 +667,7 @@ async def list_prompts(
     client = MCPClient(
         server_url=conn.server_url,
         auth_type=conn.auth_type,
-        auth_config=conn.auth_config or {},
+        auth_config=_decrypt_auth_config(conn.tenant_id, conn.auth_config) or {},
     )
 
     try:
@@ -629,7 +708,7 @@ async def get_prompt(
     client = MCPClient(
         server_url=conn.server_url,
         auth_type=conn.auth_type,
-        auth_config=conn.auth_config or {},
+        auth_config=_decrypt_auth_config(conn.tenant_id, conn.auth_config) or {},
     )
 
     try:
@@ -741,9 +820,9 @@ async def oauth2_callback(
     refresh_token = tokens.get("refresh_token")
     expires_in = tokens.get("expires_in")
 
-    conn.oauth2_access_token_enc = _encrypt_token(access_token)
+    conn.oauth2_access_token_enc = _encrypt_token(access_token, conn.tenant_id)
     if refresh_token:
-        conn.oauth2_refresh_token_enc = _encrypt_token(refresh_token)
+        conn.oauth2_refresh_token_enc = _encrypt_token(refresh_token, conn.tenant_id)
     if expires_in:
         from datetime import timedelta
 
@@ -751,7 +830,12 @@ async def oauth2_callback(
             seconds=expires_in
         )
 
-    conn.auth_config = {**(conn.auth_config or {}), "access_token": access_token}
+    from app.core import crypto as _crypto
+
+    conn.auth_config = {
+        **(conn.auth_config or {}),
+        "access_token": _crypto.encrypt(conn.tenant_id, access_token),
+    }
 
     await db.commit()
     await db.refresh(conn)
