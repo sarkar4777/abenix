@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.knowledge_project import KnowledgeProject  # noqa: E402
 from models.project_member import (  # noqa: E402

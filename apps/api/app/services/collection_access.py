@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.collection_grant import (  # noqa: E402
     AgentCollectionGrant,

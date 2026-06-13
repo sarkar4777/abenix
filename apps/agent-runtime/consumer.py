@@ -82,9 +82,6 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
         if agent is None:
             return None
         model_cfg = agent.model_config_ or {}
-        # Resolve KB grants for this agent so the queue path can register
-        # knowledge_search and friends with the right kb_ids (the inline
-        # path in apps/api/app/routers/agents.py already does this).
         kb_ids: list[str] = []
         try:
             from sqlalchemy import select as _select
@@ -452,12 +449,6 @@ async def _run_one(payload: dict) -> None:
             _agg_tool_calls: list[dict[str, Any]] = []
             _last_done: dict[str, Any] = {}
             async for _ev in executor.stream(message):
-                # Swallow the executor's own "done" event — the consumer
-                # emits a single merged done event at the end of this
-                # block that includes `output`. Publishing the executor's
-                # intermediate done would race the API _collect coroutine
-                # at apps/api/app/routers/agents.py:_collect, which reads
-                # the first done it sees and returns empty `output`.
                 if _ev.event == "done" and isinstance(_ev.data, dict):
                     _last_done = _ev.data
                     continue
@@ -525,9 +516,6 @@ async def _run_one(payload: dict) -> None:
             )
             if not _tid_done:
                 _tid_done = getattr(executor, "_trace_id_for_log", None)
-            # Capture executor trace so /executions/{id}/replay (Flight
-            # Recorder) has steps to surface. Without this every queue
-            # path execution rendered total_steps=0 in the UI.
             _exec_trace: dict[str, Any] | None = None
             try:
                 _exec_trace = {

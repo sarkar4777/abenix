@@ -12,9 +12,6 @@ from croniter import croniter
 
 logger = logging.getLogger("abenix.scheduler")
 
-# Hold strong refs to background tasks so they don't get GC'd mid-flight.
-# Without this, asyncio.create_task tasks for trigger executions can be
-# collected before they ever run, leaving rows stuck status=RUNNING.
 _BACKGROUND_TASKS: set = set()
 
 _scheduler: AsyncIOScheduler | None = None
@@ -123,15 +120,7 @@ async def _check_due_triggers() -> None:
 
 
 async def _run_trigger(trigger: Any, agent: Any, db: Any) -> None:
-    """Execute a single trigger's agent in the background.
-
-    Mirrors what triggers.py:execute_webhook_trigger does — create the
-    Execution row first, then launch the background task with the right
-    kwargs. The previous version called _execute_triggered_agent with
-    a (trigger_id, agent_id, message, context, tenant_id) signature
-    that doesn't match the helper's actual params, so every cron tick
-    threw TypeError and zero executions ran.
-    """
+    """Execute a single trigger's agent in the background."""
     try:
         import asyncio as _asyncio
 
@@ -141,7 +130,6 @@ async def _run_trigger(trigger: Any, agent: Any, db: Any) -> None:
         from models.execution import Execution, ExecutionStatus  # type: ignore
         from models.user import User as UserModel  # type: ignore
 
-        # Resolve the trigger owner so the execution has a user_id.
         trigger_user = (
             await db.execute(
                 _select(UserModel).where(UserModel.id == trigger.created_by)
@@ -187,7 +175,6 @@ async def _run_trigger(trigger: Any, agent: Any, db: Any) -> None:
                 db_url=str(_get_db_url()),
             )
         )
-        # Keep a hard reference so the task isn't GC'd before completion.
         _BACKGROUND_TASKS.add(_t)
         _t.add_done_callback(_BACKGROUND_TASKS.discard)
 

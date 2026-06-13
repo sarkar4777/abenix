@@ -1072,8 +1072,6 @@ async def execute_tool(
     except (TypeError, ValueError):
         accepted = set()
 
-    # Honor caller-supplied kb_id / kb_ids so KB/Atlas/graph tools that
-    # need a KB context can be invoked via the direct-execute surface.
     _kb_ids = arguments.get("kb_ids") if isinstance(arguments, dict) else None
     _kb_id = arguments.get("kb_id") if isinstance(arguments, dict) else None
     if _kb_id and not _kb_ids:

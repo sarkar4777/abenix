@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.collection_grant import UserCollectionGrant
 from models.document_grant import DocumentGrant

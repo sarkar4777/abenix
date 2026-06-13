@@ -1302,11 +1302,6 @@ def _ensure_tool_classes() -> None:
             "invoke_agent": InvokeAgentTool,
             "recall_trajectory": RecallTrajectoryTool,
             "narrate": NarrateTool,
-            # KB/Atlas/Graph/Portfolio tools — these were previously only
-            # constructed inside build_tool_registry() with full kb_ids
-            # context. Adding them here makes /api/tools/{slug}/execute
-            # reachable; the executor passes kb_ids/tenant_id via kwargs
-            # filtering at apps/api/app/routers/tools.py.
             "knowledge_search": KnowledgeSearchTool,
             "vector_search": VectorSearchTool,
             "graph_explorer": GraphExplorerTool,

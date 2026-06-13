@@ -1,13 +1,4 @@
-"""GDPR-compliant cascade delete with audit receipts.
-
-Five stores hold subject data: postgres, pinecone, neo4j (atlas),
-blob storage (`/data`), and trajectory memory. A purge marks every
-subject row soft-deleted, fires per-store cleanup with retry+backoff,
-and logs each attempt in `gdpr_purge_log` so an auditor can prove the
-data is gone.
-
-Idempotent: a retried purge skips stores that are already `completed`.
-"""
+"""GDPR-compliant cascade delete with audit receipts."""
 
 from __future__ import annotations
 
@@ -21,7 +12,7 @@ from pathlib import Path
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "db"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.agent_memory import AgentMemory
 from models.gdpr_purge_log import GDPRPurgeLog
@@ -64,15 +55,6 @@ async def _purge_postgres(
     subject_user_id: uuid.UUID,
     requested_by: uuid.UUID | None,
 ) -> int:
-    """Erase PII for the subject across every relevant table.
-
-    Previously this only soft-deleted PersonaItem + AgentMemory. The user
-    row, activity_logs (PII: email/ip), api_keys, and execution attribution
-    were all left intact, so a 'completed' receipt actually did almost
-    nothing. This version uses raw SQL via the engine to anonymize the
-    user row, null PII in activity_logs, revoke api_keys, and anonymize
-    executions while preserving the content rows for compliance.
-    """
     from sqlalchemy import text
 
     now = datetime.now(timezone.utc)
@@ -99,8 +81,6 @@ async def _purge_postgres(
     placeholder_email = f"deleted-{sid}@purged.local"
     placeholder_name = f"deleted-{sid[:8]}"
 
-    # Anonymize the user row in place — preserve the FK target so
-    # historical rows pointing at this user_id don't dangle.
     r = await db.execute(
         text(
             "UPDATE users SET email=:em, full_name=:fn, is_active=false, "
@@ -111,8 +91,6 @@ async def _purge_postgres(
     )
     affected += r.rowcount or 0
 
-    # Null PII in activity_logs while keeping the action row for the
-    # tamper-evident audit trail.
     r = await db.execute(
         text(
             "UPDATE activity_logs SET user_id=NULL, ip_address=NULL, "
@@ -122,22 +100,18 @@ async def _purge_postgres(
     )
     affected += r.rowcount or 0
 
-    # Revoke any active API keys the subject created.
     r = await db.execute(
         text("UPDATE api_keys SET is_active=false WHERE user_id=:uid"),
         {"uid": sid},
     )
     affected += r.rowcount or 0
 
-    # Anonymize executions — keep the input/output content for compliance
-    # but break the user attribution.
     r = await db.execute(
         text("UPDATE executions SET user_id=NULL WHERE user_id=:uid"),
         {"uid": sid},
     )
     affected += r.rowcount or 0
 
-    # Conversations
     r = await db.execute(
         text("UPDATE conversations SET user_id=NULL WHERE user_id=:uid"),
         {"uid": sid},
@@ -149,15 +123,13 @@ async def _purge_postgres(
 
 
 async def _purge_pinecone(subject_user_id: uuid.UUID) -> int:
-    """Delete every Pinecone vector owned by the subject. Best-effort
-    with retry; the daily vacuum sweeper catches any orphans."""
     try:
         from app.services.pinecone_client import delete_by_metadata
     except Exception:
         return 0
     deleted = 0
     last_error: Exception | None = None
-    for attempt, delay in enumerate(_RETRY_DELAYS + (None,)):
+    for delay in _RETRY_DELAYS + (None,):
         try:
             deleted = await delete_by_metadata({"user_id": str(subject_user_id)})
             return deleted
@@ -171,7 +143,6 @@ async def _purge_pinecone(subject_user_id: uuid.UUID) -> int:
 
 
 async def _purge_neo4j(subject_user_id: uuid.UUID) -> int:
-    """Detach + delete any node tagged with the subject's user_id."""
     try:
         from app.services.atlas.neo4j_client import run_cypher
     except Exception:
@@ -184,7 +155,6 @@ async def _purge_neo4j(subject_user_id: uuid.UUID) -> int:
 
 
 async def _purge_blob(subject_user_id: uuid.UUID) -> int:
-    """Remove subject-owned files from /data."""
     try:
         from app.core.blob import delete_prefix
     except Exception:
@@ -194,9 +164,6 @@ async def _purge_blob(subject_user_id: uuid.UUID) -> int:
 
 
 async def _purge_trajectory(subject_user_id: uuid.UUID) -> int:
-    """Trajectory memory is already covered by the postgres path (it
-    lives in agent_memories). This step is a no-op marker so the audit
-    receipt enumerates all five stores."""
     return 0
 
 
@@ -216,7 +183,6 @@ async def purge_user(
     subject_user_id: uuid.UUID,
     requested_by: uuid.UUID | None = None,
 ) -> dict[str, dict]:
-    """Run a full per-user GDPR purge. Returns a per-store receipt."""
     receipt: dict[str, dict] = {}
     for store in STORES:
         purger = _PURGERS[store]

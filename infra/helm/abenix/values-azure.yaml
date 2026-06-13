@@ -122,11 +122,6 @@ cognifyWorker:
 postgresql:
   enabled: true
   architecture: standalone            # Service name "abenix-postgresql" expected by API init
-  # TODO(deploy): the bitnamilegacy image does NOT ship pgvector. KB ingest
-  # silently fails to write embeddings until this is swapped to the custom
-  # bitnami+pgvector image (see values.yaml + infra/docker/Dockerfile.postgres-pgvector
-  # for the build pattern). Don't swap to plain pgvector/pgvector:pg16 — the
-  # bitnami chart expects bitnami-shaped images.
   image:
     registry: docker.io
     repository: bitnamilegacy/postgresql
@@ -218,9 +213,6 @@ scaling:
   agentRuntimeImage: {}         # { repository: "...", tag: "...", pullPolicy: Always }
   keda:
     enabled: true               # Set false if KEDA operator isn't on the cluster
-    # FQDN required: keda-operator runs in the `keda` namespace so the
-    # short name `abenix-prometheus` resolves against keda.svc.cluster.local
-    # and the scaler errors every poll.
     prometheusUrl: "http://abenix-prometheus.abenix.svc.cluster.local:9090"
   alerts:
     # PrometheusRule CRDs require prometheus-operator. Flip to true once

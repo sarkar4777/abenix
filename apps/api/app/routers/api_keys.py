@@ -60,9 +60,6 @@ async def list_api_keys(
     q = select(ApiKey).where(
         ApiKey.tenant_id == user.tenant_id, ApiKey.is_active.is_(True)
     )
-    # Non-admins only see their own keys. Without this scope a regular
-    # tenant member could enumerate (and revoke) the admin's automation
-    # keys via the previous tenant-only filter.
     if not _is_admin(user):
         q = q.where(ApiKey.user_id == user.id)
     q = q.order_by(ApiKey.created_at.desc())
