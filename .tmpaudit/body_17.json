@@ -1,0 +1,1 @@
+{"data":{"tool_slug":"database_writer","content":"Error: Table name must start with 'af_' for safety. Example: af_repo_analyses","metadata":{},"is_error":true},"error":null,"meta":null}

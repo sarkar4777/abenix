@@ -82,6 +82,25 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
         if agent is None:
             return None
         model_cfg = agent.model_config_ or {}
+        # Resolve KB grants for this agent so the queue path can register
+        # knowledge_search and friends with the right kb_ids (the inline
+        # path in apps/api/app/routers/agents.py already does this).
+        kb_ids: list[str] = []
+        try:
+            from sqlalchemy import select as _select
+
+            from models.agent_collection_grant import AgentCollectionGrant  # type: ignore
+
+            allowed = {"read", "write", "admin"}
+            grants = await db.execute(
+                _select(AgentCollectionGrant.collection_id).where(
+                    AgentCollectionGrant.agent_id == agent.id,
+                    AgentCollectionGrant.permission.in_(allowed),
+                )
+            )
+            kb_ids = [str(row[0]) for row in grants.all()]
+        except Exception:
+            kb_ids = []
         return {
             "execution": execution,
             "agent_id": str(agent.id),
@@ -93,6 +112,7 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
             "tool_names": model_cfg.get("tools", []) or [],
             "pipeline_config": model_cfg.get("pipeline_config"),
             "tenant_id": str(execution.tenant_id),
+            "kb_ids": kb_ids,
         }
 
 
@@ -107,6 +127,9 @@ async def _mark_done(
     cost: float | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
     trace_id: str | None = None,
+    node_results: dict[str, Any] | None = None,
+    execution_trace: dict[str, Any] | list[Any] | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import update
@@ -131,6 +154,12 @@ async def _mark_done(
         values["cost"] = round(float(cost), 6)
     if tool_calls is not None:
         values["tool_calls"] = tool_calls
+    if node_results is not None:
+        values["node_results"] = node_results
+    if execution_trace is not None:
+        values["execution_trace"] = execution_trace
+    if duration_ms is not None:
+        values["duration_ms"] = duration_ms
     if trace_id:
         values["trace_id"] = trace_id
     else:
@@ -291,7 +320,12 @@ async def _run_one(payload: dict) -> None:
                 if node.tool_name == "web_search" and "query" not in node.arguments:
                     node.arguments["query"] = message
 
-            registry = build_tool_registry(loaded["tool_names"])
+            registry = build_tool_registry(
+                loaded["tool_names"],
+                agent_id=loaded.get("agent_id"),
+                tenant_id=loaded.get("tenant_id"),
+                kb_ids=loaded.get("kb_ids") or [],
+            )
             executor = PipelineExecutor(
                 tool_registry=registry,
                 timeout_seconds=120,
@@ -354,7 +388,15 @@ async def _run_one(payload: dict) -> None:
                     "; ".join(node_errs) or f"failed nodes: {','.join(failed_nodes)}"
                 )[:2000]
 
-            await _mark_done(execution_id, pipeline_status, final_text, err_text)
+            await _mark_done(
+                execution_id,
+                pipeline_status,
+                final_text,
+                err_text,
+                node_results=serialized.get("node_results"),
+                execution_trace=serialized,
+                duration_ms=serialized.get("duration_ms"),
+            )
             _pipe_evt: dict[str, Any] = {
                 "event": "done" if pipeline_status == "completed" else "error",
                 "execution_id": execution_id,
@@ -382,6 +424,7 @@ async def _run_one(payload: dict) -> None:
                 agent_name=agent_name,
                 db_url=os.environ.get("DATABASE_URL", ""),
                 model_config=loaded.get("model_cfg") or {},
+                kb_ids=loaded.get("kb_ids") or [],
             )
             llm_router = LLMRouter()
             _tool_cfg = loaded["model_cfg"].get("tool_config") or {}
@@ -396,6 +439,7 @@ async def _run_one(payload: dict) -> None:
                 max_tokens=loaded["model_cfg"].get("max_tokens", 4096),
                 agent_id=loaded["agent_id"],
                 execution_id=execution_id,
+                tenant_id=str(loaded.get("tenant_id") or ""),
                 # Apply tool-schema injection here too so the NATS
                 # consumer path behaves the same as the inline path.
                 tool_config=_tool_cfg,
@@ -408,10 +452,15 @@ async def _run_one(payload: dict) -> None:
             _agg_tool_calls: list[dict[str, Any]] = []
             _last_done: dict[str, Any] = {}
             async for _ev in executor.stream(message):
-                # Publish each event with its full data payload. The
-                # platform's executions/{id}/watch SSE re-emits a
-                # snapshot for every event it receives, so the drawer
-                # ticks tokens / tool chips live.
+                # Swallow the executor's own "done" event — the consumer
+                # emits a single merged done event at the end of this
+                # block that includes `output`. Publishing the executor's
+                # intermediate done would race the API _collect coroutine
+                # at apps/api/app/routers/agents.py:_collect, which reads
+                # the first done it sees and returns empty `output`.
+                if _ev.event == "done" and isinstance(_ev.data, dict):
+                    _last_done = _ev.data
+                    continue
                 _evt: dict[str, Any] = {"event": _ev.event}
                 if isinstance(_ev.data, dict):
                     _evt.update(_ev.data)
@@ -428,8 +477,6 @@ async def _run_one(payload: dict) -> None:
                         await _append_tc(execution_id, _ev.data)
                     except Exception as _ape:
                         logger.debug("append_tool_call failed: %s", _ape)
-                elif _ev.event == "done" and isinstance(_ev.data, dict):
-                    _last_done = _ev.data
             result = SimpleNamespace(
                 output="".join(_full_text_parts),
                 tool_calls=_agg_tool_calls,
@@ -478,6 +525,22 @@ async def _run_one(payload: dict) -> None:
             )
             if not _tid_done:
                 _tid_done = getattr(executor, "_trace_id_for_log", None)
+            # Capture executor trace so /executions/{id}/replay (Flight
+            # Recorder) has steps to surface. Without this every queue
+            # path execution rendered total_steps=0 in the UI.
+            _exec_trace: dict[str, Any] | None = None
+            try:
+                _exec_trace = {
+                    "steps": (
+                        executor.get_trace_summary()
+                        if hasattr(executor, "get_trace_summary")
+                        else []
+                    ),
+                    "tool_calls": _agg_tool_calls,
+                }
+            except Exception as _te:
+                logger.debug("trace summary unavailable: %s", _te)
+                _exec_trace = None
             await _mark_done(
                 execution_id,
                 "completed",
@@ -488,6 +551,8 @@ async def _run_one(payload: dict) -> None:
                 cost=getattr(result, "cost", None),
                 tool_calls=_agg_tool_calls or None,
                 trace_id=_tid_done,
+                execution_trace=_exec_trace,
+                duration_ms=getattr(result, "duration_ms", None) or None,
             )
             _done_evt: dict[str, Any] = {
                 "event": "done",

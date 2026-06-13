@@ -1,0 +1,27 @@
+event: heartbeat
+data: {"event": "heartbeat"}
+
+event: start
+data: {"event": "start", "execution_id": "ff720c58-9b41-4ee5-be9e-283ff6ab81bb", "agent": "Time Greeting Pipeline (UAT)", "pool": "default", "mode": "pipeline"}
+
+event: node_start
+data: {"event": "node_start", "node_id": "fetch_time", "tool_name": "current_time"}
+
+event: node_complete
+data: {"event": "node_complete", "node_id": "fetch_time", "status": "completed", "duration_ms": 0, "output_preview": "Current time (UTC):\n  Date: 2026-06-13\n  Time: 07:48:10\n  Day: Saturday\n  ISO: 2026-06-13T07:48:10.812991+00:00"}
+
+event: node_start
+data: {"event": "node_start", "node_id": "generate_greeting", "tool_name": "llm_call"}
+
+event: node_complete
+data: {"event": "node_complete", "node_id": "generate_greeting", "status": "completed", "duration_ms": 1348, "output_preview": "{'response': 'Hey there! Hope you\u2019re having a great day, even if I can\u2019t check the time right now!', 'model': 'gpt-4o-mini', 'input_tokens': 44, 'output_tokens': 22, 'cost': 1.98e-05, 'latency_ms': 1329}", "produced_fields": ["cost", "input_tokens", "latency_ms", "model", "output_tokens", "response"]}
+
+event: node_start
+data: {"event": "node_start", "node_id": "export_json", "tool_name": "data_exporter"}
+
+event: node_complete
+data: {"event": "node_complete", "node_id": "export_json", "status": "completed", "duration_ms": 61, "output_preview": "{'status': 'success', 'destination': 'file', 'file_path': '/data/exports/greeting.json', 'storage_uri': '/data/exports/greeting.json', 'download_url': '/api/files/export/greeting.json', 'filename': 'greeting.json', 'format': 'json', 'size_bytes': 148}", "produced_fields": ["destination", "download_url", "file_path", "filename", "format", "size_bytes", "status", "storage_uri"]}
+
+event: done
+data: {"event": "done", "execution_id": "ff720c58-9b41-4ee5-be9e-283ff6ab81bb", "output": "{\"status\": \"success\", \"destination\": \"file\", \"file_path\": \"/data/exports/greeting.json\", \"storage_uri\": \"/data/exports/greeting.json\", \"download_url\": \"/api/files/export/greeting.json\", \"filename\": \"greeting.json\", \"format\": \"json\", \"size_bytes\": 148}", "summary": {"status": "completed", "node_results": {"fetch_time": {"node_id": "fetch_time", "status": "completed", "tool_name": "current_time", "duration_ms": 0, "condition_evaluated": false, "condition_met": null, "error": null, "attempt": 1, "output": "Current time (UTC):\n  Date: 2026-06-13\n  Time: 07:48:10\n  Day: Saturday\n  ISO: 2026-06-13T07:48:10.812991+00:00"}, "generate_greeting": {"node_id": "generate_greeting", "status": "completed", "tool_name": "llm_call", "duration_ms": 1348, "condition_evaluated": false, "condition_met": null, "error": null, "attempt": 1, "output": {"response": "Hey there! Hope you\u2019re having a great day, even if I can\u2019t check the time right now!", "model": "gpt-4o-mini", "input_tokens": 44, "output_tokens": 22, "cost": 1.98e-05, "latency_ms": 1329}}, "export_json": {"node_id": "export_json", "status": "completed", "tool_name": "data_exporter", "duration_ms": 61, "condition_evaluated": false, "condition_met": null, "error": null, "attempt": 1, "output": {"status": "success", "destination": "file", "file_path": "/data/exports/greeting.json", "storage_uri": "/data/exports/greeting.json", "download_url": "/api/files/export/greeting.json", "filename": "greeting.json", "format": "json", "size_bytes": 148}}}, "execution_path": ["fetch_time", "generate_greeting", "export_json"], "skipped_nodes": [], "failed_nodes": [], "total_duration_ms": 1414, "final_output": {"status": "success", "destination": "file", "file_path": "/data/exports/greeting.json", "storage_uri": "/data/exports/greeting.json", "download_url": "/api/files/export/greeting.json", "filename": "greeting.json", "format": "json", "size_bytes": 148}}}
+

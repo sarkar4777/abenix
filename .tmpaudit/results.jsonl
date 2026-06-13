@@ -1,0 +1,100 @@
+200|calculator|{"data":{"tool_slug":"calculator","content":"Error: expression is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|current_time|{"data":{"tool_slug":"current_time","content":"Current time (UTC):\n  Date: 2026-06-13\n  Time: 08:41:56\n  Day: Saturday\n  ISO: 2026-06-13T08:41:56.860210+00:00","metadata":{"timezone":"UTC","iso":"2026-06-13T08:41:56.860210+00:00"},"is_e
+200|web_search|{"data":{"tool_slug":"web_search","content":"Error: query is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|file_reader|{"data":{"tool_slug":"file_reader","content":"Either `path` (filesystem path) or `text` (inline content) must be supplied. Pass the document content as `text` if you have it inline; pass `path` if it's already on disk.","metadata":{},"is_er
+200|csv_analyzer|{"data":{"tool_slug":"csv_analyzer","content":"Error: provide either 'file_path' or 'csv_text'","metadata":{},"is_error":true},"error":null,"meta":null}
+200|spreadsheet_analyzer|{"data":{"tool_slug":"spreadsheet_analyzer","content":"Either `path` (filesystem path) or `text` (inline content) must be supplied. Pass the document content as `text` if you have it inline; pass `path` if it's already on disk.","metadata":
+200|json_transformer|{"data":{"tool_slug":"json_transformer","content":"Error: data is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|regex_extractor|{"data":{"tool_slug":"regex_extractor","content":"Error: text is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|text_analyzer|{"data":{"tool_slug":"text_analyzer","content":"Error: text is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|code_executor|{"data":{"tool_slug":"code_executor","content":"Error: code is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|llm_call|{"data":{"tool_slug":"llm_call","content":"Error: prompt is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|email_sender|{"data":{"tool_slug":"email_sender","content":"Error: to is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|http_client|{"data":{"tool_slug":"http_client","content":"Error: url is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|data_merger|{"data":{"tool_slug":"data_merger","content":"{}","metadata":{"strategy":"nested","input_count":0},"is_error":false},"error":null,"meta":null}
+200|data_exporter|{"data":{"tool_slug":"data_exporter","content":"Error: destination is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|database_query|{"data":{"tool_slug":"database_query","content":"Error: query is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|database_writer|{"data":{"tool_slug":"database_writer","content":"Error: Table name must start with 'af_' for safety. Example: af_repo_analyses","metadata":{},"is_error":true},"error":null,"meta":null}
+200|cloud_storage|{"data":{"tool_slug":"cloud_storage","content":"Error: operation and path are required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|github_tool|{"data":{"tool_slug":"github_tool","content":"GITHUB_TOKEN environment variable is not set and operation '' requires authentication. Set GITHUB_TOKEN or use one of: ['compare_branches', 'get_commits', 'get_languages', 'get_repo', 'get_workf
+200|image_analyzer|{"data":{"tool_slug":"image_analyzer","content":"Error: image_url is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|schema_validator|{"data":{"tool_slug":"schema_validator","content":"Error: Unknown operation: ","metadata":{},"is_error":true},"error":null,"meta":null}
+200|structured_analyzer|{"data":{"tool_slug":"structured_analyzer","content":"Error: content is required","metadata":{},"is_error":true},"error":null,"meta":null}
+500|memory_store|{"data":null,"error":{"message":"tool memory_store failed: 'key'","code":500}}
+200|memory_recall|{"data":{"tool_slug":"memory_recall","content":"memory_recall needs agent_id and tenant_id (not supplied to the tool).","metadata":{},"is_error":true},"error":null,"meta":null}
+500|memory_forget|{"data":null,"error":{"message":"tool memory_forget failed: 'key'","code":500}}
+500|human_approval|{"data":null,"error":{"message":"tool human_approval failed: 'action'","code":500}}
+200|agent_step|{"data":{"tool_slug":"agent_step","content":"Error: input_message is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|invoke_agent|{"data":{"tool_slug":"invoke_agent","content":"agent_slug is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|recall_trajectory|{"data":{"tool_slug":"recall_trajectory","content":"query is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|narrate|{"data":{"tool_slug":"narrate","content":"narrate: message is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|financial_calculator|{"data":{"tool_slug":"financial_calculator","content":"Error: calculation type is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|risk_analyzer|{"data":{"tool_slug":"risk_analyzer","content":"Error: analysis_type is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|market_data|{"data":{"tool_slug":"market_data","content":"Unknown data_type: ","metadata":{},"is_error":true},"error":null,"meta":null}
+200|unit_converter|{"data":{"tool_slug":"unit_converter","content":"Error: from_unit and to_unit are required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|date_calculator|{"data":{"tool_slug":"date_calculator","content":"Unknown operation: ","metadata":{},"is_error":true},"error":null,"meta":null}
+200|document_extractor|{"data":{"tool_slug":"document_extractor","content":"Error: provide either 'text' or 'file_path'","metadata":{},"is_error":true},"error":null,"meta":null}
+200|presentation_analyzer|{"data":{"tool_slug":"presentation_analyzer","content":"Either `path` (filesystem path) or `text` (inline content) must be supplied. Pass the document content as `text` if you have it inline; pass `path` if it's already on disk.","metadata"
+200|integration_hub|{"data":{"tool_slug":"integration_hub","content":"Error: Unknown service ''. Available: slack, teams, gmail, salesforce, hubspot, zendesk, jira, google_sheets, notion, airtable, asana, linear, intercom, twilio, sendgrid, pagerduty, snowflak
+200|speech_to_text|{"data":{"tool_slug":"speech_to_text","content":"Error: audio_url is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|text_to_speech|{"data":{"tool_slug":"text_to_speech","content":"Error: text is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|file_system|{"data":{"tool_slug":"file_system","content":"Error: path is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|pii_redactor|{"data":{"tool_slug":"pii_redactor","content":"{\"redacted_text\": \"\", \"detections\": [], \"detection_count\": 0, \"strategy_applied\": \"mask\"}","metadata":{},"is_error":false},"error":null,"meta":null}
+200|time_series_analyzer|{"data":{"tool_slug":"time_series_analyzer","content":"No data points provided","metadata":{},"is_error":true},"error":null,"meta":null}
+200|event_buffer|{"data":{"tool_slug":"event_buffer","content":null,"metadata":null,"is_error":false},"error":null,"meta":null}
+500|redis_stream_consumer|{"data":null,"error":{"message":"tool redis_stream_consumer failed: 'stream'","code":500}}
+500|redis_stream_publisher|{"data":null,"error":{"message":"tool redis_stream_publisher failed: 'stream'","code":500}}
+500|kafka_consumer|{"data":null,"error":{"message":"tool kafka_consumer failed: 'topic'","code":500}}
+200|ml_model|{"data":{"tool_slug":"ml_model","content":"Error: operation is required","metadata":{},"is_error":true},"error":null,"meta":null}
+000|code_asset|
+200|meeting_join|{"data":{"tool_slug":"meeting_join","content":"meeting_id is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|meeting_listen|{"data":{"tool_slug":"meeting_listen","content":"No live meeting session — call meeting_join first.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|meeting_speak|{"data":{"tool_slug":"meeting_speak","content":"No live meeting session — call meeting_join first.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|meeting_post_chat|{"data":{"tool_slug":"meeting_post_chat","content":"No live meeting session — call meeting_join first.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|meeting_leave|{"data":{"tool_slug":"meeting_leave","content":"No active meeting session — nothing to leave.","metadata":{},"is_error":false},"error":null,"meta":null}
+200|scope_gate|{"data":{"tool_slug":"scope_gate","content":"{\"decision\": \"answer\", \"reason\": \"no_active_session_default_answer\", \"hint\": \"No live session context available \\u2014 the pod may have restarted. Use persona_rag; if nothing relevant
+200|defer_to_human|{"data":{"tool_slug":"defer_to_human","content":"meeting_id and question are required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|persona_rag|{"data":{"tool_slug":"persona_rag","content":"query is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|sandboxed_job|{"data":{"tool_slug":"sandboxed_job","content":"image and command are required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|sanctions_screening|{"data":{"tool_slug":"sanctions_screening","content":"Error: 'name' is required.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|pep_screening|{"data":{"tool_slug":"pep_screening","content":"Error: 'name' is required.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|adverse_media|{"data":{"tool_slug":"adverse_media","content":"Error: 'name' is required.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|ubo_discovery|{"data":{"tool_slug":"ubo_discovery","content":"Error: 'company_name' is required.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|country_risk_index|{"data":{"tool_slug":"country_risk_index","content":"Error: 'country' is required.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|legal_existence_verifier|{"data":{"tool_slug":"legal_existence_verifier","content":"Error: 'company_name' is required.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|kyc_scorer|{"data":{"tool_slug":"kyc_scorer","content":"{\n  \"inputs\": {\n    \"cpi_rank\": null,\n    \"annual_notional_usd\": null,\n    \"industry_segment\": null,\n    \"sanctions_hit\": false,\n    \"pep_match\": false,\n    \"adverse_media_gra
+200|regulatory_enforcement|{"data":{"tool_slug":"regulatory_enforcement","content":"Error: 'name' is required.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|entso_e|{"data":{"tool_slug":"entso_e","content":"Error: data_type is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|ember_climate|{"data":{"tool_slug":"ember_climate","content":"Error: EMBER_API_KEY environment variable is not set. Register for a free key at https://ember-energy.org/data/api/ and export EMBER_API_KEY=<your-key>.","metadata":{},"is_error":true},"error"
+200|ecb_rates|{"data":{"tool_slug":"ecb_rates","content":"Error: data_type is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|yahoo_finance|{"data":{"tool_slug":"yahoo_finance","content":"Error: 'action' is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|options_data|{"data":{"tool_slug":"options_data","content":"Error: both 'action' and 'symbol' are required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|eia_open_data|{"data":{"tool_slug":"eia_open_data","content":"Error: series_id is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|open_meteo|{"data":{"tool_slug":"open_meteo","content":"Either location (shortcut) or lat+lon must be provided.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|ais_stream|{"data":{"tool_slug":"ais_stream","content":"AIS live snapshot — 30 unique vessels in 30 messages\nBounding box(es): [[[-90.0, -180.0], [90.0, 180.0]]]\nShip-type filter: all\n\n  MMSI 305741000  KONSTANZE B               (51.2962, 4.2619
+200|bunker_fuel|{"data":{"tool_slug":"bunker_fuel","content":"Public bunker-fuel reference (VLSFO, $/MT) — sourced from shipandbunker.com\nNOT a Baltic Exchange assessed rate; freight estimate is bunker-derived only.\n\n  Houston       $612.00 /MT VLSFO\
+200|vessel_specs|{"data":{"tool_slug":"vessel_specs","content":"Error: unknown action ''","metadata":{},"is_error":true},"error":null,"meta":null}
+200|refined_products_forwards|{"data":{"tool_slug":"refined_products_forwards","content":"Unknown action ''","metadata":{},"is_error":true},"error":null,"meta":null}
+200|freight_worldscale|{"data":{"tool_slug":"freight_worldscale","content":"Unknown action ''","metadata":{},"is_error":true},"error":null,"meta":null}
+200|freight_baltic_blpg|{"data":{"tool_slug":"freight_baltic_blpg","content":"Unknown action ''","metadata":{},"is_error":true},"error":null,"meta":null}
+200|port_constraints|{"data":{"tool_slug":"port_constraints","content":"Unknown action ''","metadata":{},"is_error":true},"error":null,"meta":null}
+200|tavily_search|{"data":{"tool_slug":"tavily_search","content":"Error: query is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|news_feed|{"data":{"tool_slug":"news_feed","content":"Error: query is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|academic_search|{"data":{"tool_slug":"academic_search","content":"Error: query is required","metadata":{},"is_error":true},"error":null,"meta":null}
+404|knowledge_search|{"data":null,"error":{"message":"unknown tool: knowledge_search","code":404}}
+404|graph_explorer|{"data":null,"error":{"message":"unknown tool: graph_explorer","code":404}}
+404|atlas_describe|{"data":null,"error":{"message":"unknown tool: atlas_describe","code":404}}
+404|atlas_query|{"data":null,"error":{"message":"unknown tool: atlas_query","code":404}}
+404|atlas_traverse|{"data":null,"error":{"message":"unknown tool: atlas_traverse","code":404}}
+404|atlas_search_grounded|{"data":null,"error":{"message":"unknown tool: atlas_search_grounded","code":404}}
+404|atlas_cypher|{"data":null,"error":{"message":"unknown tool: atlas_cypher","code":404}}
+404|atlas_as_of|{"data":null,"error":{"message":"unknown tool: atlas_as_of","code":404}}
+200|graph_builder|{"data":{"tool_slug":"graph_builder","content":"At least one node is required.","metadata":{},"is_error":true},"error":null,"meta":null}
+200|structured_extractor|{"data":{"tool_slug":"structured_extractor","content":"Error: 'text' is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|document_parser|{"data":{"tool_slug":"document_parser","content":"Either `path` (filesystem path) or `text` (inline content) must be supplied. Pass the document content as `text` if you have it inline; pass `path` if it's already on disk.","metadata":{},"i
+404|schema_portfolio_tool|{"data":null,"error":{"message":"unknown tool: schema_portfolio_tool","code":404}}
+200|llm_route|{"data":{"tool_slug":"llm_route","content":"No branches provided","metadata":{},"is_error":true},"error":null,"meta":null}
+200|sentiment_analyzer|{"data":{"tool_slug":"sentiment_analyzer","content":"Error: 'texts' must be a non-empty array of strings","metadata":{},"is_error":true},"error":null,"meta":null}
+200|scenario_planner|{"data":{"tool_slug":"scenario_planner","content":"Error: 'parameters' must be a non-empty object","metadata":{},"is_error":true},"error":null,"meta":null}
+200|weather_simulator|{"data":{"tool_slug":"weather_simulator","content":"Error: location is required","metadata":{},"is_error":true},"error":null,"meta":null}
+200|api_connector|{"data":{"tool_slug":"api_connector","content":"Unknown service: . Available: ['slack', 'airtable_read', 'airtable_write', 'notion_query', 'notion_create', 'jira_create', 'jira_search', 'google_sheets_read', 'google_sheets_append']","metada

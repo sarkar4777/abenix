@@ -351,6 +351,7 @@ async def search_knowledge(
             mode=SearchMode(body.mode),
             top_k=body.top_k,
             graph_depth=body.graph_depth,
+            tenant_id=str(user.tenant_id),
         )
         return success(
             {

@@ -26,14 +26,21 @@ class SemanticCache:
             vectorizer=vectorizer,
             distance_threshold=DISTANCE_THRESHOLD,
             ttl=TTL_SECONDS,
-            filterable_fields=[{"name": "agent_id", "type": "tag"}],
+            filterable_fields=[
+                {"name": "agent_id", "type": "tag"},
+                {"name": "tenant_id", "type": "tag"},
+            ],
         )
 
-    async def get(self, prompt: str, agent_id: str) -> dict[str, Any] | None:
-        agent_filter = Tag("agent_id") == agent_id
+    async def get(
+        self, prompt: str, agent_id: str, tenant_id: str = ""
+    ) -> dict[str, Any] | None:
+        filt = Tag("agent_id") == agent_id
+        if tenant_id:
+            filt = filt & (Tag("tenant_id") == tenant_id)
         results = await self._cache.acheck(
             prompt=prompt,
-            filter_expression=agent_filter,
+            filter_expression=filt,
         )
         if not results:
             return None
@@ -52,11 +59,20 @@ class SemanticCache:
             return json.loads(raw)
         return raw
 
-    async def set(self, prompt: str, response: dict[str, Any], agent_id: str) -> None:
+    async def set(
+        self,
+        prompt: str,
+        response: dict[str, Any],
+        agent_id: str,
+        tenant_id: str = "",
+    ) -> None:
+        filters: dict[str, str] = {"agent_id": agent_id}
+        if tenant_id:
+            filters["tenant_id"] = tenant_id
         await self._cache.astore(
             prompt=prompt,
             response=json.dumps(response, default=str),
-            filters={"agent_id": agent_id},
+            filters=filters,
         )
 
     async def close(self) -> None:

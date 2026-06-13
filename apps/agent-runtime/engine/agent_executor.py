@@ -173,6 +173,7 @@ class AgentExecutor:
         execution_id: str = "",
         tool_config: dict[str, dict[str, Any]] | None = None,
         asset_schemas: dict[str, dict[str, Any]] | None = None,
+        tenant_id: str = "",
     ) -> None:
         self.llm_router = llm_router
         self.tool_registry = tool_registry
@@ -187,6 +188,7 @@ class AgentExecutor:
         self.max_tokens = max_tokens
         self.cache = cache
         self.agent_id = agent_id
+        self.tenant_id = tenant_id
         # Policy-gate snapshot. None = no gate (backward-compatible
         # default); callers with an active ModerationPolicy build a
         # GateConfig in the API layer and pass it in.
@@ -295,6 +297,7 @@ class AgentExecutor:
                 temperature=self.temperature,
                 system=self.system_prompt or None,
                 agent_id=self.agent_id,
+                tenant_id=self.tenant_id,
             )
             if cache_result.hit and cache_result.response:
                 duration = int((time.monotonic() - start) * 1000)
@@ -481,6 +484,7 @@ class AgentExecutor:
                         temperature=self.temperature,
                         response=response_data,
                         agent_id=self.agent_id,
+                        tenant_id=self.tenant_id,
                     )
 
                 return ExecutionResult(
@@ -742,6 +746,7 @@ class AgentExecutor:
                 temperature=self.temperature,
                 system=self.system_prompt or None,
                 agent_id=self.agent_id,
+                tenant_id=self.tenant_id,
             )
             if cache_result.hit and cache_result.response:
                 cached_content = cache_result.response.get("content", "")
@@ -831,6 +836,7 @@ class AgentExecutor:
                         temperature=self.temperature,
                         response=response_data,
                         agent_id=self.agent_id,
+                        tenant_id=self.tenant_id,
                     )
 
                 yield ExecutionEvent(
@@ -1264,6 +1270,17 @@ def _ensure_tool_classes() -> None:
     from engine.tools.invoke_agent import InvokeAgentTool
     from engine.tools.recall_trajectory import RecallTrajectoryTool
     from engine.tools.narrate import NarrateTool
+    from engine.tools.knowledge_search import KnowledgeSearchTool
+    from engine.tools.vector_search import VectorSearchTool
+    from engine.tools.graph_explorer_tool import GraphExplorerTool
+    from engine.tools.schema_portfolio_tool import SchemaPortfolioTool
+    from engine.tools.atlas_tools import (
+        AtlasQueryTool,
+        AtlasTraverseTool,
+        AtlasSearchGroundedTool,
+        AtlasDescribeTool,
+    )
+    from engine.tools.atlas_cypher import AtlasCypherTool, AtlasAsOfTool
 
     _CONTEXT_TOOL_FACTORIES.update(
         {
@@ -1285,6 +1302,21 @@ def _ensure_tool_classes() -> None:
             "invoke_agent": InvokeAgentTool,
             "recall_trajectory": RecallTrajectoryTool,
             "narrate": NarrateTool,
+            # KB/Atlas/Graph/Portfolio tools — these were previously only
+            # constructed inside build_tool_registry() with full kb_ids
+            # context. Adding them here makes /api/tools/{slug}/execute
+            # reachable; the executor passes kb_ids/tenant_id via kwargs
+            # filtering at apps/api/app/routers/tools.py.
+            "knowledge_search": KnowledgeSearchTool,
+            "vector_search": VectorSearchTool,
+            "graph_explorer": GraphExplorerTool,
+            "schema_portfolio_tool": SchemaPortfolioTool,
+            "atlas_query": AtlasQueryTool,
+            "atlas_traverse": AtlasTraverseTool,
+            "atlas_search_grounded": AtlasSearchGroundedTool,
+            "atlas_describe": AtlasDescribeTool,
+            "atlas_cypher": AtlasCypherTool,
+            "atlas_as_of": AtlasAsOfTool,
         }
     )
     _TOOL_CLASSES_LOADED = True

@@ -218,7 +218,10 @@ spec:
     {{- if eq (default "celery" $.Values.scaling.queueBackend) "nats" }}
     - type: nats-jetstream
       metadata:
-        natsServerMonitoringEndpoint: "http://{{ $release }}-nats:8222"
+        # KEDA prepends http:// to natsServerMonitoringEndpoint. Pass
+        # host:port only; including the scheme yields http://http//host
+        # and every poll fails with NameResolutionError.
+        natsServerMonitoringEndpoint: "{{ $release }}-nats.{{ $.Release.Namespace }}.svc.cluster.local:8222"
         account: "$G"
         stream: "agents"
         consumer: "abenix-{{ .key }}-consumer"

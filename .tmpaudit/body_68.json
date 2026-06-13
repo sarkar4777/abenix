@@ -1,0 +1,1 @@
+{"data":{"tool_slug":"ember_climate","content":"Error: EMBER_API_KEY environment variable is not set. Register for a free key at https://ember-energy.org/data/api/ and export EMBER_API_KEY=<your-key>.","metadata":{},"is_error":true},"error":null,"meta":null}

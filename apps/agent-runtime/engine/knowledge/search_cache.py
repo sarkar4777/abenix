@@ -61,7 +61,7 @@ def cache_key(
         sort_keys=True,
     )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
-    return f"kbsearch:{digest}"
+    return f"kbsearch:{tenant_id}:{digest}"
 
 
 async def get(key: str) -> dict | None:
@@ -98,10 +98,9 @@ async def invalidate_tenant(tenant_id: str) -> None:
     try:
         cursor = 0
         deleted = 0
+        pattern = f"kbsearch:{tenant_id}:*"
         while True:
-            cursor, keys = await client.scan(
-                cursor=cursor, match="kbsearch:*", count=200
-            )
+            cursor, keys = await client.scan(cursor=cursor, match=pattern, count=200)
             if keys:
                 await client.delete(*keys)
                 deleted += len(keys)

@@ -141,6 +141,20 @@ async def _maybe_snapshot(
     now = datetime.now(timezone.utc)
     if last and last.created_at and (now - last.created_at) < timedelta(seconds=60):
         return
+    # Snapshots have a unique (graph_id, version) constraint. Skip if a
+    # snapshot already exists for this version — caused 500s on /restore
+    # because every restore tried to take a pre-restore snapshot at the
+    # already-snapshotted current version.
+    existing_at_version = (
+        await db.execute(
+            select(AtlasSnapshot).where(
+                AtlasSnapshot.graph_id == graph.id,
+                AtlasSnapshot.version == graph.version,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_at_version is not None:
+        return
     nodes = (
         (await db.execute(select(AtlasNode).where(AtlasNode.graph_id == graph.id)))
         .scalars()

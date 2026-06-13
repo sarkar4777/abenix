@@ -471,8 +471,9 @@ async def _graph_search(
                     connected.entity_type AS type,
                     connected.description AS description,
                     hops,
-                    [rel IN r | type(rel)] AS rel_types
-                ORDER BY hops ASC, connected.mention_count DESC
+                    [rel IN r | type(rel)] AS rel_types,
+                    connected.mention_count AS mention_count
+                ORDER BY hops ASC, mention_count DESC
                 LIMIT 30
                 """,
                 kb_id=kb_id,

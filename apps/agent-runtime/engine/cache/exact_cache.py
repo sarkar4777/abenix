@@ -19,9 +19,11 @@ def _cache_key(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
     temperature: float,
+    tenant_id: str = "",
 ) -> str:
     payload = json.dumps(
         {
+            "tenant": tenant_id or "",
             "model": model,
             "messages": messages,
             "tools": tools,
@@ -31,7 +33,7 @@ def _cache_key(
         default=str,
     )
     digest = hashlib.sha256(payload.encode()).hexdigest()
-    return f"abenix:exact:{digest}"
+    return f"abenix:exact:{tenant_id or 'notenant'}:{digest}"
 
 
 class ExactCache:
@@ -45,11 +47,12 @@ class ExactCache:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         temperature: float,
+        tenant_id: str = "",
     ) -> dict[str, Any] | None:
         if temperature > TEMP_THRESHOLD:
             return None
 
-        key = _cache_key(model, messages, tools, temperature)
+        key = _cache_key(model, messages, tools, temperature, tenant_id)
         raw = await self._redis.get(key)
         if raw is None:
             return None
@@ -64,11 +67,12 @@ class ExactCache:
         tools: list[dict[str, Any]] | None,
         temperature: float,
         response: dict[str, Any],
+        tenant_id: str = "",
     ) -> None:
         if temperature > TEMP_THRESHOLD:
             return
 
-        key = _cache_key(model, messages, tools, temperature)
+        key = _cache_key(model, messages, tools, temperature, tenant_id)
         await self._redis.set(key, json.dumps(response, default=str), ex=TTL_SECONDS)
 
     async def close(self) -> None:

@@ -213,7 +213,10 @@ scaling:
   agentRuntimeImage: {}         # { repository: "...", tag: "...", pullPolicy: Always }
   keda:
     enabled: true               # Set false if KEDA operator isn't on the cluster
-    prometheusUrl: "http://abenix-prometheus:9090"
+    # FQDN required: keda-operator runs in the `keda` namespace so the
+    # short name `abenix-prometheus` resolves against keda.svc.cluster.local
+    # and the scaler errors every poll.
+    prometheusUrl: "http://abenix-prometheus.abenix.svc.cluster.local:9090"
   alerts:
     # PrometheusRule CRDs require prometheus-operator. Flip to true once
     # the cluster has the operator (AKS ships it as an add-on).

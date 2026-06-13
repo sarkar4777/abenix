@@ -52,10 +52,13 @@ class CacheOrchestrator:
         temperature: float = 0.7,
         system: str | None = None,
         agent_id: str = "",
+        tenant_id: str = "",
         rag_context: str | None = None,
     ) -> CacheResult:
         if self.exact:
-            cached = await self.exact.get(model, messages, tools, temperature)
+            cached = await self.exact.get(
+                model, messages, tools, temperature, tenant_id
+            )
             if cached is not None:
                 cache_hits.labels(layer="exact").inc()
                 return CacheResult(hit=True, layer="exact", response=cached)
@@ -63,7 +66,9 @@ class CacheOrchestrator:
         if self.semantic and agent_id:
             last_user_msg = _extract_last_user_text(messages)
             if last_user_msg:
-                cached = await self.semantic.get(last_user_msg, agent_id)
+                cached = await self.semantic.get(
+                    last_user_msg, agent_id, tenant_id=tenant_id
+                )
                 if cached is not None:
                     cache_hits.labels(layer="semantic").inc()
                     return CacheResult(hit=True, layer="semantic", response=cached)
@@ -90,18 +95,23 @@ class CacheOrchestrator:
         temperature: float,
         response: dict[str, Any],
         agent_id: str = "",
+        tenant_id: str = "",
     ) -> None:
         if _looks_like_error_fallback(response, had_tools=bool(tools)):
             logger.info("skipping cache store — response looks like an error fallback")
             return
 
         if self.exact:
-            await self.exact.set(model, messages, tools, temperature, response)
+            await self.exact.set(
+                model, messages, tools, temperature, response, tenant_id
+            )
 
         if self.semantic and agent_id:
             last_user_msg = _extract_last_user_text(messages)
             if last_user_msg:
-                await self.semantic.set(last_user_msg, response, agent_id)
+                await self.semantic.set(
+                    last_user_msg, response, agent_id, tenant_id=tenant_id
+                )
 
     async def close(self) -> None:
         if self.exact:

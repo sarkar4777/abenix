@@ -33,17 +33,18 @@ async def _get_client() -> Any | None:
 
 
 async def invalidate_tenant_search_cache(tenant_id: str) -> int:
-    """Drop kbsearch:* entries; returns count for logging."""
+    """Drop kbsearch:{tenant}:* entries; returns count for logging."""
     client = await _get_client()
     if client is None:
         return 0
     deleted = 0
     try:
         cursor = 0
+        pattern = f"kbsearch:{tenant_id}:*"
         while True:
             cursor, keys = await client.scan(
                 cursor=cursor,
-                match="kbsearch:*",
+                match=pattern,
                 count=200,
             )
             if keys:
