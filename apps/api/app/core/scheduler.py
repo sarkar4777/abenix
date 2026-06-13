@@ -12,6 +12,11 @@ from croniter import croniter
 
 logger = logging.getLogger("abenix.scheduler")
 
+# Hold strong refs to background tasks so they don't get GC'd mid-flight.
+# Without this, asyncio.create_task tasks for trigger executions can be
+# collected before they ever run, leaving rows stuck status=RUNNING.
+_BACKGROUND_TASKS: set = set()
+
 _scheduler: AsyncIOScheduler | None = None
 
 
@@ -118,21 +123,73 @@ async def _check_due_triggers() -> None:
 
 
 async def _run_trigger(trigger: Any, agent: Any, db: Any) -> None:
-    """Execute a single trigger's agent in the background."""
-    try:
-        from app.routers.triggers import _execute_triggered_agent
+    """Execute a single trigger's agent in the background.
 
-        await _execute_triggered_agent(
-            trigger_id=str(trigger.id),
-            agent_id=str(agent.id),
-            message=trigger.default_message or "Scheduled execution",
-            context=(
-                trigger.default_context
-                if isinstance(trigger.default_context, dict)
-                else {}
+    Mirrors what triggers.py:execute_webhook_trigger does — create the
+    Execution row first, then launch the background task with the right
+    kwargs. The previous version called _execute_triggered_agent with
+    a (trigger_id, agent_id, message, context, tenant_id) signature
+    that doesn't match the helper's actual params, so every cron tick
+    threw TypeError and zero executions ran.
+    """
+    try:
+        import asyncio as _asyncio
+
+        from sqlalchemy import select as _select
+
+        from app.routers.triggers import _execute_triggered_agent, _get_db_url
+        from models.execution import Execution, ExecutionStatus  # type: ignore
+        from models.user import User as UserModel  # type: ignore
+
+        # Resolve the trigger owner so the execution has a user_id.
+        trigger_user = (
+            await db.execute(
+                _select(UserModel).where(UserModel.id == trigger.created_by)
+            )
+        ).scalar_one_or_none()
+        if trigger_user is None:
+            raise RuntimeError(
+                f"trigger {trigger.id} owner {trigger.created_by} not found"
+            )
+
+        execution = Execution(
+            tenant_id=trigger.tenant_id,
+            agent_id=agent.id,
+            user_id=trigger.created_by,
+            input_message=trigger.default_message or "Scheduled execution",
+            status=ExecutionStatus.RUNNING,
+            model_used=(
+                agent.model_config_.get("model", "claude-sonnet-4-5-20250929")
+                if agent.model_config_
+                else "claude-sonnet-4-5-20250929"
             ),
-            tenant_id=str(trigger.tenant_id),
         )
+        db.add(execution)
+        trigger.run_count = (trigger.run_count or 0) + 1
+        from datetime import datetime as _dt, timezone as _tz
+
+        trigger.last_run_at = _dt.now(_tz.utc)
+        await db.commit()
+        await db.refresh(execution)
+
+        _t = _asyncio.create_task(
+            _execute_triggered_agent(
+                execution_id=str(execution.id),
+                agent=agent,
+                user=trigger_user,
+                message=trigger.default_message or "Scheduled execution",
+                context=(
+                    trigger.default_context
+                    if isinstance(trigger.default_context, dict)
+                    else {}
+                ),
+                trigger_id=str(trigger.id),
+                db_url=str(_get_db_url()),
+            )
+        )
+        # Keep a hard reference so the task isn't GC'd before completion.
+        _BACKGROUND_TASKS.add(_t)
+        _t.add_done_callback(_BACKGROUND_TASKS.discard)
 
         logger.info("Trigger %s executed successfully", trigger.id)
     except Exception as e:

@@ -64,7 +64,17 @@ async def _purge_postgres(
     subject_user_id: uuid.UUID,
     requested_by: uuid.UUID | None,
 ) -> int:
-    """Soft-delete every PG row owned by the subject. Returns affected rows."""
+    """Erase PII for the subject across every relevant table.
+
+    Previously this only soft-deleted PersonaItem + AgentMemory. The user
+    row, activity_logs (PII: email/ip), api_keys, and execution attribution
+    were all left intact, so a 'completed' receipt actually did almost
+    nothing. This version uses raw SQL via the engine to anonymize the
+    user row, null PII in activity_logs, revoke api_keys, and anonymize
+    executions while preserving the content rows for compliance.
+    """
+    from sqlalchemy import text
+
     now = datetime.now(timezone.utc)
     affected = 0
     result = await db.execute(
@@ -84,6 +94,56 @@ async def _purge_postgres(
         .values(deleted_at=now, deleted_by=requested_by)
     )
     affected += result.rowcount or 0
+
+    sid = str(subject_user_id)
+    placeholder_email = f"deleted-{sid}@purged.local"
+    placeholder_name = f"deleted-{sid[:8]}"
+
+    # Anonymize the user row in place — preserve the FK target so
+    # historical rows pointing at this user_id don't dangle.
+    r = await db.execute(
+        text(
+            "UPDATE users SET email=:em, full_name=:fn, is_active=false, "
+            "hashed_password='', notification_settings='{}'::jsonb, "
+            "updated_at=now() WHERE id=:uid"
+        ),
+        {"em": placeholder_email, "fn": placeholder_name, "uid": sid},
+    )
+    affected += r.rowcount or 0
+
+    # Null PII in activity_logs while keeping the action row for the
+    # tamper-evident audit trail.
+    r = await db.execute(
+        text(
+            "UPDATE activity_logs SET user_id=NULL, ip_address=NULL, "
+            "user_agent=NULL WHERE user_id=:uid"
+        ),
+        {"uid": sid},
+    )
+    affected += r.rowcount or 0
+
+    # Revoke any active API keys the subject created.
+    r = await db.execute(
+        text("UPDATE api_keys SET is_active=false WHERE user_id=:uid"),
+        {"uid": sid},
+    )
+    affected += r.rowcount or 0
+
+    # Anonymize executions — keep the input/output content for compliance
+    # but break the user attribution.
+    r = await db.execute(
+        text("UPDATE executions SET user_id=NULL WHERE user_id=:uid"),
+        {"uid": sid},
+    )
+    affected += r.rowcount or 0
+
+    # Conversations
+    r = await db.execute(
+        text("UPDATE conversations SET user_id=NULL WHERE user_id=:uid"),
+        {"uid": sid},
+    )
+    affected += r.rowcount or 0
+
     await db.commit()
     return affected
 

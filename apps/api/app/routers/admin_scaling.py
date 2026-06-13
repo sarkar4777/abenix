@@ -458,14 +458,14 @@ async def tenant_spend(
     try:
         today = (
             await db.execute(
-                select(sqlfunc.coalesce(sqlfunc.sum(Execution.cost_usd), 0))
+                select(sqlfunc.coalesce(sqlfunc.sum(Execution.cost), 0))
                 .join(Agent, Agent.id == Execution.agent_id)
                 .where(Agent.tenant_id == tenant_id, Execution.created_at >= start_day)
             )
         ).scalar() or 0.0
         month = (
             await db.execute(
-                select(sqlfunc.coalesce(sqlfunc.sum(Execution.cost_usd), 0))
+                select(sqlfunc.coalesce(sqlfunc.sum(Execution.cost), 0))
                 .join(Agent, Agent.id == Execution.agent_id)
                 .where(
                     Agent.tenant_id == tenant_id, Execution.created_at >= start_month

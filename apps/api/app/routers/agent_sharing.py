@@ -48,9 +48,18 @@ async def share_agent(
     if not email:
         return error("email is required", 400)
 
-    # Find target user
-    target_result = await db.execute(select(User).where(User.email == email))
+    # Find target user — tenant-scoped. Without this filter, sharing
+    # cross-tenant would leak agent metadata via /shared-with-me even
+    # though direct fetch is still 404'd by the agents.py tenant filter.
+    target_result = await db.execute(
+        select(User).where(
+            User.email == email,
+            User.tenant_id == user.tenant_id,
+        )
+    )
     target_user = target_result.scalar_one_or_none()
+    if email and not target_user:
+        return error("User not found in this tenant", 404)
 
     # Check for existing share
     if target_user:
@@ -178,11 +187,15 @@ async def shared_with_me(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """List all agents shared with the current user."""
+    # Tenant-scope the join too — defense in depth against any
+    # stale cross-tenant share rows from before the share-create
+    # tenant filter was added.
     result = await db.execute(
         select(AgentShare, Agent)
         .join(Agent, AgentShare.agent_id == Agent.id)
         .where(
             AgentShare.shared_with_user_id == user.id,
+            Agent.tenant_id == user.tenant_id,
         )
     )
     rows = result.all()

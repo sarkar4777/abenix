@@ -2043,6 +2043,20 @@ async def _stream_pipeline_execution(
             )
             execution.duration_ms = pr.total_duration_ms
             execution.completed_at = datetime.now(timezone.utc)
+            try:
+                from app.core.failure_codes import emit_outcome_metric
+
+                emit_outcome_metric(
+                    outcome=(
+                        "SUCCESS"
+                        if execution.status == ExecutionStatus.COMPLETED
+                        else "FAILED"
+                    ),
+                    failure_code=execution.failure_code or "",
+                    agent_type="pipeline",
+                )
+            except Exception:
+                pass
             if pr.final_output:
                 # Apply the same generic post-processor that runs in the
                 # NATS consumer path so the inline path produces the same
@@ -2261,6 +2275,18 @@ async def _non_stream_pipeline_execution(
         execution.failure_code = "PIPELINE_NODE_FAILED"
     execution.duration_ms = result.total_duration_ms
     execution.completed_at = datetime.now(timezone.utc)
+    try:
+        from app.core.failure_codes import emit_outcome_metric
+
+        emit_outcome_metric(
+            outcome=(
+                "SUCCESS" if execution.status == ExecutionStatus.COMPLETED else "FAILED"
+            ),
+            failure_code=execution.failure_code or "",
+            agent_type="pipeline",
+        )
+    except Exception:
+        pass
     if result.final_output:
         out = result.final_output
         if isinstance(out, (dict, list)):
@@ -2659,6 +2685,14 @@ async def _stream_execution(
                 execution.duration_ms = final_data.get("duration_ms")
                 execution.tool_calls = all_tool_calls if all_tool_calls else None
                 execution.completed_at = datetime.now(timezone.utc)
+                try:
+                    emit_outcome_metric(
+                        outcome="SUCCESS",
+                        failure_code="",
+                        agent_type="agent",
+                    )
+                except Exception:
+                    pass
 
             # Store confidence score and execution trace
             if hasattr(execution, "confidence_score"):
@@ -2934,6 +2968,14 @@ async def _non_stream_execution(
             execution.duration_ms = result.duration_ms
             execution.tool_calls = result.tool_calls if result.tool_calls else None
             execution.completed_at = datetime.now(timezone.utc)
+            try:
+                emit_outcome_metric(
+                    outcome="SUCCESS",
+                    failure_code="",
+                    agent_type="agent",
+                )
+            except Exception:
+                pass
 
         # Store confidence and execution trace
         if hasattr(execution, "confidence_score") and confidence is not None:

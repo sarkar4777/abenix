@@ -26,6 +26,11 @@ from models.user import User
 
 router = APIRouter(prefix="/api/triggers", tags=["triggers"])
 
+# Hold strong refs to background tasks so they don't get GC'd mid-flight.
+# Without this, webhook executions stayed status=RUNNING forever because
+# their asyncio.create_task tasks were collected before they could run.
+_BACKGROUND_TASKS: set = set()
+
 
 def _next_cron_run(cron_expr: str) -> datetime | None:
     """Calculate next run time from a cron expression using croniter."""
@@ -311,8 +316,10 @@ async def receive_webhook(
     await db.commit()
     await db.refresh(execution)
 
-    # Launch execution in background
-    asyncio.create_task(
+    # Launch execution in background. Keep a strong ref or the task can
+    # be GC'd before it ever runs, leaving the Execution row stuck at
+    # status=RUNNING and the user with no response.
+    _t = asyncio.create_task(
         _execute_triggered_agent(
             execution_id=str(execution.id),
             agent=agent,
@@ -323,6 +330,8 @@ async def receive_webhook(
             db_url=str(_get_db_url()),
         )
     )
+    _BACKGROUND_TASKS.add(_t)
+    _t.add_done_callback(_BACKGROUND_TASKS.discard)
 
     return success(
         {

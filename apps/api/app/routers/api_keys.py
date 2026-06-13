@@ -35,7 +35,21 @@ def _serialize(k: ApiKey) -> dict:
         "is_active": k.is_active,
         "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
         "created_at": k.created_at.isoformat() if k.created_at else None,
+        "tokens_used": int(getattr(k, "tokens_used", 0) or 0),
+        "cost_used": float(getattr(k, "cost_used", 0) or 0.0),
+        "max_monthly_tokens": getattr(k, "max_monthly_tokens", None),
+        "max_monthly_cost": (
+            float(k.max_monthly_cost)
+            if getattr(k, "max_monthly_cost", None) is not None
+            else None
+        ),
     }
+
+
+def _is_admin(user: User) -> bool:
+    role = getattr(user, "role", None)
+    role_val = getattr(role, "value", role) if role is not None else ""
+    return str(role_val).lower() == "admin"
 
 
 @router.get("")
@@ -43,11 +57,16 @@ async def list_api_keys(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    result = await db.execute(
-        select(ApiKey)
-        .where(ApiKey.tenant_id == user.tenant_id, ApiKey.is_active.is_(True))
-        .order_by(ApiKey.created_at.desc())
+    q = select(ApiKey).where(
+        ApiKey.tenant_id == user.tenant_id, ApiKey.is_active.is_(True)
     )
+    # Non-admins only see their own keys. Without this scope a regular
+    # tenant member could enumerate (and revoke) the admin's automation
+    # keys via the previous tenant-only filter.
+    if not _is_admin(user):
+        q = q.where(ApiKey.user_id == user.id)
+    q = q.order_by(ApiKey.created_at.desc())
+    result = await db.execute(q)
     keys = result.scalars().all()
     return success([_serialize(k) for k in keys])
 
@@ -83,12 +102,13 @@ async def revoke_api_key(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    result = await db.execute(
-        select(ApiKey).where(
-            ApiKey.id == key_id,
-            ApiKey.tenant_id == user.tenant_id,
-        )
+    q = select(ApiKey).where(
+        ApiKey.id == key_id,
+        ApiKey.tenant_id == user.tenant_id,
     )
+    if not _is_admin(user):
+        q = q.where(ApiKey.user_id == user.id)
+    result = await db.execute(q)
     key = result.scalar_one_or_none()
     if not key:
         return error("API key not found", 404)

@@ -47,7 +47,9 @@ async def export_user_data(
     }
 
     # Collect agents
-    result = await db.execute(select(Agent).where(Agent.user_id == user.id).limit(1000))
+    result = await db.execute(
+        select(Agent).where(Agent.creator_id == user.id).limit(1000)
+    )
     agents = [
         {
             "id": str(a.id),
