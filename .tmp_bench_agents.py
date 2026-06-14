@@ -1,30 +1,32 @@
 import json
+import os
 import subprocess
 import time
 import urllib.request
 
 API = "http://localhost:8000"
+PG_NS = "abenix"
 PG_POD = "abenix-postgresql-0"
 DB_NAME = "abenix"
 DB_USER = "postgres"
+PG_PASSWORD = os.environ["PG_PASSWORD"]
 
 
 def pg_query(sql: str) -> str:
     cmd = [
         "kubectl",
         "exec",
+        "-n",
+        PG_NS,
         PG_POD,
         "--",
-        "psql",
-        "-U",
-        DB_USER,
-        "-d",
-        DB_NAME,
-        "-At",
+        "bash",
         "-c",
-        sql,
+        f"PGPASSWORD='{PG_PASSWORD}' psql -U {DB_USER} -d {DB_NAME} -At -c \"{sql}\"",
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        raise RuntimeError(f"psql failed: rc={r.returncode} stderr={r.stderr[:300]}")
     return r.stdout.strip()
 
 
@@ -65,8 +67,17 @@ def hit(token: str, path: str) -> tuple[int, float]:
     return code, time.time() - t0
 
 
-def bench(path: str, n: int, token: str):
-    # Warm up + flush any background activity
+def baseline_rate(seconds: int = 10) -> float:
+    """Measure xact/sec with NO load, to subtract background noise."""
+    c0, r0 = xact_total()
+    t0 = time.time()
+    time.sleep(seconds)
+    c1, r1 = xact_total()
+    elapsed = time.time() - t0
+    return ((c1 - c0) + (r1 - r0)) / elapsed
+
+
+def bench(path: str, n: int, token: str, baseline_xps: float):
     hit(token, path)
     time.sleep(2)
 
@@ -82,17 +93,29 @@ def bench(path: str, n: int, token: str):
     time.sleep(2)
     c1, r1 = xact_total()
 
-    delta = (c1 - c0) + (r1 - r0)
+    raw_delta = (c1 - c0) + (r1 - r0)
+    # subtract background: baseline_xps * elapsed
+    bg = baseline_xps * elapsed
+    net = raw_delta - bg
     avg_ms = sum(times) / len(times) * 1000
-    print(f"path={path} n={n} codes={set(codes)} elapsed={elapsed:.2f}s avg={avg_ms:.0f}ms xact_delta={delta} per_req={delta/n:.2f}")
+    print(
+        f"path={path} n={n} codes={set(codes)} elapsed={elapsed:.2f}s avg={avg_ms:.0f}ms "
+        f"raw_delta={raw_delta} bg_est={bg:.1f} net={net:.1f} per_req={net/n:.2f}"
+    )
 
 
 def main():
     token = login()
     print(f"token_len={len(token)}")
-    # Match the original methodology: 30 sequential GETs
-    for path in ["/api/agents?limit=20", "/api/executions?limit=20"]:
-        bench(path, 30, token)
+    bg = baseline_rate(15)
+    print(f"baseline_xps={bg:.2f}")
+    for path in [
+        "/api/agents?limit=20",
+        "/api/executions?limit=20",
+        "/api/agents?limit=20",
+        "/api/executions?limit=20",
+    ]:
+        bench(path, 30, token, bg)
 
 
 if __name__ == "__main__":
