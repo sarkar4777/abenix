@@ -62,16 +62,38 @@ def emit_outcome_metric(
     outcome: str,
     failure_code: str = "",
     agent_type: str = "agent",
+    tenant_id: str = "",
 ) -> None:
-    """Push an outcome to Prometheus. Centralizes the label contract so
-    every catch site emits identical labels."""
     try:
-        from app.core.telemetry import execution_outcomes_total
+        from app.core.telemetry import (
+            active_executions,
+            execution_outcomes_total,
+            executions_completed_total,
+            executions_failed_total,
+        )
 
         execution_outcomes_total.labels(
             outcome=outcome,
             failure_code=failure_code,
             agent_type=agent_type,
         ).inc()
+        status_label = "success" if outcome == "SUCCESS" else "failed"
+        executions_completed_total.labels(status=status_label).inc()
+        if outcome != "SUCCESS":
+            executions_failed_total.labels(failure_code=failure_code or "UNKNOWN").inc()
+        if tenant_id:
+            try:
+                active_executions.labels(tenant_id=tenant_id).dec()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def emit_started_metric(agent_type: str = "agent") -> None:
+    try:
+        from app.core.telemetry import executions_started_total
+
+        executions_started_total.labels(agent_type=agent_type).inc()
     except Exception:
         pass

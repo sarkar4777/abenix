@@ -147,6 +147,21 @@ async def login(
     )
 
 
+async def _rt_denylist_threshold(user_id: uuid.UUID) -> int:
+    try:
+        import os as _os
+
+        import redis.asyncio as aioredis
+
+        url = _os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        r = aioredis.from_url(url, decode_responses=True)
+        v = await r.get(f"auth:rt_revoke_before:{user_id}")
+        await r.aclose()
+        return int(v) if v else 0
+    except Exception:
+        return 0
+
+
 @router.post("/refresh")
 async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     payload = verify_token(body.refresh_token)
@@ -158,6 +173,11 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
         user_id = uuid.UUID(sub)
     except ValueError:
         return error("Invalid refresh token", 401)
+
+    rt_iat = int(payload.get("iat", 0) or 0)
+    revoke_before = await _rt_denylist_threshold(user_id)
+    if rt_iat and revoke_before and rt_iat < revoke_before:
+        return error("Refresh token revoked", 401)
 
     result = await db.execute(
         select(User).where(User.id == user_id, User.is_active.is_(True))
@@ -174,6 +194,28 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
             "token_type": "bearer",
         }
     )
+
+
+@router.post("/logout")
+async def logout(user: User = Depends(get_current_user)):
+    import time as _time
+
+    try:
+        import os as _os
+
+        import redis.asyncio as aioredis
+
+        url = _os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        r = aioredis.from_url(url, decode_responses=True)
+        await r.set(
+            f"auth:rt_revoke_before:{user.id}",
+            str(int(_time.time())),
+            ex=60 * 60 * 24 * 90,
+        )
+        await r.aclose()
+    except Exception:
+        pass
+    return success({"logged_out": True})
 
 
 @router.get("/me")

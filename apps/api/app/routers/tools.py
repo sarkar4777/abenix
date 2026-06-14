@@ -1103,11 +1103,24 @@ async def execute_tool(
         except TypeError:
             tool = cls()
 
+    tool_started_at = time.time()
     try:
         result = await tool.execute(arguments)
     except Exception as e:
         await tool_gate.release(decision, tool_slug, tenant_id, ok=False)
         logger.exception("direct tool execute failed: %s", tool_slug)
+        try:
+            from app.core.telemetry import (
+                tool_calls_total,
+                tool_execution_duration_seconds,
+            )
+
+            tool_calls_total.labels(tool_name=tool_slug, outcome="error").inc()
+            tool_execution_duration_seconds.labels(tool_name=tool_slug).observe(
+                time.time() - tool_started_at
+            )
+        except Exception:
+            pass
         await _log_invocation(
             db,
             user,
@@ -1119,6 +1132,20 @@ async def execute_tool(
             error_message=str(e),
         )
         return error(f"tool {tool_slug} failed: {e}", 500)
+
+    try:
+        from app.core.telemetry import (
+            tool_calls_total,
+            tool_execution_duration_seconds,
+        )
+
+        _outcome = "error" if getattr(result, "is_error", False) else "ok"
+        tool_calls_total.labels(tool_name=tool_slug, outcome=_outcome).inc()
+        tool_execution_duration_seconds.labels(tool_name=tool_slug).observe(
+            time.time() - tool_started_at
+        )
+    except Exception:
+        pass
 
     is_error = getattr(result, "is_error", False)
     payload = {

@@ -208,8 +208,16 @@ async def stream_execution_events(
 
     async def _gen():
         async for evt in subscribe_events(str(execution_id)):
-            data = json.dumps(evt, default=str)
             ev_name = evt.get("event") or "message"
+            if ev_name == "token" and "text" not in evt:
+                raw = evt.get("data")
+                if isinstance(raw, str):
+                    evt = {"event": "token", "text": raw}
+            if ev_name == "error" and "message" not in evt:
+                err = evt.get("error") or evt.get("data")
+                if isinstance(err, str):
+                    evt = {"event": "error", "message": err}
+            data = json.dumps(evt, default=str)
             yield f"event: {ev_name}\ndata: {data}\n\n".encode()
 
     return StreamingResponse(

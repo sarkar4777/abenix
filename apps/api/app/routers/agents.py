@@ -1443,7 +1443,21 @@ async def execute_agent(
     await db.commit()
     await db.refresh(execution)
 
-    # Extract context (input variables) from request
+    try:
+        from app.core.failure_codes import emit_started_metric
+        from app.core.telemetry import active_executions
+
+        emit_started_metric(
+            agent_type=(
+                "pipeline"
+                if (agent.model_config_ or {}).get("mode") == "pipeline"
+                else "agent"
+            )
+        )
+        active_executions.labels(tenant_id=str(user.tenant_id)).inc()
+    except Exception:
+        pass
+
     user_context = body.context or {}
 
     agent_pool = getattr(agent, "runtime_pool", None) or "default"

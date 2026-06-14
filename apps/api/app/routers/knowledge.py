@@ -100,6 +100,32 @@ def _serialize_kb_summary(kb: KnowledgeBase) -> dict[str, Any]:
     return full
 
 
+def _serialize_kb_summary_lite(kb: KnowledgeBase) -> dict[str, Any]:
+    return {
+        "id": str(kb.id),
+        "name": kb.name,
+        "description": kb.description,
+        "embedding_model": kb.embedding_model,
+        "chunk_size": kb.chunk_size,
+        "chunk_overlap": kb.chunk_overlap,
+        "status": kb.status.value if isinstance(kb.status, KBStatus) else kb.status,
+        "doc_count": kb.doc_count,
+        "chunk_count": 0,
+        "total_size": 0,
+        "agent_id": str(kb.agent_id) if kb.agent_id else None,
+        "project_id": str(kb.project_id) if kb.project_id else None,
+        "default_visibility": (
+            kb.default_visibility.value
+            if hasattr(kb.default_visibility, "value")
+            else kb.default_visibility
+        ),
+        "vector_backend": kb.vector_backend,
+        "created_by": str(kb.created_by) if kb.created_by else None,
+        "created_at": kb.created_at.isoformat() if kb.created_at else None,
+        "updated_at": kb.updated_at.isoformat() if kb.updated_at else None,
+    }
+
+
 def _serialize_doc(d: Document) -> dict[str, Any]:
     return {
         "id": str(d.id),
@@ -186,7 +212,29 @@ async def list_knowledge_bases(
 
     result = await db.execute(query)
     kbs = result.scalars().all()
-    data = [_serialize_kb_summary(kb) for kb in kbs]
+    kb_ids = [kb.id for kb in kbs]
+    rollups: dict[uuid.UUID, tuple[int, int]] = {}
+    if kb_ids:
+        rollup_rows = (
+            await db.execute(
+                select(
+                    Document.collection_id,
+                    func.coalesce(func.sum(Document.chunk_count), 0),
+                    func.coalesce(func.sum(Document.file_size), 0),
+                )
+                .where(Document.collection_id.in_(kb_ids))
+                .group_by(Document.collection_id)
+            )
+        ).all()
+        for cid, ck, sz in rollup_rows:
+            rollups[cid] = (int(ck or 0), int(sz or 0))
+    data = []
+    for kb in kbs:
+        d = _serialize_kb_summary_lite(kb)
+        ck, sz = rollups.get(kb.id, (0, 0))
+        d["chunk_count"] = ck
+        d["total_size"] = sz
+        data.append(d)
     return success(data, meta={"total": total, "limit": limit, "offset": offset})
 
 

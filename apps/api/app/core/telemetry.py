@@ -120,7 +120,49 @@ notifications_sent_total = Counter(
 tool_calls_total = Counter(
     "abenix_tool_calls_total",
     "Tool invocations per agent execution",
-    ["tool_name", "outcome"],  # outcome = ok|error
+    ["tool_name", "outcome"],
+)
+
+queue_depth = Gauge(
+    "abenix_queue_depth",
+    "Pending items in agent queue per pool",
+    ["pool"],
+)
+
+executions_started_total = Counter(
+    "abenix_executions_started_total",
+    "Executions started",
+    ["agent_type"],
+)
+
+executions_failed_total = Counter(
+    "abenix_executions_failed_total",
+    "Executions that ended in FAILED",
+    ["failure_code"],
+)
+
+executions_in_flight = Gauge(
+    "abenix_executions_in_flight",
+    "Inline-path executions currently running",
+    ["pool"],
+)
+
+tool_execution_duration_seconds = Histogram(
+    "abenix_tool_execution_duration_seconds",
+    "Per-tool wall-clock duration",
+    ["tool_name"],
+    buckets=(0.01, 0.05, 0.1, 0.3, 0.5, 1, 2, 5, 10, 30, 60),
+)
+
+cache_hits_total = Counter(
+    "abenix_cache_hits_total",
+    "Cache hits",
+    ["layer", "tenant_id"],
+)
+cache_misses_total = Counter(
+    "abenix_cache_misses_total",
+    "Cache misses",
+    ["tenant_id"],
 )
 
 

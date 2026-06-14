@@ -33,9 +33,9 @@ spec:
         - alert: Abenix_Http5xxRate
           expr: |
             (
-              sum(rate(abenix_http_request_total{status=~"5.."}[5m]))
+              sum(rate(abenix_http_requests_total{status=~"5.."}[5m]))
               /
-              sum(rate(abenix_http_request_total[5m]))
+              sum(rate(abenix_http_requests_total[5m]))
             ) > 0.01
           for: 5m
           labels: { severity: p1, tier: customer_visible }
