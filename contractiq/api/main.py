@@ -35,6 +35,19 @@ async def lifespan(app: FastAPI):
         from app.models import contractiq_models  # noqa: F401 — register models
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        try:
+            import sys as _sys
+            from pathlib import Path as _Path
+
+            _sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "packages" / "db"))
+            from use_case_schema_sync import sync_missing_columns
+
+            _added = await sync_missing_columns(engine, Base)
+            if _added:
+                logger.info("ContractIQ schema_sync: added %d missing columns", _added)
+        except Exception as _e:
+            logger.warning("ContractIQ schema_sync skipped: %s", _e)
+        async with engine.begin() as conn:
             # Light-touch ALTERs for columns that widened since initial create.
             # Idempotent — Postgres ALTER TYPE VARCHAR(n) is a no-op if already wider.
             from sqlalchemy import text as _t

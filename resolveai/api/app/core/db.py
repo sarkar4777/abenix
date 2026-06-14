@@ -98,4 +98,17 @@ async def init_tables() -> None:
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _sys.path.insert(0, str(_Path(__file__).resolve().parents[4] / "packages" / "db"))
+        from use_case_schema_sync import sync_missing_columns
+
+        _added = await sync_missing_columns(_engine, Base)
+        if _added:
+            logger.info("ResolveAI schema_sync: added %d missing columns", _added)
+    except Exception as _e:
+        logger.warning("ResolveAI schema_sync skipped: %s", _e)
+
     logger.info("ResolveAI tables ensured (%d tables)", len(Base.metadata.tables))

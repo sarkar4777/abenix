@@ -32,6 +32,18 @@ async def lifespan(app: FastAPI):
         from app.models import tourism_models  # noqa: F401
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        try:
+            import sys as _sys
+            from pathlib import Path as _Path
+
+            _sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "packages" / "db"))
+            from use_case_schema_sync import sync_missing_columns
+
+            _added = await sync_missing_columns(engine, Base)
+            if _added:
+                logger.info("Mideast Tourism schema_sync: added %d missing columns", _added)
+        except Exception as _e:
+            logger.warning("Mideast Tourism schema_sync skipped: %s", _e)
         logger.info("Mideast Tourism tables ensured")
 
         # Seed default test user
