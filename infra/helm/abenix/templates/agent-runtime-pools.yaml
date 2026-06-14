@@ -242,7 +242,7 @@ spec:
     - type: nats-jetstream
       metadata:
         natsServerMonitoringEndpoint: "{{ $release }}-nats.{{ $.Release.Namespace }}.svc.cluster.local:8222"
-        account: {{ default "A" $.Values.scaling.nats.account | quote }}
+        account: "A"
         stream: "agents"
         consumer: "abenix-{{ .key }}-consumer"
         lagThreshold: {{ default "3" .keda_queue_trigger | quote }}

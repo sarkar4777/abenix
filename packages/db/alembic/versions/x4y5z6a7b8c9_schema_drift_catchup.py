@@ -111,10 +111,40 @@ def upgrade() -> None:
             sa.Column("shared_with_email", sa.String(length=255), nullable=True),
         )
 
+    if not _has_column("moderation_policies", "default_action"):
+        op.add_column(
+            "moderation_policies",
+            sa.Column(
+                "default_action",
+                sa.String(length=40),
+                nullable=True,
+                server_default="allow",
+            ),
+        )
+    if not _has_column("agent_memories", "importance"):
+        op.add_column(
+            "agent_memories",
+            sa.Column("importance", sa.Float(), nullable=True),
+        )
+    if not _has_column("approvals", "client_token"):
+        op.add_column(
+            "approvals",
+            sa.Column("client_token", sa.String(length=128), nullable=True),
+        )
+    if not _has_column("approvals", "gate_kind"):
+        op.add_column(
+            "approvals",
+            sa.Column("gate_kind", sa.String(length=40), nullable=True),
+        )
+
 
 def downgrade() -> None:
     # Best-effort drops; idempotent if the columns already gone.
     for tbl, col, idx in (
+        ("approvals", "gate_kind", None),
+        ("approvals", "client_token", None),
+        ("agent_memories", "importance", None),
+        ("moderation_policies", "default_action", None),
         ("agent_shares", "shared_with_email", None),
         ("agent_shares", "shared_with_user_id", "ix_agent_shares_shared_with_user_id"),
         ("executions", "moderation_blocked", None),
