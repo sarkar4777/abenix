@@ -185,6 +185,36 @@ See [packages/db/migrations/](../../packages/db/migrations/) for prior examples.
 
 ---
 
+## Security headers
+
+`SecurityHeadersMiddleware` ([`apps/api/app/core/middleware.py`](../../apps/api/app/core/middleware.py)) sets the following on every API response. They are set with `setdefault` so a tighter value from a more specific handler wins.
+
+| Header | Default value | Notes |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | Stops MIME-sniffing on responses. |
+| `X-Frame-Options` | `DENY` | Blocks framing of the API. |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Limits referer on outbound links. |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Enforces HTTPS once the browser has seen it once. |
+| `Content-Security-Policy` | `default-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:` | Skipped on `/docs`, `/redoc`, `/openapi.json` so Swagger UI keeps loading. |
+
+The OpenAPI spec also declares `BearerAuth` (JWT) and `ApiKeyAuth` (`X-API-Key` header) security schemes globally so generated SDKs and `try-it-out` in Swagger UI prompt for credentials.
+
+---
+
+## Outbound URL validation
+
+Inbound requests that store an outbound URL (MCP server URL, webhook destination) pass through a shared validator that rejects.
+
+- IP literals in private, loopback, link-local, multicast, or unspecified ranges.
+- Decimal IP encodings like `2130706433` (= `127.0.0.1`).
+- Hostnames `localhost`, `host.docker.internal`, `host.minikube.internal`, `metadata.google.internal`, `kubernetes.default.svc`, plain `metadata`, plain `kubernetes`.
+- Anything ending in `.svc.cluster.local`, `.cluster.local`, `.internal`, `.local`.
+- For MCP only, an operator allowlist via `MCP_ALLOWED_HOSTS` (comma-separated suffixes). When set, only listed hosts are accepted.
+
+Run a candidate URL against `/api/mcp/discover` to test without saving a connection. The same checks fire there.
+
+---
+
 ## Edge runtimes
 
 For deployments where some agents need to run on-prem (low latency, data residency), the edge runtimes are deployed separately. They register with the cloud abenix-api on a heartbeat:

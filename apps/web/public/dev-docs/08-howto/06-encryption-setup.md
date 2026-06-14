@@ -4,7 +4,19 @@
 
 ## What you're enabling
 
-The v2.0 encryption layer at [`apps/api/app/core/crypto.py`](../../apps/api/app/core/crypto.py) wraps sensitive PersonaItem + AgentMemory values with AES-256-GCM. Without a KEK, `encrypt()` short-circuits and stores plaintext; the platform still works, but the at-rest threat model isn't covered. See [`01-architecture/06-atlas-knowledge-engine.md#persona-encryption-v20`](../01-architecture/06-atlas-knowledge-engine.md) for the design.
+The v2.0 encryption layer at [`apps/api/app/core/crypto.py`](../../apps/api/app/core/crypto.py) wraps sensitive values with AES-256-GCM. Without a KEK, `encrypt()` short-circuits and stores plaintext, the platform still works, but the at-rest threat model isn't covered. See [`01-architecture/06-atlas-knowledge-engine.md#persona-encryption-v20`](../01-architecture/06-atlas-knowledge-engine.md) for the design.
+
+What gets encrypted once the KEK is set.
+
+| Surface | Field | Notes |
+|---|---|---|
+| PersonaItem.value | wrap | hashed when accessed by other agents |
+| AgentMemory.value | wrap | hashed when accessed by other agents |
+| UserMCPConnection.auth_config | per-secret-key wrap | `api_key`, `access_token`, `refresh_token`, `client_secret`, `password`, `token`, `bearer` keys inside the JSONB blob each become a `v1:...` envelope. Other fields stay readable so admins can spot which connection it is. |
+| UserMCPConnection.oauth2_access_token_enc | wrap | replaces the legacy XOR helper from v1.x |
+| UserMCPConnection.oauth2_refresh_token_enc | wrap | |
+
+`GET /api/mcp/connections` redacts all secret-shaped values to `***` on the wire so the encrypted payload is never echoed back to the browser.
 
 Key derivation chain:
 

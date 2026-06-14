@@ -344,7 +344,16 @@ async def update_connection(
     if body.auth_type is not None:
         conn.auth_type = body.auth_type
     if body.auth_config is not None:
-        conn.auth_config = _encrypt_auth_config(user.tenant_id, body.auth_config)
+        existing = conn.auth_config or {}
+        merged: dict[str, Any] = {}
+        for k, v in (body.auth_config or {}).items():
+            if isinstance(v, str) and v == "***" and k in existing:
+                merged[k] = existing[k]
+            else:
+                merged[k] = v
+        for k, v in existing.items():
+            merged.setdefault(k, v)
+        conn.auth_config = _encrypt_auth_config(user.tenant_id, merged)
     if body.is_enabled is not None:
         conn.is_enabled = body.is_enabled
 

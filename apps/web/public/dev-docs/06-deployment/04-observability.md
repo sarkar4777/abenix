@@ -43,21 +43,32 @@ Helm `values.observability.{prometheus,grafana,tempo}.enabled` — all default t
 
 Every Python service exports a Prometheus endpoint at `/metrics` via [`prometheus_client`](https://github.com/prometheus/client_python). Multi-process compatible (Gunicorn + Uvicorn) via the multiproc dir env.
 
-Built-in metrics:
+Built-in metrics. Labels listed are exactly the ones the code emits, so PromQL `rate(...)` and Grafana queries match without surprise.
 
-| Metric | Type | Labels |
-|---|---|---|
-| `abenix_http_requests_total` | counter | `method`, `path`, `status` |
-| `abenix_http_request_duration_seconds` | histogram | `method`, `path` |
-| `abenix_executions_started_total` | counter | `agent_slug`, `runtime_pool` |
-| `abenix_executions_completed_total` | counter | `agent_slug`, `failure_code` |
-| `abenix_execution_duration_seconds` | histogram | `agent_slug` |
-| `abenix_llm_tokens_total` | counter | `provider`, `model`, `direction` (prompt/completion) |
-| `abenix_llm_cost_usd_total` | counter | `provider`, `model` |
-| `abenix_tool_invocations_total` | counter | `tool_slug`, `is_error` |
-| `abenix_tool_duration_seconds` | histogram | `tool_slug` |
-| `abenix_queue_depth` | gauge | `subject` (NATS subject) |
-| `abenix_active_executions` | gauge | `runtime_pool` |
+| Metric | Type | Labels | Notes |
+|---|---|---|---|
+| `abenix_http_requests_total` | counter | `method`, `path`, `status` | `path` is the FastAPI route template, `status` is `2xx`/`4xx`/`5xx`. |
+| `abenix_http_request_duration_seconds` | histogram | `method`, `path` | |
+| `abenix_agents_created_total` | counter | `type` | |
+| `abenix_executions_started_total` | counter | `agent_type` | Emitted on every Execution row insert. |
+| `abenix_executions_completed_total` | counter | `status` | `status` is `success` or `failed`. |
+| `abenix_executions_failed_total` | counter | `failure_code` | One increment per failed execution, grouped by stable failure code. |
+| `abenix_executions_in_flight` | gauge | `pool` | Inline path live count. |
+| `abenix_execution_outcomes_total` | counter | `outcome`, `failure_code`, `agent_type` | Funnel for alerts. |
+| `abenix_active_executions` | gauge | `tenant_id` | Inc on Execution insert, dec on outcome. |
+| `abenix_queue_depth` | gauge | `pool` | Pending items in the agent queue per pool. |
+| `abenix_knowledge_searches_total` | counter | `mode` | |
+| `abenix_llm_tokens_total` | counter | `provider`, `model`, `direction` | `direction` is `input` or `output`. |
+| `abenix_llm_cost_usd_total` | counter | `provider`, `model` | |
+| `abenix_llm_call_duration_seconds` | histogram | `provider`, `model` | |
+| `abenix_tool_calls_total` | counter | `tool_name`, `outcome` | `outcome` is `ok` or `error`. |
+| `abenix_tool_execution_duration_seconds` | histogram | `tool_name` | |
+| `abenix_sandbox_runs_total` | counter | `backend`, `image_family`, `outcome` | |
+| `abenix_sandbox_run_duration_seconds` | histogram | `backend`, `image_family` | |
+| `abenix_cache_hits_total` | counter | `layer`, `tenant_id` | `layer` is `exact`, `semantic`, or `prompt`. |
+| `abenix_cache_misses_total` | counter | `tenant_id` | |
+| `abenix_notifications_sent_total` | counter | `channel`, `severity` | `channel` is `in_app`, `ws`, `slack`, `email`. |
+| `abenix_stale_sweeps_total` | counter | `reason` | Stuck-execution sweeper. |
 
 Add a custom metric in a tool:
 ```python

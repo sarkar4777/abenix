@@ -104,6 +104,27 @@ export default function NotificationsPage() {
     setSlackSaving(false);
   };
 
+  const [slackTesting, setSlackTesting] = useState(false);
+  const [slackTestResult, setSlackTestResult] = useState<string | null>(null);
+  const testSlack = async () => {
+    setSlackTesting(true); setSlackTestResult(null); setSlackErr(null);
+    try {
+      const r = await apiFetch<{ channel: string; delivered: boolean }>(
+        '/api/admin/notification-channels/slack/test',
+        { method: 'POST' },
+      );
+      if (r.data?.delivered) {
+        setSlackTestResult('Sent. Check your Slack channel.');
+      } else {
+        setSlackTestResult('Did not deliver. Check the webhook URL.');
+      }
+      setTimeout(() => setSlackTestResult(null), 5000);
+    } catch (e: unknown) {
+      setSlackErr(e instanceof Error ? e.message : 'Test failed');
+    }
+    setSlackTesting(false);
+  };
+
   const handleToggle = (key: keyof NotifPrefs) => {
     if (!prefs) return;
     setPrefs({ ...prefs, [key]: !prefs[key] });
@@ -247,6 +268,18 @@ export default function NotificationsPage() {
                 {slackSaving && <Loader2 className="w-3 h-3 animate-spin" />}
                 Save webhook
               </button>
+              <button
+                data-testid="slack-test-send"
+                onClick={testSlack}
+                disabled={slackTesting || !slackUrl}
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-100 text-xs font-medium rounded-lg inline-flex items-center gap-1.5"
+              >
+                {slackTesting && <Loader2 className="w-3 h-3 animate-spin" />}
+                Send test
+              </button>
+              {slackTestResult && (
+                <span className="text-[11px] text-cyan-300">{slackTestResult}</span>
+              )}
             </div>
           </div>
         </div>
