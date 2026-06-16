@@ -26,6 +26,8 @@ NEXT_STEPS.md
 UAT_REPORT.md
 RELEASE_NOTES_PENDING_*.md
 PLAN_*.md
+*_INTERNAL.md
+BUILDOUT_*.md
 logs/uat/
 logs/build-*.log
 
@@ -86,6 +88,54 @@ alembic/versions/*.pyc
 # Generated presentation — build via: python scripts/build_presentation.py
 presentation.pptx
 scripts/build_presentation.py
+
+# Scratch / probe / ad-hoc test artefacts. The codebase is treated as a
+# golden public copy; every transient curl probe, repro script, dump
+# file, or tempfile redirect must stay local. Patterns below cover the
+# shapes that have leaked into history before:
+#   - `.tmp_*` — dotfile probes from session loops
+#   - `tmp_*.{py,ps1,json,sh,txt}` — ad-hoc throwaway scripts
+#   - `_*.py`, `_*.json`, `_*.txt` — underscore-prefixed scratch
+#     (e.g. `_drift_audit.py`, `_repro_webhook.py`, `_uat_probe.py`)
+#   - `Userssarka*` and `C*UserssarkaApp*` — mangled-tempfile artefacts
+#     from PowerShell redirects when $env:TEMP wasn't honoured
+#   - `*_resp.json`, `*_probe.txt`, `agent_drift.json`, `build_agent.json`,
+#     `create_agent.json` — single-shot API probe outputs
+.tmp_*
+.tmp*/
+tmp_*.py
+tmp_*.ps1
+tmp_*.sh
+tmp_*.json
+tmp_*.txt
+_audit_*.py
+_drift_*.py
+_long_pipe*
+_repro_*.py
+_ssrf_*.py
+_tmp_*
+_uat_*.py
+_verify_*.py
+Userssarka*
+agent_drift.json
+build_agent.json
+builder_page.html
+create_agent.json
+create_agent_resp.json
+drift_alerts.json
+drift_config.json
+exec_*.json
+execs*.json
+full_id.txt
+login.json
+openapi_dump.json
+pipe_replay.json
+replay*.json
+response_probe.txt
+test_db.py
+uat_jobid.txt
+verify_audit.py
+verify_audit_out.json
 
 # Demo-only rebrand recipe — never commit (see file for context)
 BODHI_REBRAND_RECIPE.md

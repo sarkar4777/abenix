@@ -272,6 +272,7 @@ async def sweep_stale_executions() -> None:
                 )
                 .values(
                     status=ExecutionStatus.FAILED,
+                    failure_code="STALE_SWEEP",
                     error_message=(
                         f"Sweep: execution stuck in RUNNING for >{max_minutes} minutes. "
                         "The owning process likely crashed or was terminated before "

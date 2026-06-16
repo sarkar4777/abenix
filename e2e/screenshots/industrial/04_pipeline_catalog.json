@@ -1,0 +1,44 @@
+[
+  {
+    "key": "pump",
+    "slug": "iot-pump-pipeline",
+    "label": "Pump Diagnostics & RUL Estimation",
+    "description": "Feeds FFT features from a vibration window into the pump-dsp analyser, fuses the spectral read-out with historical maintenance records, and emits a remaining-useful-life (RUL) estimate with a recommended action.",
+    "wait_seconds": 240,
+    "required_assets": {
+      "pump_dsp_asset_id": "pump-dsp-correction",
+      "rul_asset_id": "rul-estimator"
+    }
+  },
+  {
+    "key": "cold-chain",
+    "slug": "iot-coldchain-pipeline",
+    "label": "Cold-Chain Excursion Adjudicator",
+    "description": "Reconstructs the true temperature profile of a shipment from noisy sensor telemetry, adjudicates any excursions against policy, and decides whether to release, dispose, or trigger a claim.",
+    "wait_seconds": 240,
+    "required_assets": {
+      "cold_chain_asset_id": "cold-chain-corrector"
+    }
+  },
+  {
+    "key": "valueedge",
+    "slug": "iot-valueedge-pipeline",
+    "label": "ValueEdge — Offshore-Wind FEED Designer",
+    "description": "From a one-line offshore-wind site brief, generates 3 distinct design scenarios, recomputes CapEx + CO2 + IRR + LCOE per scenario, ranks value-engineering opportunities, and drafts compliance RFIs against IEC 61400-3 / NEC 690 / IEEE 1547 / RWE-EPC.",
+    "wait_seconds": 240
+  },
+  {
+    "key": "bedrocc",
+    "slug": "iot-bedrocc-pipeline",
+    "label": "BedROCC Operations Alarm Triage",
+    "description": "Operations control-room triage for a single SCADA alarm — runs the alarm classifier, cascade noise filter, and safe-reset advisor and returns a triage envelope the UI renders next to the alarm row.",
+    "wait_seconds": 120
+  },
+  {
+    "key": "fieldedge",
+    "slug": "iot-fieldedge-pipeline",
+    "label": "FieldEdge Wind-Turbine Maintenance Copilot",
+    "description": "Voice/text symptom from a technician on the nacelle -> fleet-wide history search -> OEM-manual-grounded repair procedure with safety gates, parts, cited manual sections, and confidence.",
+    "wait_seconds": 180
+  }
+]

@@ -134,6 +134,10 @@ postgresql:
     resources:
       requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: "1",  memory: 1Gi }
+    extendedConfiguration: |
+      max_connections = 400
+      shared_buffers = 256MB
+      work_mem = 8MB
 
 # ── Redis (sub-chart) ──────────────────────────────────────────────────────
 redis:
@@ -278,6 +282,18 @@ sharedData:
   usePVC: true
   storageClass: azurefile-csi
   storageSize: 20Gi
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  image: postgres:16-alpine
+  persistentVolume:
+    enabled: true
+    storageClass: azurefile-csi
+    size: 50Gi
+  neo4j:
+    enabled: true
+    schedule: "0 3 * * *"
 
 # ── Global image pull policy ───────────────────────────────────────────────
 global:

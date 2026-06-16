@@ -85,9 +85,9 @@ system_prompt: |
   ```
 
 model_config:
-  model: gemini-2.0-flash
+  model: gemini-2.5-pro
   temperature: 0.1
-  max_iterations: 25
+  max_iterations: 12
   tools:
     - database_query
     - web_search

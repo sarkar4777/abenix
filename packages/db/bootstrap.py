@@ -104,6 +104,108 @@ def _alembic_version_exists_sync(conn) -> bool:
     return row is not None
 
 
+def _parse_migration_graph() -> dict[str, set[str]]:
+    """Parse every alembic versions/*.py and return {revision: set(parents)}.
+
+    Loads each file as a Python module so that tuple/list/str down_revision
+    shapes resolve correctly. Revisions whose module fails to import (rare,
+    only on truly broken files) are skipped with a warning.
+    """
+    import importlib.util
+
+    versions_dir = ROOT / "alembic" / "versions"
+    graph: dict[str, set[str]] = {}
+    for f in sorted(versions_dir.glob("*.py")):
+        if f.name == "__init__.py":
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(f"_mig_{f.stem}", f)
+            if spec is None or spec.loader is None:
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except Exception as e:
+            print(f"[bootstrap] WARN failed to parse {f.name}: {e}")
+            continue
+        rev = getattr(mod, "revision", None)
+        down = getattr(mod, "down_revision", None)
+        if not isinstance(rev, str):
+            continue
+        if down is None:
+            parents: set[str] = set()
+        elif isinstance(down, str):
+            parents = {down}
+        elif isinstance(down, (tuple, list)):
+            parents = {p for p in down if isinstance(p, str)}
+        else:
+            parents = set()
+        graph[rev] = parents
+    return graph
+
+
+def _all_ancestors(rev: str, graph: dict[str, set[str]]) -> set[str]:
+    """Transitive closure of ancestors for a single revision."""
+    seen: set[str] = set()
+    stack = list(graph.get(rev, set()))
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        stack.extend(graph.get(cur, set()))
+    return seen
+
+
+def _heal_alembic_version_sync(conn) -> int:
+    """Prune stale ancestor rows from alembic_version.
+
+    Across environment versions, alembic_version can drift into a state
+    where it tracks both a revision X AND one of X's descendants Y. This
+    drift happens when a merge migration applied but the version-row
+    cleanup did not commit, or when a stamp left stragglers behind. The
+    next ``alembic upgrade heads`` then complains that X overlaps with Y
+    and the deploy halts.
+
+    Self-heal: for every pair (X, Y) of tracked revisions, if X is a
+    transitive ancestor of Y in the script graph, DELETE the row for X.
+    Idempotent and additive-safe — only deletes rows that the migration
+    graph already implies as "applied via descendant."
+    """
+    from sqlalchemy import text
+
+    rows: list[str] = [
+        r[0]
+        for r in conn.execute(text("SELECT version_num FROM alembic_version")).all()
+    ]
+    if len(rows) < 2:
+        return 0
+
+    try:
+        graph = _parse_migration_graph()
+    except Exception as e:
+        print(f"[bootstrap] WARN could not parse migration graph: {e}")
+        return 0
+
+    ancestors_per_rev = {r: _all_ancestors(r, graph) for r in rows if r in graph}
+    to_delete: set[str] = set()
+    for r1 in rows:
+        for r2 in rows:
+            if r1 == r2 or r1 in to_delete:
+                continue
+            if r1 in ancestors_per_rev.get(r2, set()):
+                to_delete.add(r1)
+                break
+
+    deleted = 0
+    for r in to_delete:
+        conn.execute(
+            text("DELETE FROM alembic_version WHERE version_num = :v"), {"v": r}
+        )
+        print(f"[bootstrap] healed alembic_version: removed stale ancestor {r}")
+        deleted += 1
+    return deleted
+
+
 def _patch_missing_columns_sync(conn) -> int:
     """Compare ORM Base.metadata to live schema, ALTER ADD any column the
     ORM declares that the live DB lacks. Idempotent, additive only —
@@ -169,6 +271,7 @@ def _bootstrap_sync(url: str) -> int:
     engine = create_engine(url, future=True)
     with engine.begin() as conn:
         if _alembic_version_exists_sync(conn):
+            _heal_alembic_version_sync(conn)
             print(
                 "[bootstrap] alembic_version table present — "
                 "skipping fresh-install bootstrap."
@@ -208,6 +311,7 @@ async def _bootstrap_async(url: str) -> int:
                 )
             ).first()
             if row is not None:
+                await conn.run_sync(_heal_alembic_version_sync)
                 print(
                     "[bootstrap] alembic_version table present — "
                     "skipping fresh-install bootstrap."

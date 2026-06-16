@@ -110,10 +110,11 @@ spec:
             failureThreshold: 3
           lifecycle:
             preStop:
-              # Graceful drain — tell THIS worker to stop consuming, NOT a
-              # broadcast shutdown that kills all workers on the broker.
               exec:
-                command: ["celery", "-A", "worker.celery_app", "control", "cancel_consumer", "cognify"]
+                command:
+                  - sh
+                  - -c
+                  - 'celery -A worker.celery_app control cancel_consumer cognify --destination=celery@$HOSTNAME || true'
           volumeMounts:
             - name: tmp
               mountPath: /tmp

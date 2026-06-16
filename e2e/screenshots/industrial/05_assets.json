@@ -1,0 +1,2000 @@
+[
+  {
+    "id": "8f62a579-e53d-4ae2-803b-3b274212c198",
+    "name": "AuditCodeA",
+    "description": "tenant A code",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/e93d9777cf584e0a.zip",
+    "file_size_bytes": 245,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T20:45:29.199825+00:00",
+    "updated_at": "2026-06-13T20:45:29.293453+00:00"
+  },
+  {
+    "id": "d466c8ef-dd53-4b11-9d89-3f5fd9bec73d",
+    "name": "chunk-60mb-bypass",
+    "description": null,
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/cc585c75aa814ac5.zip",
+    "file_size_bytes": 62914560,
+    "detected_language": null,
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": null,
+    "suggested_image": null,
+    "suggested_build_command": null,
+    "suggested_run_command": null,
+    "analysis_notes": [],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "failed",
+    "error": "File is not a zip file",
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T16:53:24.469195+00:00",
+    "updated_at": "2026-06-13T16:53:24.748409+00:00"
+  },
+  {
+    "id": "6fc84251-fa1e-451d-bd7c-97a262097e56",
+    "name": "ssrf_probe2",
+    "description": "adversarial probe",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/8fbfb077ab334728.zip",
+    "file_size_bytes": 1214,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "run.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "python run.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "noop": {
+          "type": "string"
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object"
+    },
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T16:42:01.088635+00:00",
+    "updated_at": "2026-06-13T16:42:01.160053+00:00"
+  },
+  {
+    "id": "dd6415d0-5879-4e6d-8598-0dcf3970197b",
+    "name": "chunk-small",
+    "description": null,
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/da6e621d55e54664.zip",
+    "file_size_bytes": 1048576,
+    "detected_language": null,
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": null,
+    "suggested_image": null,
+    "suggested_build_command": null,
+    "suggested_run_command": null,
+    "analysis_notes": [],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "failed",
+    "error": "File is not a zip file",
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T16:40:56.418664+00:00",
+    "updated_at": "2026-06-13T16:40:56.502797+00:00"
+  },
+  {
+    "id": "bf39e1f9-d12f-4093-bc7a-d7c31cbdf445",
+    "name": "ssrf_probe",
+    "description": "adversarial probe",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/6a37e93bad76433e.zip",
+    "file_size_bytes": 1217,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "run.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "python run.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "noop": {
+          "type": "string"
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object"
+    },
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T16:37:32.820649+00:00",
+    "updated_at": "2026-06-13T16:37:32.877836+00:00"
+  },
+  {
+    "id": "37b56b3f-f927-44af-bced-155c135f11d6",
+    "name": "verify_ruby_withgem_v2",
+    "description": "control",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/5758b47317244600.zip",
+    "file_size_bytes": 514,
+    "detected_language": "ruby",
+    "detected_version": null,
+    "detected_package_manager": "bundler",
+    "detected_entrypoint": "main.rb",
+    "suggested_image": "ruby:3.3-slim",
+    "suggested_build_command": "bundle install --quiet",
+    "suggested_run_command": "ruby main.rb",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Suggested image: ruby:3.3-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T16:30:58.075039+00:00",
+    "updated_at": "2026-06-13T16:30:58.143146+00:00"
+  },
+  {
+    "id": "41f28bc5-0f08-4b96-920d-e6b1f5f94e36",
+    "name": "verify_c_only_v2",
+    "description": "adversarial verify",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/7c8fd3919e4343f9.zip",
+    "file_size_bytes": 281,
+    "detected_language": "unknown",
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": null,
+    "suggested_image": null,
+    "suggested_build_command": null,
+    "suggested_run_command": null,
+    "analysis_notes": [
+      {
+        "level": "error",
+        "message": "Couldn't detect a supported language from the files in this repo.",
+        "suggestion": "Supported: Python, Node.js, Go, Rust, Ruby, Java, Perl. Add the appropriate manifest (pyproject.toml, package.json, go.mod, Cargo.toml, Gemfile, pom.xml, cpanfile, etc.)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "failed",
+    "error": "Analysis completed with errors — see analysis_notes.",
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T16:30:12.909457+00:00",
+    "updated_at": "2026-06-13T16:30:12.973278+00:00"
+  },
+  {
+    "id": "0cb315a1-11d0-49b5-8fec-0517ec0bd562",
+    "name": "verify_ruby_nogem_v2",
+    "description": "adversarial verify",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/ecc45cd351ab4b6a.zip",
+    "file_size_bytes": 389,
+    "detected_language": "unknown",
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": null,
+    "suggested_image": null,
+    "suggested_build_command": null,
+    "suggested_run_command": null,
+    "analysis_notes": [
+      {
+        "level": "error",
+        "message": "Couldn't detect a supported language from the files in this repo.",
+        "suggestion": "Supported: Python, Node.js, Go, Rust, Ruby, Java, Perl. Add the appropriate manifest (pyproject.toml, package.json, go.mod, Cargo.toml, Gemfile, pom.xml, cpanfile, etc.)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "failed",
+    "error": "Analysis completed with errors — see analysis_notes.",
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T16:30:12.282698+00:00",
+    "updated_at": "2026-06-13T16:30:12.367574+00:00"
+  },
+  {
+    "id": "1a32e790-46e3-4cef-a4e5-f6b9e45c2510",
+    "name": "refute-cwd-test",
+    "description": "verify cwd bug",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/c8a564ddd23644b2.zip",
+    "file_size_bytes": 492,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "pip install --no-cache-dir -r requirements.txt",
+    "suggested_run_command": "cd /tmp/app && python main.py",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {
+      "name": "refute"
+    },
+    "last_test_output": {
+      "result": {
+        "echo": {
+          "name": "refute"
+        },
+        "helper": "hello refute"
+      },
+      "schema_ok": true,
+      "schema_error": ""
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-06-13T16:38:18.306770+00:00",
+    "created_at": "2026-06-13T16:27:45.816729+00:00",
+    "updated_at": "2026-06-13T16:38:13.375721+00:00"
+  },
+  {
+    "id": "c3f9b896-48cb-48f5-aa59-ebcd18ce17aa",
+    "name": "audit-zipslip",
+    "description": "zipslip poc",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/d99f5887a5c24965.zip",
+    "file_size_bytes": 375,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T16:06:13.278119+00:00",
+    "updated_at": "2026-06-13T16:06:13.352748+00:00"
+  },
+  {
+    "id": "ed424843-03c5-47b5-b35b-ed76e2f4eb48",
+    "name": "audit-probe-mem",
+    "description": "mem probe",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/fc3599e723d249cb.zip",
+    "file_size_bytes": 416,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "cd /tmp/app && python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object"
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {},
+    "last_test_output": {
+      "result": {
+        "allocated_500mb": "YES"
+      },
+      "schema_ok": true,
+      "schema_error": ""
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-06-13T16:00:13.605248+00:00",
+    "created_at": "2026-06-13T16:00:03.959836+00:00",
+    "updated_at": "2026-06-13T16:00:08.818184+00:00"
+  },
+  {
+    "id": "724cc048-24eb-44b9-a8bf-70d8d4afec6d",
+    "name": "audit-probe-net",
+    "description": "net probe",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/ee2259858f2a46a5.zip",
+    "file_size_bytes": 623,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "cd /tmp/app && python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object"
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {},
+    "last_test_output": {
+      "result": {
+        "http://10.0.239.81:8000/api/health": "OK 200 body[:200]={\"status\":\"ok\"}",
+        "https://kubernetes.default.svc/api/v1/namespaces": "ERR URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)>",
+        "http://abenix-api.abenix.svc.cluster.local:8000/api/health": "OK 200 body[:200]={\"status\":\"ok\"}"
+      },
+      "schema_ok": true,
+      "schema_error": ""
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-06-13T15:58:39.864706+00:00",
+    "created_at": "2026-06-13T15:58:32.641472+00:00",
+    "updated_at": "2026-06-13T15:58:36.545549+00:00"
+  },
+  {
+    "id": "b8fa8d24-49c7-468e-9491-fc8eb1522fb6",
+    "name": "audit-probe-small",
+    "description": "sandbox probe small",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/9cfba52fb1b4432d.zip",
+    "file_size_bytes": 630,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "cd /tmp/app && python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object"
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {},
+    "last_test_output": {
+      "result": {
+        "id": "uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)",
+        "caps": "0000000000000000",
+        "api_dns": "10.0.239.81",
+        "readonly_root": false,
+        "kubernetes_dns": "10.0.0.1"
+      },
+      "schema_ok": true,
+      "schema_error": ""
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-06-13T15:58:01.862066+00:00",
+    "created_at": "2026-06-13T15:57:55.503649+00:00",
+    "updated_at": "2026-06-13T15:57:58.563876+00:00"
+  },
+  {
+    "id": "2e0c4c40-b9ad-4999-af82-85b86467b267",
+    "name": "audit-probe",
+    "description": "sandbox probe",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/db17b4821b7b4982.zip",
+    "file_size_bytes": 872,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "cd /tmp/app && python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object"
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T15:50:29.518662+00:00",
+    "updated_at": "2026-06-13T15:50:29.884645+00:00"
+  },
+  {
+    "id": "96b20d84-23c0-49d1-9ab4-7ccd02534d4d",
+    "name": "audit-hang-r2",
+    "description": "hang test",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/3ad9183d27174869.zip",
+    "file_size_bytes": 404,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "cd /tmp/app && python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T15:48:11.075775+00:00",
+    "updated_at": "2026-06-13T15:48:45.315780+00:00"
+  },
+  {
+    "id": "0c353378-cb2a-4390-87d1-683181df6876",
+    "name": "audit-rb-r3",
+    "description": "ruby audit",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/3b703ca128d74e82.zip",
+    "file_size_bytes": 644,
+    "detected_language": "ruby",
+    "detected_version": "3.3",
+    "detected_package_manager": "bundler",
+    "detected_entrypoint": "main.rb",
+    "suggested_image": "ruby:3.3-alpine",
+    "suggested_build_command": "true",
+    "suggested_run_command": "cd /tmp/app && ruby main.rb",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Suggested image: ruby:3.3-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {
+      "n": 11
+    },
+    "last_test_output": {
+      "result": {
+        "lang": "ruby",
+        "result": 55
+      },
+      "schema_ok": true,
+      "schema_error": ""
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-06-13T16:07:11.001978+00:00",
+    "created_at": "2026-06-13T15:47:20.902219+00:00",
+    "updated_at": "2026-06-13T16:07:07.675019+00:00"
+  },
+  {
+    "id": "3e3c4202-6b21-4083-ab2a-c19ebb1d348c",
+    "name": "audit-c-r2",
+    "description": "c audit",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/244a31ff81c746bf.zip",
+    "file_size_bytes": 897,
+    "detected_language": "unknown",
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": null,
+    "suggested_image": null,
+    "suggested_build_command": null,
+    "suggested_run_command": null,
+    "analysis_notes": [
+      {
+        "level": "error",
+        "message": "Couldn't detect a supported language from the files in this repo.",
+        "suggestion": "Supported: Python, Node.js, Go, Rust, Ruby, Java, Perl. Add the appropriate manifest (pyproject.toml, package.json, go.mod, Cargo.toml, Gemfile, pom.xml, cpanfile, etc.)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    },
+    "output_schema": null,
+    "status": "failed",
+    "error": "Analysis completed with errors — see analysis_notes.",
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T15:42:39.567462+00:00",
+    "updated_at": "2026-06-13T15:42:39.634838+00:00"
+  },
+  {
+    "id": "277712d8-c5b1-49d0-acbc-685f90651429",
+    "name": "audit-rb-r2",
+    "description": "rb audit",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/2d1e4c15e7c649a1.zip",
+    "file_size_bytes": 1026,
+    "detected_language": "unknown",
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": null,
+    "suggested_image": null,
+    "suggested_build_command": null,
+    "suggested_run_command": null,
+    "analysis_notes": [
+      {
+        "level": "error",
+        "message": "Couldn't detect a supported language from the files in this repo.",
+        "suggestion": "Supported: Python, Node.js, Go, Rust, Ruby, Java, Perl. Add the appropriate manifest (pyproject.toml, package.json, go.mod, Cargo.toml, Gemfile, pom.xml, cpanfile, etc.)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    },
+    "output_schema": null,
+    "status": "failed",
+    "error": "Analysis completed with errors — see analysis_notes.",
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T15:42:38.258848+00:00",
+    "updated_at": "2026-06-13T15:42:38.319021+00:00"
+  },
+  {
+    "id": "887c395f-481c-4c9d-af32-6ebdb33f11b6",
+    "name": "audit-go-r2",
+    "description": "go audit",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/35e9b014dd87496f.zip",
+    "file_size_bytes": 704,
+    "detected_language": "go",
+    "detected_version": "go 1.22",
+    "detected_package_manager": "go modules",
+    "detected_entrypoint": "main.go",
+    "suggested_image": "golang:1.22-alpine",
+    "suggested_build_command": "export GOCACHE=/tmp/go-cache GOPATH=/tmp/go GOTMPDIR=/tmp && cd /tmp/app && mkdir -p /tmp/bin && go build -o /tmp/bin/app .",
+    "suggested_run_command": "/tmp/bin/app",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Suggested image: golang:1.22-alpine",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {
+      "n": 3
+    },
+    "last_test_output": {
+      "result": {
+        "lang": "go",
+        "result": 12
+      },
+      "schema_ok": true,
+      "schema_error": ""
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-06-13T15:59:44.435897+00:00",
+    "created_at": "2026-06-13T15:42:37.468297+00:00",
+    "updated_at": "2026-06-13T15:59:34.967184+00:00"
+  },
+  {
+    "id": "2c04daaa-c40b-405b-99b7-2278a06fef7e",
+    "name": "audit-node-r2",
+    "description": "node audit",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/f60a724abcd748a0.zip",
+    "file_size_bytes": 739,
+    "detected_language": "node",
+    "detected_version": "20",
+    "detected_package_manager": "npm",
+    "detected_entrypoint": "main.js",
+    "suggested_image": "node:20-alpine",
+    "suggested_build_command": "true",
+    "suggested_run_command": "cd /tmp/app && node main.js",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Suggested image: node:20-alpine",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {
+      "n": {
+        "nested": "garbage"
+      }
+    },
+    "last_test_output": {
+      "result": {
+        "lang": "node",
+        "result": null
+      },
+      "schema_ok": true,
+      "schema_error": ""
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-06-13T16:27:02.274708+00:00",
+    "created_at": "2026-06-13T15:42:34.880907+00:00",
+    "updated_at": "2026-06-13T16:26:58.950900+00:00"
+  },
+  {
+    "id": "fbb2d8e2-bd1e-455f-92c2-a5889ebb7de8",
+    "name": "audit-py-r2",
+    "description": "py-audit",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/adb1fe41d003433c.zip",
+    "file_size_bytes": 950,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "cd /tmp/app && python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {
+      "n": 21
+    },
+    "last_test_output": {
+      "lang": "python",
+      "result": 42
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-06-13T16:32:00.331368+00:00",
+    "created_at": "2026-06-13T15:27:29.968881+00:00",
+    "updated_at": "2026-06-13T16:31:57.020229+00:00"
+  },
+  {
+    "id": "e3a588fc-e89d-406b-b7f0-d4c23cb2f593",
+    "name": "audit-py",
+    "description": "py audit",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/909840669d50418b.zip",
+    "file_size_bytes": 950,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "python main.py",
+    "analysis_notes": [
+      {
+        "level": "warn",
+        "message": "No pyproject.toml, setup.py, or requirements.txt found.",
+        "suggestion": "Add requirements.txt listing your dependencies so the sandbox can pip-install them."
+      },
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      },
+      {
+        "level": "info",
+        "message": "Input / output contract discovered from abenix.yaml.",
+        "suggestion": "The Builder will pre-fill pipeline-node arguments from this schema. Authors can override in the asset settings if inference is wrong."
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    },
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-06-13T15:25:04.979829+00:00",
+    "updated_at": "2026-06-13T15:25:05.039795+00:00"
+  },
+  {
+    "id": "1ecf1c1a-e200-4044-88f2-29dcf3a9da7c",
+    "name": "cold-chain-corrector",
+    "description": "Auto-uploaded for shared PVC migration",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/177a6bc0f9e94dfe.zip",
+    "file_size_bytes": 5109,
+    "detected_language": "go",
+    "detected_version": "go 1.22",
+    "detected_package_manager": "go modules",
+    "detected_entrypoint": null,
+    "suggested_image": "golang:1.22-alpine",
+    "suggested_build_command": "export GOCACHE=/tmp/go-cache GOPATH=/tmp/go GOTMPDIR=/tmp && go build -o /tmp/bin .",
+    "suggested_run_command": "/tmp/bin",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Suggested image: golang:1.22-alpine",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-05-18T04:54:09.207166+00:00",
+    "updated_at": "2026-05-18T04:54:09.273243+00:00"
+  },
+  {
+    "id": "37a83ff8-b3f6-48a7-a8db-09696303e7b4",
+    "name": "rul-estimator",
+    "description": "Auto-uploaded for shared PVC migration",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/2d0b4758fdd64bcd.zip",
+    "file_size_bytes": 3787,
+    "detected_language": "python",
+    "detected_version": ">=3.11",
+    "detected_package_manager": "pip",
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": "true",
+    "suggested_run_command": "python main.py",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Suggested image: python:3.12-slim",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-05-18T04:54:08.656174+00:00",
+    "updated_at": "2026-05-18T04:54:08.715029+00:00"
+  },
+  {
+    "id": "841c6d46-c7de-49dc-98b1-600a6d01fe95",
+    "name": "pump-dsp-correction",
+    "description": "Auto-uploaded for shared PVC migration",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/af296ff85f61432d.zip",
+    "file_size_bytes": 5360,
+    "detected_language": "go",
+    "detected_version": "go 1.22",
+    "detected_package_manager": "go modules",
+    "detected_entrypoint": null,
+    "suggested_image": "golang:1.22-alpine",
+    "suggested_build_command": "export GOCACHE=/tmp/go-cache GOPATH=/tmp/go GOTMPDIR=/tmp && go build -o /tmp/bin .",
+    "suggested_run_command": "/tmp/bin",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Suggested image: golang:1.22-alpine",
+        "suggestion": "You can override this in the asset settings to pin a specific version tag (e.g. python:3.11.9-slim)."
+      }
+    ],
+    "input_schema": null,
+    "output_schema": null,
+    "status": "ready",
+    "error": null,
+    "last_test_input": {
+      "samples": [
+        -0.092,
+        0.0700206313951049,
+        0.31006554764596833,
+        0.3157986487447629,
+        0.48810392940526726,
+        0.6455533905932737,
+        0.5987198004465044,
+        0.5943066609691734,
+        0.5310853086060714,
+        0.45564756917255844,
+        0.554,
+        0.4070407714225794,
+        0.3009712076890821,
+        0.3296998632191945,
+        0.26129719392844303,
+        0.24355339059327377,
+        0.049681322887205885,
+        0.08619185099478384,
+        0.12795144672897907,
+        -0.07358616635487403,
+        0.018000000000000013,
+        -0.050413833645125986,
+        -0.05795144672897906,
+        0.007808149005216106,
+        -0.1936813228872059,
+        -0.22455339059327384,
+        -0.2692971939284429,
+        -0.32369986321919436,
+        -0.4229712076890821,
+        -0.5030407714225792,
+        -0.5519999999999999,
+        -0.4976475691725583,
+        -0.6330853086060715,
+        -0.6113066609691734,
+        -0.6437198004465043,
+        -0.5885533905932735,
+        -0.3921039294052675,
+        -0.390798648744763,
+        -0.2570655476459685,
+        -0.1860206313951051,
+        -0.04600000000000022,
+        0.1470206313951055,
+        0.31806554764596884,
+        0.4537986487447627,
+        0.3961039294052672,
+        0.5255533905932737,
+        0.6827198004465044,
+        0.5473066609691735,
+        0.5270853086060714,
+        0.5706475691725582,
+        0.4459999999999998,
+        0.5050407714225799,
+        0.2789712076890823,
+        0.3716998632191941,
+        0.18329719392844315,
+        0.06255339059327356,
+        0.06168132288720591,
+        0.13519185099478379,
+        0.08495144672897915,
+        0.07841383364512608,
+        -0.08699999999999995,
+        -0.04441383364512601,
+        -0.12095144672897903,
+        0.013808149005216
+      ],
+      "sensor_id": "pump-12-y",
+      "shaft_rpm": 1750,
+      "sample_rate_hz": 2000
+    },
+    "last_test_output": {
+      "rms": 0.20212899664304712,
+      "peak": 0.4416757959995774,
+      "kurtosis": -0.22367248236247672,
+      "sensor_id": "pump-12-y",
+      "crest_factor": 2.1851184309768366,
+      "fault_scores": {
+        "bearing": 0.07185421691814486,
+        "imbalance": 0,
+        "cavitation": 0.07037414629043959,
+        "misalignment": 0
+      },
+      "sample_count": 64,
+      "dominant_freqs": [
+        {
+          "hz": 62.5,
+          "amplitude": 0.12300508636050445
+        },
+        {
+          "hz": 31.25,
+          "amplitude": 0.10878724787079565
+        },
+        {
+          "hz": 93.75,
+          "amplitude": 0.08168300402492248
+        },
+        {
+          "hz": 125,
+          "amplitude": 0.04829743582018816
+        },
+        {
+          "hz": 406.25,
+          "amplitude": 0.008677008476376818
+        }
+      ],
+      "iso_10816_zone": "C"
+    },
+    "last_test_ok": true,
+    "last_test_at": "2026-05-18T04:56:01.561917+00:00",
+    "created_at": "2026-05-18T04:54:08.080286+00:00",
+    "updated_at": "2026-05-18T04:54:08.158872+00:00"
+  },
+  {
+    "id": "59ab325b-35d9-427d-9a44-5daa7461a6f7",
+    "name": "rul-estimator",
+    "description": "Remaining-useful-life estimator for rotating machinery. Takes a recent history of health-index readings and fits an exponential degradation model — the same shape used in production PHM systems on turbine blades, pump bearings, and compressor valves.",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/70e7549a-9803-4692-ba13-032ee6f7175e/a0d0422fcf1b4ab7_rul-estimator.zip",
+    "file_size_bytes": 3787,
+    "detected_language": "python",
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": "main.py",
+    "suggested_image": "python:3.12-slim",
+    "suggested_build_command": null,
+    "suggested_run_command": "python main.py",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Seeded from industrial-iot/code-assets/rul-estimator"
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "readings"
+      ],
+      "x-example": {
+        "readings": [
+          {
+            "timestamp": "2026-04-15T12:00:00Z",
+            "health_score": 0.92
+          },
+          {
+            "timestamp": "2026-04-16T12:00:00Z",
+            "health_score": 0.88
+          },
+          {
+            "timestamp": "2026-04-17T12:00:00Z",
+            "health_score": 0.83
+          },
+          {
+            "timestamp": "2026-04-18T12:00:00Z",
+            "health_score": 0.76
+          },
+          {
+            "timestamp": "2026-04-19T12:00:00Z",
+            "health_score": 0.68
+          },
+          {
+            "timestamp": "2026-04-20T12:00:00Z",
+            "health_score": 0.59
+          }
+        ],
+        "failure_threshold": 0.35
+      },
+      "properties": {
+        "readings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "timestamp",
+              "health_score"
+            ],
+            "properties": {
+              "rms": {
+                "type": "number",
+                "description": "Optional vibration RMS"
+              },
+              "timestamp": {
+                "type": "string",
+                "description": "ISO-8601 UTC"
+              },
+              "health_score": {
+                "type": "number",
+                "description": "0..1 — higher is healthier"
+              }
+            }
+          },
+          "minItems": 4,
+          "description": "Chronological history of health observations. Newest last."
+        },
+        "failure_threshold": {
+          "type": "number",
+          "default": 0.35,
+          "description": "Health level below which the asset is considered failed."
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "rul_hours",
+        "confidence",
+        "model",
+        "trend_slope",
+        "last_health"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Which model won — 'exponential' or 'linear' fallback."
+        },
+        "rul_hours": {
+          "type": "number",
+          "description": "Remaining useful life in hours. 0 if already below threshold."
+        },
+        "confidence": {
+          "type": "number",
+          "description": "0..1 — R² of the fit vs. history."
+        },
+        "last_health": {
+          "type": "number",
+          "description": "Most recent observed health score."
+        },
+        "trend_slope": {
+          "type": "number",
+          "description": "Per-hour rate of health change (negative = degrading)."
+        },
+        "horizon_samples": {
+          "type": "integer",
+          "description": "How many readings were used for the fit."
+        }
+      }
+    },
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-05-08T06:27:39.831700+00:00",
+    "updated_at": "2026-05-08T06:27:39.831700+00:00"
+  },
+  {
+    "id": "cc5d6cbd-9322-449e-aaad-518c8cb88db2",
+    "name": "wingman-var-simulator",
+    "description": "Monte Carlo Value-at-Risk simulator for Wingman strategy rules. Takes a corridor + side + size + recent EIA weekly spot history, runs N GBM walks of P&L over the horizon, and emits p50/p95/p99 VaR, expected shortfall at p99, mean/std, and a 30-bucket histogram. Compute-heavy (10k sims × 30 days × 5 RNG draws / step) — ~5–10× faster than the same maths in NumPy at this scale.",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/70e7549a-9803-4692-ba13-032ee6f7175e/0006c0268c4641d5_var-simulator.zip",
+    "file_size_bytes": 5362,
+    "detected_language": "go",
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": "main.go",
+    "suggested_image": "golang:1.22-alpine",
+    "suggested_build_command": null,
+    "suggested_run_command": "go run .",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Seeded from wingman/code-assets/var-simulator"
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "rule",
+        "spot_history",
+        "horizon_days",
+        "n_simulations"
+      ],
+      "x-example": {
+        "rule": {
+          "side": "sell_forward",
+          "size_mt": 10000,
+          "trigger": {
+            "value": 30,
+            "metric": "spread_usd_mt",
+            "operator": ">"
+          },
+          "corridor_id": "USGC-NWE"
+        },
+        "horizon_days": 30,
+        "spot_history": [
+          0.92,
+          0.94,
+          0.91,
+          0.93,
+          0.95,
+          0.96,
+          0.94,
+          0.93,
+          0.95,
+          0.97,
+          0.98,
+          0.96
+        ],
+        "n_simulations": 10000,
+        "freight_usd_mt": 63
+      },
+      "properties": {
+        "rule": {
+          "type": "object",
+          "required": [
+            "corridor_id",
+            "side",
+            "size_mt",
+            "trigger"
+          ],
+          "properties": {
+            "side": {
+              "enum": [
+                "buy_forward",
+                "sell_forward",
+                "swap"
+              ],
+              "type": "string"
+            },
+            "size_mt": {
+              "type": "number",
+              "description": "Strategy notional in metric tons"
+            },
+            "trigger": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "metric": {
+                  "type": "string"
+                },
+                "operator": {
+                  "enum": [
+                    ">",
+                    ">=",
+                    "<",
+                    "<=",
+                    "=="
+                  ],
+                  "type": "string"
+                }
+              }
+            },
+            "corridor_id": {
+              "type": "string",
+              "description": "e.g. 'USGC-NWE'"
+            }
+          }
+        },
+        "horizon_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Days forward to simulate. Typical: 14–60."
+        },
+        "spot_history": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 8,
+          "description": "Recent weekly EIA spot ($/gal). Used to fit GBM drift+vol."
+        },
+        "n_simulations": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Number of Monte Carlo paths. Typical: 10000."
+        },
+        "freight_usd_mt": {
+          "type": "number",
+          "description": "Bunker-derived freight cost USD/MT. Used in P&L attribution."
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "p50_usd",
+        "p95_usd",
+        "p99_usd",
+        "expected_shortfall_p99_usd",
+        "mean_usd",
+        "std_usd"
+      ],
+      "properties": {
+        "p50_usd": {
+          "type": "number"
+        },
+        "p95_usd": {
+          "type": "number"
+        },
+        "p99_usd": {
+          "type": "number"
+        },
+        "std_usd": {
+          "type": "number"
+        },
+        "mean_usd": {
+          "type": "number"
+        },
+        "histogram": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer"
+              },
+              "bin_low": {
+                "type": "number"
+              },
+              "bin_high": {
+                "type": "number"
+              }
+            }
+          },
+          "description": "30-bucket equal-width histogram of terminal P&L across paths."
+        },
+        "narrative": {
+          "type": "string",
+          "description": "1–2 sentence trader-facing summary"
+        },
+        "data_sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "horizon_days": {
+          "type": "integer"
+        },
+        "n_simulations": {
+          "type": "integer"
+        },
+        "expected_shortfall_p99_usd": {
+          "type": "number",
+          "description": "Avg loss in worst 1% of paths"
+        }
+      }
+    },
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-05-08T06:27:39.831700+00:00",
+    "updated_at": "2026-05-08T06:27:39.831700+00:00"
+  },
+  {
+    "id": "ab130666-d47c-42de-ad59-648e09ce8774",
+    "name": "pump-dsp-correction",
+    "description": "Vibration-signal DSP for rotating machinery. Takes a window of raw accelerometer samples, removes drift, de-noises, then computes the classic bearing / imbalance / misalignment / cavitation health indicators used by every real predictive-maintenance suite.",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/70e7549a-9803-4692-ba13-032ee6f7175e/969d075b80614702_pump-dsp-correction.zip",
+    "file_size_bytes": 5360,
+    "detected_language": "go",
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": "cmd/main.go",
+    "suggested_image": "golang:1.22-alpine",
+    "suggested_build_command": null,
+    "suggested_run_command": "go run .",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Seeded from industrial-iot/code-assets/pump-dsp-correction"
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "samples",
+        "sample_rate_hz",
+        "sensor_id"
+      ],
+      "x-example": {
+        "samples": [
+          0.01,
+          0.03,
+          0.02,
+          0.04,
+          0.03,
+          0.05,
+          0.04,
+          0.06,
+          0.05,
+          0.07,
+          0.06,
+          0.08,
+          0.07,
+          0.09,
+          0.08,
+          0.1,
+          0.09,
+          0.11,
+          0.1,
+          0.12,
+          0.11,
+          0.13,
+          0.12,
+          0.14,
+          0.13,
+          0.15,
+          0.14,
+          0.16,
+          0.15,
+          0.17,
+          0.16,
+          0.18
+        ],
+        "sensor_id": "PUMP-A-01",
+        "shaft_rpm": 1800,
+        "sample_rate_hz": 2000
+      },
+      "properties": {
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 32,
+          "description": "Raw accelerometer samples in g (or any consistent unit)."
+        },
+        "sensor_id": {
+          "type": "string",
+          "description": "Stable id of the sensor emitting the window."
+        },
+        "shaft_rpm": {
+          "type": "number",
+          "description": "Optional shaft RPM — if supplied, per-fault scores use it."
+        },
+        "sample_rate_hz": {
+          "type": "integer",
+          "description": "Sampling rate in Hz. Typical industrial: 2000–25000."
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "rms",
+        "peak",
+        "crest_factor",
+        "kurtosis",
+        "dominant_freqs",
+        "fault_scores"
+      ],
+      "properties": {
+        "rms": {
+          "type": "number",
+          "description": "Root-mean-square amplitude — overall vibration energy."
+        },
+        "peak": {
+          "type": "number",
+          "description": "Peak absolute amplitude in the window."
+        },
+        "kurtosis": {
+          "type": "number",
+          "description": "Higher kurtosis → more impulsive content."
+        },
+        "crest_factor": {
+          "type": "number",
+          "description": "peak / rms. Crest > 5 suggests impulsive faults (bearing)."
+        },
+        "fault_scores": {
+          "type": "object",
+          "properties": {
+            "bearing": {
+              "type": "number",
+              "description": "0..1 — high-freq + kurtosis"
+            },
+            "imbalance": {
+              "type": "number",
+              "description": "0..1 — 1x RPM amplitude"
+            },
+            "cavitation": {
+              "type": "number",
+              "description": "0..1 — broadband high-freq"
+            },
+            "misalignment": {
+              "type": "number",
+              "description": "0..1 — 2x RPM amplitude"
+            }
+          }
+        },
+        "dominant_freqs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "hz": {
+                "type": "number"
+              },
+              "amplitude": {
+                "type": "number"
+              }
+            }
+          },
+          "description": "Top-5 bins from the FFT, sorted by amplitude desc."
+        },
+        "iso_10816_zone": {
+          "type": "string",
+          "description": "A/B/C/D per ISO 10816-3 severity (if shaft_rpm + RMS provided)."
+        }
+      }
+    },
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-05-08T06:27:39.831700+00:00",
+    "updated_at": "2026-05-08T06:27:39.831700+00:00"
+  },
+  {
+    "id": "bdd8ee08-95f9-426c-ab9d-6e9b4c493124",
+    "name": "cold-chain-corrector",
+    "description": "Cold-chain telemetry signal correction + excursion detection for reefer containers (pharma, fresh food, vaccines). Takes a window of noisy sensor readings and emits Kalman-smoothed temperature, dwell-time per stop, door-open events, and FSMA-style excursion flags.",
+    "source_type": "zip",
+    "source_git_url": null,
+    "source_ref": null,
+    "storage_uri": "/data/code-assets/70e7549a-9803-4692-ba13-032ee6f7175e/e62fdbb90082488a_cold-chain-corrector.zip",
+    "file_size_bytes": 5109,
+    "detected_language": "go",
+    "detected_version": null,
+    "detected_package_manager": null,
+    "detected_entrypoint": "cmd/main.go",
+    "suggested_image": "golang:1.22-alpine",
+    "suggested_build_command": null,
+    "suggested_run_command": "go run .",
+    "analysis_notes": [
+      {
+        "level": "info",
+        "message": "Seeded from industrial-iot/code-assets/cold-chain-corrector"
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "readings",
+        "product_spec"
+      ],
+      "x-example": {
+        "readings": [
+          {
+            "lat": 37.77,
+            "lon": -122.42,
+            "temp_c": 4.2,
+            "door_open": false,
+            "timestamp": "2026-04-22T10:00:00Z"
+          },
+          {
+            "lat": 37.77,
+            "lon": -122.42,
+            "temp_c": 4.5,
+            "door_open": false,
+            "timestamp": "2026-04-22T10:05:00Z"
+          },
+          {
+            "lat": 37.77,
+            "lon": -122.42,
+            "temp_c": 4.3,
+            "door_open": false,
+            "timestamp": "2026-04-22T10:10:00Z"
+          },
+          {
+            "lat": 37.77,
+            "lon": -122.42,
+            "temp_c": 9.1,
+            "door_open": true,
+            "timestamp": "2026-04-22T10:15:00Z"
+          },
+          {
+            "lat": 37.77,
+            "lon": -122.42,
+            "temp_c": 11.4,
+            "door_open": true,
+            "timestamp": "2026-04-22T10:20:00Z"
+          },
+          {
+            "lat": 37.77,
+            "lon": -122.42,
+            "temp_c": 10.8,
+            "door_open": true,
+            "timestamp": "2026-04-22T10:25:00Z"
+          },
+          {
+            "lat": 37.77,
+            "lon": -122.42,
+            "temp_c": 7.3,
+            "door_open": false,
+            "timestamp": "2026-04-22T10:30:00Z"
+          },
+          {
+            "lat": 37.77,
+            "lon": -122.42,
+            "temp_c": 5.1,
+            "door_open": false,
+            "timestamp": "2026-04-22T10:35:00Z"
+          }
+        ],
+        "product_spec": {
+          "sku": "PHARM-A-INSULIN",
+          "name": "Insulin vials (refrigerated)",
+          "max_c": 8,
+          "min_c": 2,
+          "door_open_minutes": 5,
+          "excursion_minutes": 10
+        }
+      },
+      "properties": {
+        "readings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "timestamp",
+              "temp_c"
+            ],
+            "properties": {
+              "lat": {
+                "type": "number"
+              },
+              "lon": {
+                "type": "number"
+              },
+              "temp_c": {
+                "type": "number",
+                "description": "Noisy sensor reading in °C"
+              },
+              "door_open": {
+                "type": "boolean",
+                "description": "Optional door state"
+              },
+              "timestamp": {
+                "type": "string",
+                "description": "ISO-8601 UTC"
+              }
+            }
+          },
+          "minItems": 4
+        },
+        "product_spec": {
+          "type": "object",
+          "required": [
+            "min_c",
+            "max_c",
+            "excursion_minutes"
+          ],
+          "properties": {
+            "sku": {
+              "type": "string",
+              "description": "Product SKU"
+            },
+            "name": {
+              "type": "string"
+            },
+            "max_c": {
+              "type": "number",
+              "description": "Upper spec bound °C"
+            },
+            "min_c": {
+              "type": "number",
+              "description": "Lower spec bound °C"
+            },
+            "door_open_minutes": {
+              "type": "integer",
+              "default": 5,
+              "description": "Allowed cumulative door-open minutes"
+            },
+            "excursion_minutes": {
+              "type": "integer",
+              "description": "Minutes outside spec before excursion flagged"
+            }
+          }
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "smoothed",
+        "excursions",
+        "summary"
+      ],
+      "properties": {
+        "summary": {
+          "type": "object",
+          "properties": {
+            "dwell_stops": {
+              "type": "integer",
+              "description": "Inferred stationary segments from GPS."
+            },
+            "max_smoothed_c": {
+              "type": "number"
+            },
+            "min_smoothed_c": {
+              "type": "number"
+            },
+            "mean_smoothed_c": {
+              "type": "number"
+            },
+            "spoilage_risk_flag": {
+              "type": "boolean"
+            },
+            "total_door_open_min": {
+              "type": "number"
+            },
+            "total_excursion_min": {
+              "type": "number"
+            }
+          }
+        },
+        "smoothed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "temp_c": {
+                "type": "number"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Kalman-smoothed temperature time series aligned to input."
+        },
+        "excursions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "direction": {
+                "type": "string",
+                "description": "'above' or 'below'"
+              },
+              "peak_temp_c": {
+                "type": "number"
+              },
+              "duration_min": {
+                "type": "number"
+              }
+            }
+          },
+          "description": "Windows where temp was out-of-spec beyond excursion_minutes."
+        },
+        "door_events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "duration_min": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    "status": "ready",
+    "error": null,
+    "last_test_input": null,
+    "last_test_output": null,
+    "last_test_ok": null,
+    "last_test_at": null,
+    "created_at": "2026-05-08T06:27:39.831700+00:00",
+    "updated_at": "2026-05-08T06:27:39.831700+00:00"
+  }
+]

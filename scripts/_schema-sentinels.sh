@@ -28,6 +28,9 @@ SCHEMA_CANONICAL_COLUMNS=(
   "agent_memories.importance"
   "approvals.client_token"
   "approvals.gate_kind"
+)
+
+SCHEMA_USE_CASE_COLUMNS=(
   "contractiq_users.email"
   "contractiq_contracts.asset_class"
   "contractiq_contracts.pricing_pattern"

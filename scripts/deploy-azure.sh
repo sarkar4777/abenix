@@ -154,6 +154,18 @@ check_prereqs() {
     fi
     ok "All SDK copies in sync"
   fi
+
+  # Alembic graph guard — catches duplicate revision IDs and unmerged
+  # heads before we ship an image whose db-migrate init container will
+  # crashloop on the cluster.
+  if [ "${SKIP_ALEMBIC_GRAPH_CHECK:-0}" != "1" ]; then
+    step "Phase 0 — Alembic graph guard"
+    if ! bash "${ROOT_DIR}/scripts/verify-alembic-graph.sh"; then
+      err "Alembic graph is unhealthy. Fix duplicate revisions or merge unmerged heads."
+      err "Set SKIP_ALEMBIC_GRAPH_CHECK=1 to bypass (NOT recommended)."
+      exit 7
+    fi
+  fi
 }
 
 # Helper: --only parser
@@ -771,7 +783,23 @@ run_migrations() {
       err "Production rollout aborted — DB is not at the expected schema."
       exit 6
     fi
-    ok "Schema verified — all sentinel columns present"
+    ok "Platform schema verified — all sentinel columns present"
+
+    local uc_missing=""
+    for entry in "${SCHEMA_USE_CASE_COLUMNS[@]}"; do
+      table="${entry%.*}"
+      column="${entry#*.}"
+      exists=$(kubectl exec -n "${NAMESPACE}" "${pg}" -- bash -c \
+        "PGPASSWORD=\$POSTGRES_PASSWORD psql -U postgres -d abenix -tAc \"SELECT 1 FROM information_schema.columns WHERE table_name='${table}' AND column_name='${column}'\"" \
+        2>/dev/null | tr -d '[:space:]')
+      [ "${exists}" = "1" ] || uc_missing="${uc_missing} ${table}.${column}"
+    done
+    if [ -n "${uc_missing}" ]; then
+      warn "Use-case schema not yet synced:${uc_missing}"
+      warn "Will be added by the use-case api pods at startup (use_case_schema_sync.py)"
+    else
+      ok "Use-case schema verified — all sentinel columns present"
+    fi
   else
     warn "No ready API pod — skipping alembic + schema verification"
   fi

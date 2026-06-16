@@ -63,9 +63,13 @@ test.describe.serial('Wingman Mispricing Lens — end-to-end', () => {
     test.setTimeout(60_000);
     await afLogin(page);
     await gotoOk(page, `${BASE_AF}/ml-models`, 3500);
+    // The page is paginated/virtualized; wingman models sit near the end
+    // alphabetically. Scroll them into view before asserting visibility.
     const fair = page.getByText('wingman-mispricing-fairvalue').first();
     const anom = page.getByText('wingman-mispricing-anomaly').first();
+    await fair.scrollIntoViewIfNeeded({ timeout: 20_000 });
     await expect(fair).toBeVisible({ timeout: 20_000 });
+    await anom.scrollIntoViewIfNeeded({ timeout: 20_000 });
     await expect(anom).toBeVisible({ timeout: 20_000 });
   });
 

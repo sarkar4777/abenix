@@ -149,10 +149,11 @@ spec:
             failureThreshold: 3
           lifecycle:
             preStop:
-              # Graceful: stop consuming from the queue (NOT broadcast shutdown
-              # which kills all workers on the same broker).
               exec:
-                command: ["celery", "-A", "worker.celery_app", "control", "cancel_consumer", "celery"]
+                command:
+                  - sh
+                  - -c
+                  - 'celery -A worker.celery_app control cancel_consumer celery --destination=celery@$HOSTNAME || true'
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

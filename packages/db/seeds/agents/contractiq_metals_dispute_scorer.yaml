@@ -86,9 +86,9 @@ system_prompt: |
   `expected_loss_usd` must be numbers, never null.
 
 model_config:
-  model: gemini-2.0-flash
+  model: gemini-2.5-pro
   temperature: 0.15
-  max_iterations: 14
+  max_iterations: 2
   tools:
     - database_query
     - knowledge_search

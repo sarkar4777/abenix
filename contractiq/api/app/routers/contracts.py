@@ -354,9 +354,24 @@ def _parse_extraction_json(text: str) -> dict | None:
         # Truncated response — no closing ```, strip the opening marker
         cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned).strip()
 
+    # `strict=False` tolerates raw control chars (newlines, tabs) inside
+    # quoted strings — gemini emits multi-line strings without escaping the
+    # newlines, which standard json.loads rejects.
+    last_err: json.JSONDecodeError | None = None
+    last_payload: str = ""
+
+    def _loads(s: str):
+        nonlocal last_err, last_payload
+        try:
+            return json.loads(s, strict=False)
+        except json.JSONDecodeError as e:
+            last_err = e
+            last_payload = s
+            raise
+
     # Strategy 2: direct parse
     try:
-        return json.loads(cleaned)
+        return _loads(cleaned)
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -365,7 +380,7 @@ def _parse_extraction_json(text: str) -> dict | None:
     end = cleaned.rfind("}")
     if start != -1 and end > start:
         try:
-            return json.loads(cleaned[start:end + 1])
+            return _loads(cleaned[start:end + 1])
         except json.JSONDecodeError:
             pass
 
@@ -374,9 +389,49 @@ def _parse_extraction_json(text: str) -> dict | None:
     end = text.rfind("}")
     if start != -1 and end > start:
         try:
-            return json.loads(text[start:end + 1])
+            return _loads(text[start:end + 1])
         except json.JSONDecodeError:
             pass
+
+    # Strategy 5: tolerate trailing commas in objects/arrays — gemini emits them
+    # under load when output_tokens are tight. Strip them and retry.
+    for candidate in (cleaned, text):
+        s = candidate.find("{")
+        e = candidate.rfind("}")
+        if s == -1 or e <= s:
+            continue
+        slice_ = candidate[s:e + 1]
+        slice_ = re.sub(r",(\s*[}\]])", r"\1", slice_)
+        try:
+            return _loads(slice_)
+        except json.JSONDecodeError:
+            continue
+
+    # Strategy 6: last-resort tolerant repair — handles unquoted values,
+    # missing commas, smart quotes, comments, and other common LLM JSON
+    # mistakes that standard json.loads rejects.
+    try:
+        from json_repair import repair_json
+        for candidate in (cleaned, text):
+            s = candidate.find("{")
+            e = candidate.rfind("}")
+            if s == -1 or e <= s:
+                continue
+            repaired = repair_json(candidate[s:e + 1], return_objects=True)
+            if isinstance(repaired, dict) and repaired:
+                return repaired
+    except Exception as repair_err:
+        logger.warning("json-repair fallback failed: %s", repair_err)
+
+    if last_err is not None and last_payload:
+        pos = last_err.pos
+        ctx_start = max(0, pos - 120)
+        ctx_end = min(len(last_payload), pos + 120)
+        logger.error(
+            "JSON parse failure at line %d col %d pos %d: %s; CONTEXT=%r",
+            last_err.lineno, last_err.colno, pos, last_err.msg,
+            last_payload[ctx_start:ctx_end],
+        )
 
     return None
 
@@ -457,7 +512,14 @@ async def extract_contract(
     SENTINEL = object()
 
     async def _extract_and_persist():
-        """Run the agent call + parse + DB writes against a fresh session."""
+        """Run the agent call + parse + DB writes.
+
+        Each DB write batch opens its own short-lived SessionLocal context.
+        Holding one session across the long-running forge.execute() call
+        (which takes 60-120s on real contracts) loses greenlet context on
+        asyncpg and causes MissingGreenlet on subsequent writes. No ORM rows
+        live across the agent call — all mutations are UPDATE statements.
+        """
         from abenix_sdk import Abenix, ActingSubject
 
         async def emit(event: dict) -> None:
@@ -469,111 +531,103 @@ async def extract_contract(
         api_key = os.environ.get("CONTRACTIQ_ABENIX_API_KEY", "")
         api_base = os.environ.get("ABENIX_API_URL", "http://localhost:8000")
 
-        async with SessionLocal() as bg_db:
-            try:
-                await bg_db.execute(
-                    update(ContractIQContract).where(ContractIQContract.id == contract_id).values(
-                        status=ContractStatus.EXTRACTING
-                    )
-                )
-                await bg_db.commit()
-
-                await emit({'event': 'status', 'agent': 'document_ingester', 'status': 'running'})
-                await emit({'event': 'status', 'agent': 'commercial_extractor', 'status': 'running'})
-                await emit({'event': 'status', 'agent': 'technical_extractor', 'status': 'running'})
-
-                extraction_text = ""
-                if api_key:
-                    subject = ActingSubject(
-                        subject_type="contractiq",
-                        subject_id=str(user_id),
-                        email=user_email,
-                        display_name=user_full_name,
-                    )
-                    async with Abenix(api_key=api_key, base_url=api_base, act_as=subject, timeout=600.0) as forge:
-                        result = await forge.execute("contractiq-extractor", contract_text[:80000])
-                        extraction_text = result.output or ""
-                        logger.info("Abenix extraction complete: %d chars, %d tool_calls, $%.4f",
-                                   len(extraction_text), len(result.tool_calls), result.cost)
-                else:
-                    import anthropic
-                    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-                    if not anthropic_key:
-                        await emit({'event': 'error', 'message': 'Neither CONTRACTIQ_ABENIX_API_KEY nor ANTHROPIC_API_KEY configured'})
-                        return
-                    logger.info("Falling back to direct Anthropic extraction (no Abenix API key)")
-                    client = anthropic.Anthropic(api_key=anthropic_key)
-                    extraction_prompt = (
-                        f"Analyze this contract and extract ALL information into structured JSON.\n\n"
-                        f"CONTRACT TEXT:\n{contract_text[:60000]}\n\n"
-                        f"Return a single JSON object with keys: parties, commercial_terms, technical_data, "
-                        f"clauses, assets, events, risk_assessment. Be thorough."
-                    )
-                    response = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=8000,
-                        messages=[{"role": "user", "content": extraction_prompt}],
-                    )
-                    extraction_text = response.content[0].text if response.content else ""
-
-                await emit({'event': 'status', 'agent': 'document_ingester', 'status': 'complete'})
-                await emit({'event': 'status', 'agent': 'commercial_extractor', 'status': 'complete'})
-                await emit({'event': 'status', 'agent': 'technical_extractor', 'status': 'complete'})
-
-                logger.info("Extraction output: %d chars, first 200: %s", len(extraction_text), extraction_text[:200])
-                parsed = _parse_extraction_json(extraction_text)
-                if not parsed:
-                    logger.error("Failed to parse extraction JSON (%d chars): %s", len(extraction_text), extraction_text[:500])
-                    existing = (await bg_db.execute(
+        async def _set_status(new_status: ContractStatus, summary_patch: dict | None = None) -> None:
+            async with SessionLocal() as s:
+                values: dict = {"status": new_status}
+                if summary_patch is not None:
+                    existing = (await s.execute(
                         select(ContractIQContract.extraction_summary).where(ContractIQContract.id == contract_id)
                     )).scalar_one_or_none() or {}
-                    await bg_db.execute(
-                        update(ContractIQContract).where(ContractIQContract.id == contract_id).values(
-                            status=ContractStatus.ERROR,
-                            extraction_summary={
-                                **existing,
-                                "extraction_error": "Failed to parse LLM output",
-                                "raw_output": extraction_text[:2000],
-                            },
-                        )
-                    )
-                    await bg_db.commit()
-                    await emit({'event': 'error', 'message': 'Failed to parse extraction output'})
-                    return
+                    values["extraction_summary"] = {**existing, **summary_patch}
+                await s.execute(
+                    update(ContractIQContract).where(ContractIQContract.id == contract_id).values(**values)
+                )
+                await s.commit()
 
-                await emit({'event': 'status', 'agent': 'legal_extractor', 'status': 'running'})
-                await emit({'event': 'status', 'agent': 'financial_extractor', 'status': 'running'})
+        try:
+            await _set_status(ContractStatus.EXTRACTING)
 
-                # Re-attach contract row in background session for ORM updates
-                contract_row = (await bg_db.execute(
-                    select(ContractIQContract).where(ContractIQContract.id == contract_id)
-                )).scalar_one()
+            await emit({'event': 'status', 'agent': 'document_ingester', 'status': 'running'})
+            await emit({'event': 'status', 'agent': 'commercial_extractor', 'status': 'running'})
+            await emit({'event': 'status', 'agent': 'technical_extractor', 'status': 'running'})
 
-                parties = parsed.get("parties", {})
-                if parties.get("counterparty_a"):
-                    contract_row.counterparty_a = parties["counterparty_a"]
-                if parties.get("counterparty_b"):
-                    contract_row.counterparty_b = parties["counterparty_b"]
-                if parties.get("total_capacity_mw"):
-                    try:
-                        contract_row.total_capacity_mw = float(parties["total_capacity_mw"])
-                    except (ValueError, TypeError):
-                        pass
-                if parties.get("contract_value"):
-                    try:
-                        contract_row.contract_value = float(parties["contract_value"])
-                    except (ValueError, TypeError):
-                        pass
-                if parties.get("currency"):
-                    contract_row.currency = parties["currency"]
-                if parties.get("effective_date"):
-                    contract_row.effective_date = _parse_date(parties["effective_date"])
-                if parties.get("expiry_date"):
-                    contract_row.expiry_date = _parse_date(parties["expiry_date"])
+            if not api_key:
+                await _set_status(ContractStatus.ERROR)
+                await emit({'event': 'error', 'message': 'CONTRACTIQ_ABENIX_API_KEY not configured on contractiq-api'})
+                return
 
+            subject = ActingSubject(
+                subject_type="contractiq",
+                subject_id=str(user_id),
+                email=user_email,
+                display_name=user_full_name,
+            )
+            async with Abenix(api_key=api_key, base_url=api_base, act_as=subject, timeout=600.0) as forge:
+                result = await forge.execute("contractiq-extractor", contract_text[:80000])
+                extraction_text = result.output or ""
+                logger.info("Abenix extraction complete: %d chars, %d tool_calls, $%.4f",
+                           len(extraction_text), len(result.tool_calls), result.cost)
+
+            await emit({'event': 'status', 'agent': 'document_ingester', 'status': 'complete'})
+            await emit({'event': 'status', 'agent': 'commercial_extractor', 'status': 'complete'})
+            await emit({'event': 'status', 'agent': 'technical_extractor', 'status': 'complete'})
+
+            logger.info("Extraction output: %d chars, first 200: %s", len(extraction_text), extraction_text[:200])
+            parsed = _parse_extraction_json(extraction_text)
+            if not parsed:
+                logger.error(
+                    "Failed to parse extraction JSON (%d chars). HEAD=%r TAIL=%r",
+                    len(extraction_text),
+                    extraction_text[:300],
+                    extraction_text[-300:],
+                )
+                await _set_status(
+                    ContractStatus.ERROR,
+                    summary_patch={
+                        "extraction_error": "Failed to parse LLM output",
+                        "raw_output": extraction_text[:2000],
+                    },
+                )
+                await emit({'event': 'error', 'message': 'Failed to parse extraction output'})
+                return
+
+            await emit({'event': 'status', 'agent': 'legal_extractor', 'status': 'running'})
+            await emit({'event': 'status', 'agent': 'financial_extractor', 'status': 'running'})
+
+            parties = parsed.get("parties", {})
+
+            # Resolve final contract column values from `parties` + parsed sections.
+            party_values: dict = {}
+            if parties.get("counterparty_a"):
+                party_values["counterparty_a"] = parties["counterparty_a"]
+            if parties.get("counterparty_b"):
+                party_values["counterparty_b"] = parties["counterparty_b"]
+            if parties.get("total_capacity_mw"):
+                try:
+                    party_values["total_capacity_mw"] = float(parties["total_capacity_mw"])
+                except (ValueError, TypeError):
+                    pass
+            if parties.get("contract_value"):
+                try:
+                    party_values["contract_value"] = float(parties["contract_value"])
+                except (ValueError, TypeError):
+                    pass
+            if parties.get("currency"):
+                party_values["currency"] = parties["currency"]
+            if parties.get("effective_date"):
+                ed_val = _parse_date(parties["effective_date"])
+                if ed_val is not None:
+                    party_values["effective_date"] = ed_val
+            if parties.get("expiry_date"):
+                exp_val = _parse_date(parties["expiry_date"])
+                if exp_val is not None:
+                    party_values["expiry_date"] = exp_val
+
+            # Batch 1 — extracted_data rows (terms + definitions)
+            async with SessionLocal() as s:
                 for section_key in ("commercial_terms", "technical_data", "legal_terms", "financial_terms", "operational_terms"):
                     for item in parsed.get(section_key, []):
-                        ed = ContractIQExtractedData(
+                        s.add(ContractIQExtractedData(
                             id=uuid.uuid4(),
                             contract_id=contract_id,
                             section=item.get("section", section_key),
@@ -582,10 +636,9 @@ async def extract_contract(
                             field_type=item.get("type", "string"),
                             confidence_score=0.85,
                             extraction_pass=1,
-                        )
-                        bg_db.add(ed)
+                        ))
                 for defn in parsed.get("definitions", []):
-                    ed = ContractIQExtractedData(
+                    s.add(ContractIQExtractedData(
                         id=uuid.uuid4(),
                         contract_id=contract_id,
                         section="definitions",
@@ -594,18 +647,19 @@ async def extract_contract(
                         field_type="definition",
                         confidence_score=0.90,
                         extraction_pass=1,
-                    )
-                    bg_db.add(ed)
-                await bg_db.commit()
+                    ))
+                await s.commit()
 
-                await emit({'event': 'status', 'agent': 'legal_extractor', 'status': 'complete'})
-                await emit({'event': 'status', 'agent': 'financial_extractor', 'status': 'complete'})
+            await emit({'event': 'status', 'agent': 'legal_extractor', 'status': 'complete'})
+            await emit({'event': 'status', 'agent': 'financial_extractor', 'status': 'complete'})
 
-                await emit({'event': 'status', 'agent': 'clause_classifier', 'status': 'running'})
+            # Batch 2 — clauses
+            await emit({'event': 'status', 'agent': 'clause_classifier', 'status': 'running'})
+            async with SessionLocal() as s:
                 for clause_data in parsed.get("clauses", []):
                     ct = CLAUSE_TYPE_MAP.get(clause_data.get("type", "other"), ClauseType.OTHER)
                     rl = RISK_LEVEL_MAP.get(clause_data.get("risk_level", "low"), RiskLevel.LOW)
-                    clause = ContractIQClause(
+                    s.add(ContractIQClause(
                         id=uuid.uuid4(),
                         contract_id=contract_id,
                         clause_number=clause_data.get("number"),
@@ -614,14 +668,16 @@ async def extract_contract(
                         clause_type=ct,
                         risk_level=rl,
                         risk_notes=clause_data.get("risk_notes"),
-                    )
-                    bg_db.add(clause)
-                await emit({'event': 'status', 'agent': 'clause_classifier', 'status': 'complete'})
+                    ))
+                await s.commit()
+            await emit({'event': 'status', 'agent': 'clause_classifier', 'status': 'complete'})
 
-                await emit({'event': 'status', 'agent': 'asset_registry', 'status': 'running'})
+            # Batch 3 — assets
+            await emit({'event': 'status', 'agent': 'asset_registry', 'status': 'running'})
+            async with SessionLocal() as s:
                 for asset_data in parsed.get("assets", []):
                     cod = _parse_date(asset_data.get("cod_date", ""))
-                    asset = ContractIQAsset(
+                    s.add(ContractIQAsset(
                         id=uuid.uuid4(),
                         contract_id=contract_id,
                         asset_name=asset_data.get("name", "Unknown Asset"),
@@ -631,30 +687,37 @@ async def extract_contract(
                         technology=asset_data.get("technology"),
                         cod_date=cod,
                         degradation_rate=asset_data.get("degradation_rate"),
-                    )
-                    bg_db.add(asset)
-                await emit({'event': 'status', 'agent': 'asset_registry', 'status': 'complete'})
+                    ))
+                await s.commit()
+            await emit({'event': 'status', 'agent': 'asset_registry', 'status': 'complete'})
 
-                await emit({'event': 'status', 'agent': 'event_extractor', 'status': 'running'})
+            # Batch 4 — events
+            await emit({'event': 'status', 'agent': 'event_extractor', 'status': 'running'})
+            async with SessionLocal() as s:
                 for event_data in parsed.get("events", []):
                     event_date = _parse_date(event_data.get("date", ""))
-                    event = ContractIQEvent(
+                    s.add(ContractIQEvent(
                         id=uuid.uuid4(),
                         contract_id=contract_id,
                         event_type=event_data.get("type", "milestone"),
                         event_date=event_date,
                         description=event_data.get("description", ""),
                         status="upcoming" if event_date and event_date > datetime.now(timezone.utc) else "passed",
-                    )
-                    bg_db.add(event)
-                await emit({'event': 'status', 'agent': 'event_extractor', 'status': 'complete'})
+                    ))
+                await s.commit()
+            await emit({'event': 'status', 'agent': 'event_extractor', 'status': 'complete'})
 
-                await emit({'event': 'status', 'agent': 'risk_analyzer', 'status': 'running'})
-                risk_scores = []
+            # Batch 5 — risks
+            await emit({'event': 'status', 'agent': 'risk_analyzer', 'status': 'running'})
+            risk_scores: list[float] = []
+            async with SessionLocal() as s:
                 for risk_data in parsed.get("risk_assessment", []):
-                    score = float(risk_data.get("score", 50))
+                    try:
+                        score = float(risk_data.get("score", 50))
+                    except (ValueError, TypeError):
+                        score = 50.0
                     risk_scores.append(score)
-                    risk = ContractIQRiskAnalysis(
+                    s.add(ContractIQRiskAnalysis(
                         id=uuid.uuid4(),
                         contract_id=contract_id,
                         analysis_type="single",
@@ -662,122 +725,117 @@ async def extract_contract(
                         risk_score=score,
                         risk_description=risk_data.get("description", ""),
                         mitigation_suggestion=risk_data.get("mitigation"),
-                    )
-                    bg_db.add(risk)
-                contract_row.risk_score = sum(risk_scores) / len(risk_scores) if risk_scores else 50.0
+                    ))
+                await s.commit()
+            overall_risk_score = sum(risk_scores) / len(risk_scores) if risk_scores else 50.0
 
-                completeness_checks = [
-                    ("parties.counterparty_a", bool(parties.get("counterparty_a"))),
-                    ("parties.counterparty_b", bool(parties.get("counterparty_b"))),
-                    ("parties.contract_type", bool(parties.get("contract_type"))),
-                    ("parties.effective_date", bool(parties.get("effective_date"))),
-                    ("parties.expiry_date", bool(parties.get("expiry_date"))),
-                    ("parties.governing_law", bool(parties.get("governing_law"))),
-                    ("commercial_terms", len(parsed.get("commercial_terms", [])) > 0),
-                    ("technical_data", len(parsed.get("technical_data", [])) > 0),
-                    ("legal_terms", len(parsed.get("legal_terms", [])) > 0),
-                    ("financial_terms", len(parsed.get("financial_terms", [])) > 0),
-                    ("operational_terms", len(parsed.get("operational_terms", [])) > 0),
-                    ("definitions", len(parsed.get("definitions", [])) > 0),
-                    ("clauses", len(parsed.get("clauses", [])) >= 3),
-                    ("assets", len(parsed.get("assets", [])) > 0),
-                    ("events", len(parsed.get("events", [])) > 0),
-                    ("risk_assessment", len(parsed.get("risk_assessment", [])) > 0),
-                    ("deal_clusters", bool(parsed.get("deal_clusters")) and isinstance(parsed.get("deal_clusters"), dict) and len(parsed["deal_clusters"]) > 0),
-                ]
-                present = [k for k, ok in completeness_checks if ok]
-                missing_fields = [k for k, ok in completeness_checks if not ok]
-                completeness_score = round(100.0 * len(present) / len(completeness_checks), 1)
+            completeness_checks = [
+                ("parties.counterparty_a", bool(parties.get("counterparty_a"))),
+                ("parties.counterparty_b", bool(parties.get("counterparty_b"))),
+                ("parties.contract_type", bool(parties.get("contract_type"))),
+                ("parties.effective_date", bool(parties.get("effective_date"))),
+                ("parties.expiry_date", bool(parties.get("expiry_date"))),
+                ("parties.governing_law", bool(parties.get("governing_law"))),
+                ("commercial_terms", len(parsed.get("commercial_terms", [])) > 0),
+                ("technical_data", len(parsed.get("technical_data", [])) > 0),
+                ("legal_terms", len(parsed.get("legal_terms", [])) > 0),
+                ("financial_terms", len(parsed.get("financial_terms", [])) > 0),
+                ("operational_terms", len(parsed.get("operational_terms", [])) > 0),
+                ("definitions", len(parsed.get("definitions", [])) > 0),
+                ("clauses", len(parsed.get("clauses", [])) >= 3),
+                ("assets", len(parsed.get("assets", [])) > 0),
+                ("events", len(parsed.get("events", [])) > 0),
+                ("risk_assessment", len(parsed.get("risk_assessment", [])) > 0),
+                ("deal_clusters", bool(parsed.get("deal_clusters")) and isinstance(parsed.get("deal_clusters"), dict) and len(parsed["deal_clusters"]) > 0),
+            ]
+            present = [k for k, ok in completeness_checks if ok]
+            missing_fields = [k for k, ok in completeness_checks if not ok]
+            completeness_score = round(100.0 * len(present) / len(completeness_checks), 1)
 
-                summary_data = {
-                    "raw_text_length": len(raw_text),
-                    "raw_text": raw_text[:200000],
-                    "extracted_fields": sum(len(parsed.get(k, [])) for k in ("commercial_terms", "technical_data", "legal_terms", "financial_terms", "operational_terms", "definitions")),
-                    "clauses_count": len(parsed.get("clauses", [])),
-                    "assets_count": len(parsed.get("assets", [])),
-                    "events_count": len(parsed.get("events", [])),
-                    "risk_categories": len(parsed.get("risk_assessment", [])),
-                    "overall_risk_score": contract_row.risk_score,
-                    "deal_clusters": parsed.get("deal_clusters"),
-                    "counterparty_a_role": parties.get("counterparty_a_role"),
-                    "counterparty_b_role": parties.get("counterparty_b_role"),
-                    "contract_type_detected": parties.get("contract_type"),
-                    "governing_law": parties.get("governing_law"),
-                    "dispute_resolution": parties.get("dispute_resolution"),
-                    "completeness_score": completeness_score,
-                    "missing_fields": missing_fields,
-                    "present_fields": present,
-                }
-                await bg_db.execute(
+            summary_data = {
+                "raw_text_length": len(raw_text),
+                "raw_text": raw_text[:200000],
+                "extracted_fields": sum(len(parsed.get(k, [])) for k in ("commercial_terms", "technical_data", "legal_terms", "financial_terms", "operational_terms", "definitions")),
+                "clauses_count": len(parsed.get("clauses", [])),
+                "assets_count": len(parsed.get("assets", [])),
+                "events_count": len(parsed.get("events", [])),
+                "risk_categories": len(parsed.get("risk_assessment", [])),
+                "overall_risk_score": overall_risk_score,
+                "deal_clusters": parsed.get("deal_clusters"),
+                "counterparty_a_role": parties.get("counterparty_a_role"),
+                "counterparty_b_role": parties.get("counterparty_b_role"),
+                "contract_type_detected": parties.get("contract_type"),
+                "governing_law": parties.get("governing_law"),
+                "dispute_resolution": parties.get("dispute_resolution"),
+                "completeness_score": completeness_score,
+                "missing_fields": missing_fields,
+                "present_fields": present,
+            }
+
+            # Batch 6 — final contract row update (status, risk_score, party fields, summary)
+            async with SessionLocal() as s:
+                await s.execute(
                     update(ContractIQContract).where(ContractIQContract.id == contract_id).values(
                         status=ContractStatus.ANALYZED,
-                        risk_score=contract_row.risk_score,
-                        counterparty_a=contract_row.counterparty_a,
-                        counterparty_b=contract_row.counterparty_b,
-                        total_capacity_mw=contract_row.total_capacity_mw,
-                        contract_value=contract_row.contract_value,
-                        currency=contract_row.currency,
-                        effective_date=contract_row.effective_date,
-                        expiry_date=contract_row.expiry_date,
+                        risk_score=overall_risk_score,
                         extraction_summary=summary_data,
+                        **party_values,
                     )
                 )
-                await bg_db.commit()
-                await emit({'event': 'status', 'agent': 'risk_analyzer', 'status': 'complete'})
+                await s.commit()
+            await emit({'event': 'status', 'agent': 'risk_analyzer', 'status': 'complete'})
 
-                try:
-                    learn_summary = await _learn_taxonomy(bg_db, user_id, contract_id, parsed)
+            # Taxonomy learning — its own session
+            try:
+                async with SessionLocal() as s:
+                    learn_summary = await _learn_taxonomy(s, user_id, contract_id, parsed)
                     await emit({'event': 'taxonomy_learned', **learn_summary})
                     logger.info("Taxonomy updated: %s", learn_summary)
-                except Exception as e:
-                    logger.warning("Taxonomy learning failed: %s", e)
-
-                await emit({'event': 'status', 'agent': 'synthesis', 'status': 'running'})
-
-                # Knowledge graph indexing — fire and forget
-                try:
-                    if api_key:
-                        async def _run_cognify_background():
-                            try:
-                                kg_subject = ActingSubject(subject_type="contractiq", subject_id=str(user_id))
-                                async with Abenix(api_key=api_key, base_url=api_base, act_as=kg_subject, timeout=30.0) as kg_forge:
-                                    coll = await kg_forge.knowledge.ensure_subject_collection(
-                                        project_slug="contractiq",
-                                        subject_type="contractiq",
-                                        subject_id=str(user_id),
-                                        description=f"Per-user contracts corpus for {user_email}",
-                                    )
-                                    kb_id = coll["id"]
-                                    kg_result = await kg_forge.knowledge.cognify(kb_id, doc_ids=[str(contract_id)])
-                                    logger.info("Cognify triggered for contract %s: job=%s kb=%s", contract_id, kg_result.get("job_id"), kb_id)
-                            except Exception as e:
-                                logger.warning("Background Cognify failed for contract %s: %s", contract_id, e)
-                        asyncio.create_task(_run_cognify_background())
-                        await emit({'event': 'status', 'agent': 'knowledge_graph', 'status': 'queued', 'message': 'Knowledge graph indexing dispatched to Abenix'})
-                    else:
-                        await emit({'event': 'status', 'agent': 'knowledge_graph', 'status': 'skipped', 'message': 'Abenix SDK not configured'})
-                except Exception as kg_err:
-                    logger.warning("Knowledge graph dispatch failed for contract %s: %s", contract_id, kg_err)
-                    await emit({'event': 'status', 'agent': 'knowledge_graph', 'status': 'skipped'})
-
-                await emit({'event': 'status', 'agent': 'synthesis', 'status': 'complete'})
-                await emit({'event': 'completeness', 'score': completeness_score, 'missing_fields': missing_fields})
-                await emit({'event': 'done', 'contract_id': str(contract_id), 'status': 'analyzed', 'completeness_score': completeness_score})
-
             except Exception as e:
-                logger.exception("Background extraction failed: %s", e)
-                try:
-                    await bg_db.execute(
-                        update(ContractIQContract).where(ContractIQContract.id == contract_id).values(
-                            status=ContractStatus.ERROR
-                        )
-                    )
-                    await bg_db.commit()
-                except Exception:
-                    pass
-                await emit({'event': 'error', 'message': str(e)})
-            finally:
-                await emit(SENTINEL)
+                logger.warning("Taxonomy learning failed: %s", e)
+
+            await emit({'event': 'status', 'agent': 'synthesis', 'status': 'running'})
+
+            # Knowledge graph indexing — fire and forget
+            try:
+                if api_key:
+                    async def _run_cognify_background():
+                        try:
+                            kg_subject = ActingSubject(subject_type="contractiq", subject_id=str(user_id))
+                            async with Abenix(api_key=api_key, base_url=api_base, act_as=kg_subject, timeout=30.0) as kg_forge:
+                                coll = await kg_forge.knowledge.ensure_subject_collection(
+                                    project_slug="contractiq",
+                                    subject_type="contractiq",
+                                    subject_id=str(user_id),
+                                    description=f"Per-user contracts corpus for {user_email}",
+                                )
+                                kb_id = coll["id"]
+                                kg_result = await kg_forge.knowledge.cognify(kb_id, doc_ids=[str(contract_id)])
+                                logger.info("Cognify triggered for contract %s: job=%s kb=%s", contract_id, kg_result.get("job_id"), kb_id)
+                        except Exception as e:
+                            logger.warning("Background Cognify failed for contract %s: %s", contract_id, e)
+                    asyncio.create_task(_run_cognify_background())
+                    await emit({'event': 'status', 'agent': 'knowledge_graph', 'status': 'queued', 'message': 'Knowledge graph indexing dispatched to Abenix'})
+                else:
+                    await emit({'event': 'status', 'agent': 'knowledge_graph', 'status': 'skipped', 'message': 'Abenix SDK not configured'})
+            except Exception as kg_err:
+                logger.warning("Knowledge graph dispatch failed for contract %s: %s", contract_id, kg_err)
+                await emit({'event': 'status', 'agent': 'knowledge_graph', 'status': 'skipped'})
+
+            await emit({'event': 'status', 'agent': 'synthesis', 'status': 'complete'})
+            await emit({'event': 'completeness', 'score': completeness_score, 'missing_fields': missing_fields})
+            await emit({'event': 'done', 'contract_id': str(contract_id), 'status': 'analyzed', 'completeness_score': completeness_score})
+
+        except Exception as e:
+            logger.exception("Background extraction failed: %s", e)
+            err_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            try:
+                await _set_status(ContractStatus.ERROR)
+            except Exception:
+                pass
+            await emit({'event': 'error', 'message': err_msg})
+        finally:
+            await emit(SENTINEL)
 
     # Detach the worker so client disconnect cannot cancel persistence
     asyncio.create_task(_extract_and_persist())
@@ -821,16 +879,14 @@ async def deep_extract_contract(
 
     contract_text = raw_text[:100000]
 
-    import anthropic
     from app.core.extraction_schemas import get_schema_for_type, get_total_fields
+    from app.routers.insights import _call_abenix
 
     async def stream_deep_extraction():
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            yield f"data: {json.dumps({'event': 'error', 'message': 'ANTHROPIC_API_KEY not configured'})}\n\n"
+        if not os.environ.get("CONTRACTIQ_ABENIX_API_KEY"):
+            yield f"data: {json.dumps({'event': 'error', 'message': 'CONTRACTIQ_ABENIX_API_KEY not configured on contractiq-api'})}\n\n"
             return
 
-        client = anthropic.Anthropic(api_key=api_key)
         ctype = contract.contract_type.value if contract.contract_type else "ppa"
         schema = get_schema_for_type(ctype)
         total_fields = get_total_fields(ctype)
@@ -880,20 +936,14 @@ Rules:
 - Extract EVERY field in the list — do not skip any"""
 
             try:
-                response = client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=6000,
-                    messages=[{"role": "user", "content": prompt}],
+                parsed_fields, resp_text, _meta = await _call_abenix(
+                    user, "contractiq-deep-extractor", prompt, timeout=300.0,
                 )
-                resp_text = response.content[0].text if response.content else ""
-
-                parsed_fields = _parse_extraction_json(resp_text)
                 if parsed_fields and isinstance(parsed_fields, list):
                     extracted = parsed_fields
                 elif parsed_fields and isinstance(parsed_fields, dict):
                     extracted = parsed_fields.get("fields", [parsed_fields])
                 else:
-                    # Try to parse as JSON array
                     try:
                         start = resp_text.find("[")
                         end = resp_text.rfind("]")

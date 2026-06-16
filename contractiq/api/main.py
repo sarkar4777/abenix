@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI):
                             "description": "Shared reference corpus (clause library, benchmarks).",
                             "default_visibility": "tenant",
                             "agent_slugs": [
-                                "contractiq-chat", "contractiq-extractor",
+                                "contractiq-chat", "contractiq-extractor", "contractiq-deep-extractor",
                                 "contractiq-clause-benchmarker", "contractiq-portfolio-valuator",
                             ],
                             "agent_permission": "READ",
