@@ -48,6 +48,7 @@ from app.models.contractiq_models import (
     ContractIQHedgeRecommendation,
     ContractIQKycCheck,
     ContractIQClause,
+    ContractIQCounterparty,
     ContractIQForecastCurve,
     ContractIQValuation,
     ContractIQClauseBenchmark,
@@ -1817,32 +1818,81 @@ async def get_portfolio_credit_summary(
     user: ContractIQUser = Depends(get_contractiq_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Get a portfolio-level credit risk summary based on contract counterparties."""
-    # Get unique counterparties from analyzed contracts
-    contracts = (
+    """Get a portfolio-level credit risk summary based on contract counterparties.
+
+    Counterparties are unioned across three sources so a freshly-assessed name
+    (e.g. typed into /credit-risk/assess) shows up immediately, even before any
+    contract referencing it has been uploaded:
+      1. Contracts (counterparty_a / counterparty_b) — tenant-scoped
+      2. Existing ContractIQCreditRisk rows — tenant-scoped
+      3. Seeded ContractIQCounterparty rows — tenant-scoped
+    """
+    tenant_id = tenant_id_for(user)
+
+    # 1. Contracts (extracted counterparties). Filter by tenant_id so the
+    #    union shape is consistent across all three sources.
+    contract_rows = (
         (
             await db.execute(
-                select(ContractIQContract).where(ContractIQContract.user_id == user.id)
+                select(
+                    ContractIQContract.counterparty_a,
+                    ContractIQContract.counterparty_b,
+                ).where(ContractIQContract.tenant_id == tenant_id)
+            )
+        )
+        .all()
+    )
+
+    counterparties: set[str] = set()
+    for ca, cb in contract_rows:
+        if ca:
+            counterparties.add(ca.strip())
+        if cb:
+            counterparties.add(cb.strip())
+
+    # 2. Names from prior credit risk assessments — captures Vitol after the
+    #    user runs /credit-risk/assess but before any contract references it.
+    cr_names = (
+        (
+            await db.execute(
+                select(ContractIQCreditRisk.counterparty_name).where(
+                    ContractIQCreditRisk.tenant_id == tenant_id
+                )
             )
         )
         .scalars()
         .all()
     )
+    for n in cr_names:
+        if n:
+            counterparties.add(n.strip())
 
-    counterparties = set()
-    for c in contracts:
-        if c.counterparty_a:
-            counterparties.add(c.counterparty_a)
-        if c.counterparty_b:
-            counterparties.add(c.counterparty_b)
+    # 3. Seeded canonical counterparties.
+    seeded_names = (
+        (
+            await db.execute(
+                select(ContractIQCounterparty.legal_name).where(
+                    ContractIQCounterparty.tenant_id == tenant_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for n in seeded_names:
+        if n:
+            counterparties.add(n.strip())
 
-    # Get latest assessment for each counterparty
+    counterparties.discard("")
+
+    # Latest assessment per counterparty — join on counterparty_name.
     assessments = []
+    assessed_names: set[str] = set()
     for name in counterparties:
         result = await db.execute(
             select(ContractIQCreditRisk)
             .where(
-                ContractIQCreditRisk.tenant_id == tenant_id_for(user),
+                ContractIQCreditRisk.tenant_id == tenant_id,
                 ContractIQCreditRisk.counterparty_name == name,
                 ContractIQCreditRisk.status == InsightStatus.COMPLETED.value,
             )
@@ -1852,16 +1902,22 @@ async def get_portfolio_credit_summary(
         row = result.scalar_one_or_none()
         if row:
             assessments.append(_serialize_credit_risk(row))
+            assessed_names.add(name)
+
+    # Deterministic ordering — same data, same shape, regardless of source.
+    sorted_cps = sorted(counterparties, key=str.lower)
+    assessments.sort(key=lambda a: (a.get("counterparty_name") or "").lower())
+    unassessed = sorted(
+        (n for n in counterparties if n not in assessed_names), key=str.lower
+    )
 
     return success(
         {
-            "counterparties": list(counterparties),
+            "counterparties": sorted_cps,
             "assessments": assessments,
-            "total_counterparties": len(counterparties),
+            "total_counterparties": len(sorted_cps),
             "assessed_count": len(assessments),
-            "unassessed": list(
-                counterparties - {a["counterparty_name"] for a in assessments}
-            ),
+            "unassessed": unassessed,
         }
     )
 

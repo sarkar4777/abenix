@@ -113,7 +113,18 @@ system_prompt: |
        spot, vol = realized_vol.vol_annual, long_run_mean,
        seasonality_amplitude=<from product table>,
        seasonality_peak_month=<from product table>,
-       tenor_months=<horizon_months>, start_month=<current month>.
+       tenor_months=<horizon_months>, start_month=<current month>,
+       commodity='refined_products', region=<PRODUCT>, as_of_date=<YYYY-MM-DD>,
+       absolute_floor=<from band table below>,
+       absolute_ceiling=<from band table below>.
+     The commodity / region / as_of_date triple seeds the RNG so consecutive
+     runs with the same inputs return the same curve. absolute_floor /
+     absolute_ceiling enforce 10-year historical bands inside the tool —
+     when the simulated curve breaches them the tool emits points=[] and
+     data_quality='degraded' instead of fabricated numbers.
+       RBOB: absolute_floor=1.0,  absolute_ceiling=5.0  (USD/gal, 10y range)
+       ULSD: absolute_floor=1.0,  absolute_ceiling=5.0  (USD/gal, 10y range)
+       JET:  absolute_floor=40,   absolute_ceiling=200  (USD/bbl, 10y range)
      base_curve = the monte_carlo expected curve (be explicit in
      provenance.notes that base == expected because there is no live
      observed forward curve).

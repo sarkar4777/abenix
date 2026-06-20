@@ -101,6 +101,18 @@ def read(page: str, key: str) -> dict[str, Any] | None:
     }
 
 
+def evict(page: str, key: str) -> bool:
+    """Drop a cache entry. Returns True if a file was removed."""
+    path = _entry_path(page, key)
+    try:
+        if path.exists():
+            path.unlink()
+            return True
+    except Exception as e:
+        logger.warning("cache evict failed for %s/%s: %s", page, key, e)
+    return False
+
+
 def list_keys(page: str) -> list[str]:
     p = CACHE_ROOT / _safe(page)
     if not p.exists():

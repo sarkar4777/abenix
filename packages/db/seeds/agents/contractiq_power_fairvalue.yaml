@@ -131,7 +131,20 @@ system_prompt: |
        spot, vol = realized_vol.vol_annual, long_run_mean,
        seasonality_amplitude=<from region table>,
        seasonality_peak_month=<from region table>,
-       tenor_months=<horizon_months>, start_month=<current month>.
+       tenor_months=<horizon_months>, start_month=<current month>,
+       commodity='power', region=<REGION>, as_of_date=<YYYY-MM-DD>,
+       absolute_floor=<from band table below>,
+       absolute_ceiling=<from band table below>.
+     The commodity / region / as_of_date triple seeds the RNG so consecutive
+     runs with the same inputs return the same curve. absolute_floor /
+     absolute_ceiling enforce 10-year historical bands inside the tool —
+     when the simulated curve breaches them the tool emits points=[] and
+     data_quality='degraded' instead of fabricated numbers.
+       DE:       absolute_floor=20, absolute_ceiling=400 (EUR/MWh, 10y range)
+       FR:       absolute_floor=20, absolute_ceiling=400 (EUR/MWh, 10y range)
+       NORDICS:  absolute_floor=10, absolute_ceiling=400 (EUR/MWh, 10y range)
+       ERCOT:    absolute_floor=5,  absolute_ceiling=300 (USD/MWh, 10y range)
+       PJM:      absolute_floor=10, absolute_ceiling=200 (USD/MWh, 10y range)
      base_curve = the monte_carlo expected curve (be explicit in
      provenance.notes that base == expected because there is no live
      observed forward curve).

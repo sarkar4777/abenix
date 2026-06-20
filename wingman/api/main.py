@@ -300,6 +300,66 @@ async def _run_agent_with_retry(
 _MISPRICING_EXPECTED_KEYS = ("verdict", "observed_spread_usd_mt", "fair_value_spread_usd_mt", "residual_sigma")
 _SCENARIO_EXPECTED_KEYS = ("scenarios", "expected_curve", "base_curve")
 
+# Realistic propane corridor spreads sit in +/-200 USD/MT. 2000 is a generous
+# outlier ceiling — anything beyond that is an agent hallucination and must
+# never be cached. Memory rule: no synth in wingman-api; show "data unavailable"
+# instead of a fabricated value.
+_FAIR_VALUE_SPREAD_OUTLIER_USD_MT = 2000.0
+
+try:
+    from prometheus_client import Counter as _PromCounter  # type: ignore
+    wingman_signal_rejected_total = _PromCounter(
+        "wingman_signal_rejected_total",
+        "Mispricing scans rejected before cache write because they failed sanity checks.",
+        ["reason"],
+    )
+except Exception:  # prometheus_client not installed — degrade silently
+    class _NoopCounter:
+        def labels(self, **_kwargs):
+            return self
+        def inc(self, _n: float = 1) -> None:
+            return None
+    wingman_signal_rejected_total = _NoopCounter()  # type: ignore[assignment]
+
+
+def _mispricing_passes_sanity(scan: dict[str, Any]) -> bool:
+    """Reject agent output that can't be a real market state before we cache it.
+    - |fair_value_spread_usd_mt| must be <= 2000 (realistic propane spread ceiling).
+    - p10 and p90 must both be non-null AND p90 > p10 (a real band, not a point).
+    - residual_sigma must be non-null.
+    On failure we bump a labeled metric and the caller treats the scan as agent-unavailable."""
+    if not isinstance(scan, dict):
+        wingman_signal_rejected_total.labels(reason="fair_value_outlier").inc()
+        return False
+    try:
+        fv = float(scan.get("fair_value_spread_usd_mt"))
+    except (TypeError, ValueError):
+        wingman_signal_rejected_total.labels(reason="fair_value_outlier").inc()
+        return False
+    if abs(fv) > _FAIR_VALUE_SPREAD_OUTLIER_USD_MT:
+        logger.warning(
+            "mispricing sanity reject: fair_value_spread_usd_mt=%.2f exceeds +/-%.0f outlier ceiling",
+            fv, _FAIR_VALUE_SPREAD_OUTLIER_USD_MT,
+        )
+        wingman_signal_rejected_total.labels(reason="fair_value_outlier").inc()
+        return False
+    p10 = scan.get("fair_value_p10_usd_mt")
+    p90 = scan.get("fair_value_p90_usd_mt")
+    if p10 is None or p90 is None:
+        wingman_signal_rejected_total.labels(reason="band_collapsed").inc()
+        return False
+    try:
+        if float(p90) <= float(p10):
+            wingman_signal_rejected_total.labels(reason="band_collapsed").inc()
+            return False
+    except (TypeError, ValueError):
+        wingman_signal_rejected_total.labels(reason="band_collapsed").inc()
+        return False
+    if scan.get("residual_sigma") is None:
+        wingman_signal_rejected_total.labels(reason="sigma_missing").inc()
+        return False
+    return True
+
 
 def _scan_has_required_numbers(scan: dict[str, Any]) -> bool:
     """A scan is load-bearing when observed and fair-value are both
@@ -340,7 +400,7 @@ async def _warm_mispricing(corridor_id: str) -> dict[str, Any]:
         timeout=300,
         max_retries=2,
     )
-    if parsed and _scan_has_required_numbers(parsed):
+    if parsed and _scan_has_required_numbers(parsed) and _mispricing_passes_sanity(parsed):
         return parsed
     logger.info("mispricing agent unavailable for %s — UI will show data-unavailable state", corridor_id)
     return {}
@@ -418,6 +478,14 @@ async def todays_signals() -> dict[str, Any]:
     for c in active:
         entry = result_cache.read("mispricing", c["id"])
         scan = (entry or {}).get("payload") or {}
+        # Evict degraded/unavailable rows — agent flagged the scan as not
+        # trustworthy, so don't keep serving 27-min-old garbage for the rest
+        # of the TTL. Next read returns the data-unavailable state.
+        dq = (scan.get("data_quality") or "").lower()
+        if dq in ("degraded", "unavailable"):
+            result_cache.evict("mispricing", c["id"])
+            entry = None
+            scan = {}
         rows.append({
             "id": c["id"],
             "label": c["label"],
@@ -437,7 +505,7 @@ async def todays_signals() -> dict[str, Any]:
             "cached_at": (entry or {}).get("written_at"),
             "age_seconds": (entry or {}).get("age_seconds"),
             "fresh": (entry or {}).get("fresh"),
-            "data_quality": scan.get("data_quality"),
+            "data_quality": scan.get("data_quality") if scan else "unavailable",
         })
     return {"data": {"signals": rows, "as_of": time.time()}}
 
@@ -1330,6 +1398,7 @@ async def mispricing_result(execution_id: str) -> dict[str, Any]:
     is_load_bearing = (
         any(parsed.get(k) is not None for k in _MISPRICING_EXPECTED_KEYS)
         and _scan_has_required_numbers(parsed)
+        and _mispricing_passes_sanity(parsed)
     ) if parsed else False
     if terminal and corridor_id and not is_load_bearing:
         logger.info("mispricing-result %s for %s: agent unavailable — no cache write", execution_id, corridor_id)

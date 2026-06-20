@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -10,6 +11,29 @@ from typing import Any
 from engine.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def _derive_seed(arguments: dict[str, Any]) -> int:
+    # Stable seed for cache consistency: same logical input -> same curve.
+    # Pull a few coarse cache keys from the arguments; if none are present we
+    # still want a deterministic 42 fall-back so the math is repeatable.
+    parts: list[str] = []
+    for key in (
+        "commodity",
+        "region",
+        "product",
+        "as_of_date",
+        "as_of",
+        "anchor_source",
+    ):
+        val = arguments.get(key)
+        if val is None:
+            continue
+        parts.append(f"{key}={val}")
+    if not parts:
+        return 42
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=False)
 
 
 class MonteCarloCurveTool(BaseTool):
@@ -70,6 +94,45 @@ class MonteCarloCurveTool(BaseTool):
                 "default": 1,
                 "description": "Calendar month of the first tenor point (1-12).",
             },
+            "seed": {
+                "type": "integer",
+                "description": (
+                    "Optional explicit RNG seed for deterministic output. "
+                    "When omitted, a stable seed is derived from "
+                    "commodity+region+as_of_date so the same logical input "
+                    "always returns the same curve (cache-friendly)."
+                ),
+            },
+            "commodity": {
+                "type": "string",
+                "description": "Optional commodity tag used for seed derivation only.",
+            },
+            "region": {
+                "type": "string",
+                "description": "Optional region/product tag used for seed derivation only.",
+            },
+            "as_of_date": {
+                "type": "string",
+                "description": "Optional ISO date used for seed derivation only.",
+            },
+            "absolute_floor": {
+                "type": "number",
+                "description": (
+                    "Optional absolute lower bound (in the curve's price "
+                    "unit). When the expected curve dips below this, the "
+                    "tool returns degraded instead of fabricated numbers. "
+                    "Use historical floors (Brent: 20 USD/bbl)."
+                ),
+            },
+            "absolute_ceiling": {
+                "type": "number",
+                "description": (
+                    "Optional absolute upper bound (in the curve's price "
+                    "unit). When the expected curve exceeds this, the tool "
+                    "returns degraded. Use historical ceilings (Brent: "
+                    "200 USD/bbl)."
+                ),
+            },
         },
         "required": ["spot", "vol"],
     }
@@ -93,6 +156,20 @@ class MonteCarloCurveTool(BaseTool):
         drift = float(arguments.get("drift") or 0.0)
         start_month = int(arguments.get("start_month") or 1)
 
+        raw_seed = arguments.get("seed")
+        if raw_seed is None:
+            seed = _derive_seed(arguments)
+        else:
+            try:
+                seed = int(raw_seed)
+            except (TypeError, ValueError):
+                seed = _derive_seed(arguments)
+
+        abs_floor_raw = arguments.get("absolute_floor")
+        abs_ceiling_raw = arguments.get("absolute_ceiling")
+        abs_floor = float(abs_floor_raw) if abs_floor_raw is not None else None
+        abs_ceiling = float(abs_ceiling_raw) if abs_ceiling_raw is not None else None
+
         dt = 1.0 / 12.0
         sigma_step = vol * math.sqrt(dt)
         # Itô correction for geometric Brownian motion: without subtracting
@@ -101,7 +178,7 @@ class MonteCarloCurveTool(BaseTool):
         # E[exp(log_path)] tracks the deterministic drift, not the variance.
         ito_step = 0.5 * vol * vol * dt
 
-        rng = np.random.default_rng(seed=42)
+        rng = np.random.default_rng(seed=seed)
         log_paths = np.zeros((paths, tenor))
         log_spot = math.log(spot)
         log_lr = math.log(max(lr_mean, 1e-6))
@@ -138,14 +215,46 @@ class MonteCarloCurveTool(BaseTool):
         # instead of a fabricated $700k/bbl print.
         curve_max = float(expected.max())
         curve_min = float(expected.min())
-        if curve_max > 10.0 * spot or curve_min < spot / 10.0:
+        spot_breach = curve_max > 10.0 * spot or curve_min < spot / 10.0
+        # Absolute historical band: 10x-of-spot misses the case where vol is
+        # tame but the anchor itself drifted (e.g. Brent p10=9.69 vs spot=80).
+        # Callers pass commodity-specific bands; the override fires whenever
+        # the expected curve falls outside them.
+        abs_breach = False
+        abs_reason = ""
+        # Tails as well as expected curve must respect the absolute band.
+        # The wide p10/p90 envelope is what the UI shows as the downside /
+        # upside cone — letting it drift below the historical floor (e.g.
+        # Brent p10=9.84 vs a $20 floor) produces a misleading chart even
+        # when the expected curve is sane. Check all three series.
+        p10_min = float(p10.min())
+        p90_max = float(p90.max())
+        if abs_floor is not None and min(curve_min, p10_min) < abs_floor:
+            abs_breach = True
+            abs_reason = f"min={min(curve_min, p10_min):.2f} below absolute_floor={abs_floor:.2f}"
+        elif abs_ceiling is not None and max(curve_max, p90_max) > abs_ceiling:
+            abs_breach = True
+            abs_reason = f"max={max(curve_max, p90_max):.2f} above absolute_ceiling={abs_ceiling:.2f}"
+
+        if spot_breach or abs_breach:
             logger.warning(
-                "monte_carlo_curve degraded: spot=%s expected_max=%s expected_min=%s vol=%s",
+                "monte_carlo_curve degraded: spot=%s expected_max=%s expected_min=%s vol=%s seed=%s abs=[%s,%s]",
                 spot,
                 curve_max,
                 curve_min,
                 vol,
+                seed,
+                abs_floor,
+                abs_ceiling,
             )
+            if abs_breach:
+                reason = abs_reason
+            else:
+                reason = (
+                    f"expected curve out of band: max={curve_max:.2f} "
+                    f"min={curve_min:.2f} vs spot={spot:.2f} "
+                    "(>10x or <0.1x). likely uncalibrated vol upstream."
+                )
             return ToolResult(
                 content=json.dumps(
                     {
@@ -155,13 +264,12 @@ class MonteCarloCurveTool(BaseTool):
                         "paths": paths,
                         "seasonality_amplitude": amp,
                         "long_run_mean": lr_mean,
+                        "seed": seed,
+                        "absolute_floor": abs_floor,
+                        "absolute_ceiling": abs_ceiling,
                         "points": [],
                         "data_quality": "degraded",
-                        "degraded_reason": (
-                            f"expected curve out of band: max={curve_max:.2f} "
-                            f"min={curve_min:.2f} vs spot={spot:.2f} "
-                            "(>10x or <0.1x). likely uncalibrated vol upstream."
-                        ),
+                        "degraded_reason": reason,
                     }
                 )
             )
@@ -189,6 +297,9 @@ class MonteCarloCurveTool(BaseTool):
                     "paths": paths,
                     "seasonality_amplitude": amp,
                     "long_run_mean": lr_mean,
+                    "seed": seed,
+                    "absolute_floor": abs_floor,
+                    "absolute_ceiling": abs_ceiling,
                     "points": points,
                 }
             )

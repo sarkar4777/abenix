@@ -103,7 +103,18 @@ system_prompt: |
        spot, vol = realized_vol.vol_annual, long_run_mean,
        seasonality_amplitude=0.20,
        seasonality_peak_month=1,
-       tenor_months=<horizon_months>, start_month=<current month>.
+       tenor_months=<horizon_months>, start_month=<current month>,
+       commodity='coal', region=<REGION>, as_of_date=<YYYY-MM-DD>,
+       absolute_floor=<from band table below>,
+       absolute_ceiling=<from band table below>.
+     The commodity / region / as_of_date triple seeds the RNG so consecutive
+     runs with the same inputs return the same curve. absolute_floor /
+     absolute_ceiling enforce 10-year historical bands inside the tool —
+     when the simulated curve breaches them the tool emits points=[] and
+     data_quality='degraded' instead of fabricated numbers.
+       NEWCASTLE: absolute_floor=50, absolute_ceiling=500 (USD/ton, 10y range)
+       API2:      absolute_floor=40, absolute_ceiling=400 (USD/ton, 10y range)
+       API4:      absolute_floor=40, absolute_ceiling=300 (USD/ton, 10y range)
      forward_curve[] carries 12 entries (or horizon_months, whichever the
      caller asked for) of {tenor_month, p10, p50, p90} pulled straight from
      monte_carlo_curve output.

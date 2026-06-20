@@ -16,8 +16,11 @@ from typing import AsyncIterator
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.contractiq_models import ContractIQUser
+from app.core.deps import get_db
+from app.models.contractiq_models import ContractIQCounterparty, ContractIQUser
 from app.routers.auth import get_contractiq_user, tenant_id_for
 
 
@@ -426,6 +429,7 @@ async def run_price_engine(
 async def run_recommendations(
     payload: dict,
     user: ContractIQUser = Depends(get_contractiq_user),
+    db: AsyncSession = Depends(get_db),
 ):
     # Tenant scope is a JWT-only claim. Reject any body-passed tenant_id so a
     # caller can't aim the engine at another tenant by tampering with the post
@@ -435,7 +439,23 @@ async def run_recommendations(
             status_code=400,
             detail="tenant_id must not be sent in the request body; it is taken from the auth token",
         )
-    payload = {**payload, "tenant_id": tenant_id_for(user)}
+    tid = tenant_id_for(user)
+    # Inline the tenant's counterparties — the agent's portfolio_query tool hits an
+    # abenix-side feed under tenant_id, which is empty for CIQ seed tenants. Pass the
+    # CIQ-side roster so the engine has something to score.
+    cp_rows = (await db.execute(
+        select(ContractIQCounterparty).where(ContractIQCounterparty.tenant_id == tid)
+    )).scalars().all()
+    counterparties = [
+        {
+            "name": cp.legal_name,
+            "sector": cp.sector,
+            "country": cp.country,
+            "credit_rating": cp.credit_rating,
+        }
+        for cp in cp_rows
+    ]
+    payload = {**payload, "tenant_id": tid, "counterparties": counterparties}
     result = await _execute_agent("ciq-recommendation-engine", payload, user)
     # Overwrite fetched_at server-side — the model frequently hallucinates a
     # frozen date (training-data anchor) for this field; the only authoritative
