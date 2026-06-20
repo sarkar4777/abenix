@@ -61,6 +61,10 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE contractiq_contracts ADD COLUMN IF NOT EXISTS asset_class VARCHAR(40)",
                 "ALTER TABLE contractiq_contracts ADD COLUMN IF NOT EXISTS pricing_pattern VARCHAR(40)",
                 "ALTER TABLE contractiq_contracts ADD COLUMN IF NOT EXISTS quantity JSONB",
+                # KYC widenings and lookup indexes
+                "ALTER TABLE contractiq_kyc_checks ALTER COLUMN outcome_of_check TYPE VARCHAR(40)",
+                "CREATE INDEX IF NOT EXISTS ix_contractiq_kyc_name_country ON contractiq_kyc_checks (counterparty_name, country_iso2)",
+                "CREATE INDEX IF NOT EXISTS ix_contractiq_kyc_next_review ON contractiq_kyc_checks (next_review_due)",
             ]:
                 try:
                     await conn.execute(_t(ddl))
@@ -74,6 +78,12 @@ async def lifespan(app: FastAPI):
         from sqlalchemy import select
         import bcrypt
         async with SessionLocal() as db:
+            # Resolve the demo tenant id once so the test user and the
+            # quickwin seed share the same tenant scope. Falls back to the
+            # same placeholder used in the c0d1e2f3a4b5 migration.
+            from app.core.quickwin_seed import _resolve_demo_tenant_id
+            demo_tid = await _resolve_demo_tenant_id(db)
+
             existing = (await db.execute(
                 select(ContractIQUser).where(ContractIQUser.email == "test@contractiq.com")
             )).scalar_one_or_none()
@@ -83,6 +93,7 @@ async def lifespan(app: FastAPI):
                     password_hash=bcrypt.hashpw(b"TestPass123!", bcrypt.gensalt()).decode(),
                     full_name="Test User",
                     organization="ContractIQ Demo",
+                    tenant_id=demo_tid,
                     role=ContractIQUserRole.ANALYST,
                     is_active=True,
                 )
@@ -90,6 +101,11 @@ async def lifespan(app: FastAPI):
                 await db.commit()
                 logger.info("Seeded default ContractIQ test user (test@contractiq.com)")
             else:
+                # Re-home the test user onto the demo tenant if it landed on
+                # its own user-id tenant before this migration shipped.
+                if not existing.tenant_id or existing.tenant_id == str(existing.id):
+                    existing.tenant_id = demo_tid
+                    await db.commit()
                 logger.info("ContractIQ test user already exists")
     except Exception as e:
         logger.exception("Startup bootstrap failed: %s", e)
@@ -152,6 +168,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Quickwin seed failed (non-fatal): %s", e)
 
+    # ── Required-agent presence check (boot-time seed-drift guard) ──
+    try:
+        from app.core.required_agents import warn_if_required_agents_missing
+        await warn_if_required_agents_missing(logger)
+    except Exception as e:
+        logger.warning("Required-agents check skipped: %s", e)
+
     # ── Reconcile stuck extractions (pod-restart / torn SSE recovery) ──
     reconciler_task = None
     try:
@@ -181,12 +204,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-try:
-    from abenix_sdk.tracing import init_tracing as _init_tracing
-    _init_tracing("contractiq-api", fastapi_app=app)
-except Exception:
-    pass
-
+# CORS must be registered BEFORE OTel auto-instrumentation. OTel's ASGI
+# middleware walks the FastAPI router on every request to derive span names,
+# and on OPTIONS preflights against APIRouter.include_router it crashes with
+# `_IncludedRouter has no attribute 'path'`. Putting CORS first means
+# preflights short-circuit at the outer middleware and never reach the
+# instrumented router.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -199,6 +222,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Hard short-circuit for any OPTIONS request — guarantees a 204 even if
+# downstream middleware (OTel) blows up walking the route tree.
+@app.options("/{full_path:path}")
+async def _cors_preflight(full_path: str):
+    return JSONResponse(status_code=204, content=None)
+
+
+try:
+    from abenix_sdk.tracing import init_tracing as _init_tracing
+    _init_tracing("contractiq-api", fastapi_app=app)
+except Exception:
+    pass
 
 
 @app.get("/api/health")
@@ -226,6 +263,9 @@ from app.routers import rules as ciq_rules
 from app.routers import audit as ciq_audit
 from app.routers import executions as ciq_executions
 from app.routers import quickwin as ciq_quickwin
+from app.routers import commodities as ciq_commodities
+from app.routers import access_control_templates as ciq_access_control_templates
+from app.routers import portfolio_schema_templates as ciq_portfolio_schema_templates
 
 app.include_router(ciq_auth.router)
 app.include_router(ciq_contracts.router)
@@ -241,6 +281,9 @@ app.include_router(ciq_rules.router)
 app.include_router(ciq_audit.router)
 app.include_router(ciq_executions.router)
 app.include_router(ciq_quickwin.router)
+app.include_router(ciq_commodities.router)
+app.include_router(ciq_access_control_templates.router)
+app.include_router(ciq_portfolio_schema_templates.router)
 
 
 @app.exception_handler(Exception)

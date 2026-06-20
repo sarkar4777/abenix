@@ -98,6 +98,7 @@ from models.document_grant import (
 )
 from models.cognify_config import CognifyConfig, CognifyConflict
 from models.gdpr_purge_log import GDPRPurgeLog
+from models.llm_pricing import LLMModelPricing, ModelAvailability
 
 __all__ = [
     "Base",
@@ -213,4 +214,6 @@ __all__ = [
     "CognifyConfig",
     "CognifyConflict",
     "GDPRPurgeLog",
+    "LLMModelPricing",
+    "ModelAvailability",
 ]

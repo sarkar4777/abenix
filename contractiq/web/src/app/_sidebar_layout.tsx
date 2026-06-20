@@ -13,8 +13,6 @@ import {
 import { ContractIQExecutionsProvider, useContractIQExecutions } from './components/ContractIQExecutionsProvider';
 import LiveActivityRail from './components/LiveActivityRail';
 import DagDrawer from './components/DagDrawer';
-import PageExplainer from './components/PageExplainer';
-import { getPageDoc } from './components/page-docs';
 
 function getToken() { if (typeof window === 'undefined') return null; return localStorage.getItem('contractiq_token'); }
 function getUser() { if (typeof window === 'undefined') return null; try { return JSON.parse(localStorage.getItem('contractiq_user') || 'null'); } catch { return null; } }
@@ -35,20 +33,20 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Data Fabric', icon: Database, href: '/data-fabric' },
       { label: 'Offtake Forecaster', icon: TrendingUp, href: '/forecaster' },
-      { label: 'Forward Price Engine', icon: LineChartIcon, href: '/price-engine' },
       { label: 'Analyst Workbench', icon: BrainCircuit, href: '/workbench' },
       { label: 'Performance & Backtest', icon: Activity, href: '/model-performance' },
       { label: 'Recommendations', icon: BellRing, href: '/recommendations' },
+      { label: 'Forward Price Engine', icon: LineChartIcon, href: '/price-engine' },
     ],
   },
   {
     title: 'Commodities',
     description: 'Per-commodity views into the engines above',
     items: [
-      { label: 'Natural Gas', icon: Flame, href: '/commodities/gas' },
-      { label: 'Power', icon: Zap, href: '/commodities/power' },
-      { label: 'LNG', icon: Ship, href: '/commodities/lng' },
-      { label: 'Environmental', icon: Leaf, href: '/commodities/environmental' },
+      { label: 'Natural Gas', icon: Flame, href: '/commodities/forward?commodity=pipeline_gas' },
+      { label: 'Power', icon: Zap, href: '/commodities/forward?commodity=power' },
+      { label: 'LNG', icon: Ship, href: '/commodities/forward?commodity=lng' },
+      { label: 'Environmental', icon: Leaf, href: '/commodities/forward?commodity=carbon' },
       {
         label: 'Precious Metals', icon: Diamond, href: '/metals',
         children: [
@@ -80,9 +78,15 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'KYC Checks', icon: FileCheck2, href: '/credit-risk/kyc' },
       { label: 'Market Risk (VaR/CVaR)', icon: Activity, href: '/risk' },
       { label: 'Valuation', icon: Wallet, href: '/valuation' },
-      { label: 'Simulations', icon: Gauge, href: '/simulations' },
+      {
+        label: 'Simulations & Stress Test', icon: Gauge, href: '/simulations',
+        children: [
+          { label: 'Monte Carlo Simulations', icon: Gauge, href: '/simulations' },
+          { label: 'Stress Test', icon: FlaskConical, href: '/insights/stress-test' },
+        ],
+      },
       { label: 'What-If (pick contract)', icon: FlaskConical, href: '/contracts' },
-      { label: 'Market', icon: Activity, href: '/market' },
+      { label: 'Market Data', icon: Activity, href: '/market' },
     ],
   },
   {
@@ -303,14 +307,6 @@ function ContractIQLayoutInner({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <main className="flex-1 overflow-y-auto relative">
-        {(() => {
-          const doc = pathname ? getPageDoc(pathname) : undefined;
-          return doc ? (
-            <div className="absolute top-3 right-4 z-30">
-              <PageExplainer doc={doc} />
-            </div>
-          ) : null;
-        })()}
         {children}
       </main>
       <LiveActivityRail />

@@ -859,7 +859,6 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Until v1.1 every agent ran in response to an HTTP call, a cron, or a webhook. Streaming triggers let an agent or pipeline subscribe directly to an MQTT topic or a Kafka consumer group, so a vibration packet, a temperature waypoint, or a SCADA alarm wakes the agent the instant it lands on the broker — no polling, no batch lag.</p>
-            <Hero src={SS('29-mqtt-trigger.png')} alt="MQTT trigger config" />
             <p><strong className="text-white">What it solves.</strong> The Pump Vibration showcase used to call a synthetic generator on a 5-second timer. With the MQTT trigger an agent subscribed to <code className="text-cyan-300">vibration.raw</code> reacts to every packet a SCADA gateway publishes, exactly the way a plant historian would in production.</p>
             <p><strong className="text-white">When to use.</strong> High-rate machine telemetry, IoT fleet messages, alarm fan-outs, change-data-capture from a Debezium Kafka topic. <strong className="text-white">When not to use.</strong> Low-rate human-in-the-loop flows (a Slack mention or a calendar event) — those are still a webhook trigger.</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -883,7 +882,6 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Read-only agents are demos. Production agents have to <em>act</em> — open a valve, raise a work order, push a setpoint back to the PLC. v1.1 ships three palette tools that write back to the systems of record: <code className="text-cyan-300">opcua_write</code> for OPC-UA tag writes, <code className="text-cyan-300">mqtt_publish</code> for command topics, and <code className="text-cyan-300">cmms_write</code> for SAP-style work-order creates via the connector framework.</p>
-            <Hero src={SS('30-bidirectional-tools.png')} alt="OPC-UA write + MQTT publish config panels" />
             <p><strong className="text-white">What it solves.</strong> The Alarm Desk showcase couldn&apos;t actually reset an alarm — it could only suggest one. With <code className="text-cyan-300">opcua_write</code> gated by an <code>approval_gate</code> the agent now drafts a remote-reset command, blocks for two human signoffs, and on approval pushes the setpoint to the device through the platform OPC-UA bridge.</p>
             <p><strong className="text-white">When to use.</strong> Anywhere an agent&apos;s output is meant to change the physical or business world: closing a CMMS work order, publishing a control message, raising a partial-loss claim. <strong className="text-white">When not to use.</strong> Inside the agent&apos;s reasoning loop. Always put the write at the end of the pipeline behind a clear human or programmatic gate.</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -907,7 +905,6 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>An agent that has to call SAP, ServiceNow, Workday, Sensitech, BNEF, and ECMWF gets unmaintainable fast if every integration is a hand-rolled tool. The connector framework gives you one generic <code className="text-cyan-300">connector_call(connector_id, operation, payload)</code> tool plus a registry of presets — each connector has a kind (cmms / hris / telematics / standards / market-data / custom), a base URL, an auth profile, and an operation catalogue.</p>
-            <Hero src={SS('31-connector-admin.png')} alt="Connector admin page — list + create form" />
             <p><strong className="text-white">What it solves.</strong> Field Guide needs CMMS for fleet + WO read, HRIS for the technician roster, weather for forecasts, and CMMS-write for closeout — all four are now the same tool with different connector IDs. Cold Chain swaps the telematics preset from Sensitech to Geotab without touching the agent prompt.</p>
             <p><strong className="text-white">When to use.</strong> Any third-party SaaS or enterprise system the agent has to read from or write to. <strong className="text-white">When not to use.</strong> Public web pages — that&apos;s still <code>web_search</code> + <code>web_scrape</code>. Internal databases — that&apos;s <code>postgres_query</code>.</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -931,7 +928,6 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>An agent that has to spot a cascade — three correlated alarms in 90 seconds, five vibration spikes in five minutes, two failed logins in a row — needs short-term memory keyed by an asset, not by a chat thread. The <code className="text-cyan-300">windowed_state</code> tool gives every agent a Redis-backed sorted set per <code>(tenant, asset, name)</code> with append, query, count, and pattern-match operations.</p>
-            <Hero src={SS('32-windowed-state.png')} alt="Sliding-window state config" />
             <p><strong className="text-white">What it solves.</strong> Alarm Desk now detects <em>cascades</em> — alarm A followed by alarm B within a configurable window — instead of only firing on individual events. Pump Vibration uses <code>count(asset, &quot;high_severity&quot;, since=now-1h)</code> to suppress duplicate work orders.</p>
             <p><strong className="text-white">When to use.</strong> Anywhere temporal correlation matters — debouncing, cascade detection, last-N reasoning, simple counters. <strong className="text-white">When not to use.</strong> Long-term memory or auditable history — that&apos;s the time-series store. Cross-asset analytics — that&apos;s a real OLAP query.</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -954,7 +950,6 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Some agent actions must not fire without human signoff — a remote PLC reset, a refund above $1k, a contract execute. The approval workflow is enforced server-side: when an agent calls <code className="text-cyan-300">approval_gate</code> the execution blocks, a row lands in the <code>approvals</code> table, the right humans get a notification, and the agent only resumes once the configured number of signoffs land (or the request expires / is denied).</p>
-            <Hero src={SS('33-approvals-page.png')} alt="Approvals page" />
             <p><strong className="text-white">What it solves.</strong> Alarm Desk&apos;s remote-reset flow now requires two operator signoffs before <code>opcua_write</code> fires. ResolveAI&apos;s refund flow blocks any amount over policy until a supervisor approves. The gate is enforced in the API layer so a malicious or buggy agent cannot bypass it.</p>
             <p><strong className="text-white">When to use.</strong> Any irreversible or expensive action. Anything a regulator might audit. <strong className="text-white">When not to use.</strong> Internal reasoning steps — humans should not be in the inner loop.</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -1104,7 +1099,6 @@ if (result.isPaused()) {
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Pump readings, fridge temperatures, alarm rates, market ticks — all of that fits Postgres badly and pgvector worse. v1.1 ships TimescaleDB as a sidecar in the dev-local stack (port <code>5433</code>) and exposes a <code className="text-cyan-300">tsdb_query</code> tool with first-class hypertable support: ingest with <code>insert</code>, query with <code>select</code> + time-bucket aggregates, and pull a sample with <code>recent</code>.</p>
-            <Hero src={SS('34-tsdb-query.png')} alt="TSDB query tool config" />
             <p><strong className="text-white">What it solves.</strong> Pump Vibration now writes every severity reading to TSDB, so a downstream agent can answer "what was the average severity for asset X last week?" without scanning every execution row. Cold Chain pivots waypoints to a daily mean. Design Studio caches BNEF cost coefficients with daily-bucket aggregates.</p>
             <p><strong className="text-white">When to use.</strong> Sensor data, KPIs, financial ticks, anything timestamped + numeric you want to aggregate over a window. <strong className="text-white">When not to use.</strong> Document content (that&apos;s a knowledge base). Mutable rows (that&apos;s Postgres).</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -1127,7 +1121,6 @@ if (result.isPaused()) {
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>An at-least-once trigger is going to redeliver. A network blip is going to retry. v1.1 makes both safe with two new primitives: an <code className="text-cyan-300">Idempotency-Key</code> header on <code>/api/agents/{`{id}`}/execute</code> (same key inside 24h returns the original execution) and a dead-letter queue for executions the stale sweeper aborts as <code>STALE_SWEEP</code>.</p>
-            <Hero src={SS('35-dlq-admin.png')} alt="DLQ admin page" />
             <p><strong className="text-white">What it solves.</strong> A retry storm on a vibration packet no longer creates ten work orders for the same window. An execution killed by a pod restart shows up on the DLQ page with the full failure context and a one-click <strong>Replay</strong>, so it never just disappears.</p>
             <p><strong className="text-white">When to use.</strong> Idempotency: every external caller that can retry — webhooks, MQTT triggers, an SDK with auto-retry. DLQ: it&apos;s on by default; nothing to wire.</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -1149,7 +1142,6 @@ if (result.isPaused()) {
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Some data is read so often, and changes so rarely, that calling the upstream API from every agent run is wasteful — weather forecasts, FX rates, electricity prices, BNEF cost benchmarks. The <code className="text-cyan-300">subscribed_feed</code> tool lets you register a feed once with a refresh interval, the platform polls in the background, and every agent reads from a TTL cache.</p>
-            <Hero src={SS('36-subscribed-feeds.png')} alt="Subscribed feeds config" />
             <p><strong className="text-white">What it solves.</strong> Field Guide&apos;s weather forecast went from "five Open-Meteo calls per work order" to "one cached read." Design Studio&apos;s BNEF cost coefficients refresh once a day at 06:00 UTC instead of on every scenario.</p>
             <p><strong className="text-white">When to use.</strong> Slow-changing reference data — currencies, weather, market indices, public dataset snapshots. <strong className="text-white">When not to use.</strong> User-specific or sensor data — those need fresh reads on every call.</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -1172,7 +1164,6 @@ if (result.isPaused()) {
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Field technicians dictate work-order closeouts. Customer-service agents listen to call recordings. Plant operators speak shift reports. The <code className="text-cyan-300">audio_stt</code> tool transcribes any uploaded audio (or an MQTT-published audio blob) using a Deepgram preset — language autodetect, speaker diarisation optional, punctuation always on.</p>
-            <Hero src={SS('37-audio-stt.png')} alt="Audio STT tool config" />
             <p><strong className="text-white">What it solves.</strong> Field Guide&apos;s voice-driven closeout (technician taps the mic, dictates "valve replaced, leak resolved, took 35 min") flows through STT into a structured WO. Alarm Desk&apos;s shift handover ingests the operator&apos;s verbal summary into the EOD report.</p>
             <p><strong className="text-white">When to use.</strong> Any audio you want to feed into a downstream LLM step. <strong className="text-white">When not to use.</strong> Real-time conversational voice — that&apos;s the LiveKit meeting bot path; STT is one-shot.</p>
             <p><strong className="text-white">How to wire.</strong></p>
@@ -1194,7 +1185,6 @@ if (result.isPaused()) {
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>An offshore wind farm, a pharma cold-storage warehouse, a refinery — all of them have hours where the network is gone or the data is too sensitive to leave the site. The edge runtime takes any Abenix agent flagged <code>edge_compatible</code>, packages it into a signed <code>.agent</code> bundle, and runs it next to the equipment.</p>
-            <Hero src={SS('38-edge-deploy.png')} alt="Edge gateway deploy flow" />
             <p><strong className="text-white">Three runtime variants ship.</strong> Same <code>.agent</code> bundle, same MQTT delivery topic, same HTTP contract — pick the one that matches the plant hardware:</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong className="text-cyan-300">Python</strong> (~80 MB, <code>agentforge/edge-runtime</code>) — default, easiest to extend with tool shims, runs on any box that already has python3.12+.</li>
@@ -1263,7 +1253,6 @@ if (result.isPaused()) {
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Every Industrial-IoT showcase has a <strong>Live mode</strong> toggle in v1.1 that wires the tab&apos;s pipeline to the new primitives end-to-end. Use them as templates when you build your own.</p>
-            <Hero src={SS('39-iot-live-mode.png')} alt="Industrial-IoT — live mode toggle wired to MQTT + TSDB" />
             <ul className="list-disc pl-5 space-y-2 text-[13px]">
               <li><strong>Pump Vibration → live mode.</strong> The simulator agent publishes packets to <code>vibration.raw</code>; an MQTT trigger wakes the pump pipeline; severity readings are written to the <code>iot_pump_readings</code> hypertable; high-severity windows raise a CMMS work order via the connector framework.</li>
               <li><strong>Cold Chain → live mode.</strong> Telematics connector (Sensitech preset) feeds waypoints into <code>cold-chain.waypoints</code>; the excursion adjudicator uses <code>windowed_state</code> to detect repeated-breach patterns; the partial-loss claim drops into the broker portal via a custom connector.</li>

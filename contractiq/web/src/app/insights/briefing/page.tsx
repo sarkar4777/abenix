@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   Sunrise, Sparkles, Loader2, AlertCircle, CheckCircle2, Clock,
-  ChevronLeft, RefreshCw, TrendingDown, TrendingUp, Activity,
+  ChevronLeft, RefreshCw, TrendingDown, TrendingUp, Activity, Upload,
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
@@ -50,25 +51,33 @@ export default function BriefingPage() {
   const [history, setHistory] = useState<Briefing[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [contractCount, setContractCount] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
     const token = getToken();
     if (!token) return;
-    const [todayRes, histRes] = await Promise.all([
+    const [todayRes, histRes, portfolioRes] = await Promise.all([
       fetch(`${API_URL}/api/contractiq/insights/briefing/today`, { headers: { Authorization: `Bearer ${token}` } }),
       fetch(`${API_URL}/api/contractiq/insights/briefing/history?limit=10`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${API_URL}/api/contractiq/analytics/portfolio`, { headers: { Authorization: `Bearer ${token}` } }),
     ]);
     const todayBody = await todayRes.json();
     const histBody = await histRes.json();
+    const portfolioBody = await portfolioRes.json().catch(() => ({}));
     setBriefing(todayBody.data);
     setHistory(histBody.data || []);
+    const tc = portfolioBody?.data?.total_contracts;
+    setContractCount(typeof tc === 'number' ? tc : 0);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
+  const hasPortfolio = (contractCount ?? 0) >= 1;
+
   const generate = async () => {
+    if (!hasPortfolio) return;
     setGenerating(true);
     const token = getToken();
     try {
@@ -110,17 +119,28 @@ export default function BriefingPage() {
           </div>
           <button
             onClick={generate}
-            disabled={generating}
-            className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-amber-500/25 transition-all flex items-center gap-2 disabled:opacity-50"
+            disabled={generating || !hasPortfolio}
+            title={!hasPortfolio ? 'Upload a contract first — briefings need a portfolio' : undefined}
+            className="px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-amber-500/25 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {generating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Sparkles className="w-4 h-4" /> Generate Today's Briefing</>}
           </button>
         </div>
+        <PageExplainer routeKey="insights-briefing" />
 
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <Loader2 className="w-8 h-8 animate-spin text-amber-400" />
           </div>
+        ) : !hasPortfolio ? (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-12 text-center">
+            <Upload className="w-12 h-12 text-amber-400/60 mx-auto mb-3" />
+            <p className="text-sm text-white font-semibold mb-1">Upload a contract first — briefings need a portfolio</p>
+            <p className="text-xs text-slate-400 mb-5">The briefing agent reads your contracts, alerts, and MtM exposure. With zero contracts there is nothing to brief on.</p>
+            <a href="/upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-amber-500/25 transition-all">
+              <Upload className="w-4 h-4" /> Upload Contract
+            </a>
+          </motion.div>
         ) : !briefing ? (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-12 text-center">
             <Sunrise className="w-12 h-12 text-amber-400/40 mx-auto mb-3" />

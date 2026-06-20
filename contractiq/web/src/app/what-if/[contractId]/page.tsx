@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Gauge, Loader2, Play, ChevronLeft, TrendingDown, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -25,6 +26,28 @@ type Run = {
 
 const ACCENT: Record<string, string> = {
   ppa: 'cyan', vppa: 'emerald', tolling: 'amber', gas: 'orange', metals: 'amber',
+};
+
+// Literal Tailwind classes per accent so the JIT keeps every variant.
+const ACCENT_ICON_CLASSES: Record<string, string> = {
+  cyan:    'text-cyan-300',
+  emerald: 'text-emerald-300',
+  amber:   'text-amber-300',
+  orange:  'text-orange-300',
+};
+
+const ACCENT_LABEL_CLASSES: Record<string, string> = {
+  cyan:    'text-cyan-300 uppercase',
+  emerald: 'text-emerald-300 uppercase',
+  amber:   'text-amber-300 uppercase',
+  orange:  'text-orange-300 uppercase',
+};
+
+const ACCENT_BUTTON_CLASSES: Record<string, string> = {
+  cyan:    'bg-cyan-500/20 border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/30',
+  emerald: 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30',
+  amber:   'bg-amber-500/20 border-amber-500/40 text-amber-200 hover:bg-amber-500/30',
+  orange:  'bg-orange-500/20 border-orange-500/40 text-orange-200 hover:bg-orange-500/30',
 };
 
 export default function WhatIfPage() {
@@ -93,15 +116,17 @@ export default function WhatIfPage() {
           <ChevronLeft className="w-3.5 h-3.5" /> Back to contract
         </Link>
         <div className="flex items-center gap-3 mb-6">
-          <Gauge className={`w-7 h-7 text-${accent}-300`} />
+          <Gauge className={`w-7 h-7 ${ACCENT_ICON_CLASSES[accent] ?? ACCENT_ICON_CLASSES.cyan}`} />
           <div>
             <h1 className="text-2xl font-bold text-white">What-If Analysis</h1>
             <p className="text-sm text-slate-400">
-              Type-aware scenarios for <span className={`text-${accent}-300 uppercase`}>{contract?.contract_type}</span>{contract?.asset_class && <> · {contract.asset_class}</>} contracts.
+              Type-aware scenarios for <span className={ACCENT_LABEL_CLASSES[accent] ?? ACCENT_LABEL_CLASSES.cyan}>{contract?.contract_type}</span>{contract?.asset_class && <> · {contract.asset_class}</>} contracts.
               Perturb a driver, watch the value re-price, get a per-driver decomposition.
             </p>
           </div>
         </div>
+
+        <PageExplainer routeKey="what-if-detail" />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80">
@@ -138,7 +163,7 @@ export default function WhatIfPage() {
               <button
                 onClick={runCustom}
                 disabled={running === 'Custom what-if'}
-                className={`mt-3 w-full px-3 py-2 text-xs rounded-md bg-${accent}-500/20 border border-${accent}-500/40 text-${accent}-200 hover:bg-${accent}-500/30 disabled:opacity-50 flex items-center justify-center gap-1.5`}
+                className={`mt-3 w-full px-3 py-2 text-xs rounded-md border ${ACCENT_BUTTON_CLASSES[accent] ?? ACCENT_BUTTON_CLASSES.cyan} disabled:opacity-50 flex items-center justify-center gap-1.5`}
               >
                 {running === 'Custom what-if' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                 Run custom

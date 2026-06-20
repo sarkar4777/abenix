@@ -11,6 +11,8 @@ httpx>=0.25.0
 PyPDF2>=3.0.0
 numpy>=1.26.0
 json-repair>=0.30.0
+reportlab>=4.0.0
+tenacity>=8.2.0
 
 # v1.5.0 distributed tracing
 opentelemetry-api>=1.27.0

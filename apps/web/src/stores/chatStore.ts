@@ -36,6 +36,9 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   blocks: ContentBlock[];
   timestamp: Date;
+  model?: string;
+  requestedModel?: string;
+  fallbackReason?: string;
 }
 
 export interface AgentInfo {
@@ -172,6 +175,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           role: 'assistant',
           blocks: get().streamingBlocks,
           timestamp: new Date(),
+          model: data.effective_model || data.model,
+          requestedModel: data.requested_model,
+          fallbackReason: data.fallback_reason,
         };
         set({
           messages: [...get().messages, assistantMsg],

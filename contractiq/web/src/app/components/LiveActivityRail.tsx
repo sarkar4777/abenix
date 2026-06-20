@@ -1,8 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Activity, BrainCircuit, Cpu, Layers, Sparkles, ChevronRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { Activity, BrainCircuit, Cpu, ChevronRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useContractIQExecutions } from './ContractIQExecutionsProvider';
+
+// Routes that benefit from the rail narrating progress — auto-open here.
+// Anywhere else, default to collapsed to reduce visual noise.
+const AUTO_OPEN_PREFIXES = ['/recommendations', '/commodities/forward', '/insights/stress-test'];
+
+function shouldAutoOpen(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return AUTO_OPEN_PREFIXES.some(p => pathname === p || pathname.startsWith(p + '/'));
+}
 
 interface LiveAgent {
   id: string;
@@ -42,10 +52,19 @@ const STATUS_TONE: Record<string, string> = {
 
 export default function LiveActivityRail() {
   const { selectExecutionForDrawer, drawerExecutionId } = useContractIQExecutions();
+  const pathname = usePathname();
   const [agents, setAgents] = useState<LiveAgent[]>([]);
   const [models, setModels] = useState<LiveModel[]>([]);
-  const [collapsed, setCollapsed] = useState(false);
+  // Default collapsed; auto-open only on narrative-heavy routes.
+  const [collapsed, setCollapsed] = useState(true);
+  const [userToggled, setUserToggled] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Apply route-based default collapse unless the user has explicitly toggled.
+  useEffect(() => {
+    if (userToggled) return;
+    setCollapsed(!shouldAutoOpen(pathname));
+  }, [pathname, userToggled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,10 +109,13 @@ export default function LiveActivityRail() {
 
   const totalCount = agents.length + models.length;
 
+  const openRail = () => { setUserToggled(true); setCollapsed(false); };
+  const closeRail = () => { setUserToggled(true); setCollapsed(true); };
+
   if (collapsed) {
     return (
       <button
-        onClick={() => setCollapsed(false)}
+        onClick={openRail}
         className="fixed top-1/2 right-3 -translate-y-1/2 z-30 bg-slate-900/95 border border-emerald-500/30 text-emerald-300 px-2 py-3 rounded-l-lg shadow-lg hover:bg-slate-800 transition-colors flex flex-col items-center gap-2"
         title="Show live activity"
       >
@@ -109,9 +131,11 @@ export default function LiveActivityRail() {
       <div className="flex items-center justify-between px-3 py-3 border-b border-slate-800/60">
         <div className="flex items-center gap-2">
           <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-          <span className="text-[10px] uppercase tracking-[0.15em] text-emerald-300 font-bold">Live activity</span>
+          <span className="text-[11px] text-emerald-200 font-semibold">
+            Live agents ({agents.length}) <span className="text-slate-500">·</span> Live models ({models.length})
+          </span>
         </div>
-        <button onClick={() => setCollapsed(true)} className="text-slate-500 hover:text-white p-1" title="Collapse">
+        <button onClick={closeRail} className="text-slate-500 hover:text-white p-1" title="Collapse">
           <ChevronRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -172,15 +196,6 @@ export default function LiveActivityRail() {
               )}
             </div>
           ))}
-        </Section>
-
-        <Section icon={Layers} title="Where the data lives">
-          <div className="rounded-md border border-slate-800 bg-slate-950/40 p-2 space-y-1.5 text-[10px]">
-            <p className="flex items-center gap-1.5 text-emerald-300"><CheckCircle2 className="w-3 h-3" /> Logs in Abenix platform</p>
-            <p className="text-slate-500 leading-snug">Every agent run, tool call, ML prediction streams into Abenix&apos;s executions + tool_invocations + ml_invocations tables.</p>
-            <p className="flex items-center gap-1.5 text-cyan-300 mt-1.5"><Activity className="w-3 h-3" /> Read-only view here</p>
-            <p className="text-slate-500 leading-snug">E&amp;C-Copilot stores nothing locally — it&apos;s a viewer onto Abenix observability.</p>
-          </div>
         </Section>
 
         <p className="text-[9px] text-slate-600 italic px-2 pt-1">Polls every 5 s · click any agent for live DAG</p>

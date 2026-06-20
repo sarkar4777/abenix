@@ -72,6 +72,40 @@ def _truncate_tool_result(content: str, max_chars: int = MAX_TOOL_RESULT_CHARS) 
     )
 
 
+def _build_output_summary(metadata: Any, is_error: bool) -> dict[str, Any]:
+    """Compact tool-result projection that survives the SDK round-trip.
+
+    Carries the load-bearing metadata fields (status, resolved_symbol,
+    closes, prices_count, latest_close, currency, fetched_at) so downstream
+    callers — per-agent post-processors and the CIQ router defense-in-depth
+    guardrail — can recompute without re-running the tool.
+    """
+    if not isinstance(metadata, dict):
+        metadata = {}
+    closes = metadata.get("closes") or []
+    if not isinstance(closes, list):
+        closes = []
+    status_val = metadata.get("status")
+    if is_error:
+        status = "error"
+    elif isinstance(status_val, str) and status_val:
+        status = status_val
+    else:
+        status = "ok"
+    return {
+        "status": status,
+        "resolved_symbol": metadata.get("resolved_symbol")
+        or metadata.get("symbol")
+        or "",
+        "symbol": metadata.get("symbol") or "",
+        "closes": closes,
+        "prices_count": int(metadata.get("price_count") or len(closes) or 0),
+        "latest_close": metadata.get("latest_close"),
+        "fetched_at": metadata.get("fetched_at") or metadata.get("last_refresh") or "",
+        "currency": metadata.get("currency") or "",
+    }
+
+
 def _estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
     """Rough estimate of token count for the messages array."""
     total_chars = 0
@@ -607,6 +641,14 @@ class AgentExecutor:
 
                 self.sandbox.check_output_size(result.content)
 
+                # Attach an output_summary back onto the tool_call entry the
+                # caller will receive. This is what the CIQ router's
+                # canonical-anchor guardrail reads — without it the router
+                # would have to refetch yahoo_finance to know the closes.
+                tc["output_summary"] = _build_output_summary(
+                    result.metadata, bool(result.is_error)
+                )
+
                 # Truncate large tool results to prevent context overflow
                 context_content = _truncate_tool_result(result.content)
                 tool_results_content.append(
@@ -938,6 +980,13 @@ class AgentExecutor:
 
                 self.sandbox.check_output_size(result.content)
 
+                # Same enrichment as the non-stream path: stamp output_summary
+                # back onto the tool_call entry so downstream callers can
+                # canonical-anchor without round-tripping the tool.
+                tc["output_summary"] = _build_output_summary(
+                    result.metadata, bool(result.is_error)
+                )
+
                 yield ExecutionEvent(
                     event="tool_result",
                     data={"name": tc["name"], "result": result.content},
@@ -953,6 +1002,7 @@ class AgentExecutor:
                         "output_preview": result.content[:500],
                         "is_error": result.is_error,
                         "metadata": result.metadata,
+                        "output_summary": tc["output_summary"],
                     },
                 )
 
@@ -1073,6 +1123,9 @@ def _ensure_tool_classes() -> None:
     from engine.tools.integration_hub import IntegrationHubTool
     from engine.tools.pii_redactor import PIIRedactorTool
     from engine.tools.time_series_analyzer import TimeSeriesAnalyzerTool
+    from engine.tools.monte_carlo_curve import MonteCarloCurveTool
+    from engine.tools.realized_vol_calc import RealizedVolCalcTool
+    from engine.tools.eex_public_summary import EexPublicSummaryTool
     from engine.tools.event_stream import (
         EventBufferTool,
         RedisStreamConsumerTool,
@@ -1163,6 +1216,9 @@ def _ensure_tool_classes() -> None:
             "integration_hub": IntegrationHubTool,
             "pii_redactor": PIIRedactorTool,
             "time_series_analyzer": TimeSeriesAnalyzerTool,
+            "monte_carlo_curve": MonteCarloCurveTool,
+            "realized_vol_calc": RealizedVolCalcTool,
+            "eex_public_summary": EexPublicSummaryTool,
             "event_buffer": EventBufferTool,
             "redis_stream_consumer": RedisStreamConsumerTool,
             "redis_stream_publisher": RedisStreamPublisherTool,
@@ -1237,6 +1293,22 @@ def _ensure_tool_classes() -> None:
     from engine.tools.legal_existence import LegalExistenceVerifierTool
     from engine.tools.kyc_scorer import KYCScorerTool
     from engine.tools.regulatory_enforcement import RegulatoryEnforcementTool
+    from engine.tools.kyc_met_pdf_extractor import KycMetPdfExtractorTool
+    from engine.tools.country_cpi_lookup import CountryCpiLookupTool
+    from engine.tools.industry_segment_risk import IndustrySegmentRiskTool
+    from engine.tools.moodys_orbis_lookup import MoodysOrbisLookupTool
+    from engine.tools.notional_volume_score import NotionalVolumeScoreTool
+
+    # Public regulatory / credit data sources — generic, any tenant can use them.
+    from engine.tools.phmsa_lookup import PhmsaLookupTool
+    from engine.tools.epa_echo import EpaEchoTool
+    from engine.tools.moodys_api import MoodysApiTool
+    from engine.tools.bundesanzeiger import BundesanzeigerTool
+    from engine.tools.ferc_elibrary import FercElibraryTool
+    from engine.tools.companies_house import CompaniesHouseTool
+    from engine.tools.edgar_filings import EdgarFilingsTool
+    from engine.tools.spg_ratings import SPGRatingsTool
+    from engine.tools.fitch_connect import FitchConnectTool
 
     _TOOL_CLASSES.update(
         {
@@ -1248,6 +1320,20 @@ def _ensure_tool_classes() -> None:
             "legal_existence_verifier": LegalExistenceVerifierTool,
             "kyc_scorer": KYCScorerTool,
             "regulatory_enforcement": RegulatoryEnforcementTool,
+            "kyc_met_pdf_extractor": KycMetPdfExtractorTool,
+            "country_cpi_lookup": CountryCpiLookupTool,
+            "industry_segment_risk": IndustrySegmentRiskTool,
+            "moodys_orbis_lookup": MoodysOrbisLookupTool,
+            "notional_volume_score": NotionalVolumeScoreTool,
+            "phmsa_lookup": PhmsaLookupTool,
+            "epa_echo": EpaEchoTool,
+            "moodys_api": MoodysApiTool,
+            "bundesanzeiger_filings": BundesanzeigerTool,
+            "ferc_elibrary": FercElibraryTool,
+            "companies_house": CompaniesHouseTool,
+            "edgar_filings": EdgarFilingsTool,
+            "spg_ratings_api": SPGRatingsTool,
+            "fitch_connect": FitchConnectTool,
             "connector_call": ConnectorCallTool,
             "approval_gate": ApprovalGateTool,
             "mqtt_publish": MqttPublishTool,

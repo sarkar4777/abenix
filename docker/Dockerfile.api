@@ -32,6 +32,7 @@ COPY industrial-iot/code-assets/ ./industrial-iot/code-assets/
 COPY wingman/code-assets/ ./wingman/code-assets/
 COPY wingman/ml-models/ ./wingman/ml-models/
 COPY contractiq/aimodels/ ./contractiq/aimodels/
+COPY contractiq/code-assets/ ./contractiq/code-assets/
 WORKDIR /app/apps/api
 
 ENV PYTHONPATH="/app/packages/db:/app/packages/sdk/python:/app/apps/agent-runtime"

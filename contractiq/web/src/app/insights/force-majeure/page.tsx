@@ -6,6 +6,7 @@ import {
   AlertOctagon, ChevronLeft, Sparkles, Loader2, Clock,
   CheckCircle2, XCircle, FileText, AlertCircle,
 } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
@@ -112,6 +113,7 @@ export default function ForceMajeurePage() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-white">Force Majeure Monitor</h1>
+                <PageExplainer routeKey="insights-force-majeure" />
                 <p className="text-xs text-slate-400">Auto-detect FM triggers and draft notices via <code className="text-red-300">contractiq-force-majeure-monitor</code></p>
               </div>
             </div>

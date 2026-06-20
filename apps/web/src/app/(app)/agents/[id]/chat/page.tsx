@@ -1,18 +1,28 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, Suspense, lazy } from 'react';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { MessageSquare, Info } from 'lucide-react';
+import { MessageSquare, Info, Loader2 } from 'lucide-react';
 import ChatMessage from '@/components/chat/ChatMessage';
 import ChatInput from '@/components/chat/ChatInput';
-import AgentDetailSidebar from '@/components/chat/AgentDetailSidebar';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { useChatStore } from '@/stores/chatStore';
 import { toastWarning } from '@/stores/toastStore';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
 import { useIsMobile } from '@/hooks/useMediaQuery';
+
+// Lazy so the sidebar's per-agent fetches don't block first paint of the chat shell.
+const AgentDetailSidebar = lazy(() => import('@/components/chat/AgentDetailSidebar'));
+
+function SidebarSpinner() {
+  return (
+    <div className="flex items-center justify-center w-80 border-l border-slate-800 text-slate-500">
+      <Loader2 className="w-5 h-5 animate-spin" />
+    </div>
+  );
+}
 
 export default function AgentChatPage() {
   const params = useParams();
@@ -36,10 +46,12 @@ export default function AgentChatPage() {
     clearChat,
   } = useChatStore();
 
-  // Clear chat when switching between agents
+  // Clear chat when switching between agents. Deferred until after first paint
+  // so the chat shell renders immediately even on a cold agent fetch.
   useEffect(() => {
-    clearChat();
-  }, [agentId]);  
+    const raf = requestAnimationFrame(() => clearChat());
+    return () => cancelAnimationFrame(raf);
+  }, [agentId]);
 
   usePageTitle(agentInfo?.name ? `Chat - ${agentInfo.name}` : 'Chat');
 
@@ -48,7 +60,9 @@ export default function AgentChatPage() {
   );
 
   useEffect(() => {
-    if (agentData) {
+    if (!agentData) return;
+    // Push the store write out of the commit so the chat shell can paint first.
+    const raf = requestAnimationFrame(() => {
       setAgentInfo({
         id: agentData.id as string,
         name: agentData.name as string,
@@ -62,7 +76,8 @@ export default function AgentChatPage() {
         category: agentData.category as string | undefined,
         version: agentData.version as string | undefined,
       });
-    }
+    });
+    return () => cancelAnimationFrame(raf);
   }, [agentData, setAgentInfo]);
 
   useEffect(() => {
@@ -119,9 +134,9 @@ export default function AgentChatPage() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={false}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
+      transition={{ duration: 0.12 }}
       className="-m-3 md:-m-6 flex h-[calc(100vh-3.5rem-1.75rem)]"
     >
       <div className="flex-1 flex flex-col min-w-0">
@@ -166,7 +181,14 @@ export default function AgentChatPage() {
           )}
 
           {messages.map((msg) => (
-            <ChatMessage key={msg.id} role={msg.role} blocks={msg.blocks} />
+            <ChatMessage
+              key={msg.id}
+              role={msg.role}
+              blocks={msg.blocks}
+              model={msg.model}
+              requestedModel={msg.requestedModel}
+              fallbackReason={msg.fallbackReason}
+            />
           ))}
 
           {isStreaming && (
@@ -250,12 +272,14 @@ export default function AgentChatPage() {
 
       {/* Desktop: inline sidebar */}
       {!isMobile && agentInfo && (
-        <AgentDetailSidebar
-          agent={agentInfo}
-          onClearChat={clearChat}
-          onAgentUpdated={refetchAgent}
-          isOOB={agentData?.agent_type === 'oob'}
-        />
+        <Suspense fallback={<SidebarSpinner />}>
+          <AgentDetailSidebar
+            agent={agentInfo}
+            onClearChat={clearChat}
+            onAgentUpdated={refetchAgent}
+            isOOB={agentData?.agent_type === 'oob'}
+          />
+        </Suspense>
       )}
 
       {/* Mobile: sidebar in a modal */}
@@ -265,12 +289,14 @@ export default function AgentChatPage() {
           onClose={() => setShowAgentInfo(false)}
           title="Agent Details"
         >
-          <AgentDetailSidebar
-            agent={agentInfo}
-            onClearChat={clearChat}
-            onAgentUpdated={refetchAgent}
-            isOOB={agentData?.agent_type === 'oob'}
-          />
+          <Suspense fallback={<SidebarSpinner />}>
+            <AgentDetailSidebar
+              agent={agentInfo}
+              onClearChat={clearChat}
+              onAgentUpdated={refetchAgent}
+              isOOB={agentData?.agent_type === 'oob'}
+            />
+          </Suspense>
         </ResponsiveModal>
       )}
     </motion.div>

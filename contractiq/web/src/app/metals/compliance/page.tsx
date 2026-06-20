@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ShieldCheck, ChevronLeft, Loader2, Play, CheckCircle2, XCircle, AlertCircle, Minus } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -94,6 +95,7 @@ export default function MetalsCompliancePage() {
             <p className="text-sm text-slate-400">LBMA Good Delivery + RGG · LPPM · OECD DDG · RJC · Dodd-Frank · EU 2017/821 · ISO · Swiss PMCA · HMRC · REACH · sanctions.</p>
           </div>
         </div>
+        <div className="mb-4"><PageExplainer routeKey="metals-compliance" /></div>
 
         {toast && (
           <div className="mb-4 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-sm text-cyan-200">{toast}</div>

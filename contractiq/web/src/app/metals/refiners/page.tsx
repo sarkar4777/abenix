@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Radar, ChevronLeft, Loader2, Play, ShieldAlert, Calendar } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -86,6 +87,7 @@ export default function RefinersPage() {
             {scanning ? 'Scanning...' : 'Run scan'}
           </button>
         </div>
+        <div className="mb-4"><PageExplainer routeKey="metals-refiners" /></div>
 
         {toast && (
           <div className="mb-4 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-sm text-cyan-200">{toast}</div>

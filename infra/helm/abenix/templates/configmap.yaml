@@ -82,3 +82,21 @@ data:
   DEFER_NOTIFY_WEBHOOK_URL: {{ .Values.meeting.deferNotifyWebhookUrl | quote }}
   {{- end }}
   {{- end }}
+  # Progress pub/sub namespacing. Each consuming app picks its own prefix
+  # so the wingman Desk stream and contractiq live-canvas don't collide.
+  # The engine stays generic — no app name baked into the runtime.
+  PROGRESS_CHANNEL_PREFIX: {{ .Values.progress.channelPrefix | default "progress:" | quote }}
+  PROGRESS_PARENT_KEY_PREFIX: {{ .Values.progress.parentKeyPrefix | default "parent:" | quote }}
+  PROGRESS_PARENT_TTL: {{ .Values.progress.parentTtl | default "1800" | quote }}
+  # Comma-separated list of post-processor modules the runtime imports at
+  # startup. Each module registers its bindings with engine.post_processors
+  # via side-effect imports. Keep this app-owned; the engine knows nothing
+  # about which commodities or workflows it covers.
+  POST_PROCESSOR_MODULES: {{ .Values.postProcessorModules | default "" | quote }}
+  # MCP server URL allow-list. Comma-separated host suffixes that
+  # _validate_mcp_url() permits in addition to the default public-host
+  # rules. Required so the in-cluster UAT MCP fixture
+  # (uat-mcp.<ns>.svc.cluster.local) can be registered — without it the
+  # validator's cluster-internal DNS block rejects every register call
+  # with "server_url rejected: cluster-internal DNS blocked".
+  MCP_ALLOWED_HOSTS: {{ .Values.mcpAllowedHosts | default (printf "uat-mcp.%s.svc.cluster.local" .Release.Namespace) | quote }}

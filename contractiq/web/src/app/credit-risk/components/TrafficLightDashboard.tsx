@@ -32,6 +32,14 @@ const TIER_STYLE: Record<string, { ring: string; bg: string; text: string; bar: 
   unknown: { ring: 'ring-slate-700 hover:ring-slate-500',        bg: 'from-slate-800/30 to-slate-800/0',     text: 'text-slate-300',   bar: 'bg-slate-500',                  Icon: AlertTriangle, label: 'N/A' },
 };
 
+// Literal class lookup for the filter pill — JIT must see every variant verbatim.
+const FILTER_ACTIVE_CLASSES: Record<string, string> = {
+  emerald: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/40',
+  amber:   'bg-amber-500/15 text-amber-200 border-amber-500/40',
+  rose:    'bg-rose-500/15 text-rose-200 border-rose-500/40',
+  slate:   'bg-slate-500/15 text-slate-200 border-slate-500/40',
+};
+
 function fmtUsd(v: number | null) {
   if (v === null) return '—';
   if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(1)}B`;
@@ -87,7 +95,7 @@ export default function TrafficLightDashboard() {
                 onClick={() => setFilter(f)}
                 className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors ${
                   isActive
-                    ? `bg-${tone}-500/15 text-${tone}-200 border-${tone}-500/40`
+                    ? (FILTER_ACTIVE_CLASSES[tone] ?? FILTER_ACTIVE_CLASSES.slate)
                     : 'bg-slate-900/40 text-slate-400 border-slate-800 hover:bg-slate-800/60'
                 }`}
               >

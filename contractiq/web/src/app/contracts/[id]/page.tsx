@@ -13,6 +13,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend,
 } from 'recharts';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { if (typeof window === 'undefined') return null; return localStorage.getItem('contractiq_token'); }
@@ -84,7 +85,7 @@ function FunctionalAnalysisTab({ contractId }: { contractId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
   const fetchAnalysis = async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : '';
@@ -959,6 +960,8 @@ export default function ContractDetailPage() {
       <div className="p-6">
         <div className="max-w-6xl mx-auto space-y-4">
           <button onClick={() => router.push('/contracts')} className="flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors"><ChevronLeft className="w-3 h-3" /> Back to Contracts</button>
+
+          <PageExplainer routeKey="contracts-detail" />
 
           {/* Header */}
           <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">

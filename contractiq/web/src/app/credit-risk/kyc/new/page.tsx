@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   FileCheck2, ChevronRight, Play, Loader2, AlertTriangle, Building2,
   DollarSign, Briefcase, Info, FileText, Search, Flag, CheckCircle2,
@@ -33,34 +34,7 @@ const COUNTRIES: { code: string; name: string }[] = [
   { code: 'NZ', name: 'New Zealand' }, { code: 'IR', name: 'Iran' }, { code: 'KP', name: 'North Korea' },
 ];
 
-const INDUSTRIES = [
-  { key: 'energy_trading', label: 'Energy Trading' },
-  { key: 'oil_gas', label: 'Oil & Gas' },
-  { key: 'utility_regulated', label: 'Regulated Utility' },
-  { key: 'wood_furniture_paper', label: 'Wood, Furniture & Paper' },
-  { key: 'manufacturing', label: 'Manufacturing' },
-  { key: 'mining_extractives', label: 'Mining / Extractives' },
-  { key: 'shipping_maritime', label: 'Shipping / Maritime' },
-  { key: 'construction', label: 'Construction' },
-  { key: 'real_estate', label: 'Real Estate' },
-  { key: 'banking_regulated', label: 'Regulated Banking' },
-  { key: 'insurance_regulated', label: 'Regulated Insurance' },
-  { key: 'technology_saas', label: 'Technology / SaaS' },
-  { key: 'telecoms', label: 'Telecoms' },
-  { key: 'crypto_vasp', label: 'Crypto / Virtual Asset Service Provider' },
-  { key: 'gambling_casinos', label: 'Gambling / Casinos' },
-  { key: 'arms_defence', label: 'Arms & Defence' },
-  { key: 'money_service_business', label: 'Money Service Business' },
-  { key: 'professional_services', label: 'Professional Services' },
-  { key: 'wholesale_distribution', label: 'Wholesale / Distribution' },
-  { key: 'agriculture', label: 'Agriculture / Agri-commodities' },
-  { key: 'cash_intensive_retail', label: 'Cash-Intensive Retail' },
-  { key: 'precious_metals_stones', label: 'Precious Metals / Stones' },
-  { key: 'public_sector', label: 'Public Sector' },
-  { key: 'healthcare_regulated', label: 'Regulated Healthcare' },
-  { key: 'education', label: 'Education' },
-  { key: 'other', label: 'Other' },
-];
+interface IndustryOpt { key: string; label: string }
 
 interface ContractRow {
   id: string;
@@ -106,6 +80,9 @@ export default function NewKycCheckPage() {
   const [pickerSearch, setPickerSearch] = useState('');
   const [pickerMode, setPickerMode] = useState<'existing' | 'new'>('existing');
 
+  // Industry options fetched from the agent-backed endpoint (same as the list page).
+  const [industries, setIndustries] = useState<IndustryOpt[]>([]);
+
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
   useEffect(() => {
@@ -118,6 +95,23 @@ export default function NewKycCheckPage() {
       .then(j => setContracts(j.data || []))
       .catch(() => {})
       .finally(() => setContractsLoading(false));
+  }, []);
+
+  // Load industry options from the agent-backed endpoint
+  useEffect(() => {
+    const t = getToken();
+    if (!t) return;
+    (async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/contractiq/insights/kyc/industry-options`, {
+          headers: { Authorization: `Bearer ${t}` },
+        });
+        const j = await r.json();
+        if (j.data?.industries) {
+          setIndustries(j.data.industries.map((it: any) => ({ key: it.key, label: it.label })));
+        }
+      } catch { /* silent */ }
+    })();
   }, []);
 
   // Deduplicate counterparties across all contracts, with aggregate notional + metadata
@@ -229,6 +223,7 @@ export default function NewKycCheckPage() {
             SEE-BV standard taxonomy.
           </p>
         </div>
+        <PageExplainer routeKey="credit-risk-kyc-new" />
 
         {/* Picker: existing counterparties vs. new */}
         <div className="flex gap-2 border-b border-slate-800">
@@ -395,8 +390,8 @@ export default function NewKycCheckPage() {
                     data-testid="kyc-industry"
                     className="mt-1 w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-emerald-500/60 focus:outline-none"
                   >
-                    <option value="">— Select —</option>
-                    {INDUSTRIES.map(i => (
+                    <option value="">{industries.length ? '— Select —' : 'Loading…'}</option>
+                    {industries.map(i => (
                       <option key={i.key} value={i.key}>{i.label}</option>
                     ))}
                   </select>

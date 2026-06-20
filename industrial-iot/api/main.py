@@ -159,6 +159,38 @@ def _acting_subject(request: Request) -> ActingSubject | None:
     return ActingSubject(subject_type=subject_type, subject_id=user)
 
 
+# ─── Proxy auth gate ───────────────────────────────────────────────────
+# The platform-API passthroughs (/api/code-assets, /api/agents,
+# /api/connectors) forward to abenix-api with the standalone's service-
+# account X-API-Key — so any unauthenticated caller could otherwise act
+# as the standalone's tenant from inside the cluster. The showcase has
+# no user database, so the gate is a shared secret set by the Next.js
+# web pod on every proxied request via server-side middleware. The
+# secret is never exposed to the browser.
+_WEB_PROXY_SECRET_ENV = "INDUSTRIALIOT_WEB_PROXY_SECRET"
+_WEB_PROXY_HEADER = "X-IIOT-Web-Secret"
+
+
+def _gate_proxy_request(request: Request) -> None:
+    """Fail-closed gate: require X-IIOT-Web-Secret == env secret.
+
+    401 when the env var is unset (so an undeployed-secret config never
+    quietly leaks data) or when the header is missing / wrong.
+    """
+    expected = os.environ.get(_WEB_PROXY_SECRET_ENV, "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                f"{_WEB_PROXY_SECRET_ENV} is not set on the industrial-iot-api "
+                "pod — refusing to proxy platform-API traffic anonymously."
+            ),
+        )
+    presented = (request.headers.get(_WEB_PROXY_HEADER) or "").strip()
+    if not presented or presented != expected:
+        raise HTTPException(status_code=401, detail="unauthorized proxy request")
+
+
 # ─── Endpoints ─────────────────────────────────────────────────────────
 
 
@@ -249,6 +281,16 @@ async def live_trigger(request: Request) -> dict[str, Any]:
                 json={"enabled": enabled},
                 timeout=5.0,
             )
+        if r.status_code == 404:
+            # Trigger registry isn't externalised on abenix-api yet. Tell
+            # the UI honestly so it can show "demo mode" rather than
+            # green-lighting a non-existent subscription.
+            return {
+                "ok": False,
+                "accepted": False,
+                "status": 404,
+                "reason": "live trigger not wired on platform yet",
+            }
         return {"ok": r.is_success, "accepted": r.is_success, "status": r.status_code}
     except Exception as exc:
         logger.warning("trigger toggle forward failed: %s", exc)
@@ -440,17 +482,98 @@ async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
             if cand:
                 exec_id = cand
                 break
-    return JSONResponse({
-        "ok": True,
-        "status": "completed",
+
+    # The SDK return shape stamps status="completed" even when the
+    # underlying execution failed — the truth lives on the platform's
+    # execution record. Re-fetch /api/executions/{id} so the UI sees the
+    # real per-node status, tokens, cost, and any error surface. See
+    # MEMORY: feedback_failure_visibility.
+    status = (getattr(result, "status", None) or "completed").lower()
+    node_results: dict[str, Any] = getattr(result, "node_results", None) or {}
+    input_tokens = int(getattr(result, "input_tokens", 0) or 0)
+    output_tokens = int(getattr(result, "output_tokens", 0) or 0)
+    cost = float(getattr(result, "cost", 0) or 0)
+    duration_ms = int(getattr(result, "duration_ms", 0) or 0)
+    error_message: str | None = None
+    failure_code: str | None = None
+
+    if exec_id:
+        try:
+            forge = _sdk()
+            try:
+                rec = await forge.executions.get(exec_id)
+            finally:
+                try:
+                    await forge.close()
+                except Exception:
+                    pass
+            payload = (rec or {}).get("data") if isinstance(rec, dict) else None
+            if not payload and isinstance(rec, dict):
+                payload = rec
+            if isinstance(payload, dict):
+                raw_status = payload.get("status")
+                if isinstance(raw_status, str) and raw_status:
+                    status = raw_status.lower()
+                if payload.get("node_results") is not None:
+                    node_results = payload.get("node_results") or {}
+                if payload.get("input_tokens") is not None:
+                    input_tokens = int(payload.get("input_tokens") or 0)
+                if payload.get("output_tokens") is not None:
+                    output_tokens = int(payload.get("output_tokens") or 0)
+                # Platform serialises as `cost` (USD float). Accept either key.
+                if payload.get("cost") is not None:
+                    cost = float(payload.get("cost") or 0)
+                elif payload.get("cost_usd") is not None:
+                    cost = float(payload.get("cost_usd") or 0)
+                if payload.get("duration_ms") is not None:
+                    duration_ms = int(payload.get("duration_ms") or 0)
+                error_message = payload.get("error_message") or None
+                failure_code = payload.get("failure_code") or None
+        except Exception as exc:
+            # The follow-up fetch is advisory — never mask the execute
+            # result. Log and continue with the SDK numbers.
+            logger.warning("execution detail fetch failed for %s: %s", exec_id, exc)
+
+    # Surface per-node failures so the UI can red-flag the failing step
+    # even when the overall status string was already "failed".
+    node_errors: list[dict[str, Any]] = []
+    if isinstance(node_results, dict):
+        for nid, nval in node_results.items():
+            if isinstance(nval, dict):
+                nstatus = (nval.get("status") or "").lower()
+                nerr = nval.get("error") or nval.get("error_message")
+                if nstatus == "failed" or nerr:
+                    node_errors.append({
+                        "node_id": nid,
+                        "status": nstatus or "failed",
+                        "error": nerr,
+                    })
+
+    sdk_errors = list(getattr(result, "errors", None) or [])
+    ok = status != "failed"
+    body: dict[str, Any] = {
+        "ok": ok,
+        "status": status,
         "execution_id": exec_id,
         "final_output": result.output,
-        "node_results": getattr(result, "node_results", None) or {},
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
-        "cost": result.cost,
-        "duration_ms": result.duration_ms,
-    })
+        "node_results": node_results,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost": cost,
+        "duration_ms": duration_ms,
+    }
+    if not ok or error_message or sdk_errors or node_errors:
+        body["error"] = error_message or (
+            sdk_errors[0].get("message") if sdk_errors and isinstance(sdk_errors[0], dict)
+            else None
+        )
+        if failure_code:
+            body["failure_code"] = failure_code
+        if sdk_errors:
+            body["errors"] = sdk_errors
+        if node_errors:
+            body["node_errors"] = node_errors
+    return JSONResponse(body, status_code=200 if ok else 502)
 
 
 # ─── Platform-API passthrough ──────────────────────────────────────────
@@ -458,11 +581,12 @@ async def execute_pipeline(pipeline_key: str, request: Request) -> JSONResponse:
 # seeded service-account key so the showcase web doesn't have to expose
 # Abenix credentials in the browser. Read-only or upload-style routes
 # only — execution stays in the explicit pipelines endpoint above.
+# /api/approvals is deliberately NOT on this list — HITL approvals carry
+# business decisions and never go through an anonymous read path.
 _PASSTHROUGH_PREFIXES = (
     "/api/code-assets",
     "/api/agents",
     "/api/connectors",
-    "/api/approvals",
 )
 _HOP_BY_HOP_HEADERS = {
     "host", "content-length", "transfer-encoding", "connection",
@@ -473,6 +597,10 @@ _HOP_BY_HOP_HEADERS = {
 
 async def _proxy(request: Request, path: str) -> Response:
     """Forward `path` to abenix-api with the standalone's API key."""
+    # Gate-in-front of the SDK so an unauthenticated in-cluster request
+    # cannot impersonate the standalone's tenant. The actAs delegation
+    # below only happens after this check passes.
+    _gate_proxy_request(request)
     full = f"/{path.lstrip('/')}"
     if not any(full == p or full.startswith(p + "/") or full.startswith(p + "?")
                for p in _PASSTHROUGH_PREFIXES):
@@ -709,14 +837,10 @@ async def proxy_connectors(request: Request, rest: str) -> Response:
     return await _proxy(request, f"/api/connectors/{rest}")
 
 
-@app.api_route("/api/approvals", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-async def proxy_approvals_root(request: Request) -> Response:
-    return await _proxy(request, "/api/approvals")
-
-
-@app.api_route("/api/approvals/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-async def proxy_approvals(request: Request, rest: str) -> Response:
-    return await _proxy(request, f"/api/approvals/{rest}")
+# /api/approvals intentionally has no passthrough route — HITL approvals
+# are business decisions that must never be served through an anonymous
+# in-cluster proxy. Any UI surface that needs approvals must call abenix
+# directly through an authenticated session, not via this standalone.
 
 
 if __name__ == "__main__":

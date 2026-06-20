@@ -135,7 +135,8 @@ def app(monkeypatch: pytest.MonkeyPatch, mock_sdk: _MockSDK):
     # a handler returns our stub. Each router imports the name locally
     # via ``from app.routers._deps import get_sdk`` so the patch has to
     # be applied to each module's namespace.
-    sdk_factory = lambda: mock_sdk
+    def sdk_factory():
+        return mock_sdk
     monkeypatch.setattr(_deps, "get_sdk", sdk_factory)
     monkeypatch.setattr(cases_mod, "get_sdk", sdk_factory)
     monkeypatch.setattr(qa_mod, "get_sdk", sdk_factory)

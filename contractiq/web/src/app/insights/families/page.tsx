@@ -6,6 +6,7 @@ import {
   Layers, ChevronLeft, Plus, Trash2, Edit3, Save, X,
   Loader2, FileText, Crown,
 } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -107,6 +108,7 @@ export default function FamiliesPage() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-white">Contract Families</h1>
+                <PageExplainer routeKey="insights-families" />
                 <p className="text-xs text-slate-400">Group master contracts with their amendments and side letters</p>
               </div>
             </div>

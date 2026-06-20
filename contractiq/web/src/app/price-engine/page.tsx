@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { LineChart, AlertOctagon, Loader2, AlertTriangle } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
 import { useContractIQExecutions } from '../components/ContractIQExecutionsProvider';
+import { PageExplainer } from '@/components/PageExplainer';
 
 type Hub = 'TTF' | 'NBP' | 'THE' | 'PEG' | 'PSV' | 'CEGH' | 'DE' | 'FR' | 'NL' | 'BE' | 'AT';
 type Commodity = 'gas' | 'power';
@@ -51,18 +52,26 @@ export default function PriceEnginePage() {
   const [stress, setStress] = useState(0);
   const [result, setResult] = useState<EngineResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [fv, setFv] = useState<Record<string, number>>({ ...GAS_FV });
+  const [spot, setSpot] = useState<number>(34.5);
   const { selectExecutionForDrawer } = useContractIQExecutions();
 
   const hubDef = HUB_DEFS.find(h => h.id === hubId)!;
+
+  // reset sample inputs when hub changes
+  useEffect(() => {
+    setFv(hubDef.commodity === 'gas' ? { ...GAS_FV } : { ...POWER_FV });
+    setSpot(hubDef.spot_default);
+  }, [hubId]);
 
   const run = async () => {
     setLoading(true);
     try {
       const isGas = hubDef.commodity === 'gas';
-      const baseFv = isGas ? { ...GAS_FV } : { ...POWER_FV };
+      const baseFv = { ...fv };
       if (isGas) baseFv.weather_anomaly_c = (baseFv.weather_anomaly_c ?? 0) + stress * 4;
       else baseFv.residual_load_gw = (baseFv.residual_load_gw ?? 0) * (1 + stress * 0.2);
-      const currentSpot = hubDef.spot_default * (1 + stress * 0.06);
+      const currentSpot = spot * (1 + stress * 0.06);
 
       const res = await authFetch('/api/contractiq/price-engine/run', {
         method: 'POST',
@@ -99,8 +108,9 @@ export default function PriceEnginePage() {
         </div>
         <p className="text-slate-400 max-w-3xl">
           Calls <span className="font-mono text-violet-300">{hubDef.commodity === 'gas' ? 'price_fairvalue_gas_hubs' : 'price_fairvalue_power_hubs'}</span>
-          {' '}(BayesianRidge + IsolationForest residual) via the <span className="font-mono">ciq-price-engine</span> agent. z-score and verdict are computed from the model's sigma; no values are invented.
+          {' '}(BayesianRidge + IsolationForest residual) via the <span className="font-mono">ciq-price-engine</span> agent. Demo inputs — adjust to test the engine. Wire to live feeds via the SDK to source real values.
         </p>
+        <PageExplainer routeKey="price-engine" />
       </header>
 
       <div className="flex flex-wrap gap-2 mb-6">
@@ -116,6 +126,31 @@ export default function PriceEnginePage() {
           </button>
         ))}
       </div>
+
+      <div className="rounded-lg border border-amber-700/50 bg-amber-900/20 p-3 mb-4 flex items-start gap-3">
+        <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-amber-200">
+          These are sample inputs. Edit any value to test the engine, or wire to live feeds via the SDK to source real values.
+        </p>
+      </div>
+
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-white">Feature vector — {hubId}</h2>
+          <button
+            onClick={() => { setFv(hubDef.commodity === 'gas' ? { ...GAS_FV } : { ...POWER_FV }); setSpot(hubDef.spot_default); }}
+            className="text-[10px] text-slate-400 hover:text-white underline underline-offset-2"
+          >
+            Reset to sample
+          </button>
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          <FvInput label="current_spot" value={spot} unit="€/MWh" onChange={setSpot} />
+          {Object.entries(fv).map(([k, v]) => (
+            <FvInput key={k} label={k} value={v} onChange={(nv) => setFv({ ...fv, [k]: nv })} />
+          ))}
+        </div>
+      </section>
 
       {needsConfig && (
         <div className="rounded-lg border border-amber-700/50 bg-amber-900/20 p-4 mb-6 flex items-start gap-3">
@@ -204,6 +239,25 @@ function Stat({ label, value, unit, color }: { label: string; value?: string; un
       <p className="text-xs text-slate-500">{label}</p>
       <p className={`text-2xl font-bold font-mono ${color}`}>{value ?? '—'}</p>
       <p className="text-[10px] text-slate-600">{unit}</p>
+    </div>
+  );
+}
+
+function FvInput({ label, value, unit, onChange }: { label: string; value: number; unit?: string; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] text-slate-400 font-mono truncate" title={label}>{label}</span>
+        <span className="text-[8px] uppercase tracking-wider text-amber-400/80 bg-amber-900/30 border border-amber-700/40 px-1 py-px rounded">Sample</span>
+      </div>
+      <input
+        type="number"
+        step="any"
+        value={Number.isFinite(value) ? value : 0}
+        onChange={e => onChange(Number(e.target.value))}
+        className="w-full px-2 py-1 text-xs font-mono bg-slate-950/60 border border-slate-800 rounded text-slate-200 focus:border-violet-500/60 focus:outline-none"
+      />
+      {unit && <p className="text-[9px] text-slate-600 mt-0.5">{unit}</p>}
     </div>
   );
 }

@@ -104,6 +104,35 @@ async def _active_policy(
     return (await db.execute(q)).scalars().first()
 
 
+async def _seed_default_policy(
+    db: AsyncSession, tenant_id: uuid.UUID, created_by: uuid.UUID | None
+) -> ModerationPolicy:
+    # Mirrors the auto-seed in apps/api/app/routers/auth.py register flow so
+    # tenants that predate that path still get a working gate on first visit.
+    policy = ModerationPolicy(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        name="Default Policy",
+        description="Auto-seeded on first /moderation visit. Edit at /moderation.",
+        is_active=True,
+        pre_llm=True,
+        post_llm=True,
+        on_tool_output=False,
+        provider="openai",
+        provider_model="omni-moderation-latest",
+        thresholds={},
+        default_threshold=0.5,
+        category_actions={},
+        default_action=ModerationAction.BLOCK,
+        custom_patterns=[],
+        redaction_mask="█████",
+        created_by=created_by,
+    )
+    db.add(policy)
+    await db.commit()
+    return policy
+
+
 @router.post("/vet")
 async def vet(
     body: dict,
@@ -233,6 +262,13 @@ async def list_policies(
         .order_by(desc(ModerationPolicy.updated_at))
     )
     rows = (await db.execute(q)).scalars().all()
+    # Lazy backfill for tenants that predate the register-time auto-seed.
+    if not rows:
+        try:
+            await _seed_default_policy(db, user.tenant_id, user.id)
+            rows = (await db.execute(q)).scalars().all()
+        except Exception:
+            logger.exception("failed to lazy-seed default moderation policy")
     return success([_policy_dict(r) for r in rows])
 
 

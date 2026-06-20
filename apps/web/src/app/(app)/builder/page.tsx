@@ -59,6 +59,7 @@ import {
 } from '@/components/builder/pipeline/pipelineUtils';
 
 import { getToolDescription } from '@/lib/tool-docs';
+import ModelPicker from '@/components/ModelPicker';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -131,6 +132,26 @@ const DEFAULT_CONFIG: AgentConfig = {
   example_prompts: [],
 };
 
+// Honors a localStorage force flag so UAT (and ops) can pin the builder to a
+// specific provider regardless of the default. Returns the model id to use
+// or null when no override is set.
+function _forcedModelFromLocalStorage(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const forced = window.localStorage.getItem('ai_builder_force_provider');
+    if (!forced) return null;
+    const f = forced.trim().toLowerCase();
+    if (f === 'azure') return 'azure-gpt-4o';
+    if (f === 'openai') return 'gpt-4o';
+    if (f === 'google') return 'gemini-2.0-flash';
+    if (f === 'anthropic') return 'claude-sonnet-4-5-20250929';
+    // Treat any other value as an explicit model id override.
+    return forced;
+  } catch {
+    return null;
+  }
+}
+
 function makeToolNode(
   toolId: string,
   position: { x: number; y: number },
@@ -192,14 +213,6 @@ function makeMcpNode(
     draggable: true,
   };
 }
-
-const MOBILE_MODELS = [
-  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-haiku-3-5-20241022', label: 'Claude Haiku 3.5' },
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-];
 
 const MOBILE_TOOLS = [
   { id: 'calculator', name: 'Calculator' },
@@ -362,7 +375,12 @@ export default function BuilderPage() {
         setLoading(false);
         return;
       }
-      setNodes(buildInitialNodes(DEFAULT_CONFIG, []));
+      const forced = _forcedModelFromLocalStorage();
+      const initialCfg: AgentConfig = forced
+        ? { ...DEFAULT_CONFIG, model: forced }
+        : DEFAULT_CONFIG;
+      if (forced) setConfig(initialCfg);
+      setNodes(buildInitialNodes(initialCfg, []));
       setEdges([]);
       setLoading(false);
       return;
@@ -855,12 +873,13 @@ export default function BuilderPage() {
     const mode = (mc.mode || aiConfig.mode || 'agent') as string;
 
     // Build the complete new config FIRST
+    const forcedModel = _forcedModelFromLocalStorage();
     const fullConfig: AgentConfig = {
       ...DEFAULT_CONFIG,
       name: (aiConfig.name as string) || 'AI Generated Agent',
       description: (aiConfig.description as string) || '',
       system_prompt: (aiConfig.system_prompt as string) || '',
-      model: (mc.model as string) || 'claude-sonnet-4-5-20250929',
+      model: forcedModel || (mc.model as string) || 'claude-sonnet-4-5-20250929',
       temperature: (mc.temperature as number) || 0.7,
       max_tokens: 4096,
       input_variables: (mc.input_variables || aiConfig.input_variables || []) as AgentConfig['input_variables'],
@@ -1000,17 +1019,10 @@ export default function BuilderPage() {
             <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
               Model
             </label>
-            <select
+            <ModelPicker
               value={config.model}
-              onChange={(e) => updateConfig({ model: e.target.value })}
-              className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 appearance-none transition-colors"
-            >
-              {MOBILE_MODELS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => updateConfig({ model: v })}
+            />
           </div>
 
           {/* Tools */}

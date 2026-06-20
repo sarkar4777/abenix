@@ -113,36 +113,61 @@ async def critique(
     import time as _time
 
     report = LLMCriticReport(model=model)
-    try:
-        client = anthropic.AsyncAnthropic()
-    except Exception as e:
-        report.error = f"No Anthropic client available: {e}"
-        return report
-
     user_prompt = _build_user_prompt(kind, config, purpose)
     start = _time.monotonic()
-    try:
-        resp = await client.messages.create(
-            model=model,
-            max_tokens=1400,
-            temperature=0.0,
-            system=_CRITIC_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-    except Exception as e:
-        report.error = f"LLM call failed: {e}"
-        return report
-    report.latency_ms = int((_time.monotonic() - start) * 1000)
 
+    # Non-Anthropic models (azure/openai/google) route through the unified
+    # LLMRouter. Anthropic stays on the direct client so we keep the cheaper
+    # path and the existing cost calc.
+    is_anthropic = model.startswith("claude-")
     text = ""
-    for block in resp.content:
-        if getattr(block, "type", None) == "text":
-            text += block.text
+    if is_anthropic:
+        try:
+            client = anthropic.AsyncAnthropic()
+        except Exception as e:
+            report.error = f"No Anthropic client available: {e}"
+            return report
+        try:
+            resp = await client.messages.create(
+                model=model,
+                max_tokens=1400,
+                temperature=0.0,
+                system=_CRITIC_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+        except Exception as e:
+            report.error = f"LLM call failed: {e}"
+            return report
+        report.latency_ms = int((_time.monotonic() - start) * 1000)
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                text += block.text
+        # Rough cost estimate (claude-sonnet-4-5 pricing).
+        report.cost_usd = (
+            resp.usage.input_tokens * 3.0 + resp.usage.output_tokens * 15.0
+        ) / 1_000_000
+    else:
+        try:
+            from engine.llm_router import LLMRouter  # type: ignore
 
-    # Rough cost estimate (claude-sonnet-4-5 pricing).
-    report.cost_usd = (
-        resp.usage.input_tokens * 3.0 + resp.usage.output_tokens * 15.0
-    ) / 1_000_000
+            router = LLMRouter()
+        except Exception as e:
+            report.error = f"LLMRouter unavailable for model {model}: {e}"
+            return report
+        try:
+            resp = await router.complete(  # type: ignore[attr-defined]
+                messages=[{"role": "user", "content": user_prompt}],
+                system=_CRITIC_SYSTEM_PROMPT,
+                model=model,
+                temperature=0.0,
+                max_tokens=1400,
+            )
+        except Exception as e:
+            report.error = f"LLM call failed: {e}"
+            return report
+        report.latency_ms = int((_time.monotonic() - start) * 1000)
+        text = getattr(resp, "content", "") or ""
+        report.cost_usd = float(getattr(resp, "cost", 0.0) or 0.0)
 
     # Parse JSON — handle fence fallback.
     raw = text.strip()

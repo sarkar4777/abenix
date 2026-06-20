@@ -13,6 +13,7 @@ import {
   ThumbsDown, ThumbsUp, TrendingUp, XCircle, Zap, Bot, Lock, Network,
 } from 'lucide-react';
 import Link from 'next/link';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -118,10 +119,10 @@ export default function KnowledgeEnginePage() {
       if (Array.isArray(grantsBody.data)) {
         const grants: AgentGrant[] = grantsBody.data;
         try {
-          const agentsRes = await fetch(`${API_URL}/api/agents?limit=500`, { headers });
-          const agentsBody = await agentsRes.json();
-          const agents = (agentsBody.data || []) as { id: string; name: string; slug: string }[];
-          const byId = new Map(agents.map((a) => [a.id, a]));
+          const { agents } = await fetchAllAgents<{ id: string; name: string; slug: string }>({
+            token,
+          });
+          const byId = new Map((agents || []).map((a) => [a.id, a]));
           setAgentGrants(
             grants.map((g) => ({
               ...g,

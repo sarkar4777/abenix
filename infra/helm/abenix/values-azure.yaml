@@ -298,3 +298,15 @@ backup:
 # ── Global image pull policy ───────────────────────────────────────────────
 global:
   imagePullPolicy: Always
+
+# ── Progress stream + per-app post-processors ──────────────────────────────
+# The cluster runs wingman + contractiq side-by-side; each app picks its
+# own Redis channel prefix. The agent-runtime loads contractiq's
+# deterministic guardrails on import so the canonical anchors fire on
+# both fairvalue agents without the engine knowing anything about them.
+progress:
+  channelPrefix: "contractiq:progress:"
+  parentKeyPrefix: "contractiq:parent:"
+  parentTtl: "1800"
+
+postProcessorModules: "contractiq.runtime.post_processors"

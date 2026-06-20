@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Server, Cpu, HardDrive, Database, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 
@@ -160,8 +160,8 @@ export default function ClusterHealthPage() {
                 const memCap = n.mem_bytes || 0;
                 const memAlloc = n.mem_allocatable_bytes || 0;
                 return (
-                  <>
-                    <tr key={n.name} className="border-t border-slate-800/60">
+                  <React.Fragment key={n.name}>
+                    <tr className="border-t border-slate-800/60">
                       <td className="px-3 py-2 text-slate-300">
                         <span className="inline-flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full ${n.ready ? 'bg-emerald-500' : 'bg-amber-500'}`} />
@@ -176,7 +176,7 @@ export default function ClusterHealthPage() {
                       </td>
                     </tr>
                     {n.error && (
-                      <tr key={`${n.name}-error`} className="border-t border-red-500/20 bg-red-500/5" data-testid={`node-error-${n.name}`}>
+                      <tr className="border-t border-red-500/20 bg-red-500/5" data-testid={`node-error-${n.name}`}>
                         <td className="px-3 py-2 text-red-300" colSpan={4}>
                           <span className="inline-flex items-start gap-2">
                             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -185,7 +185,7 @@ export default function ClusterHealthPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
               {!data?.nodes?.length && (

@@ -7,6 +7,7 @@ import {
   AlertTriangle, TrendingUp, X, CheckCircle2, Edit3,
   DollarSign, Users, Zap, Server,
 } from 'lucide-react';
+import { formatCount, formatUsd } from '@/lib/format-stats';
 
 // Same resolution as apps/web/src/lib/api-client.ts — fall back to
 // localhost:8000 in dev, which the Next.js build bakes in at compile
@@ -229,14 +230,18 @@ export default function AdminScalingPage() {
             { label: 'Execs last 24h (fleet)',   value: totals.exec24,            icon: TrendingUp,color: 'text-emerald-400' },
             { label: 'With rate-limit',          value: totals.withRateLimit,     icon: Gauge,     color: 'text-amber-400' },
             { label: 'With daily budget',        value: totals.withBudget,        icon: DollarSign,color: 'text-rose-400' },
-          ].map(k => (
-            <div key={k.label} className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-4">
-              <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 mb-1">
-                <k.icon className={`w-3.5 h-3.5 ${k.color}`} /> {k.label}
+          ].map(k => {
+            const isZero = k.value === 0;
+            return (
+              <div key={k.label} className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-4">
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 mb-1">
+                  <k.icon className={`w-3.5 h-3.5 ${k.color}`} /> {k.label}
+                </div>
+                <p className={`text-2xl font-bold ${isZero ? 'text-slate-500' : k.color}`}>{formatCount(k.value)}</p>
+                {isZero && <p className="text-[10px] text-slate-600 mt-0.5">idle</p>}
               </div>
-              <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Cross-links to the other scaling consoles */}
@@ -268,7 +273,7 @@ export default function AdminScalingPage() {
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div>
                       <p className="text-[9px] uppercase text-slate-500">Agents</p>
-                      <p className={`text-lg font-semibold ${colors.text}`}>{p.agent_count}</p>
+                      <p className={`text-lg font-semibold ${p.agent_count === 0 ? 'text-slate-500' : colors.text}`}>{formatCount(p.agent_count)}</p>
                     </div>
                     <div>
                       <p className="text-[9px] uppercase text-slate-500">Min–Max</p>
@@ -276,7 +281,7 @@ export default function AdminScalingPage() {
                     </div>
                     <div>
                       <p className="text-[9px] uppercase text-slate-500">24 h execs</p>
-                      <p className={`text-lg font-semibold ${colors.text}`}>{p.executions_24h}</p>
+                      <p className={`text-lg font-semibold ${p.executions_24h === 0 ? 'text-slate-500' : colors.text}`}>{formatCount(p.executions_24h)}</p>
                     </div>
                   </div>
                 </button>
@@ -360,10 +365,16 @@ export default function AdminScalingPage() {
                       <td className="py-2 tabular-nums text-slate-200">{a.min_replicas} – {a.max_replicas}</td>
                       <td className="py-2 tabular-nums text-slate-200">{a.concurrency_per_replica}</td>
                       <td className="py-2 tabular-nums text-slate-300">
-                        {a.rate_limit_qps != null ? a.rate_limit_qps : <span className="text-slate-600">—</span>}
+                        {a.rate_limit_qps == null
+                          ? <span className="text-slate-600">—</span>
+                          : a.rate_limit_qps === 0
+                            ? <span className="text-slate-500">0</span>
+                            : a.rate_limit_qps}
                       </td>
                       <td className="py-2 tabular-nums text-slate-300">
-                        {a.daily_budget_usd != null ? `$${a.daily_budget_usd}` : <span className="text-slate-600">—</span>}
+                        {a.daily_budget_usd == null
+                          ? <span className="text-slate-600">—</span>
+                          : <span className={a.daily_budget_usd === 0 ? 'text-slate-500' : ''}>{formatUsd(a.daily_budget_usd)}</span>}
                       </td>
                       <td className="py-2">
                         <span className={`text-[10px] px-2 py-0.5 rounded border ${STATUS_COLORS[a.status] || STATUS_COLORS.draft}`}>

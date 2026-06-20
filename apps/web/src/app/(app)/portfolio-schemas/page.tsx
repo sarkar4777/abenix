@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Database, Plus, Trash2, Edit3, Copy, Save, X, FileJson,
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 
 interface PortfolioSchema {
   id: string;
@@ -33,7 +34,28 @@ interface Template {
 export default function PortfolioSchemasPage() {
   const { data: schemas, mutate } = useApi<PortfolioSchema[]>('/api/portfolio-schemas');
   const { data: templates } = useApi<Template[]>('/api/portfolio-schemas/templates/list');
-  const { data: allAgents } = useApi<any[]>('/api/agents?limit=500');
+  const [allAgents, setAllAgents] = useState<any[]>([]);
+  const [agentLoadProgress, setAgentLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const agentLoadStartedAt = useRef<number>(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    agentLoadStartedAt.current = Date.now();
+    (async () => {
+      const { agents } = await fetchAllAgents({
+        onProgress: (loaded, total) => {
+          if (cancelled) return;
+          if (Date.now() - agentLoadStartedAt.current > 2000) {
+            setAgentLoadProgress({ loaded, total });
+          }
+        },
+      });
+      if (cancelled) return;
+      setAllAgents(Array.isArray(agents) ? agents : []);
+      setAgentLoadProgress(null);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Map tool_name -> [{slug, name}] for the "used by these agents" badge
   const agentsByTool = (() => {
@@ -214,6 +236,12 @@ export default function PortfolioSchemasPage() {
             </p>
           </div>
         </div>
+
+        {agentLoadProgress && (
+          <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 text-xs text-slate-300">
+            Loading {agentLoadProgress.loaded} of {agentLoadProgress.total} agents…
+          </div>
+        )}
 
         {/* Templates dropdown */}
         {showTemplates && templates && (

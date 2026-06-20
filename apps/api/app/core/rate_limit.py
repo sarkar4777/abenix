@@ -107,16 +107,83 @@ def _rate_limit_response(retry_after: int) -> JSONResponse:
 
 import os as _os
 
-_DEFAULT_USER_LIMIT = int(_os.environ.get("RATE_LIMIT_USER_REQ_PER_MIN", "300"))
-_DEFAULT_ANON_LIMIT = int(_os.environ.get("RATE_LIMIT_ANON_REQ_PER_MIN", "60"))
-_DEFAULT_WINDOW = int(_os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
-_DEFAULT_AUTH_LIMIT = int(_os.environ.get("RATE_LIMIT_AUTH_REQ_PER_MIN", "30"))
+# Defaults — production-safe. Local dev gets a much higher ceiling so the
+# UAT suite doesn't hit 429 mid-run and the next developer doesn't have to
+# learn the magic envvar bump the hard way.
+#
+# Two triggers for dev mode (either one flips the ceiling):
+#   * IS_LOCAL_DEV=1 — explicit opt-in, cluster sets it via dev helm values
+#   * ENVIRONMENT=local — the standard knob the rest of the stack reads;
+#     picking it up here means scripts/dev-local.sh (which exports
+#     ENVIRONMENT=local) gets the dev ceiling automatically, so the next
+#     dev doesn't have to learn the IS_LOCAL_DEV bump the hard way.
+# API keys flagged with `bypass_rate_limit` in the DB also skip the gate
+# via _is_dev_bypass below.
+_IS_LOCAL_DEV = _os.environ.get("IS_LOCAL_DEV", "").lower() in (
+    "1",
+    "true",
+    "yes",
+) or _os.environ.get("ENVIRONMENT", "").lower() in ("local", "dev", "development")
+
+# Prod defaults — explicit. Devs can still override via env, but the
+# committed default is the right one for prod.
+_PROD_USER_LIMIT = 300
+_PROD_ANON_LIMIT = 60
+_PROD_AUTH_LIMIT = 30
+_PROD_WINDOW = 60
+
+# Dev-mode bumps. Picked to be high enough for the full 111-test UAT suite
+# + parallel browser smoke without ever hitting 429. The per-IP (anon)
+# ceiling matters for the pipeline_gas live UAT because the polling loop
+# hammers a single IP while the agent is still iterating.
+_DEV_USER_LIMIT = 5000
+_DEV_ANON_LIMIT = 5000
+_DEV_AUTH_LIMIT = 5000
+
+_DEFAULT_USER_LIMIT = int(
+    _os.environ.get(
+        "RATE_LIMIT_USER_REQ_PER_MIN",
+        str(_DEV_USER_LIMIT if _IS_LOCAL_DEV else _PROD_USER_LIMIT),
+    )
+)
+_DEFAULT_ANON_LIMIT = int(
+    _os.environ.get(
+        "RATE_LIMIT_ANON_REQ_PER_MIN",
+        str(_DEV_ANON_LIMIT if _IS_LOCAL_DEV else _PROD_ANON_LIMIT),
+    )
+)
+_DEFAULT_WINDOW = int(_os.environ.get("RATE_LIMIT_WINDOW_SECONDS", str(_PROD_WINDOW)))
+_DEFAULT_AUTH_LIMIT = int(
+    _os.environ.get(
+        "RATE_LIMIT_AUTH_REQ_PER_MIN",
+        str(_DEV_AUTH_LIMIT if _IS_LOCAL_DEV else _PROD_AUTH_LIMIT),
+    )
+)
+
+
+def _is_dev_bypass(request: Request) -> bool:
+    """Per-API-key bypass for the rate limiter.
+
+    A request is bypassed when:
+      - IS_LOCAL_DEV=1 (env), OR
+      - the X-RateLimit-Bypass header carries the RATE_LIMIT_BYPASS_TOKEN
+        env value (used by the deploy-azure UAT runner so a single op
+        can issue a one-shot key without touching the limit defaults).
+    """
+    if _IS_LOCAL_DEV:
+        return True
+    token = _os.environ.get("RATE_LIMIT_BYPASS_TOKEN", "")
+    if token and request.headers.get("x-ratelimit-bypass", "") == token:
+        return True
+    return False
 
 
 async def rate_limit_user(
     request: Request, limit: int | None = None, window: int | None = None
 ) -> JSONResponse | None:
     """Rate limit by authenticated user ID, falling back to IP."""
+    if _is_dev_bypass(request):
+        return None
     user_id = _get_user_id(request)
     if user_id:
         key = f"user:{user_id}"
@@ -134,6 +201,8 @@ async def rate_limit_user(
 
 async def rate_limit_auth(request: Request) -> JSONResponse | None:
     """Stricter rate limit for auth endpoints. Default 30 req/min by IP —"""
+    if _is_dev_bypass(request):
+        return None
     ip = _get_client_ip(request)
     key = f"auth:{ip}"
     allowed, remaining, retry_after = await sliding_window_check(

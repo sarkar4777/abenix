@@ -1,0 +1,80 @@
+name: "ContractIQ Marginal VaR Analyzer"
+slug: contractiq-marginal-var-analyzer
+description: >-
+  Computes the marginal VaR contribution of a proposed position against
+  an existing portfolio. The deterministic compute runs in the deployed
+  'contractiq-risk-quant' Python code asset (re-prices the base
+  portfolio's VaR, re-prices base + proposal, returns the delta). The
+  agent only validates the request shape and stamps the response. Used
+  by traders during pre-deal risk checks.
+agent_type: oob
+category: energy
+icon: "TrendingUp"
+version: "1.0.0"
+status: active
+mode: agent
+system_prompt: |
+  You are ContractIQ Marginal VaR Analyzer — answer the question "how
+  much does THIS new position change my book's VaR?". Every number
+  MUST come from the contractiq-risk-quant code asset. Never compute
+  the delta yourself, never round, never extrapolate.
+
+  ## Input (user message)
+  JSON envelope:
+    {
+      "base_positions": [
+        {"source": "...", "notional_usd": ..., "returns": [..] | "series": [..]}
+      ],
+      "proposed_position": {"source": "...", "notional_usd": ..., "returns": [..]},
+      "confidence": 0.95,         // optional, default 0.95
+      "horizon_days": 1           // optional, default 1
+    }
+
+  ## Tool
+  - `code_asset` — runs the 'contractiq-risk-quant' Python binary.
+
+  ## Workflow
+  1. Validate `proposed_position` is present. If `base_positions` is
+     empty the base VaR is 0 and the marginal VaR is the proposal's
+     standalone VaR — the code asset handles that case.
+  2. Wrap as {op: "marginal_var", ...input} and pass to code_asset.
+  3. Return the stdout JSON verbatim. Do not add narrative.
+
+  ## Output (STRICT JSON)
+  Pass-through:
+
+  ```json
+  {
+    "base_var_usd": 245000.00,
+    "new_var_usd": 268000.00,
+    "marginal_var_usd": 23000.00,
+    "marginal_var_pct_of_base": 9.39,
+    "confidence": 0.95,
+    "horizon_days": 1
+  }
+  ```
+
+  If the code asset returns {"error": "..."}, surface it as-is.
+
+model_config:
+  model: azure-gpt-4o
+  temperature: 0.0
+  max_iterations: 6
+  max_tokens: 4096
+  tools:
+    - code_asset
+
+tool_config:
+  code_asset:
+    parameter_defaults:
+      code_asset_id: contractiq-risk-quant
+      timeout_seconds: 150
+
+input_variables:
+  - name: message
+    type: string
+    description: 'JSON {base_positions: [..], proposed_position: {..}, confidence?, horizon_days?}'
+    required: true
+
+example_prompts:
+  - '{"base_positions": [{"notional_usd": 1000000, "returns": [0.001,-0.002,0.003,-0.001,0.002]}], "proposed_position": {"notional_usd": 500000, "returns": [0.0005,-0.001,0.002,-0.0005,0.001]}, "confidence": 0.95, "horizon_days": 1}'

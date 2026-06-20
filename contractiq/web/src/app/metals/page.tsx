@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   Diamond, ShieldCheck, AlertTriangle, Truck, Globe, Radar,
   Loader2, ArrowRight, Activity, Layers,
@@ -78,6 +79,7 @@ export default function MetalsOverviewPage() {
             <p className="text-sm text-slate-400">Refiner-grade contract intelligence — extract, audit, watch, score.</p>
           </div>
         </div>
+        <PageExplainer routeKey="metals" />
 
         {loading ? (
           <div className="flex items-center justify-center py-20">

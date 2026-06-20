@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.contractiq_models import (
@@ -18,6 +18,26 @@ from app.models.contractiq_models import (
 
 
 logger = logging.getLogger(__name__)
+
+
+# Demo-tenant placeholder used when the Abenix tenants table has no `demo` row.
+# Matches the fallback in the c0d1e2f3a4b5 migration so seed + backfill agree.
+_PLACEHOLDER_TENANT = "00000000-0000-0000-0000-000000000000"
+
+
+async def _resolve_demo_tenant_id(db: AsyncSession) -> str:
+    """Look up the Abenix `demo` tenant id; fall back to a deterministic
+    placeholder so the seed never breaks the NOT NULL constraint on a cluster
+    that hasn't seeded an Abenix demo tenant yet."""
+    try:
+        row = (await db.execute(
+            text("SELECT id::text FROM tenants WHERE name = 'demo' LIMIT 1")
+        )).first()
+        if row and row[0]:
+            return str(row[0])
+    except Exception as e:
+        logger.warning("demo tenant lookup failed (%s); using placeholder", e)
+    return _PLACEHOLDER_TENANT
 
 
 COUNTERPARTIES: list[dict] = [
@@ -38,29 +58,44 @@ COUNTERPARTIES: list[dict] = [
 
 _YEAR_SCALE = {2020: 0.62, 2021: 0.80, 2022: 1.34, 2023: 1.09, 2024: 1.00}
 
+# Year-on-year balance-sheet trajectories. Assets ramp up smoothly; long-term debt
+# is paid down through the cycle (typical post-COVID majors profile). Working-capital
+# items (current_assets / current_liabilities / cash) flex with revenue, not assets.
+_ASSET_GROWTH = {2020: 1.000, 2021: 1.027, 2022: 1.064, 2023: 1.100, 2024: 1.135}
+_DEBT_TRAJECTORY = {2020: 1.000, 2021: 0.910, 2022: 0.790, 2023: 0.680, 2024: 0.580}
+
 
 def _build_statements(cp_size_usd_bn: float, sector: str) -> dict[int, dict[str, float]]:
     out: dict[int, dict[str, float]] = {}
     rev_base = cp_size_usd_bn * 1_000.0
     ebitda_margin = {"Integrated Oil & Gas": 0.22, "Utilities": 0.18, "Commodity Trading": 0.04}.get(sector, 0.15)
     net_margin = {"Integrated Oil & Gas": 0.08, "Utilities": 0.06, "Commodity Trading": 0.015}.get(sector, 0.05)
-    debt_ratio = {"Integrated Oil & Gas": 0.35, "Utilities": 0.55, "Commodity Trading": 0.45}.get(sector, 0.4)
+    # Starting (2020) long-term-debt / assets ratio. Oil majors entered 2020 over-levered;
+    # by 2024 they had paid down ~42% (matches Exxon 67B->39B).
+    debt_ratio_2020 = {"Integrated Oil & Gas": 0.198, "Utilities": 0.42, "Commodity Trading": 0.34}.get(sector, 0.30)
+    # Assets-to-revenue at the FY2024 baseline (scale=1.0). Tuned so Exxon
+    # (size_bn=339) lands at ~420B in 2024.
+    asset_to_rev_2024 = {"Integrated Oil & Gas": 1.24, "Utilities": 2.30, "Commodity Trading": 0.55}.get(sector, 1.10)
+    assets_2024 = rev_base * asset_to_rev_2024
+    assets_2020 = assets_2024 / _ASSET_GROWTH[2024]  # rebase so 2024 hits target
 
     for year, scale in _YEAR_SCALE.items():
         revenue = rev_base * scale
-        ebitda  = revenue * ebitda_margin * (0.9 + 0.2 * (year - 2020) / 4)
+        ebitda = revenue * ebitda_margin * (0.9 + 0.2 * (year - 2020) / 4)
         net_income = revenue * net_margin * (0.7 + 0.3 * scale)
-        total_assets = rev_base * 1.1
-        cash = total_assets * 0.07
-        current_assets = total_assets * 0.32
-        current_liabilities = total_assets * 0.22
-        long_term_debt = total_assets * debt_ratio
+
+        total_assets = assets_2020 * _ASSET_GROWTH[year]
+        # Working capital flexes with revenue, not assets (this is what broke before).
+        current_assets = revenue * 0.27
+        cash = revenue * 0.055
+        current_liabilities = revenue * 0.21
+        # Long-term debt: paid down on the trajectory; anchored to 2020 assets.
+        long_term_debt = assets_2020 * debt_ratio_2020 * _DEBT_TRAJECTORY[year]
         total_liabilities = current_liabilities + long_term_debt
         total_equity = total_assets - total_liabilities
         interest_expense = long_term_debt * 0.045
         operating_cf = ebitda * 0.78
         free_cf = operating_cf - rev_base * 0.06
-        _ = scale
         out[year] = {
             "revenue": revenue,
             "ebitda": ebitda,
@@ -153,12 +188,18 @@ _PRE_SEEDED_ALERTS: list[tuple[str, str, str, str, str]] = [
 ]
 
 
-async def _get_or_create_counterparty(db: AsyncSession, payload: dict) -> ContractIQCounterparty:
+async def _get_or_create_counterparty(
+    db: AsyncSession, payload: dict, tenant_id: str
+) -> ContractIQCounterparty:
     existing = await db.execute(select(ContractIQCounterparty).where(
         ContractIQCounterparty.legal_name == payload["legal_name"]
     ))
     cp = existing.scalar_one_or_none()
     if cp:
+        # Repair rows from before tenant_id existed — leave already-tenanted
+        # rows alone so we never silently re-home another tenant's data.
+        if not cp.tenant_id:
+            cp.tenant_id = tenant_id
         cp.credit_score_1_100 = payload.get("score")
         cp.credit_rating = payload.get("credit_rating") or cp.credit_rating
         cp.credit_rating_agency = payload.get("agency") or cp.credit_rating_agency
@@ -169,6 +210,7 @@ async def _get_or_create_counterparty(db: AsyncSession, payload: dict) -> Contra
         )
         return cp
     cp = ContractIQCounterparty(
+        tenant_id=tenant_id,
         legal_name=payload["legal_name"],
         ticker=payload.get("ticker"),
         sector=payload.get("sector"),
@@ -191,7 +233,6 @@ async def _compute_and_persist_ratios(db: AsyncSession, cp_id, year: int, stmt: 
     revenue = stmt["revenue"]
     cur_a = stmt["current_assets"]
     cur_l = stmt["current_liabilities"]
-    cash = stmt["cash_and_equivalents"]
     total_liab = stmt["total_liabilities"]
     equity = stmt["total_equity"]
     int_exp = stmt["interest_expense"]
@@ -235,13 +276,14 @@ async def _compute_and_persist_ratios(db: AsyncSession, cp_id, year: int, stmt: 
     ))
 
 
-async def seed_quickwin_data(db: AsyncSession) -> dict:
+async def seed_quickwin_data(db: AsyncSession, tenant_id: str | None = None) -> dict:
     summary = {"counterparties": 0, "statements": 0, "ratios": 0, "permits": 0, "alerts": 0}
 
     cp_lookup: dict[str, ContractIQCounterparty] = {}
+    tid = tenant_id or await _resolve_demo_tenant_id(db)
 
     for cp_payload in COUNTERPARTIES:
-        cp = await _get_or_create_counterparty(db, cp_payload)
+        cp = await _get_or_create_counterparty(db, cp_payload, tid)
         cp_lookup[cp.legal_name] = cp
         if cp not in db.new:
             summary["counterparties"] += 1
@@ -254,11 +296,30 @@ async def seed_quickwin_data(db: AsyncSession) -> dict:
             ))).scalar_one()
         )
 
-        existing_stmts = await db.execute(select(ContractIQFinancialStatement).where(
+        existing_stmts = (await db.execute(select(ContractIQFinancialStatement).where(
             ContractIQFinancialStatement.counterparty_id == cp.id
-        ))
-        if existing_stmts.first():
-            continue
+        ))).scalars().all()
+        # Self-healing upgrade path: if statements exist but balance-sheet items are
+        # flat across years (the old _build_statements bug), wipe + rebuild. The
+        # detector compares total_assets across the seeded fiscal years.
+        if existing_stmts:
+            assets_seen = {
+                s.fiscal_year: round(float((s.line_items or {}).get("total_assets") or 0), 2)
+                for s in existing_stmts
+                if (s.line_items or {}).get("total_assets") is not None
+            }
+            is_flat = len(set(assets_seen.values())) <= 1 and len(assets_seen) >= 2
+            if not is_flat:
+                continue
+            for s in existing_stmts:
+                await db.delete(s)
+            existing_ratios = (await db.execute(select(ContractIQFinancialRatio).where(
+                ContractIQFinancialRatio.counterparty_id == cp.id
+            ))).scalars().all()
+            for r in existing_ratios:
+                await db.delete(r)
+            await db.flush()
+            logger.info("quickwin_seed: rebuilt flat financials for %s", cp.legal_name)
 
         size_bn = _CP_SIZE_BN.get(cp.legal_name, 50.0)
         per_year = _build_statements(size_bn, cp.sector or "")

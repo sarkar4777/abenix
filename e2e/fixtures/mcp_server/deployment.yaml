@@ -18,6 +18,15 @@ spec:
     spec:
       containers:
         - name: server
+          # Public-repo placeholder. publish-public.sh scrubs every real
+          # ACR name out of the source tree, so this image ref must stay
+          # generic. Before `kubectl apply`, substitute your real ACR —
+          # e.g. envsubst or:
+          #   sed -i "s|your-acr.azurecr.io|${ACR_NAME}.azurecr.io|g" \
+          #     e2e/fixtures/mcp_server/deployment.yaml
+          # or build+push under any tag and override with:
+          #   kubectl set image deploy/uat-mcp -n abenix \
+          #     server=<your-acr>.azurecr.io/uat-mcp:latest
           image: your-acr.azurecr.io/uat-mcp:latest
           imagePullPolicy: Always
           ports:

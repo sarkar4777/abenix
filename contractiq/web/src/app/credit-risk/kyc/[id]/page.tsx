@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   FileCheck2, ChevronRight, Loader2, AlertTriangle, CheckCircle2, XCircle,
   Building2, Flag, ShieldCheck, ShieldAlert, DollarSign,
@@ -57,6 +58,8 @@ interface KycData {
   created_at?: string;
   updated_at?: string;
   error_message?: string;
+  imported_at?: string;
+  raw_agent_response?: any;
 }
 
 const RISK_STYLE: Record<string, { text: string; bg: string; border: string; dot: string }> = {
@@ -138,6 +141,7 @@ export default function KycDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [signingOff, setSigningOff] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [signOffForm, setSignOffForm] = useState({
     outcome_of_check: 'positive',
     general_comments: '',
@@ -249,7 +253,33 @@ export default function KycDetailPage() {
           </div>
           <div className="flex gap-2">
             <button onClick={print} className="px-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700 text-xs text-slate-300 flex items-center gap-1.5 hover:bg-slate-700">
-              <Printer className="w-3 h-3" /> Print / PDF
+              <Printer className="w-3 h-3" /> Print
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const r = await fetch(`${API_URL}/api/contractiq/insights/kyc/${id}/pdf/render`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${getToken()}` },
+                  });
+                  if (!r.ok) { setExportError('PDF export failed (server returned ' + r.status + ').'); return; }
+                  const blob = await r.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `kyc_${(cp.name || 'report').replace(/\s+/g, '_').slice(0, 40)}.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                } catch (e: any) {
+                  setExportError('PDF export failed: ' + (e?.message || e));
+                }
+              }}
+              data-testid="kyc-export-pdf"
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-600 border border-emerald-500/40 text-xs text-white font-semibold flex items-center gap-1.5 hover:shadow-lg hover:shadow-emerald-500/20"
+            >
+              <Printer className="w-3 h-3" /> Export KYC PDF
             </button>
             <button
               onClick={async () => {
@@ -270,6 +300,13 @@ export default function KycDetailPage() {
             </button>
           </div>
         </div>
+
+        {exportError && (
+          <div data-testid="kyc-export-error" className="bg-rose-500/5 border border-rose-500/30 rounded-xl p-3 flex items-start gap-3">
+            <XCircle className="w-4 h-4 text-rose-400 mt-0.5" />
+            <p className="text-xs text-rose-300">{exportError}</p>
+          </div>
+        )}
 
         {/* Running state */}
         {data.status === 'running' && (
@@ -308,7 +345,23 @@ export default function KycDetailPage() {
                     <FileCheck2 className="w-7 h-7 text-emerald-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] uppercase tracking-[0.15em] text-slate-500 mb-1">KYC Standard Check Report</p>
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-[10px] uppercase tracking-[0.15em] text-slate-500">KYC Standard Check Report</p>
+                      {data.raw_agent_response?.source === 'imported_pdf' && (
+                        <span
+                          data-testid="kyc-imported-badge"
+                          title={
+                            data.imported_at
+                              ? `Imported on ${new Date(data.imported_at).toISOString().slice(0, 10)}`
+                              + (data.signed_at ? `; original signed ${new Date(data.signed_at).toISOString().slice(0, 10)}` : '')
+                              : 'Imported from PDF'
+                          }
+                          className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
+                        >
+                          imported
+                        </span>
+                      )}
+                    </div>
                     <h1 className="text-2xl font-bold text-white mb-2 truncate">{cp.name}</h1>
                     <div className="flex flex-wrap items-center gap-3 text-xs">
                       {cp.country_name && (
@@ -363,6 +416,8 @@ export default function KycDetailPage() {
                 </div>
               </div>
             </motion.div>
+
+            <PageExplainer routeKey="credit-risk-kyc-detail" />
 
             {/* Scoring row */}
             <div className="grid grid-cols-4 gap-3">

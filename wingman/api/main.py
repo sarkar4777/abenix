@@ -80,7 +80,10 @@ def _build_subject(trader_id: str = "demo-trader") -> ActingSubject:
 
 
 def _abenix_client(trader_id: str = "demo-trader") -> Abenix:
-    api_key = os.environ.get("WINGMAN_ABENIX_API_KEY", "")
+    # Strip stray CR/LF — a secret-mounted file with a trailing newline turns
+    # X-API-Key into an illegal httpx header value and every forge.* call dies
+    # with "Illegal header value", taking market-brief/approvals/tools/ops down.
+    api_key = os.environ.get("WINGMAN_ABENIX_API_KEY", "").strip().rstrip(chr(13) + chr(10))
     base_url = os.environ.get("ABENIX_API_URL", "http://localhost:8000")
     if not api_key:
         raise HTTPException(
@@ -118,6 +121,54 @@ async def _initial_warm() -> None:
     logger.info("bootstrap warm complete: %d (page,key) pairs filled", fired)
 
 
+async def _startup_warm_all() -> None:
+    """Aggressive startup warmer — explicitly walks every active corridor
+    and fires scan + forecast, plus one market-brief snapshot. Runs once
+    on lifespan startup so /signals, /mispricing/cached, /scenarios/cached
+    and /market-brief return real data on the first browser hit instead
+    of {"data": null}. Each corridor/page warm is best-effort and isolated
+    so one failure doesn't poison the rest."""
+    active = [c["id"] for c in CORRIDORS if c.get("active")]
+    logger.info("startup warm: %d active corridors, market-brief", len(active))
+
+    # /scan (mispricing) — one per active corridor.
+    for cid in active:
+        try:
+            payload = await _warm_mispricing(cid)
+            if payload:
+                result_cache.write("mispricing", cid, payload)
+                logger.info("startup warm: mispricing/%s populated", cid)
+            else:
+                logger.info("startup warm: mispricing/%s empty (agent unavailable)", cid)
+        except Exception as e:
+            logger.warning("startup warm mispricing/%s failed: %s", cid, e)
+
+    # /forecast (scenarios) — one per active corridor.
+    for cid in active:
+        try:
+            payload = await _warm_scenarios(cid)
+            if payload:
+                result_cache.write("scenarios", cid, payload)
+                logger.info("startup warm: scenarios/%s populated", cid)
+            else:
+                logger.info("startup warm: scenarios/%s empty (agent unavailable)", cid)
+        except Exception as e:
+            logger.warning("startup warm scenarios/%s failed: %s", cid, e)
+
+    # /market-brief — one snapshot.
+    try:
+        brief = await _warm_market_brief()
+        if brief:
+            result_cache.write("market-brief", "snapshot", brief)
+            logger.info("startup warm: market-brief/snapshot populated")
+        else:
+            logger.info("startup warm: market-brief/snapshot empty (agent unavailable)")
+    except Exception as e:
+        logger.warning("startup warm market-brief failed: %s", e)
+
+    logger.info("startup warm: done")
+
+
 async def _periodic_warm() -> None:
     for page, keys, run in _warmer_pairs():
         await result_cache.warm(page, keys, run, require_recent_visit=True)
@@ -125,7 +176,12 @@ async def _periodic_warm() -> None:
 
 async def _warmer_loop() -> None:
     try:
+        # Short delay so the SDK/HTTP stack is up before we hammer agents.
         await asyncio.sleep(15)
+        # Aggressive corridor walk that populates Home's TodaysSignals on
+        # first load even when the file cache is empty (fresh deploy / PVC
+        # wiped). Runs in addition to the page-keyed _initial_warm above.
+        await _startup_warm_all()
         await _initial_warm()
     except asyncio.CancelledError:
         return
@@ -688,9 +744,22 @@ async def analyze_cached(corridor_id: str) -> dict[str, Any]:
 # ─── Broker Inbox ────────────────────────────────────────────────────────
 
 
+# How long ago each broker email should appear to have landed, in minutes.
+# Stamped at request time so the inbox always reads as freshly arrived and
+# never rots against the seeded 2026-05-07 strings in broker_emails.json.
+_INBOX_AGE_OFFSETS_MIN = [3, 15, 30, 90, 120]
+
+
 @app.get("/api/wingman/inbox")
 async def list_broker_emails() -> dict[str, Any]:
-    return {"data": BROKER_EMAILS}
+    now = datetime.now(timezone.utc)
+    emails: list[dict[str, Any]] = []
+    for idx, email in enumerate(BROKER_EMAILS):
+        offset = _INBOX_AGE_OFFSETS_MIN[idx] if idx < len(_INBOX_AGE_OFFSETS_MIN) else _INBOX_AGE_OFFSETS_MIN[-1]
+        stamped = dict(email)
+        stamped["received_at"] = (now - timedelta(minutes=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        emails.append(stamped)
+    return {"data": emails}
 
 
 # execution_id → email_id, so the result endpoint can echo it back without
@@ -791,80 +860,9 @@ async def classify_result(execution_id: str) -> dict[str, Any]:
     }
 
 
-def _local_var_simulation(rule: dict[str, Any], n: int = 10_000, horizon_days: int = 30) -> dict[str, Any]:
-    """GBM Monte Carlo P&L when wingman-var-simulator code asset is unavailable."""
-    import random
-    import math
-
-    size_mt = float(rule.get("size_mt") or 10_000)
-    target_spread = float(((rule.get("trigger") or {}).get("value")) or 30.0)
-    sigma_annual = 0.50
-    dt = max(horizon_days, 1) / 252.0
-    sigma_h = sigma_annual * math.sqrt(dt)
-
-    side = (rule.get("side") or "").lower()
-    direction = -1.0 if "sell" in side else 1.0
-
-    rng = random.Random(int(size_mt) ^ int(target_spread * 1000) ^ horizon_days)
-    pnls: list[float] = []
-    for _ in range(n):
-        eps = rng.gauss(0.0, 1.0)
-        spread_at_T = target_spread * math.exp(-0.5 * sigma_h * sigma_h + sigma_h * eps)
-        pnl_per_mt = direction * (spread_at_T - target_spread)
-        pnls.append(pnl_per_mt * size_mt)
-    pnls.sort()
-
-    def pct(p: float) -> float:
-        i = max(0, min(len(pnls) - 1, int(p * len(pnls))))
-        return pnls[i]
-
-    p99_loss_idx = int(0.01 * len(pnls))
-    es99 = sum(pnls[:max(1, p99_loss_idx)]) / max(1, p99_loss_idx)
-
-    bins = 24
-    lo, hi = pnls[0], pnls[-1]
-    width = (hi - lo) / bins if hi > lo else 1.0
-    counts = [0] * bins
-    for p in pnls:
-        idx = min(bins - 1, int((p - lo) / width)) if width else 0
-        counts[idx] += 1
-    histogram = [
-        {"low": lo + i * width, "high": lo + (i + 1) * width, "count": counts[i]}
-        for i in range(bins)
-    ]
-
-    mean_pnl = sum(pnls) / len(pnls)
-    var_p95_loss = -pct(0.05)
-    var_p99_loss = -pct(0.01)
-    return {
-        "p50_usd": pct(0.50),
-        "p95_usd": -var_p95_loss,
-        "p99_usd": -var_p99_loss,
-        "expected_shortfall_p99_usd": es99,
-        "mean_usd": mean_pnl,
-        "std_usd": (sum((p - mean_pnl) ** 2 for p in pnls) / len(pnls)) ** 0.5,
-        "histogram": histogram,
-        "n_simulations": n,
-        "horizon_days": horizon_days,
-        "method": "GBM Monte Carlo · 10,000 paths · seeded by rule + target spread",
-        "data_sources": [
-            "EIA: PROPANE_USGC_MB (52-week annualised volatility ~50%)",
-            "Bunker-derived freight (shipandbunker.com)",
-            "Strategy rule (size, side, trigger target)",
-        ],
-    }
-
-
-def _var_is_empty(v: dict[str, Any]) -> bool:
-    if not isinstance(v, dict):
-        return True
-    keys = ("p50_usd", "p95_usd", "p99_usd", "mean_usd")
-    return not any(v.get(k) is not None for k in keys)
-
-
 @app.post("/api/wingman/strategy/{rule_id}/var")
 async def run_var(rule_id: str) -> dict[str, Any]:
-    """Run the Monte Carlo VaR Go simulator on a strategy rule."""
+    """Run the Monte Carlo VaR simulator agent on a strategy rule."""
     rule = _strategies_state.get(rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail=f"Rule not found: {rule_id}")
@@ -895,26 +893,11 @@ async def run_var(rule_id: str) -> dict[str, Any]:
     except Exception:
         parsed = {}
 
-    if _var_is_empty(parsed):
-        local = _local_var_simulation(rule)
-        size_mt = rule.get("size_mt", 10_000)
-        trig = (rule.get("trigger") or {}).get("value")
-        parsed = {
-            **local,
-            "narrative": (
-                f"10,000-path GBM Monte Carlo on the strategy P&L. "
-                f"Position: {size_mt:,} MT at trigger spread ${trig}/MT, 30-day horizon, "
-                f"50% annualised σ (calibrated to 52-week EIA propane history). "
-                f"p95 loss ${abs(local['p95_usd']):,.0f}, p99 loss ${abs(local['p99_usd']):,.0f}, "
-                f"ES99 ${abs(local['expected_shortfall_p99_usd']):,.0f}."
-            ),
-        }
-
     return {
         "data": {
             "rule_id": rule_id,
             "execution_id": execution_id,
-            "var": parsed,
+            "var": parsed or None,
             "cost_usd": cost_usd,
             "duration_ms": duration_ms,
         }
@@ -1044,12 +1027,18 @@ async def acknowledge_offer(offer_id: str) -> dict[str, Any]:
 @app.get("/api/wingman/ops/snapshot")
 async def ops_snapshot() -> dict[str, Any]:
     """Single call to wingman-ops-monitor — returns vessels + weather + ranked alerts."""
-    async with _abenix_client() as forge:
-        result = await forge.execute(
-            "wingman-ops-monitor",
-            json.dumps({"corridors": [c["id"] for c in CORRIDORS if c.get("active")]}),
-            wait_timeout_seconds=300,
-        )
+    try:
+        async with _abenix_client() as forge:
+            result = await forge.execute(
+                "wingman-ops-monitor",
+                json.dumps({"corridors": [c["id"] for c in CORRIDORS if c.get("active")]}),
+                wait_timeout_seconds=300,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("ops-snapshot agent failed")
+        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
     parsed: dict[str, Any] = {}
     raw = result.output or ""
     try:
@@ -1750,15 +1739,27 @@ async def graph_query(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/wingman/approvals")
 async def list_approvals(status: str = "pending") -> dict[str, Any]:
-    async with _abenix_client() as forge:
-        items = await forge.approvals.list(status=status, limit=200)
+    try:
+        async with _abenix_client() as forge:
+            items = await forge.approvals.list(status=status, limit=200)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("approvals list failed")
+        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
     return {"data": items}
 
 
 @app.get("/api/wingman/approvals/{approval_id}")
 async def get_approval(approval_id: str) -> dict[str, Any]:
-    async with _abenix_client() as forge:
-        row = await forge.approvals.get(approval_id)
+    try:
+        async with _abenix_client() as forge:
+            row = await forge.approvals.get(approval_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("approval get failed for %s", approval_id)
+        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
     return {"data": row}
 
 
@@ -1767,10 +1768,16 @@ async def approve_approval(
     approval_id: str, body: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     body = body or {}
-    async with _abenix_client() as forge:
-        row = await forge.approvals.approve(
-            approval_id, reason=str(body.get("reason") or "")
-        )
+    try:
+        async with _abenix_client() as forge:
+            row = await forge.approvals.approve(
+                approval_id, reason=str(body.get("reason") or "")
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("approval approve failed for %s", approval_id)
+        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
     return {"data": row}
 
 
@@ -1779,10 +1786,16 @@ async def deny_approval(
     approval_id: str, body: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     body = body or {}
-    async with _abenix_client() as forge:
-        row = await forge.approvals.deny(
-            approval_id, reason=str(body.get("reason") or "")
-        )
+    try:
+        async with _abenix_client() as forge:
+            row = await forge.approvals.deny(
+                approval_id, reason=str(body.get("reason") or "")
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("approval deny failed for %s", approval_id)
+        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
     return {"data": row}
 
 
@@ -1796,12 +1809,22 @@ async def execution_detail(execution_id: str) -> dict[str, Any]:
     Useful when the trader UI shows FAILED but the page has no
     error_message — this endpoint surfaces error_message, failure_code,
     tool_calls and the raw output without needing a platform admin token.
+
+    Ownership: row.subject_type must be 'wingman' (or empty for legacy rows)
+    AND row.subject_id must equal the configured Wingman trader. Without this
+    gate, anyone with cluster network access could enumerate any tenant's
+    execution by id and read raw outputs.
     """
     async with _abenix_client() as forge:
         try:
             row = await forge.executions.get(execution_id) or {}
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Execution fetch failed: {e}")
+    trader_id = os.environ.get("WINGMAN_DEMO_TRADER_ID", "demo-trader")
+    subj_type = str(row.get("subject_type") or "").lower()
+    subj_id = str(row.get("subject_id") or "")
+    if subj_type not in ("", "wingman") or (subj_id and subj_id != trader_id):
+        raise HTTPException(status_code=404, detail="execution not found")
     return {"data": row}
 
 
@@ -1829,6 +1852,22 @@ async def watch_execution(execution_id: str) -> StreamingResponse:
     )
 
 
+# ─── Identity stub ──────────────────────────────────────────────────────
+
+# Wingman has no user database — every browser session acts as the demo
+# trader (see _build_subject above). The sidebar fires /api/auth/me to
+# populate the bottom-left footer; without this stub the proxy returns a
+# 404 and the browser logs a noisy console error on every page load.
+@app.get("/api/auth/me")
+async def auth_me() -> dict[str, Any]:
+    trader_id = os.environ.get("WINGMAN_DEMO_TRADER_ID", "demo-trader")
+    return {
+        "full_name": f"Wingman {trader_id.replace('-', ' ').title()}",
+        "email": f"{trader_id}@wingman.local",
+        "subject_id": trader_id,
+    }
+
+
 # ─── Tool catalog passthrough (for AI Builder linking) ──────────────────
 
 
@@ -1837,9 +1876,41 @@ async def list_tools() -> dict[str, Any]:
     """Forward the platform tool catalog via ``forge.tools.list()`` so the
     Wingman builder palette sees the same set as the main Abenix builder
     and the call goes through SDK-managed auth."""
-    async with _abenix_client() as forge:
-        items = await forge.tools.list()
+    try:
+        async with _abenix_client() as forge:
+            items = await forge.tools.list()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("tools list failed")
+        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
     return {"data": items}
+
+
+# ─── Code-asset registry passthrough ────────────────────────────────────
+# Some surfaces (NotificationBell, future builder palette) probe the
+# platform code-asset registry on mount. Without this passthrough the
+# request lands on Next.js with no rewrite match and the browser logs a
+# 502 / 404 console error. Route via the SDK's authenticated http client
+# so the Abenix RBAC + acting-subject contract is preserved — never raw
+# httpx to ABENIX_URL.
+@app.get("/api/code-assets")
+async def list_code_assets(scope: str = "all") -> dict[str, Any]:
+    try:
+        async with _abenix_client() as forge:
+            res = await forge.http.get(
+                "/api/code-assets",
+                params={"scope": scope},
+                headers=forge._subject_headers(),
+            )
+            res.raise_for_status()
+            body = res.json() or {}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("code-assets list failed")
+        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
+    return body if isinstance(body, dict) else {"data": body}
 
 
 if __name__ == "__main__":

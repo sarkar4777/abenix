@@ -1,0 +1,7 @@
+{
+  "energy": {
+    "ppa": 0.2,
+    "tolling": 0.15,
+    "take_or_pay": 0.2
+  }
+}

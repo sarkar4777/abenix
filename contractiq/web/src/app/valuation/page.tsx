@@ -14,6 +14,8 @@ import {
 } from 'recharts';
 
 import { apiFetch } from '@/lib/api';
+import { PageExplainer } from '@/components/PageExplainer';
+
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -100,22 +102,43 @@ export default function ValuationPage() {
   const [runningTop, setRunningTop] = useState(false);
   const [selectedCurve, setSelectedCurve] = useState<ForecastCurve | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const [contractCount, setContractCount] = useState<number | null>(null);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setTimedOut(false);
+    setNotFound(false);
+    setError(null);
     const token = getToken();
     if (!token) { setLoading(false); return; }
     try {
-      const [cRes, vRes, tRes] = await Promise.all([
+      const [cRes, vRes, tRes, contractsRes] = await Promise.all([
         fetch(`${API_URL}/api/contractiq/insights/valuation/forecast-curves`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_URL}/api/contractiq/insights/valuation/latest`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_URL}/api/contractiq/insights/valuation/top-monitor`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/contractiq/contracts?limit=1`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null),
       ]);
-      const cj = await cRes.json();
-      const vj = await vRes.json();
-      const tj = await tRes.json();
-      setCurves(cj.data?.curves || []);
-      setValuation(vj.data || null);
-      setTopMonitor(tj.data || null);
+      const valuation404 = vRes.status === 404 && cRes.status === 404;
+      const cj = cRes.ok ? await cRes.json() : { data: { curves: [] } };
+      const vj = vRes.ok ? await vRes.json() : { data: null };
+      const tj = tRes.ok ? await tRes.json() : { data: null };
+      const curvesList = cj.data?.curves || [];
+      const valData = vj.data || null;
+      const topData = tj.data || null;
+      setCurves(curvesList);
+      setValuation(valData);
+      setTopMonitor(topData);
+      if (contractsRes && contractsRes.ok) {
+        const cjj = await contractsRes.json();
+        const items = cjj.data?.items || cjj.data || cjj.items || [];
+        const total = cjj.data?.total ?? cjj.total ?? items.length;
+        setContractCount(typeof total === 'number' ? total : items.length);
+      }
+      if (valuation404 || (curvesList.length === 0 && !valData && !topData)) {
+        setNotFound(true);
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to load');
     }
@@ -123,6 +146,13 @@ export default function ValuationPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // 30s timeout — if still loading, surface a retry CTA
+  useEffect(() => {
+    if (!loading) return;
+    const t = setTimeout(() => setTimedOut(true), 30000);
+    return () => clearTimeout(t);
+  }, [loading]);
 
   const runCurves = async () => {
     setError(null);
@@ -188,41 +218,36 @@ export default function ValuationPage() {
     };
   }, [valuation, topMonitor, curves]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0B0F19] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-      </div>
-    );
-  }
+  const showEmpty = !loading && notFound;
+  const showTimeout = loading && timedOut;
+  const noContracts = contractCount === 0;
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] p-6">
+    <div className="min-h-screen bg-[#0B0F19] p-6" data-testid="valuation-page">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div>
+        {/* Page shell — ALWAYS renders synchronously */}
+        <div data-testid="valuation-header">
           <a href="/insights" className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-400 mb-2">
             <ChevronLeft className="w-3 h-3" /> Back to Insights Hub
           </a>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-600/20 border border-indigo-500/30 flex items-center justify-center">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
                 <LineChartIcon className="w-6 h-6 text-indigo-400" />
               </div>
-              <div>
-                <h1 className="text-2xl font-bold text-white">Portfolio Valuation &amp; Forecast</h1>
-                <p className="text-xs text-slate-400">
-                  Forward curves · Mark-to-Market · Take-or-Pay monitoring — all driven by
-                  <code className="text-indigo-300"> contractiq-price-forecaster</code>,
-                  <code className="text-indigo-300"> contractiq-portfolio-valuator</code>, and
-                  <code className="text-indigo-300"> contractiq-top-monitor</code>.
+              <div className="min-w-0">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h1 className="text-2xl font-bold text-white">Valuation</h1>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Mark-to-market and forward P&amp;L across active positions.
                 </p>
               </div>
             </div>
             <button
               onClick={runAll}
-              disabled={runningCurves || runningVal || runningTop}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-semibold disabled:opacity-50 hover:shadow-lg hover:shadow-indigo-500/25 transition-all"
+              disabled={runningCurves || runningVal || runningTop || loading}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-semibold disabled:opacity-50 hover:shadow-lg hover:shadow-indigo-500/25 transition-all shrink-0"
             >
               {(runningCurves || runningVal || runningTop)
                 ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -230,7 +255,37 @@ export default function ValuationPage() {
               Refresh Valuation
             </button>
           </div>
+          <PageExplainer routeKey="valuation" />
         </div>
+
+        {/* Timeout banner */}
+        {showTimeout && (
+          <div
+            data-testid="valuation-timeout"
+            className="bg-amber-500/10 border border-amber-500/40 rounded-lg px-4 py-3 flex items-center justify-between"
+          >
+            <p className="text-xs text-amber-200">
+              Taking longer than expected. The valuation service may be warming up.
+            </p>
+            <button
+              onClick={load}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-100 hover:bg-amber-500/30"
+            >
+              <RefreshCw className="w-3 h-3" /> Retry
+            </button>
+          </div>
+        )}
+
+        {/* Empty state — no contracts yet OR no valuation data */}
+        {showEmpty && (
+          <EmptyValuationState noContracts={noContracts} />
+        )}
+
+        {/* Loading skeletons — render IN PLACE OF the data sections, but page shell stays visible */}
+        {loading && !showEmpty && <ValuationSkeletons />}
+
+        {!loading && !showEmpty && (<>
+        {/* end shell — async sections below */}
 
         {error && (
           <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg px-4 py-2 text-xs text-rose-300">
@@ -408,11 +463,66 @@ export default function ValuationPage() {
             <p className="text-xs text-slate-500 italic">Click "Run Monitor" to scan for Take-or-Pay shortfall.</p>
           )}
         </section>
+        </>)}
 
         {selectedCurve && (
           <CurveModal curve={selectedCurve} onClose={() => setSelectedCurve(null)} />
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Skeleton + empty state ─────────────────────────────────────────────
+
+function ValuationSkeletons() {
+  return (
+    <div className="space-y-6" data-testid="valuation-skeletons">
+      <div className="grid grid-cols-5 gap-3">
+        {[0, 1, 2, 3, 4].map(i => (
+          <div key={i} className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
+            <div className="h-3 w-24 bg-slate-700/60 rounded animate-pulse mb-3" />
+            <div className="h-6 w-16 bg-slate-700/80 rounded animate-pulse" />
+          </div>
+        ))}
+      </div>
+      {[0, 1, 2].map(i => (
+        <div key={i} className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 space-y-3">
+          <div className="h-4 w-48 bg-slate-700/60 rounded animate-pulse" />
+          <div className="h-3 w-72 bg-slate-700/40 rounded animate-pulse" />
+          <div className="grid grid-cols-3 gap-3 pt-2">
+            {[0, 1, 2].map(j => (
+              <div key={j} className="h-24 bg-slate-900/40 border border-slate-700/40 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EmptyValuationState({ noContracts }: { noContracts: boolean }) {
+  const headline = noContracts
+    ? 'You need active contracts before valuation runs.'
+    : 'No valuation has been generated yet.';
+  const sub = noContracts
+    ? 'Upload your first contract to seed the portfolio, then come back here to mark the book to market.'
+    : 'Click "Refresh Valuation" above to run the forward-curve, valuator, and Take-or-Pay agents.';
+  return (
+    <div data-testid="valuation-empty" className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-10 text-center">
+      <div className="inline-flex w-14 h-14 rounded-xl bg-indigo-500/10 border border-indigo-500/30 items-center justify-center mb-4">
+        <LineChartIcon className="w-7 h-7 text-indigo-300" />
+      </div>
+      <h2 className="text-base font-semibold text-white mb-1">{headline}</h2>
+      <p className="text-xs text-slate-400 max-w-md mx-auto mb-5">{sub}</p>
+      <a
+        href={noContracts ? '/upload' : '#'}
+        onClick={(e) => { if (!noContracts) { e.preventDefault(); window.location.reload(); } }}
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-semibold hover:shadow-lg hover:shadow-indigo-500/25 transition-all"
+      >
+        {noContracts ? 'Upload your first contract' : 'Retry'}
+        <ArrowRight className="w-3.5 h-3.5" />
+      </a>
     </div>
   );
 }

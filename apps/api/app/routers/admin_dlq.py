@@ -97,10 +97,15 @@ async def replay_dlq(
     message = original.get("message") or original.get("input_message") or ""
     context = original.get("context") or {}
 
+    from app.core.acting_subject import subject_columns_for
+
+    _sid, _stype = subject_columns_for(user)
     new_exec = Execution(
         tenant_id=user.tenant_id,
         agent_id=d.agent_id,
         user_id=user.id,
+        subject_id=_sid,
+        subject_type=_stype,
         input_message=message,
         status=ExecutionStatus.RUNNING,
         model_used="replay",

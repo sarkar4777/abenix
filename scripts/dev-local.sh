@@ -382,6 +382,17 @@ export NATS_PASSWORD=${NATS_PASSWORD:-abenix-dev}
 export RUNTIME_POOL=${RUNTIME_POOL:-default}
 ok "Queue backend: $QUEUE_BACKEND (exec_remote=$SCALING_EXEC_REMOTE)"
 
+# Progress pub/sub + per-app post-processors — parity with the helm
+# chart's configmap so the runtime publishes on the same Redis channel
+# that contractiq/wingman web subscribe to and contractiq's
+# deterministic guardrails register at startup. Without this, chat SSE
+# narration in the standalone apps comes through the legacy "wingman:"
+# alias only (kept alive in progress.py for back-compat).
+export PROGRESS_CHANNEL_PREFIX=${PROGRESS_CHANNEL_PREFIX:-progress:}
+export PROGRESS_PARENT_KEY_PREFIX=${PROGRESS_PARENT_KEY_PREFIX:-parent:}
+export POST_PROCESSOR_MODULES=${POST_PROCESSOR_MODULES:-contractiq.runtime.post_processors}
+ok "Progress channel: ${PROGRESS_CHANNEL_PREFIX}<id> | post-processors: ${POST_PROCESSOR_MODULES}"
+
 # ── Step 3: Install npm dependencies if needed ────────────────
 log "Step 2/7 — Node.js dependencies..."
 if [ ! -d "node_modules" ] || [ ! -d "apps/web/node_modules" ]; then
@@ -536,10 +547,15 @@ log "Step 7/7 — Starting services..."
 
 mkdir -p "$ROOT_DIR/logs"
 
-# Start API server (DEBUG=true for local dev — allows default secrets)
+# Start API server (DEBUG=true for local dev — allows default secrets).
+# --reload picks up engine/translator/router edits without a manual kill;
+# without it the API runs stale bytecode after every code edit (was a
+# real 4-minute UAT trap for abenix-api PID 87416).
 cd "$ROOT_DIR/apps/api"
-DEBUG=true PGSSLMODE=disable PYTHONPATH=".:../../packages/db:../../apps/agent-runtime" $PYTHON -m uvicorn app.main:app \
-  --host 0.0.0.0 --port 8000 \
+DEBUG=true PGSSLMODE=disable IS_LOCAL_DEV=1 ENVIRONMENT=local \
+  PYTHONPATH=".:../../packages/db:../../apps/agent-runtime" $PYTHON -m uvicorn app.main:app \
+  --host 0.0.0.0 --port 8000 --reload \
+  --reload-dir . --reload-dir ../../packages/db --reload-dir ../../apps/agent-runtime \
   > "$ROOT_DIR/logs/api.log" 2>&1 &
 API_PID=$!
 cd "$ROOT_DIR"

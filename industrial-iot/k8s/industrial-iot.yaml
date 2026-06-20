@@ -13,6 +13,12 @@ metadata:
 type: Opaque
 stringData:
   INDUSTRIALIOT_ABENIX_API_KEY: "REPLACE_AT_DEPLOY_TIME"
+  # Shared secret between the IIOT web pod (server-side middleware) and
+  # the IIOT api pod's _gate_proxy_request. Required: without it, the
+  # api pod 401s every /api/code-assets, /api/agents, /api/connectors
+  # request so an unauthenticated in-cluster caller cannot impersonate
+  # the standalone tenant. Regenerate per deploy.
+  INDUSTRIALIOT_WEB_PROXY_SECRET: "REPLACE_AT_DEPLOY_TIME"
 
 ---
 apiVersion: v1
@@ -95,6 +101,11 @@ spec:
               value: "http://industrial-iot-api:8003"
             - name: NODE_ENV
               value: "production"
+            - name: INDUSTRIALIOT_WEB_PROXY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: industrial-iot-secrets
+                  key: INDUSTRIALIOT_WEB_PROXY_SECRET
           livenessProbe:  { httpGet: { path: /, port: 3003 }, initialDelaySeconds: 30, periodSeconds: 30 }
           readinessProbe: { httpGet: { path: /, port: 3003 }, initialDelaySeconds: 10, periodSeconds: 10 }
           resources:

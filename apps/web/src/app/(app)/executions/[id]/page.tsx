@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { LiveDagView } from '@/components/shared/LiveDagView';
+import { FallbackBadge } from '@/components/FallbackBadge';
 
 interface ExecutionDetail {
   id: string;
@@ -39,6 +40,9 @@ interface ExecutionDetail {
   cost?: number;
   duration_ms?: number;
   model_used?: string;
+  model_requested?: string;
+  actual_model?: string;
+  fallback_reason?: string;
   trace_id?: string | null;
   tool_calls?: Array<{ name: string; arguments: Record<string, unknown>; result?: string; duration_ms?: number }>;
   confidence_score?: number;
@@ -59,14 +63,15 @@ interface ExecutionDetail {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const s = (status || '').toLowerCase();
   const styles: Record<string, string> = {
-    COMPLETED: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    FAILED: 'bg-red-500/10 text-red-400 border-red-500/20',
-    RUNNING: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+    completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    failed: 'bg-red-500/10 text-red-400 border-red-500/20',
+    running: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
   };
   return (
-    <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${styles[status] || 'bg-slate-500/10 text-slate-400 border-slate-500/20'}`}>
-      {status}
+    <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${styles[s] || 'bg-slate-500/10 text-slate-400 border-slate-500/20'}`}>
+      {s}
     </span>
   );
 }
@@ -436,7 +441,8 @@ export default function ExecutionDetailPage() {
     node_statuses?: Record<string, string>;
   } | null>(null);
 
-  const isRunning = execution?.status === 'RUNNING';
+  const s = (execution?.status || '').toLowerCase();
+  const isRunning = s === 'running';
 
   useEffect(() => {
     if (!isRunning || !executionId) return;
@@ -511,7 +517,14 @@ export default function ExecutionDetailPage() {
             <h1 className="text-lg font-bold text-white">Execution Flight Recorder</h1>
             <StatusBadge status={execution.status} />
           </div>
-          <p className="text-xs text-slate-500 mt-0.5 font-mono">{executionId.slice(0, 12)}... | {execution.model_used} | {new Date(execution.created_at).toLocaleString()}</p>
+          <p className="text-xs text-slate-500 mt-0.5 font-mono flex items-center gap-2 flex-wrap">
+            <span>{executionId.slice(0, 12)}... | {execution.model_used} | {new Date(execution.created_at).toLocaleString()}</span>
+            <FallbackBadge
+              actual_model={execution.actual_model || execution.model_used || ''}
+              requested_model={execution.model_requested || ''}
+              reason={execution.fallback_reason}
+            />
+          </p>
         </div>
         {execution.trace_id && (() => {
           const grafanaBase = (process.env.NEXT_PUBLIC_GRAFANA_URL || "http://localhost:3010").replace(/\/$/, "");

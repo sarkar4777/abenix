@@ -187,6 +187,7 @@ export default function ChatPage() {
         role: m.role as 'user' | 'assistant',
         blocks: m.blocks || [{ type: 'text' as const, content: m.content }],
         timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+        model: m.model_used || undefined,
       }));
       setMessages(loaded);
 
@@ -377,6 +378,9 @@ export default function ChatPage() {
           role: 'assistant',
           blocks: currentBlocks,
           timestamp: new Date(),
+          model: data.effective_model || data.model,
+          requestedModel: data.requested_model,
+          fallbackReason: data.fallback_reason,
         };
         setMessages((prev) => [...prev, assistantMsg]);
         setIsStreaming(false);
@@ -728,7 +732,14 @@ export default function ChatPage() {
           )}
 
           {messages.map((msg) => (
-            <ChatMessage key={msg.id} role={msg.role} blocks={msg.blocks} />
+            <ChatMessage
+              key={msg.id}
+              role={msg.role}
+              blocks={msg.blocks}
+              model={msg.model}
+              requestedModel={msg.requestedModel}
+              fallbackReason={msg.fallbackReason}
+            />
           ))}
 
           {isStreaming && (

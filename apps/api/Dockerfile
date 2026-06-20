@@ -23,6 +23,11 @@ COPY apps/api/ ./apps/api/
 COPY packages/db/ ./packages/db/
 COPY packages/sdk/python/ ./packages/sdk/python/
 COPY apps/agent-runtime/engine/ ./apps/agent-runtime/engine/
+# Standalone-app code assets need to be in the image so seed_code_assets.py
+# discovers each agentforge.yaml at boot. Without this, agents that reference
+# a code_asset_id from these folders return "Code asset not found".
+COPY contractiq/code-assets/ ./contractiq/code-assets/
+COPY wingman/code-assets/ ./wingman/code-assets/
 USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

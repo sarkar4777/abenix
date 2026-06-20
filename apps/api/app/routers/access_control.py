@@ -281,50 +281,12 @@ async def list_delegation_keys(
 
 @router.get("/templates")
 async def list_policy_templates() -> JSONResponse:
-    """Return common policy templates that admins can apply."""
+    """Return generic policy templates that admins can apply.
+
+    App-specific templates live behind the app's own router and the UI
+    is expected to union them with these.
+    """
     templates = [
-        {
-            "id": "contractiq_user_isolated",
-            "name": "ContractIQ User-Isolated",
-            "description": "Each ContractIQ user can only access their own contracts and KB namespace",
-            "subject_type": "contractiq",
-            "rules": {
-                "agents": {
-                    "mode": "allowlist",
-                    "slugs": ["contractiq-chat", "contractiq-pipeline"],
-                },
-                "knowledge_bases": [
-                    {
-                        "kb_id": "*",
-                        "access_mode": "namespace",
-                        "namespace_pattern": "contractiq-{subject_id}",
-                        "allowed_actions": ["read", "search"],
-                    }
-                ],
-                "data_scopes": {
-                    "contractiq.contracts.user_id": "{subject_id}",
-                },
-                "denied_actions": ["delete", "admin"],
-            },
-        },
-        {
-            "id": "team_lead_cross_user",
-            "name": "Team Lead (Cross-User Read)",
-            "description": "Team lead can read contracts from team members",
-            "subject_type": "contractiq",
-            "rules": {
-                "agents": {"mode": "allowlist", "slugs": ["contractiq-chat"]},
-                "knowledge_bases": [
-                    {
-                        "kb_id": "*",
-                        "access_mode": "namespace",
-                        "namespace_pattern": "contractiq-team-{subject_id}",
-                        "allowed_actions": ["read", "search"],
-                    }
-                ],
-                "denied_actions": ["delete"],
-            },
-        },
         {
             "id": "read_only",
             "name": "Read-Only Subject",
@@ -374,7 +336,7 @@ async def test_policy(
     subject_type = body.get("subject_type", "")
     subject_id = body.get("subject_id", "")
     api_key_id = body.get("api_key_id", "")
-    test_resource = body.get("test_resource", "")  # e.g., "agent:contractiq-chat"
+    test_resource = body.get("test_resource", "")  # e.g., "agent:<slug>" or "kb:<id>"
 
     if not all([subject_type, subject_id, api_key_id, test_resource]):
         return error("Missing required fields", 400)

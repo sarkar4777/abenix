@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import type { Node } from 'reactflow';
 import { getToolDoc } from '@/lib/tool-docs';
+import ModelPicker from '@/components/ModelPicker';
+import { ModelStatusBanner } from '@/components/ModelStatusBanner';
 import {
   ToolConfigFields,
   AgentStepConfig,
@@ -115,14 +117,6 @@ interface AgentConfigPanelProps {
   onAddMcpConnection?: () => void;
   onDisconnectMcp?: (nodeId: string) => void;
 }
-
-const MODELS = [
-  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-haiku-3-5-20241022', label: 'Claude Haiku 3.5' },
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-];
 
 const CATEGORIES = [
   'productivity', 'development', 'research', 'creative',
@@ -605,19 +599,24 @@ export default function AgentConfigPanel({
 
   return (
     <div className="w-[320px] border-l border-slate-800 bg-[#0F172A] flex flex-col shrink-0 overflow-hidden">
-      <div className="flex border-b border-slate-800/50">
-        {tabs.map((t) => (
+      <div className="flex items-stretch border-b border-slate-800/60 bg-slate-900/40">
+        {tabs.map((t, i) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`flex-1 py-2.5 text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
+            className={`relative flex-1 px-1 py-3 text-[10px] uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-1 ${
+              i > 0 ? 'border-l border-slate-800/60' : ''
+            } ${
               tab === t.key
-                ? 'text-cyan-400 border-b-2 border-cyan-400'
-                : 'text-slate-500 hover:text-slate-300'
+                ? 'text-cyan-300 bg-cyan-500/5'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
             }`}
           >
             {t.icon && <t.icon className="w-3 h-3" />}
-            {t.label}
+            <span className="truncate">{t.label}</span>
+            {tab === t.key && (
+              <span className="pointer-events-none absolute left-2 right-2 -bottom-px h-0.5 bg-cyan-400 rounded-full" />
+            )}
           </button>
         ))}
       </div>
@@ -725,15 +724,11 @@ export default function AgentConfigPanel({
           <>
             <div>
               <label className="block text-xs text-slate-400 mb-1.5">Model</label>
-              <select
+              <ModelPicker
                 value={config.model}
-                onChange={handleText('model')}
-                className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
-              >
-                {MODELS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
+                onChange={(v) => onChange({ model: v })}
+              />
+              <ModelStatusBanner model={config.model} />
             </div>
             <div>
               <div className="flex items-center justify-between mb-1.5">

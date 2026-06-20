@@ -36,6 +36,7 @@ export default function LlmPricingPage() {
   const [pending, setPending] = useState<Record<string, Partial<PricingRow>>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [seeding, setSeeding] = useState(false);
   const [newRow, setNewRow] = useState<Partial<PricingRow>>({
     provider: 'anthropic', is_active: true,
   });
@@ -108,6 +109,18 @@ export default function LlmPricingPage() {
     } catch (e: any) { setErr(e?.message || 'Seed failed'); }
   }
 
+  async function seedDefaults() {
+    setSeeding(true); setMsg(null); setErr(null);
+    try {
+      const r = await apiFetch<{ seeded: number }>(`/api/admin/llm-pricing/seed`, {
+        method: 'POST', body: '{}',
+      });
+      if (r.error) setErr(r.error);
+      else { setMsg(`Seeded ${r.data?.seeded ?? 0} rows from baseline.`); await load(); }
+    } catch (e: any) { setErr(e?.message || 'Seed failed'); }
+    finally { setSeeding(false); }
+  }
+
   if (loading) return <div className="p-6 text-slate-400">Loading pricing…</div>;
   if (err && !data) {
     return (
@@ -149,6 +162,31 @@ export default function LlmPricingPage() {
 
       {msg && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{msg}</div>}
       {err && <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{err}</div>}
+
+      {data && (data.rows?.length ?? 0) === 0 && (
+        <div
+          data-testid="pricing-empty-banner"
+          className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100 flex items-start justify-between gap-4"
+        >
+          <div>
+            <p className="font-semibold text-amber-200">No pricing seeded for this tenant.</p>
+            <p className="text-amber-200/80 mt-1">
+              Cost rollups will fall back to the hardcoded baseline in
+              <code className="px-1 py-0.5 mx-1 bg-amber-500/10 text-amber-100 rounded">llm_router.py</code>.
+              Seed the platform defaults to make per-model rates editable here.
+            </p>
+          </div>
+          <button
+            onClick={seedDefaults}
+            disabled={seeding}
+            data-testid="seed-defaults-btn"
+            className="shrink-0 px-3 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-2"
+          >
+            {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            Seed defaults
+          </button>
+        </div>
+      )}
 
       {/* New row */}
       <div className="rounded-xl border border-slate-700/60 bg-[#0B0F19] p-4" data-testid="add-pricing-row">

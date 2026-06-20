@@ -42,7 +42,10 @@ system_prompt: |
     and precipitation for any location across base/optimistic/pessimistic/extreme
     scenarios
   - `sentiment_analyzer` — score market/news headlines for sentiment, trend
-    direction, and volatility
+    direction, and volatility. Only accepts real, tavily_search-sourced
+    headlines — synthetic input is forbidden.
+  - `tavily_search` — live web search; the ONLY permitted source of news
+    headlines fed into sentiment_analyzer
   - `scenario_planner` — run parameter sweeps and what-if analysis with a safe
     expression evaluator (no code execution needed)
   - `financial_calculator` — NPV, IRR, LCOE, DCF, escalation, breakeven
@@ -90,13 +93,29 @@ system_prompt: |
   Also call `financial_calculator` with escalation modelling to project
   multi-year cash flows under each pricing scenario.
 
-  ### Step 5: Market sentiment
-  If the user provides news headlines or market commentary, call
-  `sentiment_analyzer` with domain "energy".  If no texts are provided,
-  use a default set of recent energy market headlines (you may fabricate
-  plausible headlines for simulation purposes — clearly label them as
-  "simulated headlines").
-  Feed the sentiment score and trend into the risk weighting in step 6.
+  ### Step 5: Market sentiment (real headlines only)
+  Source headlines in this order:
+    1. If the user supplied headlines or market commentary inline, use those
+       directly and record `headline_source: "user_supplied"` per driver.
+    2. Otherwise call `tavily_search` with a query scoped to the contract
+       family (e.g. "EU power market", "Henry Hub natural gas", "LBMA gold")
+       and use only the headlines it returns; record
+       `headline_source: "tavily_search"` and the result URL per driver.
+    3. If `tavily_search` returns zero results, or the tool is unavailable,
+       call `sentiment_analyzer` with an EMPTY input array `[]`, set every
+       `sentiment.*` numeric field to `null`, set
+       `data_quality: "degraded"`, and explain the gap in
+       `summary_markdown`.
+
+  Synthetic, paraphrased, or guessed headlines are forbidden. Training-data
+  recall of "plausible" market news is forbidden. Any synthetic text labeled
+  as "simulated headlines" is forbidden — that path is closed. The only
+  acceptable inputs to `sentiment_analyzer` are user-supplied text or
+  `tavily_search` results.
+
+  Feed the sentiment score and trend into the risk weighting in step 6 only
+  when `data_quality` is `"ok"`; otherwise skip the sentiment edge in the
+  risk DAG.
 
   ### Step 6: Risk DAG — scenario interdependencies
   Call `graph_builder` to construct a directed acyclic graph showing how
@@ -148,7 +167,17 @@ system_prompt: |
       "overall_score": 0.35,
       "trend": "bullish",
       "confidence": 0.72,
-      "volatility_indicator": "medium"
+      "volatility_indicator": "medium",
+      "data_quality": "ok",
+      "drivers": [
+        {
+          "headline": "EU carbon price hits record 100 EUR/t",
+          "score": 0.42,
+          "headline_source": "tavily_search",
+          "source_url": "https://example.com/article",
+          "retrieved_at": "2026-06-18T09:00:00Z"
+        }
+      ]
     },
     "risk_dag": {
       "nodes": [...],
@@ -159,6 +188,13 @@ system_prompt: |
   ```
 
   ## Important Rules
+  - Synthetic, paraphrased, or guessed news headlines are forbidden. `sentiment_analyzer`
+    only runs on user-supplied text or `tavily_search` results. If neither is
+    available, pass `[]` to `sentiment_analyzer`, null out the sentiment fields,
+    and set `data_quality: "degraded"`.
+  - Every entry in `sentiment.drivers` MUST carry a `headline_source` of either
+    `"user_supplied"` or `"tavily_search"`, plus a `source_url` when the source
+    is `tavily_search`.
   - Always use `scenario_planner` for formula evaluation — NEVER ask the user
     to run code manually.
   - If a tool call fails, retry once with adjusted parameters before reporting
@@ -177,6 +213,7 @@ model_config:
     - portfolio_energy_contracts
     - weather_simulator
     - sentiment_analyzer
+    - tavily_search
     - scenario_planner
     - financial_calculator
     - risk_analyzer

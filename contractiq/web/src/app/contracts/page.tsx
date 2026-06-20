@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   FileSearch, Upload, BarChart3, MessageSquare, FileText, TrendingUp,
   LogOut, Search, ChevronLeft, ChevronRight, Trash2, Zap,
@@ -107,6 +108,7 @@ export default function ContractListPage() {
               <Upload className="w-4 h-4" /> Upload
             </a>
           </div>
+          <PageExplainer routeKey="contracts" />
 
           {/* Portfolio Quick Stats */}
           {contracts.length > 0 && (

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   ChevronDown, Upload, Brain, Shield, Activity, MessageSquare,
   Database, Layers, Zap, GitBranch, Cpu, BarChart3, Scale,
@@ -13,10 +14,50 @@ import {
   Compass, Users, Sigma, Binary,
 } from 'lucide-react';
 
+// Shared context lets Section instances register themselves with the TOC + read
+// the search query without prop-drilling through every parent.
+type TocEntry = { id: string; title: string };
+type HelpCtx = {
+  query: string;
+  registerSection: (entry: TocEntry) => void;
+  unregisterSection: (id: string) => void;
+};
+const HelpContext = createContext<HelpCtx | null>(null);
+
+function slugify(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
 function Section({ title, icon: Icon, children, defaultOpen = false }: { title: string; icon: any; children: React.ReactNode; defaultOpen?: boolean }) {
+  const ctx = useContext(HelpContext);
+  const id = useMemo(() => slugify(title), [title]);
+  // Collapsed by default — user can still open. Search auto-expands matches.
   const [open, setOpen] = useState(defaultOpen);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  // Register this section with the parent TOC.
+  useEffect(() => {
+    ctx?.registerSection({ id, title });
+    return () => ctx?.unregisterSection(id);
+  }, [id, title, ctx]);
+
+  // Hide entirely when search doesn't match title or content.
+  const q = (ctx?.query || '').trim().toLowerCase();
+  const haystack = useMemo(() => {
+    if (!q) return '';
+    return (title + ' ' + (contentRef.current?.textContent || '')).toLowerCase();
+  }, [q, title]);
+  const matches = !q || haystack.includes(q);
+
+  // Auto-open on search hit so the matching content is visible.
+  useEffect(() => {
+    if (q && matches) setOpen(true);
+  }, [q, matches]);
+
+  if (!matches) return null;
+
   return (
-    <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">
+    <div id={id} className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden scroll-mt-24">
       <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-800/50 transition-colors">
         <div className="flex items-center gap-3">
           <Icon className="w-5 h-5 text-emerald-400" />
@@ -27,7 +68,7 @@ function Section({ title, icon: Icon, children, defaultOpen = false }: { title: 
       <AnimatePresence>
         {open && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
-            <div className="px-5 pb-5 text-sm text-slate-300 leading-relaxed space-y-4">{children}</div>
+            <div ref={contentRef} className="px-5 pb-5 text-sm text-slate-300 leading-relaxed space-y-4">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -495,21 +536,70 @@ const ORCHESTRATION_AGENTS: AgentSpec[] = [
 ];
 
 export default function ContractIQHelpPage() {
+  const [query, setQuery] = useState('');
+  const [sections, setSections] = useState<TocEntry[]>([]);
+
+  const ctx = useMemo<HelpCtx>(() => ({
+    query,
+    registerSection: (entry) => setSections(prev => (prev.some(p => p.id === entry.id) ? prev : [...prev, entry])),
+    unregisterSection: (id) => setSections(prev => prev.filter(p => p.id !== id)),
+  }), [query]);
+
+  const filteredToc = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sections;
+    return sections.filter(s => s.title.toLowerCase().includes(q));
+  }, [sections, query]);
+
   return (
-    <div className="p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* Hero header */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
-              <BookOpen className="w-5 h-5 text-emerald-400" />
+    <HelpContext.Provider value={ctx}>
+      <div className="p-6">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-6">
+          {/* Sticky left TOC */}
+          <aside className="lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
+            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-3 space-y-2">
+              <label className="relative block">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search help…"
+                  data-testid="help-search"
+                  className="w-full bg-slate-900 border border-slate-700 rounded pl-7 pr-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500/60 focus:outline-none"
+                />
+              </label>
+              <nav data-testid="help-toc" className="space-y-0.5 max-h-[60vh] overflow-y-auto pr-1">
+                {filteredToc.length === 0 ? (
+                  <p className="text-[11px] text-slate-500 italic px-2 py-1">No sections match.</p>
+                ) : filteredToc.map(s => (
+                  <a
+                    key={s.id}
+                    href={`#${s.id}`}
+                    className="block text-[11px] text-slate-400 hover:text-emerald-300 hover:bg-slate-800/40 rounded px-2 py-1 truncate"
+                  >
+                    {s.title}
+                  </a>
+                ))}
+              </nav>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white">E&C-Copilot — The Agent Atlas</h1>
-              <p className="text-sm text-slate-400">Every agent in the platform — what it does, what tools it uses, and how it thinks.</p>
-            </div>
-          </div>
-        </motion.div>
+          </aside>
+
+          {/* Main column */}
+          <div className="space-y-6 min-w-0">
+            {/* Hero header */}
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                  <BookOpen className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold text-white">E&C-Copilot — The Agent Atlas</h1>
+                  <p className="text-sm text-slate-400">Every agent in the platform — what it does, what tools it uses, and how it thinks.</p>
+                </div>
+              </div>
+              <PageExplainer routeKey="help" />
+            </motion.div>
 
         {/* Stats strip */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -1041,7 +1131,7 @@ export default function ContractIQHelpPage() {
           <ul className="list-disc pl-5 space-y-1 text-[13px]">
             <li><strong>Every number is auditable.</strong> Click any cell → see source URL + fetched-at + raw-response ID. Pass a regulator audit on Tuesday.</li>
             <li><strong>Free sources go live immediately.</strong> 5 of 8 tools are EDGAR / Companies House / Bundesanzeiger / FERC / EPA / PHMSA — no contract negotiation, no API key procurement.</li>
-            <li><strong>Paid sources fail loud, not silent.</strong> If S&amp;P key isn&apos;t set, the page shows &quot;Configure your S&amp;P key in Abenix Integrations&quot;. No mocked &quot;A+ · S&amp;P&quot; that&apos;s actually fake.</li>
+            <li><strong>Paid sources fail loud, not silent.</strong> Paid sources (S&amp;P, Moody&apos;s, Fitch, World-Check, LexisNexis) are marked unavailable in this tenant in the <a href="/credit-risk" className="text-emerald-300 hover:text-emerald-200 underline">Credit Risk data-sources panel</a>. There is no in-app self-serve key configurator. Contact procurement to negotiate a contract. No mocked &quot;A+ · S&amp;P&quot; that&apos;s actually fake.</li>
             <li><strong>Refresh is observable.</strong> The DAG drawer on the right rail shows the orchestrator + 3 specialists + every tool call as it runs — the demo viewer literally sees the agent fan-out.</li>
             <li><strong>Re-runs are cheap.</strong> Each tool caches by (entity, source-version) so re-clicking Refresh within 24h returns cached results without re-hitting the source.</li>
           </ul>
@@ -1118,7 +1208,7 @@ export default function ContractIQHelpPage() {
           <ol className="list-decimal pl-5 space-y-1 text-[13px]">
             <li>Drop a new tool file at <Code>apps/agent-runtime/engine/tools/contractiq_yoursource.py</Code> implementing <code>BaseTool</code>. Network calls, parsing, retry, rate-limit all live here.</li>
             <li>Add the tool to <Code>ciq-counterparty-refresher.yaml</Code> under <code>tools:</code> and (if topical) one of the specialists.</li>
-            <li>If the source needs a key, add the env var to <Code>contractiq-secrets</Code> and document under <em>Settings → Integrations → Counterparty data sources</em>.</li>
+            <li>If the source needs a key, add the env var to the <Code>contractiq-secrets</Code> k8s secret via your deploy pipeline. There is no in-app integrations panel — paid-source availability is read-only on the <a href="/credit-risk" className="text-emerald-300 hover:text-emerald-200 underline">Credit Risk page</a>.</li>
             <li>Re-seed agents (<Code>scripts/seed-agents.sh</Code>) — no code change needed in contractiq-api or web.</li>
           </ol>
         </Section>
@@ -2061,14 +2151,16 @@ async with Abenix(api_key=KEY, base_url=URL, act_as=subj) as forge:
           </div>
         </Section>
 
-        {/* Footer */}
-        <div className="text-center py-8 border-t border-slate-800/50">
-          <p className="text-xs text-slate-500 mb-2">E&C-Copilot · PPA · Gas · Metals contract intelligence</p>
-          <p className="text-[10px] text-slate-600">
-            26 agents · 11 market-data adapters · 6 risk + analytics modules · 6 RBAC personas · 100% Abenix-native
-          </p>
+            {/* Footer */}
+            <div className="text-center py-8 border-t border-slate-800/50">
+              <p className="text-xs text-slate-500 mb-2">E&C-Copilot · PPA · Gas · Metals contract intelligence</p>
+              <p className="text-[10px] text-slate-600">
+                26 agents · 11 market-data adapters · 6 risk + analytics modules · 6 RBAC personas · 100% Abenix-native
+              </p>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </HelpContext.Provider>
   );
 }

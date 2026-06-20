@@ -22,6 +22,15 @@ RUN mkdir -p ./apps/api/app/core
 COPY apps/api/app/__init__.py ./apps/api/app/__init__.py
 COPY apps/api/app/core/__init__.py ./apps/api/app/core/__init__.py
 COPY apps/api/app/core/execution_state.py ./apps/api/app/core/execution_state.py
+# Standalone-app code assets — the code_asset tool unpacks and executes
+# the agentforge.yaml + main.py bundles inside the runtime container.
+# Without these copies, agents that invoke code_asset(name='contractiq-risk-quant')
+# return "Code asset not found".
+COPY contractiq/code-assets/ ./contractiq/code-assets/
+COPY contractiq/runtime/ ./contractiq/runtime/
+COPY contractiq/__init__.py ./contractiq/__init__.py
+COPY wingman/code-assets/ ./wingman/code-assets/
+COPY industrial-iot/code-assets/ ./industrial-iot/code-assets/
 WORKDIR /app/apps/agent-runtime
 
 ENV PYTHONPATH="/app/packages/db:/app/apps/agent-runtime:/app/apps/api"

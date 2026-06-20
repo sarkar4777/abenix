@@ -12,9 +12,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Calendar, AlertTriangle, CheckCircle2, Clock, Filter, RefreshCw, ChevronRight } from 'lucide-react';
+import { Calendar, AlertTriangle, CheckCircle2, Clock, Filter, RefreshCw, ChevronRight, Upload } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 type Ev = {
   id: string;
@@ -52,6 +53,34 @@ const STATUS_META: Record<string, { color: string; Icon: any }> = {
   upcoming:  { color: 'cyan',    Icon: Clock },
   passed:    { color: 'emerald', Icon: CheckCircle2 },
   triggered: { color: 'rose',    Icon: AlertTriangle },
+};
+
+// Literal class lookup tables so Tailwind JIT keeps every variant in the bundle.
+const DOT_BORDER_CLASSES: Record<string, string> = {
+  cyan:    'border-cyan-400/60',
+  amber:   'border-amber-400/60',
+  violet:  'border-violet-400/60',
+  emerald: 'border-emerald-400/60',
+  rose:    'border-rose-400/60',
+  slate:   'border-slate-400/60',
+};
+
+const ICON_TEXT_CLASSES: Record<string, string> = {
+  cyan:    'text-cyan-400',
+  amber:   'text-amber-400',
+  violet:  'text-violet-400',
+  emerald: 'text-emerald-400',
+  rose:    'text-rose-400',
+  slate:   'text-slate-400',
+};
+
+const BADGE_CLASSES: Record<string, string> = {
+  cyan:    'bg-cyan-500/15 text-cyan-300',
+  amber:   'bg-amber-500/15 text-amber-300',
+  violet:  'bg-violet-500/15 text-violet-300',
+  emerald: 'bg-emerald-500/15 text-emerald-300',
+  rose:    'bg-rose-500/15 text-rose-300',
+  slate:   'bg-slate-500/15 text-slate-300',
 };
 
 function formatDate(iso: string | null): string {
@@ -132,6 +161,8 @@ function Inner() {
         </button>
       </div>
 
+      <PageExplainer routeKey="timeline" />
+
       {/* KPI strip */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Kpi label="Total events"   value={data?.total ?? 0}        icon={Calendar}       color="text-cyan-400" />
@@ -184,9 +215,15 @@ function Inner() {
       )}
 
       {data && data.events.length === 0 && (
-        <div className="rounded-xl border border-slate-700 bg-slate-800/30 p-8 text-center text-slate-400 text-sm">
-          No events yet. Upload + analyze a contract on <Link href="/upload" className="text-cyan-400 underline">/upload</Link> — the
-          extractor produces milestones, deadlines, reviews, renewals, and termination triggers per clause.
+        <div className="bg-slate-800/20 border border-slate-700/40 rounded-2xl p-12 text-center">
+          <Upload className="w-14 h-14 text-slate-700 mx-auto mb-3" />
+          <p className="text-base font-semibold text-white mb-1">No events yet</p>
+          <p className="text-sm text-slate-400 mb-5">
+            Upload a contract — the extractor produces milestones, deadlines, reviews, renewals, and termination triggers per clause.
+          </p>
+          <Link href="/upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-400 transition-colors">
+            <Upload className="w-4 h-4" /> Upload your first contract
+          </Link>
         </div>
       )}
 
@@ -233,17 +270,17 @@ function TimelineRow({ ev }: { ev: Ev }) {
   return (
     <li className="relative pl-10" data-testid="timeline-row">
       <span
-        className={`absolute left-1 top-2 w-5 h-5 rounded-full border-2 flex items-center justify-center bg-slate-900 border-${tm.color}-400/60`}
+        className={`absolute left-1 top-2 w-5 h-5 rounded-full border-2 flex items-center justify-center bg-slate-900 ${DOT_BORDER_CLASSES[tm.color] ?? DOT_BORDER_CLASSES.slate}`}
         aria-hidden
       >
-        <Icon className={`w-3 h-3 text-${sm.color}-400`} />
+        <Icon className={`w-3 h-3 ${ICON_TEXT_CLASSES[sm.color] ?? ICON_TEXT_CLASSES.slate}`} />
       </span>
       <Link
         href={`/contracts/${ev.contract_id}`}
         className="block group rounded-lg border border-slate-700/60 bg-slate-800/30 hover:bg-slate-800/50 p-3.5 transition-colors"
       >
         <div className="flex items-center gap-2 mb-1">
-          <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-${tm.color}-500/15 text-${tm.color}-300`}>
+          <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${BADGE_CLASSES[tm.color] ?? BADGE_CLASSES.slate}`}>
             {tm.label}
           </span>
           <span className="text-[11px] text-slate-500">·</span>
@@ -257,7 +294,7 @@ function TimelineRow({ ev }: { ev: Ev }) {
           {soon && !overdue && (
             <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">in {dn}d</span>
           )}
-          <span className={`ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-${sm.color}-500/15 text-${sm.color}-300`}>
+          <span className={`ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${BADGE_CLASSES[sm.color] ?? BADGE_CLASSES.slate}`}>
             {ev.status}
           </span>
         </div>

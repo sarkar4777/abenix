@@ -4,23 +4,15 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from prometheus_client import Counter
-
+# Canonical metric definitions live in engine/metrics.py. Importing the
+# symbols here keeps the call sites in this module readable and removes
+# the duplicate _safe_counter that used to shadow the one in metrics.py.
 from engine.cache.exact_cache import ExactCache
 from engine.cache.prompt_optimizer import PromptCacheOptimizer
 from engine.cache.semantic_cache import SemanticCache
+from engine.metrics import cache_hits, cache_misses  # noqa: F401
 
 logger = logging.getLogger(__name__)
-
-cache_hits = Counter(
-    "abenix_cache_hits_total",
-    "Cache hits by layer",
-    ["layer"],
-)
-cache_misses = Counter(
-    "abenix_cache_misses_total",
-    "Cache misses (full waterfall miss)",
-)
 
 
 @dataclass

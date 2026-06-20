@@ -11,9 +11,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   BookOpen, Search, Filter, AlertTriangle, ShieldCheck, Layers,
-  ChevronRight, Loader2, ExternalLink, FileText, Grid,
+  ChevronRight, Loader2, ExternalLink, FileText, Grid, Upload,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -137,6 +138,8 @@ export default function ClauseLibraryPage() {
           </p>
         </div>
 
+        <PageExplainer routeKey="clauses" />
+
         {/* KPI strip */}
         <div className="grid grid-cols-4 gap-3">
           <KPI label="Total clauses" value={totals.total} icon={BookOpen} color="text-emerald-400" />
@@ -210,12 +213,21 @@ export default function ClauseLibraryPage() {
               </div>
             )}
 
-            {!loading && data && data.items.length === 0 && (
+            {!loading && data && data.items.length === 0 && data.total === 0 && (
+              <div className="bg-slate-800/20 border border-slate-700/40 rounded-2xl p-12 text-center">
+                <Upload className="w-14 h-14 text-slate-700 mx-auto mb-3" />
+                <p className="text-base font-semibold text-white mb-1">No clauses yet</p>
+                <p className="text-sm text-slate-400 mb-5">Upload a contract to populate the clause library.</p>
+                <Link href="/upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-400 transition-colors">
+                  <Upload className="w-4 h-4" /> Upload your first contract
+                </Link>
+              </div>
+            )}
+
+            {!loading && data && data.items.length === 0 && data.total > 0 && (
               <div className="bg-slate-800/20 border border-slate-700/40 rounded-2xl p-12 text-center">
                 <BookOpen className="w-14 h-14 text-slate-700 mx-auto mb-3" />
-                <p className="text-sm text-slate-400">
-                  {data.total === 0 ? 'No clauses extracted yet — upload a contract first.' : 'No clauses match your filters.'}
-                </p>
+                <p className="text-sm text-slate-400">No clauses match your filters.</p>
               </div>
             )}
 
@@ -285,8 +297,12 @@ export default function ClauseLibraryPage() {
 
             {!loading && gaps && gaps.standard_types.length === 0 && (
               <div className="bg-slate-800/20 border border-slate-700/40 rounded-2xl p-12 text-center">
-                <Grid className="w-14 h-14 text-slate-700 mx-auto mb-3" />
-                <p className="text-sm text-slate-400">Need at least one extracted contract before the gap analysis can run.</p>
+                <Upload className="w-14 h-14 text-slate-700 mx-auto mb-3" />
+                <p className="text-base font-semibold text-white mb-1">No contracts to analyze yet</p>
+                <p className="text-sm text-slate-400 mb-5">Upload at least one contract to run the gap analysis.</p>
+                <Link href="/upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-400 transition-colors">
+                  <Upload className="w-4 h-4" /> Upload your first contract
+                </Link>
               </div>
             )}
 

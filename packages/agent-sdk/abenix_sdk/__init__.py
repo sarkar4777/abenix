@@ -455,6 +455,26 @@ class AgentsClient:
     async def get(self, agent_id: str) -> dict[str, Any]:
         return await self._client._get(f"/api/agents/{agent_id}")
 
+    async def find_by_slug(self, slug: str) -> dict[str, Any] | None:
+        res = await self._client._get(f"/api/agents?search={slug}&limit=10")
+        items = (res.get("data") if isinstance(res, dict) else res) or []
+        for a in items:
+            if a.get("slug") == slug:
+                return a
+        return None
+
+
+class MLModelsClient:
+    """Read-side access to the platform's ML model registry."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def list(self) -> list[dict[str, Any]]:
+        res = await self._client._get("/api/ml-models")
+        items = (res.get("data") if isinstance(res, dict) else res) or []
+        return items if isinstance(items, list) else []
+
 
 class KnowledgeClient:
     """Knowledge Engine client — Cognify, graph queries, and hybrid search."""
@@ -529,10 +549,14 @@ class ChatClient:
     ) -> dict[str, Any]:
         """Create a new thread bound to an agent. Returns the thread row."""
         body: dict[str, Any] = {}
-        if agent_slug: body["agent_slug"] = agent_slug
-        if agent_id:   body["agent_id"] = agent_id
-        if app_slug:   body["app_slug"] = app_slug
-        if title:      body["title"] = title
+        if agent_slug:
+            body["agent_slug"] = agent_slug
+        if agent_id:
+            body["agent_id"] = agent_id
+        if app_slug:
+            body["app_slug"] = app_slug
+        if title:
+            body["title"] = title
         res = await self._client._http.post(
             "/api/conversations",
             json=body,
@@ -553,8 +577,10 @@ class ChatClient:
     ) -> list[dict[str, Any]]:
         """List the acting subject's threads. Filterable by app/agent."""
         params = {"per_page": str(limit), "page": str(max(1, (offset // max(1, limit)) + 1)), "archived": str(archived).lower()}
-        if app_slug:   params["app_slug"] = app_slug
-        if agent_slug: params["agent_slug"] = agent_slug
+        if app_slug:
+            params["app_slug"] = app_slug
+        if agent_slug:
+            params["agent_slug"] = agent_slug
         res = await self._client._http.get(
             "/api/conversations",
             params=params,
@@ -587,9 +613,12 @@ class ChatClient:
         Returns: { thread, user_message, assistant_message }
         """
         body: dict[str, Any] = {"content": content}
-        if context:      body["context"] = context
-        if agent_slug:   body["agent_slug"] = agent_slug
-        if attachments:  body["attachments"] = attachments
+        if context:
+            body["context"] = context
+        if agent_slug:
+            body["agent_slug"] = agent_slug
+        if attachments:
+            body["attachments"] = attachments
         res = await self._client._http.post(
             f"/api/conversations/{thread_id}/turn",
             json=body,
@@ -655,6 +684,12 @@ class Abenix:
         timeout: float = 120.0,
         act_as: ActingSubject | None = None,
     ):
+        # Defensive: a secret-mount file with a stray CR/LF turns X-API-Key
+        # into an illegal httpx header value and every SDK call dies. Strip
+        # whitespace + CR/LF here so the caller can't accidentally take the
+        # client down with a trailing newline in the env/secret.
+        if isinstance(api_key, str):
+            api_key = api_key.strip().rstrip("\r\n")
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -666,6 +701,7 @@ class Abenix:
         self.approvals = ApprovalsClient(self)
         self.tools = ToolsClient(self)
         self.presets = PresetsClient(self)
+        self.ml_models = MLModelsClient(self)
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},

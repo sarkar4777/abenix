@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import Link from 'next/link';
 import {
   FileSearch, Upload, BarChart3, MessageSquare, FileText, TrendingUp,
   LogOut, ChevronLeft, ChevronRight, CheckCircle, Zap, Shield, Scale, Layers,
@@ -11,6 +12,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cell,
 } from 'recharts';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { if (typeof window === 'undefined') return null; return localStorage.getItem('contractiq_token'); }
@@ -119,8 +121,21 @@ export default function ComparePage() {
             </div>
           </div>
 
+          <PageExplainer routeKey="compare" />
+
+          {!loading && contracts.filter(c => c.status === 'analyzed').length < 2 && step === 1 && (
+            <div className="bg-slate-800/20 border border-slate-700/40 rounded-2xl p-12 text-center">
+              <Upload className="w-14 h-14 text-slate-700 mx-auto mb-3" />
+              <p className="text-base font-semibold text-white mb-1">You do not have any contracts yet</p>
+              <p className="text-sm text-slate-400 mb-5">Upload at least 2 to use Compare.</p>
+              <Link href="/upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-400 transition-colors">
+                <Upload className="w-4 h-4" /> Upload your first contract
+              </Link>
+            </div>
+          )}
+
           {/* Step 1: Select Contracts */}
-          {step === 1 && (
+          {step === 1 && contracts.filter(c => c.status === 'analyzed').length >= 2 && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
               <p className="text-xs text-slate-400">Select 2-5 contracts to compare ({selected.length} selected)</p>
               <div className="grid grid-cols-2 gap-3">
@@ -144,9 +159,6 @@ export default function ComparePage() {
                   </div>
                 ))}
               </div>
-              {contracts.filter(c => c.status === 'analyzed').length === 0 && (
-                <div className="text-center py-12"><p className="text-sm text-slate-500">No analyzed contracts available. Upload and extract contracts first.</p></div>
-              )}
               <button onClick={() => setStep(2)} disabled={selected.length < 2}
                 className="w-full py-3 rounded-lg bg-emerald-500 text-white font-medium text-sm hover:bg-emerald-400 disabled:opacity-30 transition-colors flex items-center justify-center gap-2">
                 Continue <ChevronRight className="w-4 h-4" />

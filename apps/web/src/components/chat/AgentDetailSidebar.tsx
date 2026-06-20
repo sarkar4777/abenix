@@ -23,6 +23,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import ModelPicker from '@/components/ModelPicker';
 import type { AgentInfo } from '@/stores/chatStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -388,18 +389,10 @@ curl -X POST ${API_URL}/api/triggers/webhook/TOKEN \\
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Model</label>
-                <select
+                <ModelPicker
                   value={editModel}
-                  onChange={(e) => setEditModel(e.target.value)}
-                  disabled={isOOB}
-                  className="w-full bg-slate-800/50 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:border-cyan-500 focus:outline-none disabled:opacity-50"
-                >
-                  <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
-                  <option value="claude-haiku-3-5-20241022">Claude Haiku 3.5</option>
-                  <option value="gpt-4o">GPT-4o</option>
-                  <option value="gpt-4o-mini">GPT-4o Mini</option>
-                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                </select>
+                  onChange={(v) => { if (!isOOB) setEditModel(v); }}
+                />
               </div>
 
               <div>

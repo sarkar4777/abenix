@@ -20,10 +20,10 @@ TERMINAL = {"completed", "succeeded", "failed", "error", "cancelled"}
 class InvokeAgentTool(BaseTool):
     name = "invoke_agent"
     description = (
-        "Invoke a registered Abenix agent by slug. The platform enqueues the "
+        "Invoke a registered platform agent by slug. The platform enqueues the "
         "sub-execution, runs it on the appropriate runtime pool, and this tool "
         "returns the parsed JSON envelope. Use it to fan a desk-level question "
-        "out across the specialised Wingman agents and synthesise a unified "
+        "out across the specialised sub-agents and synthesise a unified "
         "brief from their outputs."
     )
     input_schema: dict[str, Any] = {
@@ -31,7 +31,7 @@ class InvokeAgentTool(BaseTool):
         "properties": {
             "agent_slug": {
                 "type": "string",
-                "description": "Slug of the registered agent to invoke (e.g. 'wingman-arb-analyzer').",
+                "description": "Slug of the registered agent to invoke (e.g. 'arb-analyzer').",
             },
             "input": {
                 "type": "object",

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { apiFetch } from '@/lib/api';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   GitBranch, Loader2, FileText, Layers, Zap, DollarSign, Award,
   TrendingUp, Package, Info, Filter, Search, ArrowRight, Database,
@@ -164,6 +165,8 @@ export default function DealClustersPage() {
           </p>
         </div>
 
+        <PageExplainer routeKey="deal-clusters" />
+
         {/* KPI strip */}
         <div className="grid grid-cols-5 gap-3">
           {[
@@ -226,21 +229,23 @@ export default function DealClustersPage() {
         </div>
 
         {/* Empty state */}
-        {filtered.length === 0 && (
+        {filtered.length === 0 && rows.length === 0 && (
+          <div className="bg-slate-800/20 border border-slate-700/40 rounded-2xl p-12 text-center">
+            <Upload className="w-14 h-14 text-slate-700 mx-auto mb-3" />
+            <p className="text-base font-semibold text-white mb-1">No deal clusters yet</p>
+            <p className="text-sm text-slate-400 mb-5 max-w-md mx-auto">
+              Upload PPA / swap / tolling contracts — the extractor automatically breaks clauses into deal clusters ready for Endur-style deal templates.
+            </p>
+            <a href="/upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-400 transition-colors">
+              <Upload className="w-4 h-4" /> Upload your first contract
+            </a>
+          </div>
+        )}
+
+        {filtered.length === 0 && rows.length > 0 && (
           <div className="bg-slate-800/20 border border-slate-700/40 rounded-2xl p-12 text-center">
             <Layers className="w-14 h-14 text-slate-700 mx-auto mb-3" />
-            <p className="text-sm text-slate-400 mb-1">
-              {rows.length === 0 ? 'No deal clusters extracted yet' : 'No clusters match your filter'}
-            </p>
-            <p className="text-xs text-slate-600 max-w-md mx-auto">
-              Upload PPA / swap / tolling contracts from the Upload page — the extractor automatically
-              breaks clauses into deal clusters ready for Endur-style deal templates.
-            </p>
-            {rows.length === 0 && (
-              <a href="/upload" className="inline-flex mt-4 items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-600 text-white text-xs font-semibold">
-                Upload a Contract <ArrowRight className="w-3 h-3" />
-              </a>
-            )}
+            <p className="text-sm text-slate-400">No clusters match your filter.</p>
           </div>
         )}
 

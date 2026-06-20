@@ -44,6 +44,11 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "category": "ai_builder",
         "description": "Model used by the Builder's critic + adversarial-safety gates.",
     },
+    "ai_builder.validation.model": {
+        "value": "azure-gpt-4o",
+        "category": "ai_builder",
+        "description": "Model used to preview/validate agents and pipelines from the AI Builder (Tier-3 LLM critic + draft preview calls).",
+    },
     "moderation.model": {
         "value": "claude-sonnet-4-5-20250929",
         "category": "moderation",

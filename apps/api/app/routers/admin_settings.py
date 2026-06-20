@@ -98,6 +98,23 @@ AVAILABLE_MODELS: list[dict[str, Any]] = [
         "family": "gpt-4",
         "capabilities": ["text", "vision", "tools"],
     },
+    # Azure OpenAI deployments — same families as openai/* but billed + routed
+    # through the customer's Azure tenant. Selectable wherever an openai model
+    # is selectable.
+    {
+        "id": "azure-gpt-4o",
+        "provider": "azure",
+        "label": "Azure GPT-4o",
+        "family": "gpt-4",
+        "capabilities": ["text", "vision", "tools"],
+    },
+    {
+        "id": "azure-gpt-4o-mini",
+        "provider": "azure",
+        "label": "Azure GPT-4o mini",
+        "family": "gpt-4",
+        "capabilities": ["text", "vision", "tools"],
+    },
 ]
 
 

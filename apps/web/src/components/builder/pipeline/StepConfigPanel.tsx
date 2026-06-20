@@ -16,6 +16,8 @@ import type { PipelineStep, PipelineCondition, SwitchConfig } from './pipelineUt
 import { validatePipeline } from './pipelineUtils';
 import { usePipelineStore, type ValidationError } from './usePipelineStore';
 import { TOOL_DOCS, type ToolParam } from '@/lib/tool-docs';
+import ModelPicker from '@/components/ModelPicker';
+import { ModelStatusBanner } from '@/components/ModelStatusBanner';
 
 // Props
 
@@ -27,14 +29,6 @@ interface StepConfigPanelProps {
 }
 
 // Constants
-
-const MODELS = [
-  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-haiku-3-5-20241022', label: 'Claude Haiku 3.5' },
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-];
 
 const CONDITION_OPERATORS: { value: PipelineCondition['operator']; label: string }[] = [
   { value: 'eq', label: 'Equals (==)' },
@@ -305,17 +299,11 @@ function LLMCallArgumentsForm({
       {/* Model */}
       <div>
         <label className="block text-xs text-slate-400 mb-1.5">Model<HelpTip text="Which LLM to use. Sonnet is best for complex research and reasoning. Haiku is faster and cheaper for simple tasks." /></label>
-        <select
+        <ModelPicker
           value={model}
-          onChange={(e) => onChange({ ...args, model: e.target.value })}
-          className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-500"
-        >
-          {MODELS.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => onChange({ ...args, model: v })}
+        />
+        <ModelStatusBanner model={model} compact />
         <FieldError stepErrors={stepErrors} field="arguments.model" />
       </div>
 
@@ -1345,15 +1333,11 @@ function AgentStepArgumentsForm({
 
       <div>
         <label className="block text-xs text-slate-400 mb-1.5">Model<HelpTip text="Which LLM to use. Sonnet is best for complex research and reasoning. Haiku is faster and cheaper for simple tasks." /></label>
-        <select
+        <ModelPicker
           value={model}
-          onChange={(e) => onChange({ ...args, model: e.target.value })}
-          className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-500"
-        >
-          {MODELS.map((m) => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
+          onChange={(v) => onChange({ ...args, model: v })}
+        />
+        <ModelStatusBanner model={model} compact />
         <FieldError stepErrors={stepErrors} field="arguments.model" />
       </div>
 

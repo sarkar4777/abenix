@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   Mail, Lock, ArrowRight, Sparkles, Eye, EyeOff, Shield, Zap,
   FileText, TrendingUp, AlertOctagon, Handshake, Sunrise, Receipt,
@@ -147,7 +148,7 @@ const STACK = [
 const STATS = [
   { number: '100-200', label: 'page contracts analyzed per upload', sub: 'in ~60 seconds' },
   { number: '9', label: 'agentic workflows', sub: 'from briefing to hedging' },
-  { number: '12+', label: 'market data sources', sub: 'live, not stale' },
+  { number: 'Tools registry', label: 'ENTSO-E, Ember, ECB, EIA, Tavily', sub: 'plus the rest of the Abenix catalog' },
   { number: '~$0.90', label: 'cost per contract extracted', sub: 'with full risk analysis' },
 ];
 
@@ -263,6 +264,7 @@ export default function ContractIQLandingPage() {
               multi-pass LLM analysis, builds a knowledge graph of relationships, and lets you <strong className="text-white">chat with your entire portfolio</strong>.
               Purpose-built for PPAs, gas supply agreements, tolling, and virtual PPAs.
             </p>
+            <PageExplainer routeKey="landing" />
             <div className="flex flex-wrap gap-4">
               <button onClick={() => setShowAuth(true)}
                 className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-600 text-white text-sm font-semibold hover:shadow-2xl hover:shadow-emerald-500/30 transition-all flex items-center gap-2">
@@ -291,9 +293,9 @@ export default function ContractIQLandingPage() {
             className="relative">
             <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 blur-3xl rounded-full" />
             <div className="relative rounded-2xl border border-slate-800/50 bg-slate-900/70 backdrop-blur-xl p-6 shadow-2xl">
-              <div className="flex items-center gap-2 mb-4 pb-4 border-b border-slate-800/50">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-semibold">Live Dashboard Preview</span>
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-800/50">
+                <span className="text-[10px] uppercase tracking-wider text-slate-300 font-semibold">What you&apos;ll see inside</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-500">Sample preview</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {STATS.map(s => (
@@ -307,10 +309,10 @@ export default function ContractIQLandingPage() {
               <div className="mt-4 pt-4 border-t border-slate-800/50">
                 <div className="flex items-center justify-between text-[11px]">
                   <div className="flex items-center gap-1.5 text-slate-400">
-                    <Activity className="w-3 h-3 text-emerald-400" />
-                    <span>Pipelines running</span>
+                    <Activity className="w-3 h-3 text-slate-500" />
+                    <span>Pipeline used</span>
                   </div>
-                  <span className="text-emerald-300 font-mono">contractiq-extraction-pipeline</span>
+                  <span className="text-slate-300 font-mono">contractiq-extraction-pipeline</span>
                 </div>
               </div>
             </div>

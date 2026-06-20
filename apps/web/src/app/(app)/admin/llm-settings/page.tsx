@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Cpu, Save, RotateCcw, Sparkles, Shield, BookOpen, Zap, Clock } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import ModelPicker from '@/components/ModelPicker';
 
 type Setting = {
   key: string;
@@ -170,6 +171,50 @@ export default function LlmSettingsPage() {
         </div>
       )}
 
+      {/* Builder + Pipeline validation — highlighted at the top because it
+          drives both AI Builder previews and the Tier-3 pipeline critic. */}
+      {(() => {
+        const aiBuilder = data.categories.ai_builder || [];
+        const validation = aiBuilder.find((s) => s.key === 'ai_builder.validation.model');
+        if (!validation) return null;
+        const currentValue = pending[validation.key] ?? validation.value;
+        return (
+          <div
+            data-testid="builder-validation-section"
+            className="rounded-xl border border-cyan-500/30 bg-cyan-500/[0.04] p-4 space-y-3"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-cyan-400" />
+              <h2 className="text-base font-semibold text-white">
+                Builder + Pipeline validation model
+              </h2>
+            </div>
+            <p className="text-xs text-slate-400">
+              Used by the AI Builder for preview / draft generation and by AI Validate
+              (Tier-3 LLM critic) on agents and pipelines. Default is
+              <code className="text-cyan-300 mx-1">azure-gpt-4o</code>.
+            </p>
+            <div data-testid="builder-validation-model-select">
+              <ModelPicker
+                value={currentValue}
+                onChange={(v) => {
+                  setPending((p) => {
+                    const next = { ...p };
+                    if (v === validation.value) delete next[validation.key];
+                    else next[validation.key] = v;
+                    return next;
+                  });
+                }}
+              />
+            </div>
+            <p className="text-[10px] text-slate-500" data-testid="builder-validation-current">
+              Current: <code className="text-slate-300">{currentValue}</code> · Default:{' '}
+              <code className="text-slate-400">{validation.default}</code>
+            </p>
+          </div>
+        );
+      })()}
+
       {/* Category cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {Object.entries(data.categories).map(([cat, items]) => {
@@ -209,31 +254,18 @@ export default function LlmSettingsPage() {
                           </span>
                         )}
                       </div>
-                      <select
-                        value={currentValue}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setPending((p) => {
-                            const next = { ...p };
-                            if (v === s.value) delete next[s.key]; else next[s.key] = v;
-                            return next;
-                          });
-                        }}
-                        data-testid={`select-${s.key}`}
-                        className="w-full bg-slate-950/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white"
-                      >
-                        {['anthropic', 'google', 'openai'].map((prov) => {
-                          const provModels = data.models.filter((m) => m.provider === prov);
-                          if (provModels.length === 0) return null;
-                          return (
-                            <optgroup key={prov} label={prov.toUpperCase()}>
-                              {provModels.map((m) => (
-                                <option key={m.id} value={m.id}>{m.label}  ({m.id})</option>
-                              ))}
-                            </optgroup>
-                          );
-                        })}
-                      </select>
+                      <div data-testid={`select-${s.key}`}>
+                        <ModelPicker
+                          value={currentValue}
+                          onChange={(v) => {
+                            setPending((p) => {
+                              const next = { ...p };
+                              if (v === s.value) delete next[s.key]; else next[s.key] = v;
+                              return next;
+                            });
+                          }}
+                        />
+                      </div>
                       <p className="text-[10px] text-slate-500 mt-1">
                         Platform default: <code className="text-slate-400">{s.default}</code>
                       </p>

@@ -15,6 +15,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import { formatCount, formatPct, formatUsd, formatMs as fmtMs } from '@/lib/format-stats';
 import {
   LazyAreaChart as AreaChart,
   LazyArea as Area,
@@ -268,37 +269,41 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <KpiCard
           label="Total Executions"
-          value={overview ? formatNumber(overview.total_executions) : '0'}
+          value={formatCount(overview?.total_executions)}
           icon={Zap}
           iconColor="text-cyan-400"
           iconBg="bg-cyan-500/10"
-          sub={overview ? `${overview.completed} completed` : undefined}
+          sub={overview ? `${formatCount(overview.completed)} completed` : undefined}
+          dim={overview?.total_executions === 0}
         />
         <KpiCard
           label="Avg Response Time"
-          value={overview ? formatMs(overview.avg_response_ms) : '0ms'}
+          value={fmtMs(overview?.avg_response_ms)}
           icon={Clock}
           iconColor="text-amber-400"
           iconBg="bg-amber-500/10"
+          dim={overview?.avg_response_ms === 0}
         />
         <KpiCard
           label="Cache Hit Rate"
-          value={overview ? `${overview.cache_hit_rate}%` : '0%'}
+          value={formatPct(overview?.cache_hit_rate)}
           icon={Activity}
           iconColor="text-emerald-400"
           iconBg="bg-emerald-500/10"
+          dim={overview?.cache_hit_rate === 0}
         />
         <KpiCard
           label="Total Cost"
-          value={overview ? formatCost(overview.total_cost) : '$0'}
+          value={formatUsd(overview?.total_cost)}
           icon={DollarSign}
           iconColor="text-purple-400"
           iconBg="bg-purple-500/10"
           sub={overview ? `${formatNumber(overview.total_tokens)} tokens` : undefined}
+          dim={overview?.total_cost === 0}
         />
         <KpiCard
           label="Success Rate"
-          value={overview ? `${overview.success_rate}%` : '0%'}
+          value={formatPct(overview?.success_rate)}
           icon={overview && overview.success_rate >= 95 ? TrendingUp : TrendingDown}
           iconColor={overview && overview.success_rate >= 95 ? 'text-emerald-400' : 'text-red-400'}
           iconBg={overview && overview.success_rate >= 95 ? 'bg-emerald-500/10' : 'bg-red-500/10'}
@@ -507,17 +512,17 @@ export default function AnalyticsPage() {
                       <td className="text-xs text-slate-300 py-2.5 pr-4 max-w-[140px] truncate">
                         {agent.name}
                       </td>
-                      <td className="text-right text-xs text-slate-300 py-2.5 px-3">
-                        {agent.executions.toLocaleString()}
+                      <td className={`text-right text-xs py-2.5 px-3 ${agent.executions === 0 ? 'text-slate-500' : 'text-slate-300'}`}>
+                        {formatCount(agent.executions)}
                       </td>
-                      <td className="text-right text-xs text-slate-300 py-2.5 px-3">
+                      <td className={`text-right text-xs py-2.5 px-3 ${agent.total_tokens === 0 ? 'text-slate-500' : 'text-slate-300'}`}>
                         {formatNumber(agent.total_tokens)}
                       </td>
-                      <td className="text-right text-xs text-white font-medium py-2.5 px-3">
-                        ${agent.cost.toFixed(4)}
+                      <td className={`text-right text-xs font-medium py-2.5 px-3 ${agent.cost === 0 ? 'text-slate-500' : 'text-white'}`}>
+                        {formatUsd(agent.cost)}
                       </td>
-                      <td className="text-right text-xs text-slate-400 py-2.5 pl-3">
-                        {formatMs(agent.avg_duration_ms)}
+                      <td className={`text-right text-xs py-2.5 pl-3 ${agent.avg_duration_ms === 0 ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {fmtMs(agent.avg_duration_ms)}
                       </td>
                     </tr>
                   ))}
@@ -595,11 +600,11 @@ export default function AnalyticsPage() {
                         <span className="text-slate-300 font-mono">{m.model}</span>
                       </div>
                     </td>
-                    <td className="text-right text-xs text-slate-300 py-2.5 px-4">{formatNumber(m.input_tokens)}</td>
-                    <td className="text-right text-xs text-slate-300 py-2.5 px-4">{formatNumber(m.output_tokens)}</td>
-                    <td className="text-right text-xs text-white font-medium py-2.5 px-4">{formatNumber(m.total_tokens)}</td>
-                    <td className="text-right text-xs text-slate-300 py-2.5 px-4">{m.executions.toLocaleString()}</td>
-                    <td className="text-right text-xs text-white font-medium py-2.5 pl-4">${m.cost.toFixed(4)}</td>
+                    <td className={`text-right text-xs py-2.5 px-4 ${m.input_tokens === 0 ? 'text-slate-500' : 'text-slate-300'}`}>{formatNumber(m.input_tokens)}</td>
+                    <td className={`text-right text-xs py-2.5 px-4 ${m.output_tokens === 0 ? 'text-slate-500' : 'text-slate-300'}`}>{formatNumber(m.output_tokens)}</td>
+                    <td className={`text-right text-xs font-medium py-2.5 px-4 ${m.total_tokens === 0 ? 'text-slate-500' : 'text-white'}`}>{formatNumber(m.total_tokens)}</td>
+                    <td className={`text-right text-xs py-2.5 px-4 ${m.executions === 0 ? 'text-slate-500' : 'text-slate-300'}`}>{formatCount(m.executions)}</td>
+                    <td className={`text-right text-xs font-medium py-2.5 pl-4 ${m.cost === 0 ? 'text-slate-500' : 'text-white'}`}>{formatUsd(m.cost)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -620,6 +625,7 @@ function KpiCard({
   iconColor,
   iconBg,
   sub,
+  dim,
 }: {
   label: string;
   value: string;
@@ -627,7 +633,10 @@ function KpiCard({
   iconColor: string;
   iconBg: string;
   sub?: string;
+  dim?: boolean;
 }) {
+  const isMissing = value === '—';
+  const valueClass = isMissing || dim ? 'text-slate-500' : 'text-white';
   return (
     <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5">
       <div className="flex items-center gap-2 mb-3">
@@ -638,8 +647,9 @@ function KpiCard({
           {label}
         </span>
       </div>
-      <p className="text-2xl font-bold text-white">{value}</p>
+      <p className={`text-2xl font-bold ${valueClass}`}>{value}</p>
       {sub && <p className="text-[11px] text-slate-500 mt-1">{sub}</p>}
+      {dim && !sub && <p className="text-[11px] text-slate-600 mt-1">idle</p>}
     </div>
   );
 }

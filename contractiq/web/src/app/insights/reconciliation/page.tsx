@@ -6,6 +6,7 @@ import {
   Receipt, ChevronLeft, Sparkles, Loader2, FileText,
   AlertCircle, CheckCircle2, TrendingUp, TrendingDown,
 } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -98,6 +99,7 @@ export default function ReconciliationPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-white">Settlement Reconciliation</h1>
+              <PageExplainer routeKey="insights-reconciliation" />
               <p className="text-xs text-slate-400">Verify counterparty invoice math against contract pricing — <code className="text-cyan-300">contractiq-settlement-reconciler</code></p>
             </div>
           </div>

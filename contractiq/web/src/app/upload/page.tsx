@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   FileSearch, Upload, BarChart3, MessageSquare, FileText, TrendingUp,
   LogOut, CloudUpload, CheckCircle, Loader2, Clock, AlertCircle, X,
@@ -227,6 +228,7 @@ export default function ContractIQUploadPage() {
             <h1 className="text-xl font-bold text-white">Upload Contract</h1>
             <p className="text-sm text-slate-400 mt-1">Upload a PPA or gas contract for AI-powered extraction and analysis</p>
           </div>
+          <PageExplainer routeKey="upload" />
 
           {!extracting ? (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">

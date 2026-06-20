@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   Sparkles, Sunrise, Handshake, AlertOctagon, Receipt,
   Layers, Telescope, GitCompareArrows, Activity, ShieldCheck,
@@ -25,10 +26,13 @@ interface Overview {
   benchmarks_total: number;
 }
 
+type FeatureGroup = 'daily' | 'on_demand' | 'contracts';
+
 const FEATURES = [
   {
     id: 'briefing',
     href: '/insights/briefing',
+    group: 'daily' as FeatureGroup,
     icon: Sunrise,
     title: 'Daily Executive Briefing',
     tagline: 'Your portfolio in 1 page, every morning',
@@ -43,6 +47,7 @@ const FEATURES = [
   {
     id: 'renewals',
     href: '/insights/renewals',
+    group: 'contracts' as FeatureGroup,
     icon: Handshake,
     title: 'Renewal Negotiation Copilot',
     tagline: 'Walk into the room ready to close',
@@ -57,6 +62,7 @@ const FEATURES = [
   {
     id: 'force-majeure',
     href: '/insights/force-majeure',
+    group: 'daily' as FeatureGroup,
     icon: AlertOctagon,
     title: 'Force Majeure Monitor',
     tagline: "Don't miss the 24h notice window",
@@ -71,6 +77,7 @@ const FEATURES = [
   {
     id: 'reconciliation',
     href: '/insights/reconciliation',
+    group: 'contracts' as FeatureGroup,
     icon: Receipt,
     title: 'Settlement Reconciliation',
     tagline: 'Recover the 1-3% nobody verifies',
@@ -85,10 +92,11 @@ const FEATURES = [
   {
     id: 'families',
     href: '/insights/families',
+    group: 'contracts' as FeatureGroup,
     icon: Layers,
     title: 'Contract Families',
-    tagline: 'Reason across master + amendments',
-    description: 'Group related contracts. Resolve "what is the effective curtailment cap after Amendment 4?" automatically.',
+    tagline: 'Group master + amendments for reporting',
+    description: 'Link a master contract to its amendments and side letters so portfolio reports roll up cleanly.',
     color: 'from-indigo-500 to-purple-600',
     border: 'border-indigo-500/30',
     glow: 'hover:shadow-indigo-500/20',
@@ -99,6 +107,7 @@ const FEATURES = [
   {
     id: 'anomalies',
     href: '/insights/anomalies',
+    group: 'daily' as FeatureGroup,
     icon: Telescope,
     title: 'Clause Anomaly Detector',
     tagline: 'Find the buried risks reviewers miss',
@@ -113,6 +122,7 @@ const FEATURES = [
   {
     id: 'version-diff',
     href: '/insights/version-diff',
+    group: 'contracts' as FeatureGroup,
     icon: GitCompareArrows,
     title: 'Version Diff',
     tagline: 'Semantic redline review',
@@ -127,6 +137,7 @@ const FEATURES = [
   {
     id: 'stress-test',
     href: '/insights/stress-test',
+    group: 'on_demand' as FeatureGroup,
     icon: Activity,
     title: 'Stress Test Simulator',
     tagline: 'Monte Carlo against market shocks',
@@ -141,6 +152,7 @@ const FEATURES = [
   {
     id: 'hedge',
     href: '/insights/hedge',
+    group: 'on_demand' as FeatureGroup,
     icon: ShieldCheck,
     title: 'Hedge Advisor',
     tagline: 'Right-sized hedges, automatically',
@@ -155,6 +167,8 @@ const FEATURES = [
   {
     id: 'valuation',
     href: '/valuation',
+    group: 'on_demand' as FeatureGroup,
+    deepLink: true,
     icon: LineChartIcon,
     title: 'Portfolio Valuation & Forecast',
     tagline: 'Forward curves → MtM → T-o-P alerts',
@@ -169,6 +183,7 @@ const FEATURES = [
   {
     id: 'benchmark',
     href: '/insights/benchmark',
+    group: 'on_demand' as FeatureGroup,
     icon: Scale,
     title: 'Clause Benchmarking',
     tagline: 'Market standard + your portfolio, clause by clause',
@@ -227,62 +242,98 @@ export default function InsightsHubPage() {
               <span className="text-emerald-300"> (database_query, financial_calculator, entso_e, ember_climate, ecb_rates, tavily_search, code_executor)</span> —
               with domain knowledge encoded in the prompts, not the tools.
             </p>
+            <PageExplainer routeKey="insights" />
           </motion.div>
         </div>
       </div>
 
-      {/* Feature grid */}
-      <div className="max-w-7xl mx-auto px-8 py-10">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {FEATURES.map((f, idx) => {
-            const count = overview?.[f.countKey] ?? 0;
-            return (
-              <motion.a
-                key={f.id}
-                href={f.href}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.05, duration: 0.4 }}
-                whileHover={{ y: -2 }}
-                className={`group relative overflow-hidden rounded-2xl border ${f.border} bg-slate-900/30 backdrop-blur-sm hover:bg-slate-900/50 transition-all p-6 ${f.glow} hover:shadow-xl`}
-              >
-                {/* Gradient overlay */}
-                <div className={`absolute inset-0 bg-gradient-to-br ${f.color} opacity-0 group-hover:opacity-5 transition-opacity`} />
+      {/* Feature grid — grouped by intent */}
+      <div className="max-w-7xl mx-auto px-8 py-10 space-y-10">
+        {([
+          {
+            key: 'daily',
+            title: 'Daily briefings',
+            blurb: 'Run automatically every morning — open them with your coffee.',
+          },
+          {
+            key: 'on_demand',
+            title: 'On-demand analyses',
+            blurb: 'Long-running quant workflows. Trigger when you need a number to defend.',
+          },
+          {
+            key: 'contracts',
+            title: 'Contract intelligence',
+            blurb: 'Clause-level reasoning across renewals, settlements, families, and version diffs.',
+          },
+        ] as const).map(section => {
+          const items = FEATURES.filter(f => f.group === section.key);
+          if (!items.length) return null;
+          return (
+            <div key={section.key} data-testid={`insights-group-${section.key}`}>
+              <div className="flex items-baseline justify-between mb-4 px-1">
+                <h2 className="text-lg font-semibold text-white">{section.title}</h2>
+                <p className="text-xs text-slate-500">{section.blurb}</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {items.map((f, idx) => {
+                  const count = overview?.[f.countKey] ?? 0;
+                  return (
+                    <motion.a
+                      key={f.id}
+                      href={f.href}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.04, duration: 0.35 }}
+                      whileHover={{ y: -2 }}
+                      className={`group relative overflow-hidden rounded-2xl border ${f.border} bg-slate-900/30 backdrop-blur-sm hover:bg-slate-900/50 transition-all p-6 ${f.glow} hover:shadow-xl`}
+                    >
+                      {/* Gradient overlay */}
+                      <div className={`absolute inset-0 bg-gradient-to-br ${f.color} opacity-0 group-hover:opacity-5 transition-opacity`} />
 
-                {/* Top: icon + count */}
-                <div className="relative flex items-start justify-between mb-4">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${f.color} bg-opacity-20 flex items-center justify-center shadow-lg`}>
-                    <f.icon className="w-6 h-6 text-white" />
-                  </div>
-                  {!loading && (
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-white tabular-nums">{count}</div>
-                      <div className="text-[10px] text-slate-500 uppercase tracking-wider">{f.countLabel}</div>
-                    </div>
-                  )}
-                </div>
+                      {/* Top: icon + count */}
+                      <div className="relative flex items-start justify-between mb-4">
+                        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${f.color} bg-opacity-20 flex items-center justify-center shadow-lg`}>
+                          <f.icon className="w-6 h-6 text-white" />
+                        </div>
+                        {!loading && (
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-white tabular-nums">{count}</div>
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">{f.countLabel}</div>
+                          </div>
+                        )}
+                      </div>
 
-                {/* Title */}
-                <h3 className="text-lg font-bold text-white mb-1">{f.title}</h3>
-                <p className="text-xs text-emerald-300/80 mb-3 italic">{f.tagline}</p>
+                      {/* Title */}
+                      <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
+                        {f.title}
+                        {f.deepLink && (
+                          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-slate-700 text-slate-400">
+                            sidebar
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-xs text-emerald-300/80 mb-3 italic">{f.tagline}</p>
 
-                {/* Description */}
-                <p className="text-sm text-slate-400 leading-relaxed mb-4">{f.description}</p>
+                      {/* Description */}
+                      <p className="text-sm text-slate-400 leading-relaxed mb-4">{f.description}</p>
 
-                {/* Footer */}
-                <div className="relative flex items-center justify-between pt-3 border-t border-slate-800/50">
-                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                    <Zap className="w-3 h-3" />
-                    <code className="font-mono">{f.pipeline}</code>
-                  </div>
-                  <div className="flex items-center gap-1 text-xs text-emerald-400 group-hover:gap-2 transition-all">
-                    Open <ArrowRight className="w-3.5 h-3.5" />
-                  </div>
-                </div>
-              </motion.a>
-            );
-          })}
-        </div>
+                      {/* Footer */}
+                      <div className="relative flex items-center justify-between pt-3 border-t border-slate-800/50">
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                          <Zap className="w-3 h-3" />
+                          <code className="font-mono">{f.pipeline}</code>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-emerald-400 group-hover:gap-2 transition-all">
+                          {f.deepLink ? 'Go to page' : 'Open'} <ArrowRight className="w-3.5 h-3.5" />
+                        </div>
+                      </div>
+                    </motion.a>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
 
         {/* Bottom info strip */}
         <motion.div

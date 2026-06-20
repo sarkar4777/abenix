@@ -5,8 +5,8 @@ generic forecasts and a dedicated marine endpoint with wave height, wind,
 swell — exactly what an Operations Sentinel needs to flag vessels at risk
 of port closures or ETA slippage.
 
-Shortcut location ids are pre-mapped to the major energy-trading hubs that
-appear in the Wingman demo. Pass a raw lat/lon for anywhere else.
+Shortcut location ids are pre-mapped to the major energy-trading hubs.
+Pass a raw lat/lon for anywhere else.
 """
 
 from __future__ import annotations

@@ -844,7 +844,7 @@ TOOL_CATALOG = [
     {
         "id": "structured_extractor",
         "name": "Structured Extractor",
-        "description": "Schema-driven extraction from long documents into strict JSON — used by ContractIQ extractor",
+        "description": "Schema-driven extraction from long documents into strict JSON — generic structured-output tool for any standalone app.",
         "category": "data",
     },
     {
@@ -856,7 +856,7 @@ TOOL_CATALOG = [
     {
         "id": "schema_portfolio_tool",
         "name": "Portfolio — Schema-Driven",
-        "description": "Schema-driven portfolio tool for PPA / gas / tolling contracts. Reads its schema from portfolio_schemas at runtime so the same tool powers ContractIQ, custom energy desks, and new verticals.",
+        "description": "Schema-driven portfolio tool for PPA / gas / tolling contracts. Reads its schema from portfolio_schemas at runtime so the same tool powers energy desks and any standalone app that registers a schema.",
         "category": "finance",
         "input_schema": {
             "type": "object",

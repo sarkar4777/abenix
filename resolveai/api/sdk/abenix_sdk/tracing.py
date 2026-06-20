@@ -109,10 +109,43 @@ def init_tracing(service_name: str, fastapi_app: Any = None) -> bool:
     return True
 
 
+def _safe_default_span_details(scope: Any) -> tuple[str, dict]:
+    # OpenTelemetry's default route walker crashes with
+    # `AttributeError: '_IncludedRouter' object has no attribute 'path'`
+    # on every OPTIONS preflight when the FastAPI app uses APIRouter.include_router.
+    # That 500 blocks every browser at a non-same-origin hostname.
+    # Wrap the upstream hook so the AttributeError falls back to "{METHOD} {path}".
+    try:
+        from opentelemetry.instrumentation.fastapi import _get_default_span_details
+        return _get_default_span_details(scope)
+    except AttributeError:
+        method = scope.get("method", "HTTP") if isinstance(scope, dict) else "HTTP"
+        path = scope.get("path", "/") if isinstance(scope, dict) else "/"
+        return f"{method} {path}", {}
+    except Exception:
+        return "HTTP /", {}
+
+
 def _instrument_fastapi(app: Any) -> None:
+    # Make sure OTel doesn't crash trying to derive span names for OPTIONS
+    # preflights against include_router-mounted sub-routers. The route walker
+    # in older opentelemetry-instrumentation-fastapi blows up on _IncludedRouter
+    # and that AttributeError surfaces as an ASGI 500 on every preflight.
+    os.environ.setdefault("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", "client/.*,server/.*,health,api/health")
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-        FastAPIInstrumentor.instrument_app(app)
+    except Exception as e:
+        logger.debug("fastapi auto-instrument skipped (import): %s", e)
+        return
+    # Patch-time guard — if instrument_app itself raises (AttributeError on the
+    # route walker, missing optional dep, etc.) we MUST NOT take the app down.
+    try:
+        try:
+            FastAPIInstrumentor.instrument_app(app, default_span_details=_safe_default_span_details)
+        except TypeError:
+            FastAPIInstrumentor.instrument_app(app)
+    except AttributeError as e:
+        logger.warning("fastapi auto-instrument failed (AttributeError, leaving app un-instrumented): %s", e)
     except Exception as e:
         logger.debug("fastapi auto-instrument skipped: %s", e)
 

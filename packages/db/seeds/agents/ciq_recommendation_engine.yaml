@@ -57,8 +57,11 @@ system_prompt: |
       "needs_configuration":  [],
       "warnings":             []
     },
-    "fetched_at": "<iso-8601>"
+    "fetched_at": ""
   }
+
+  Leave `fetched_at` as an empty string — the server stamps the real UTC
+  timestamp before returning the response. Do not invent a date.
 input_schema:
   type: object
   properties:

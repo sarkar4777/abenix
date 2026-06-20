@@ -107,9 +107,16 @@ cd "$CIQ_ROOT/api"
 # The subprocess inherits the shell's env (we sourced .env above). Only
 # explicitly override values that differ from .env — port, AF URL, and
 # a couple of overrides that must win regardless of .env contents.
+#
+# --reload is required for local dev: without it, edits to engine/ or
+# translator code don't take effect until a manual restart (was a real
+# UAT trap — the api ran stale bytecode for 4 minutes post-edit).
 PORT=8001 \
 ABENIX_API_URL="${ABENIX_API_URL:-http://localhost:8000}" \
-$PYTHON main.py > "$CIQ_ROOT/logs/api.log" 2>&1 &
+IS_LOCAL_DEV=1 ENVIRONMENT=local \
+$PYTHON -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload \
+  --reload-dir . --reload-dir "$ROOT_DIR/apps/agent-runtime" \
+  > "$CIQ_ROOT/logs/api.log" 2>&1 &
 
 CIQ_PID=$!
 sleep 5

@@ -8,6 +8,7 @@ import {
   TrendingUp, Calendar, AlertTriangle, CheckCircle2, ArrowLeft, ScrollText,
   RefreshCw, ExternalLink,
 } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 interface Cp {
   id: string; legal_name: string; ticker: string | null; sector: string | null;
@@ -224,6 +225,9 @@ export default function CounterpartyDetailPage() {
                 {refreshMsg}
               </p>
             )}
+            <div className="mt-4">
+              <PageExplainer routeKey="credit-risk-counterparty-detail" />
+            </div>
             <p className="text-[10px] text-slate-500 mt-1 italic">Refresh fans out the ciq-counterparty-refresher orchestrator (Abenix) → financial extractor (EDGAR / Companies House / Bundesanzeiger), permit checker (FERC / EPA / PHMSA), rating fetcher (S&amp;P / Moody&apos;s / Fitch). Every write lands in Postgres with a provenance row.</p>
             <div className="grid grid-cols-4 gap-4 mt-4">
               <Stat label="Credit score" value={`${cp.credit_score_1_100 ?? '—'} / 100`} tone={tier.text} />

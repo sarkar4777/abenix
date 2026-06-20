@@ -268,6 +268,29 @@ sandboxedJob:
 databaseName: abenix
 frontendUrl: "http://localhost:3000"
 
+# Progress pub/sub namespacing — overridden per tenant/app deployment.
+# Defaults are generic ("progress:", "parent:") so the engine doesn't
+# carry any app-name baggage. Override e.g. to "wingman:progress:" or
+# "contractiq:progress:" in the corresponding values overlay.
+progress:
+  channelPrefix: "progress:"
+  parentKeyPrefix: "parent:"
+  parentTtl: "1800"
+
+# Comma-separated list of import paths the agent-runtime loads at
+# startup so per-app deterministic guardrails register themselves with
+# engine.post_processors. Empty by default — apps that want guardrails
+# override in their own values file. Example for contractiq:
+#   postProcessorModules: "contractiq.runtime.post_processors"
+postProcessorModules: ""
+
+# MCP server URL allow-list (comma-separated host suffixes). When empty
+# the configmap falls back to "uat-mcp.<release-namespace>.svc.cluster.local"
+# so the canonical UAT MCP fixture can be registered. Override to a
+# comma-separated list of any in-cluster MCP services you want callable
+# (e.g. "uat-mcp.abenix.svc.cluster.local,other-mcp.tools.svc.cluster.local").
+mcpAllowedHosts: ""
+
 environment: production
 logLevel: info
 
@@ -283,6 +306,9 @@ secrets:
   openaiApiKey: ""
   pineconeApiKey: ""
   googleApiKey: ""
+  azureOpenaiApiKey: ""
+  azureOpenaiApiBase: ""
+  azureOpenaiApiVersion: "2024-10-01-preview"
 
 ingress:
   enabled: true

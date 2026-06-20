@@ -26,6 +26,20 @@ data:
   ABENIX_API_URL: "http://abenix-api:8000"
   DATABASE_URL: "postgresql+asyncpg://postgres:localpass@abenix-postgresql:5432/abenix"
   PORT: "8001"
+  # Namespace the progress stream so contractiq runs alongside wingman
+  # without channel collisions. Must match what the agent-runtime pod
+  # publishes — when contractiq triggers agents through the platform we
+  # rely on the abenix configmap's PROGRESS_CHANNEL_PREFIX override.
+  PROGRESS_CHANNEL_PREFIX: "contractiq:progress:"
+  PROGRESS_PARENT_KEY_PREFIX: "contractiq:parent:"
+  PROGRESS_PARENT_TTL: "1800"
+  # Tell the agent-runtime to load contractiq's deterministic guardrails.
+  # The runtime imports each listed module at startup, which triggers the
+  # canonical-anchor registry to register itself with engine.post_processors.
+  POST_PROCESSOR_MODULES: "contractiq.runtime.post_processors"
+  # Domain-keyword overrides for sentiment_analyzer: e&c / energy-desk terms
+  # (ppa, tolling, take_or_pay) that should not live in the generic engine.
+  SENTIMENT_LEXICON_OVERRIDE_PATH: "/app/contractiq/runtime/sentiment_lexicon_override.json"
 
 ---
 apiVersion: apps/v1

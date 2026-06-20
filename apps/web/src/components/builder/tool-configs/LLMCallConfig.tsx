@@ -7,15 +7,8 @@
  * temperature slider, max_tokens input.
  */
 
-import { ChevronDown } from 'lucide-react';
-
-const MODELS = [
-  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-haiku-3-5-20241022', label: 'Claude Haiku 3.5' },
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-];
+import ModelPicker from '@/components/ModelPicker';
+import { ModelStatusBanner } from '@/components/ModelStatusBanner';
 
 interface LLMCallConfigProps {
   values: Record<string, unknown>;
@@ -64,21 +57,12 @@ export default function LLMCallConfig({ values, onChange }: LLMCallConfigProps) 
 
       {/* Model */}
       <div>
-        <label className="text-[10px] text-slate-400 mb-1 block">
-          <span className="font-mono text-slate-500">model</span>
-        </label>
-        <div className="relative">
-          <select
-            value={model}
-            onChange={(e) => onChange({ ...values, model: e.target.value })}
-            className="w-full px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500 appearance-none pr-8"
-          >
-            {MODELS.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-        </div>
+        <ModelPicker
+          value={model}
+          onChange={(v) => onChange({ ...values, model: v })}
+          label="model"
+        />
+        <ModelStatusBanner model={model} compact />
       </div>
 
       {/* Temperature */}

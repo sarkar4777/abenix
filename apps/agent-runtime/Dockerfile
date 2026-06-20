@@ -32,6 +32,17 @@ COPY packages/db/ ./packages/db/
 # small.
 COPY apps/api/app/__init__.py ./apps/api/app/__init__.py
 COPY apps/api/app/core/ ./apps/api/app/core/
+# App-owned post-processor modules. The engine itself stays
+# commodity-agnostic; each app drops a runtime/post_processors/ tree
+# here and points POST_PROCESSOR_MODULES at it.
+COPY contractiq/runtime/ ./contractiq/runtime/
+COPY contractiq/__init__.py ./contractiq/__init__.py
+# Standalone-app code assets shipped with the repo — seed_code_assets.py
+# discovers each agentforge.yaml at boot and the code_asset tool executes
+# them here. Without these copies, agents like contractiq_correlations and
+# contractiq_risk_calculator return "Code asset not found".
+COPY contractiq/code-assets/ ./contractiq/code-assets/
+COPY wingman/code-assets/ ./wingman/code-assets/
 USER appuser
 EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

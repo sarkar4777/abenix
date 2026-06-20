@@ -189,3 +189,40 @@ e2e/fixtures/corpus/
 /Wingman_Demo.webm
 e2e/_record_demo.spec.ts
 e2e/test-results/_demo_video/
+
+# Rotated / debug logs (api.log is the active file; .prev/.test are throwaway).
+*.log.prev*
+*.log.test
+*.log.[0-9]*
+
+# Root-level scratch JSON dumps from one-shot probes.
+/execution_output.json
+/forward_run.json
+/lng_run_capture.json
+/*_run.json
+/*_capture.json
+/*_dump.json
+
+# Wave-specific verifier specs and probe-monkey sweeps — regenerated per session.
+# Durable e2e tests use `uat_<feature>.spec.ts` names; everything below is scratch shape.
+**/pm_help_inspect.spec.ts
+**/pm_recheck_*.spec.ts
+**/pm_sweep_*.spec.ts
+**/final_*.spec.ts
+**/verify_*.spec.ts
+**/inspect_*.spec.ts
+**/key_warning_*.spec.ts
+**/network_*_probe.spec.ts
+**/_*verify*.spec.ts
+**/uat_p*_wave*_verify.spec.ts
+**/uat_*_resweep.spec.ts
+**/uat_page_explainer*.spec.ts
+**/capture_all_routes.spec.ts
+
+# Playwright debug captures and timestamped UAT artefacts.
+contractiq/e2e/screenshots/
+contractiq/e2e/fixtures/uat_run_*.pdf
+**/screenshots/
+
+# (contractiq/__init__.py is REQUIRED by apps/agent-runtime/Dockerfile to make
+# `contractiq.runtime.post_processors` importable — do NOT ignore it.)

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
-from app.routers.auth import get_contractiq_user
+from app.routers.auth import get_contractiq_user, tenant_id_for
 from app.models.contractiq_models import (
     ContractIQCounterparty,
     ContractIQFinancialStatement,
@@ -60,9 +60,14 @@ def _serialize_cp(cp: ContractIQCounterparty) -> dict[str, Any]:
 @router.get("/counterparties")
 async def list_counterparties(
     db: AsyncSession = Depends(get_db),
-    _user: ContractIQUser = Depends(get_contractiq_user),
+    user: ContractIQUser = Depends(get_contractiq_user),
 ):
-    rows = (await db.execute(select(ContractIQCounterparty).order_by(ContractIQCounterparty.credit_score_1_100.desc()))).scalars().all()
+    tid = tenant_id_for(user)
+    rows = (await db.execute(
+        select(ContractIQCounterparty)
+        .where(ContractIQCounterparty.tenant_id == tid)
+        .order_by(ContractIQCounterparty.credit_score_1_100.desc())
+    )).scalars().all()
     items = [_serialize_cp(cp) for cp in rows]
     bands = {"green": 0, "amber": 0, "red": 0, "unknown": 0}
     for it in items:
@@ -81,13 +86,19 @@ async def list_counterparties(
 async def get_counterparty(
     cp_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: ContractIQUser = Depends(get_contractiq_user),
+    user: ContractIQUser = Depends(get_contractiq_user),
 ):
     try:
         uid = uuid.UUID(cp_id)
     except Exception:
         raise HTTPException(400, "invalid id")
-    cp = (await db.execute(select(ContractIQCounterparty).where(ContractIQCounterparty.id == uid))).scalar_one_or_none()
+    tid = tenant_id_for(user)
+    cp = (await db.execute(
+        select(ContractIQCounterparty).where(
+            ContractIQCounterparty.id == uid,
+            ContractIQCounterparty.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
     if cp is None:
         raise HTTPException(404, "counterparty not found")
     return {"data": _serialize_cp(cp)}
@@ -97,13 +108,19 @@ async def get_counterparty(
 async def get_financials(
     cp_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: ContractIQUser = Depends(get_contractiq_user),
+    user: ContractIQUser = Depends(get_contractiq_user),
 ):
     try:
         uid = uuid.UUID(cp_id)
     except Exception:
         raise HTTPException(400, "invalid id")
-    cp = (await db.execute(select(ContractIQCounterparty).where(ContractIQCounterparty.id == uid))).scalar_one_or_none()
+    tid = tenant_id_for(user)
+    cp = (await db.execute(
+        select(ContractIQCounterparty).where(
+            ContractIQCounterparty.id == uid,
+            ContractIQCounterparty.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
     if cp is None:
         raise HTTPException(404, "counterparty not found")
     stmts = (await db.execute(
@@ -134,7 +151,7 @@ async def get_financials(
         "total_liabilities", "current_liabilities", "long_term_debt", "total_equity",
         "interest_expense", "operating_cash_flow", "free_cash_flow",
     ]
-    rows = [_row(l) for l in ordered_labels if l in line_labels]
+    rows = [_row(label) for label in ordered_labels if label in line_labels]
 
     ratio_rows = [
         {
@@ -167,12 +184,23 @@ async def get_financials(
 async def get_permits(
     cp_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: ContractIQUser = Depends(get_contractiq_user),
+    user: ContractIQUser = Depends(get_contractiq_user),
 ):
     try:
         uid = uuid.UUID(cp_id)
     except Exception:
         raise HTTPException(400, "invalid id")
+    # Validate the counterparty belongs to this tenant before returning permits —
+    # otherwise a known cp_id would still leak permits across tenants.
+    tid = tenant_id_for(user)
+    cp = (await db.execute(
+        select(ContractIQCounterparty).where(
+            ContractIQCounterparty.id == uid,
+            ContractIQCounterparty.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
+    if cp is None:
+        raise HTTPException(404, "counterparty not found")
     rows = (await db.execute(
         select(ContractIQRegulatoryPermit)
         .where(ContractIQRegulatoryPermit.counterparty_id == uid)
@@ -207,13 +235,15 @@ async def list_compliance_alerts(
     severity: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: ContractIQUser = Depends(get_contractiq_user),
+    user: ContractIQUser = Depends(get_contractiq_user),
 ):
+    # Compliance alerts hang off counterparties, so the alert is tenant-scoped
+    # transitively via the cp.tenant_id filter on the inner join.
+    tid = tenant_id_for(user)
     q = select(ContractIQComplianceAlert, ContractIQCounterparty).join(
         ContractIQCounterparty,
         ContractIQCounterparty.id == ContractIQComplianceAlert.counterparty_id,
-        isouter=True,
-    )
+    ).where(ContractIQCounterparty.tenant_id == tid)
     if status:
         q = q.where(ContractIQComplianceAlert.status == status)
     if severity:
@@ -252,7 +282,15 @@ async def acknowledge_alert(
         uid = uuid.UUID(alert_id)
     except Exception:
         raise HTTPException(400, "invalid id")
-    a = (await db.execute(select(ContractIQComplianceAlert).where(ContractIQComplianceAlert.id == uid))).scalar_one_or_none()
+    tid = tenant_id_for(user)
+    a = (await db.execute(
+        select(ContractIQComplianceAlert)
+        .join(ContractIQCounterparty, ContractIQCounterparty.id == ContractIQComplianceAlert.counterparty_id)
+        .where(
+            ContractIQComplianceAlert.id == uid,
+            ContractIQCounterparty.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
     if a is None:
         raise HTTPException(404, "alert not found")
     a.status = "acknowledged"
@@ -265,14 +303,15 @@ async def acknowledge_alert(
 @router.post("/compliance-alerts/sweep")
 async def run_compliance_sweep(
     db: AsyncSession = Depends(get_db),
-    _user: ContractIQUser = Depends(get_contractiq_user),
+    user: ContractIQUser = Depends(get_contractiq_user),
 ):
     raised = 0
     now = datetime.now(timezone.utc)
+    tid = tenant_id_for(user)
 
     permits = (await db.execute(select(ContractIQRegulatoryPermit, ContractIQCounterparty).join(
         ContractIQCounterparty, ContractIQCounterparty.id == ContractIQRegulatoryPermit.counterparty_id
-    ))).all()
+    ).where(ContractIQCounterparty.tenant_id == tid))).all()
     for permit, cp in permits:
         if permit.valid_to is None:
             continue
@@ -300,7 +339,9 @@ async def run_compliance_sweep(
         ))
         raised += 1
 
-    cps = (await db.execute(select(ContractIQCounterparty))).scalars().all()
+    cps = (await db.execute(
+        select(ContractIQCounterparty).where(ContractIQCounterparty.tenant_id == tid)
+    )).scalars().all()
     for cp in cps:
         if cp.last_kyc_at is None:
             continue
@@ -361,13 +402,19 @@ async def reseed_demo_data(
 async def refresh_counterparty(
     cp_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: ContractIQUser = Depends(get_contractiq_user),
+    user: ContractIQUser = Depends(get_contractiq_user),
 ):
     try:
         uid = uuid.UUID(cp_id)
     except Exception:
         raise HTTPException(400, "invalid id")
-    cp = (await db.execute(select(ContractIQCounterparty).where(ContractIQCounterparty.id == uid))).scalar_one_or_none()
+    tid = tenant_id_for(user)
+    cp = (await db.execute(
+        select(ContractIQCounterparty).where(
+            ContractIQCounterparty.id == uid,
+            ContractIQCounterparty.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
     if cp is None:
         raise HTTPException(404, "counterparty not found")
 
@@ -405,7 +452,8 @@ async def refresh_counterparty(
     try:
         parsed: dict[str, Any] = json.loads(output_text) if isinstance(output_text, str) else dict(output_text)
     except Exception:
-        first = output_text.find("{"); last = output_text.rfind("}")
+        first = output_text.find("{")
+        last = output_text.rfind("}")
         parsed = json.loads(output_text[first:last + 1]) if (first != -1 and last > first) else {}
 
     summary = await _persist_refresh(db, cp, parsed, execution_id)
@@ -563,12 +611,23 @@ def _parse_iso(s: Any) -> datetime | None:
 async def get_provenance(
     cp_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: ContractIQUser = Depends(get_contractiq_user),
+    user: ContractIQUser = Depends(get_contractiq_user),
 ):
     try:
         uid = uuid.UUID(cp_id)
     except Exception:
         raise HTTPException(400, "invalid id")
+    # Gate provenance read on the counterparty's tenant — provenance has no
+    # tenant_id of its own and is meaningful only in the cp's tenant scope.
+    tid = tenant_id_for(user)
+    cp = (await db.execute(
+        select(ContractIQCounterparty).where(
+            ContractIQCounterparty.id == uid,
+            ContractIQCounterparty.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
+    if cp is None:
+        raise HTTPException(404, "counterparty not found")
     rows = (await db.execute(
         select(ContractIQDataProvenance)
         .where(ContractIQDataProvenance.counterparty_id == uid)

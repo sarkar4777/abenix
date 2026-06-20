@@ -53,8 +53,10 @@ const nextConfig = {
         source: '/api/agents/:path*',
         destination: `${INTERNAL_API}/api/agents/:path*`,
       },
-      // Connectors + approvals — routed through the standalone API
-      // so the browser never holds the platform API key.
+      // Connectors — routed through the standalone API so the browser
+      // never holds the platform API key. Approvals are deliberately
+      // not proxied: HITL approvals carry business decisions and must
+      // never be readable through an anonymous standalone passthrough.
       {
         source: '/api/connectors',
         destination: `${INTERNAL_API}/api/connectors`,
@@ -62,14 +64,6 @@ const nextConfig = {
       {
         source: '/api/connectors/:path*',
         destination: `${INTERNAL_API}/api/connectors/:path*`,
-      },
-      {
-        source: '/api/approvals',
-        destination: `${INTERNAL_API}/api/approvals`,
-      },
-      {
-        source: '/api/approvals/:path*',
-        destination: `${INTERNAL_API}/api/approvals/:path*`,
       },
     ];
   },

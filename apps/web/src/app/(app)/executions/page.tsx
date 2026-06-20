@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
@@ -8,7 +9,6 @@ import { apiFetch } from '@/lib/api-client';
 import {
   Activity,
   ChevronDown,
-  ChevronUp,
   Clock,
   CheckCircle2,
   XCircle,
@@ -30,6 +30,9 @@ interface ExecutionRecord {
   cost?: number;
   duration_ms?: number;
   model_used?: string;
+  model_requested?: string;
+  actual_model?: string;
+  fallback_reason?: string;
   tool_calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
   confidence_score?: number;
   execution_trace?: Record<string, unknown>;
@@ -67,13 +70,11 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 function ExecutionRow({ exec, onDelete }: { exec: ExecutionRecord; onDelete: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-
   return (
     <div className="border border-slate-700/50 rounded-lg overflow-hidden">
       <div className="flex items-center">
-        <button
-          onClick={() => setExpanded(!expanded)}
+        <Link
+          href={`/executions/${exec.id}`}
           className="flex-1 flex items-center gap-3 p-3 hover:bg-slate-800/30 transition-colors text-left min-w-0"
         >
           <StatusIcon status={exec.status} />
@@ -89,6 +90,16 @@ function ExecutionRow({ exec, onDelete }: { exec: ExecutionRecord; onDelete: () 
                   {exec.failure_code}
                 </span>
               )}
+              {exec.fallback_reason && (exec.actual_model || exec.model_used) && exec.model_requested && (exec.actual_model || exec.model_used) !== exec.model_requested && (
+                <span
+                  data-testid={`execution-fallback-dot-${exec.id}`}
+                  className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30"
+                  title={`Ran on ${exec.actual_model || exec.model_used}; fallback from ${exec.model_requested}: ${exec.fallback_reason.replace(/_/g, ' ')}`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  fallback
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 truncate">{exec.input_message?.slice(0, 80)}</p>
           </div>
@@ -101,8 +112,8 @@ function ExecutionRow({ exec, onDelete }: { exec: ExecutionRecord; onDelete: () 
             <ConfidenceBadge score={exec.confidence_score} />
           </div>
           <span className="text-xs text-slate-600">{new Date(exec.created_at).toLocaleString()}</span>
-          {expanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
-        </button>
+          <ChevronDown className="w-4 h-4 text-slate-500 -rotate-90" />
+        </Link>
         <button
           onClick={() => {
             if (confirm('Delete this execution?')) {
@@ -115,54 +126,6 @@ function ExecutionRow({ exec, onDelete }: { exec: ExecutionRecord; onDelete: () 
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
-
-      {expanded && (
-        <div className="border-t border-slate-700/50 p-4 bg-slate-900/40 space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div><span className="text-slate-500">Status</span><br /><span className="text-white">{exec.status}</span></div>
-            <div><span className="text-slate-500">Model</span><br /><span className="text-white">{exec.model_used || '--'}</span></div>
-            <div><span className="text-slate-500">Duration</span><br /><span className="text-white">{exec.duration_ms ? `${exec.duration_ms}ms` : '--'}</span></div>
-            <div><span className="text-slate-500">Confidence</span><br /><ConfidenceBadge score={exec.confidence_score} /></div>
-          </div>
-
-          {exec.input_message && (
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">Input</p>
-              <p className="text-xs text-slate-300 bg-slate-800/50 rounded p-2 max-h-24 overflow-y-auto">{exec.input_message}</p>
-            </div>
-          )}
-
-          {exec.output_message && (
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">Output</p>
-              <p className="text-xs text-slate-300 bg-slate-800/50 rounded p-2 max-h-40 overflow-y-auto whitespace-pre-wrap">{exec.output_message.slice(0, 2000)}</p>
-            </div>
-          )}
-
-          {exec.tool_calls && exec.tool_calls.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">Tool Calls ({exec.tool_calls.length})</p>
-              <div className="flex flex-wrap gap-1">
-                {exec.tool_calls.map((tc, i) => (
-                  <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                    {tc.name}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {exec.error_message && (
-            <div>
-              <p className="text-xs font-medium text-red-400 mb-1">Error</p>
-              <p className="text-xs text-red-300 bg-red-500/10 rounded p-2">{exec.error_message}</p>
-            </div>
-          )}
-          <a href={`/executions/${exec.id}`} className="inline-flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 mt-2">
-            Open Flight Recorder &rarr;
-          </a>
-        </div>
-      )}
     </div>
   );
 }

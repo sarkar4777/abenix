@@ -54,6 +54,22 @@ test('quickwin · traffic-light heat map renders bands + filters', async ({ page
   await expect(page.getByTestId('cp-card-green')).toHaveCount(0);
 });
 
+test('quickwin · KPI strip is sourced off counterparty table (no 0/0/0/0 split-brain)', async ({ page }) => {
+  await gotoOk(page, '/credit-risk');
+  await expect(page.getByTestId('credit-risk-kpis')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('traffic-light-dashboard')).toBeVisible({ timeout: 15000 });
+
+  const cpKpi = (await page.getByTestId('kpi-counterparties').locator('p').innerText()).trim();
+  const assessedKpi = (await page.getByTestId('kpi-assessed').locator('p').innerText()).trim();
+  const cpCount = parseInt(cpKpi, 10) || 0;
+  const assessedCount = parseInt(assessedKpi, 10) || 0;
+
+  const heatCount = await page.getByTestId(/cp-card-(green|amber|red|unknown)/).count();
+  expect(cpCount, 'Counterparties KPI must match heat map count').toBeGreaterThanOrEqual(heatCount);
+  expect(cpCount, 'Counterparties KPI must be > 0 when heat map has rows').toBeGreaterThan(0);
+  expect(assessedCount, 'Assessed KPI must be > 0 when seed has scored CPs').toBeGreaterThan(0);
+});
+
 test('quickwin · compliance ticker renders + ack control wires up', async ({ page }) => {
   await gotoOk(page, '/credit-risk');
   const ticker = page.getByTestId('compliance-alerts');

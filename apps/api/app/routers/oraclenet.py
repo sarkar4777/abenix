@@ -70,11 +70,16 @@ async def analyze_decision(
 
     # Create execution record
     from models.execution import ExecutionStatus
+    from app.core.acting_subject import subject_columns_for
+
+    _sid, _stype = subject_columns_for(user)
 
     execution = Execution(
         tenant_id=user.tenant_id,
         agent_id=agent.id,
         user_id=user.id,
+        subject_id=_sid,
+        subject_type=_stype,
         input_message=body.decision_prompt,
         status=ExecutionStatus.RUNNING,
         model_used="pipeline",

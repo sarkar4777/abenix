@@ -22,7 +22,10 @@ logger = logging.getLogger(__name__)
 
 NARRATION_ROOT = Path(os.environ.get("WINGMAN_NARRATION_DIR", "/data/wingman-narrations"))
 REDIS_URL = os.environ.get("REDIS_URL", "")
-CHANNEL_PREFIX = "wingman:progress:"
+# Must match the runtime's PROGRESS_CHANNEL_PREFIX so both sides see the
+# same channel. Default to the generic engine default; wingman overrides
+# via helm to keep its stream namespaced.
+CHANNEL_PREFIX = os.environ.get("PROGRESS_CHANNEL_PREFIX", "progress:")
 
 
 def _path(execution_id: str) -> Path:

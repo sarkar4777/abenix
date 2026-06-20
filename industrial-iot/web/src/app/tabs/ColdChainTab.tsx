@@ -76,6 +76,7 @@ export default function ColdChainTab() {
   // puller; the pipeline run still happens locally so the demo
   // visuals keep working unchanged.
   const [liveMode, setLiveMode] = useState(false);
+  const [liveDemo, setLiveDemo] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -118,8 +119,16 @@ export default function ColdChainTab() {
       // Flip the telematics-pull cron on so live waypoints arrive on
       // cold-chain.waypoints. The downstream pipeline still drives
       // off the synthetic shipment so demo visuals stay coherent.
-      const ok = await toggleLiveTrigger('iot-coldchain-telematics-pull', true);
-      setLog((p) => [...p, ok ? 'Live mode: telematics pull enabled.' : 'Live mode: trigger toggle failed (running synthetic).']);
+      const trig = await toggleLiveTrigger('iot-coldchain-telematics-pull', true);
+      setLiveDemo(trig.demo);
+      setLog((p) => [
+        ...p,
+        trig.ok
+          ? 'Live mode: telematics pull enabled.'
+          : trig.demo
+            ? 'Live mode: trigger not wired on abenix-api (running in demo mode).'
+            : 'Live mode: trigger toggle failed (running synthetic).',
+      ]);
     }
 
     const shipment = coldChainShipment(parseColdChainQueryParams());
@@ -166,6 +175,7 @@ export default function ColdChainTab() {
     abortRef.current?.abort();
     if (liveMode) {
       await toggleLiveTrigger('iot-coldchain-telematics-pull', false);
+      setLiveDemo(false);
     }
   };
 
@@ -190,6 +200,7 @@ export default function ColdChainTab() {
           value={liveMode}
           onChange={setLiveMode}
           disabled={streaming}
+          demoMode={liveDemo}
           hint="Demo: in-browser shipment. Live: pull from telematics_sensitech preset, file claims via claims_servicenow."
         />
       </div>

@@ -6,6 +6,7 @@ import {
   GitCompareArrows, ChevronLeft, Sparkles, Loader2, ArrowRight,
   TrendingUp, TrendingDown, Equal, Plus as PlusIcon, Minus,
 } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -94,6 +95,7 @@ export default function VersionDiffPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-white">Version Diff</h1>
+              <PageExplainer routeKey="insights-version-diff" />
               <p className="text-xs text-slate-400">Semantic clause-by-clause comparison via <code className="text-pink-300">contractiq-version-diff</code></p>
             </div>
           </div>

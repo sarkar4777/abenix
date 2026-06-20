@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   Scale, Loader2, Sparkles, ChevronLeft, AlertTriangle, CheckCircle2,
   X, ExternalLink, FileText, BookOpen, TrendingUp, TrendingDown, Shield,
@@ -178,6 +179,32 @@ export default function BenchmarkPage() {
     }
   };
 
+  const retryBenchmark = async (clause: Clause, benchmarkId: string) => {
+    setError(null);
+    setRunningFor(clause.id);
+    const token = getToken();
+    try {
+      const r = await fetch(`${API_URL}/api/contractiq/insights/benchmarks/${benchmarkId}/retry`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+      const j = await r.json();
+      if (j.error) {
+        setError(j.error.message || 'Retry failed');
+      } else if (j.data) {
+        setBenchmarks(prev => ({ ...prev, [clause.id]: j.data }));
+        if (j.data.status === 'completed') {
+          setModalBenchmark(j.data);
+          setModalClause(clause);
+        }
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Retry request failed');
+    } finally {
+      setRunningFor(null);
+    }
+  };
+
   const openDetails = (clause: Clause) => {
     const b = benchmarks[clause.id];
     if (!b) return;
@@ -239,6 +266,7 @@ export default function BenchmarkPage() {
             </div>
           </div>
         </div>
+        <PageExplainer routeKey="insights-benchmark" />
 
         {error && (
           <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg px-4 py-2 text-xs text-rose-300 flex items-center gap-2">
@@ -375,6 +403,12 @@ export default function BenchmarkPage() {
                           </div>
                         )}
 
+                        {b?.status === 'failed' && b.error_message && (
+                          <div className="mt-2 text-[10px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded px-2 py-1 line-clamp-2" title={b.error_message}>
+                            {b.error_message}
+                          </div>
+                        )}
+
                         <div className="flex items-center gap-2 mt-2">
                           <button
                             onClick={() => runBenchmark(c)}
@@ -389,7 +423,22 @@ export default function BenchmarkPage() {
                             )}
                             {b ? 'Re-benchmark' : 'Benchmark'}
                           </button>
-                          {b && (
+                          {b?.status === 'failed' && (
+                            <button
+                              onClick={() => retryBenchmark(c, b.id)}
+                              disabled={runningFor === c.id}
+                              data-testid="retry-benchmark"
+                              className="text-[11px] px-2 py-1 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 inline-flex items-center gap-1"
+                            >
+                              {runningFor === c.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <AlertTriangle className="w-3 h-3" />
+                              )}
+                              Retry
+                            </button>
+                          )}
+                          {b && b.status !== 'failed' && (
                             <button
                               onClick={() => openDetails(c)}
                               data-testid="view-benchmark"

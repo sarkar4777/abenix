@@ -7,6 +7,7 @@ import {
   TrendingUp, Building2, Target, AlertCircle, CheckCircle2,
   ArrowRight, ChevronDown, ChevronUp,
 } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -118,6 +119,7 @@ export default function RenewalsPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-white">Renewal Negotiation Copilot</h1>
+              <PageExplainer routeKey="insights-renewals" />
               <p className="text-xs text-slate-400">Build a complete negotiation packet for any upcoming renewal — powered by <code className="text-emerald-300">contractiq-renewal-copilot</code></p>
             </div>
           </div>

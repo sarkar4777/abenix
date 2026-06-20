@@ -29,6 +29,12 @@ async def _sweep_once() -> int:
         )
         stuck = result.scalars().all()
         for c in stuck:
+            # Snapshot ORM attrs BEFORE the update — after `await db.execute(update(...))`
+            # the attributes get expired and touching them outside the greenlet raises
+            # sqlalchemy.exc.MissingGreenlet, crashing the whole sweep.
+            cid = c.id
+            ctitle = c.title
+            cupd = c.updated_at
             prev_summary = c.extraction_summary or {}
             new_summary = {
                 **prev_summary,
@@ -42,7 +48,7 @@ async def _sweep_once() -> int:
             }
             await db.execute(
                 update(ContractIQContract)
-                .where(ContractIQContract.id == c.id)
+                .where(ContractIQContract.id == cid)
                 .values(
                     status=ContractStatus.ERROR,
                     extraction_summary=new_summary,
@@ -51,7 +57,7 @@ async def _sweep_once() -> int:
             fixed += 1
             logger.warning(
                 "Reclaimed stuck extraction: contract_id=%s title=%r (last_updated=%s)",
-                c.id, c.title, c.updated_at,
+                cid, ctitle, cupd,
             )
         if fixed:
             await db.commit()

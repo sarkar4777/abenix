@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, CheckCircle2, History, Loader2 } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
+import { PageExplainer } from '@/components/PageExplainer';
 
 type RegistryRow = {
   id?: string;
@@ -56,6 +57,7 @@ export default function ModelPerformancePage() {
           Reads <span className="font-mono">GET /api/contractiq/ml-models/registry</span> which proxies the platform's
           <span className="font-mono"> /api/ml-models</span>. No hardcoded model list.
         </p>
+        <PageExplainer routeKey="model-performance" />
       </header>
 
       {error && !loading && (
@@ -73,8 +75,13 @@ export default function ModelPerformancePage() {
       ) : models.length === 0 ? (
         <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-12 text-center">
           <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-          <p className="text-sm text-slate-300">No ML models registered for this tenant yet.</p>
-          <p className="text-xs text-slate-500 mt-1">Run the seed: <span className="font-mono">scripts/deploy-azure.sh --seed-ml</span></p>
+          <p className="text-sm text-slate-300">No ML models seeded locally.</p>
+          <p className="text-xs text-slate-500 mt-2 max-w-xl mx-auto">
+            Run <span className="font-mono text-slate-300">bash scripts/dev-local.sh</span> (it seeds the canonical model
+            registry automatically) or visit the{' '}
+            <a href="/data-fabric" className="text-emerald-400 hover:text-emerald-300 underline">Data Fabric</a> page to
+            see what models the platform exposes.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-12 gap-6">

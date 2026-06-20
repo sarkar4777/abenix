@@ -1,19 +1,22 @@
 """Use-case registry — the navigation surface for standalone apps.
 
 The TopBar "Use Cases" menu and any launcher surface calls this endpoint
-to discover standalone apps (ContractIQ, Mideast Tourism, Industrial IoT,
-…) at runtime so the URLs are NEVER hardcoded in the client bundle.
+to discover standalone apps at runtime, so the URLs are NEVER hardcoded
+in the client bundle.
 
-Resolution order (first match wins):
+The catalogue itself is data, not code — it is loaded at import time
+from the JSON file pointed at by `USE_CASE_CATALOG_PATH` (default
+`infra/use_cases_catalog.json`). The router has no knowledge of any
+specific app name.
+
+Resolution order for each entry (first match wins):
   1. `USE_CASE_URLS` env var (JSON object mapping key → url). Lets ops
      override for any quirky deployment without a code change.
-  2. Per-app env var (`CONTRACTIQ_PUBLIC_URL`, `MIDEASTTOURISM_PUBLIC_URL`,
-     `INDUSTRIAL_IOT_PUBLIC_URL`). Set on the api pod from the Helm
-     values.
+  2. Per-app env var named on the catalogue entry (set on the api pod
+     from the Helm values).
   3. Host-derived default. If the caller arrives via `*.nip.io` or a
-     custom domain, we build the host by swapping the subdomain:
-        api-host   → ciq.<host> / st.<host> / iot.<host>
-  4. Final fallback — `http://localhost:3001` / `3002` / `3003` (dev).
+     custom domain, we build the host by swapping the subdomain.
+  4. Final fallback — `http://localhost:<local_port>` (dev).
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -30,80 +34,37 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/use-cases", tags=["use-cases"])
 
 
-# Canonical catalogue of apps the platform currently ships.
-# Each entry's `url` is filled in at request time by _resolve.
-CATALOG = [
-    {
-        "key": "contractiq",
-        "label": "ContractIQ",
-        "description": "Standalone app — PPA & gas contract intelligence.",
-        "icon": "contractiq",
-        "color": "emerald",
-        "host_subdomain": "ciq",
-        "local_port": 3001,
-        "env_var": "CONTRACTIQ_PUBLIC_URL",
-    },
-    {
-        "key": "mideasttourism",
-        "label": "Mideast Tourism",
-        "description": "KSA Ministry of Tourism analytics — visitor data, simulations, AI reports.",
-        "icon": "globe",
-        "color": "green",
-        "host_subdomain": "tourism",
-        "local_port": 3002,
-        "env_var": "MIDEASTTOURISM_PUBLIC_URL",
-    },
-    {
-        "key": "industrial-iot",
-        "label": "Industrial IoT",
-        "description": "Standalone app — pump vibration + cold-chain telemetry, live pipelines on streamed sensor data.",
-        "icon": "zap",
-        "color": "purple",
-        "host_subdomain": "iot",
-        "local_port": 3003,
-        "env_var": "INDUSTRIAL_IOT_PUBLIC_URL",
-    },
-    {
-        "key": "oraclenet",
-        "label": "OracleNet",
-        "description": "Strategic decision analysis with 7 AI agents. Simulates consequences before you decide.",
-        "icon": "cpu",
-        "color": "cyan",
-        # OracleNet still runs inside the core web app — its URL is
-        # derived from the requesting origin itself.
-        "inline_path": "/oraclenet",
-    },
-    {
-        "key": "resolveai",
-        "label": "ResolveAI",
-        "description": "Customer-service AI that resolves tickets, cites policy, and predicts CSAT.",
-        "icon": "headphones",
-        "color": "rose",
-        "host_subdomain": "care",
-        "local_port": 3004,
-        "env_var": "RESOLVEAI_PUBLIC_URL",
-    },
-    {
-        "key": "claimsiq",
-        "label": "ClaimsIQ",
-        "description": "Insurance FNOL adjudication — multimodal damage assessment, fraud screening, and live pipeline DAG. Java + Vaadin Flow demonstrating the JVM SDK.",
-        "icon": "shield",
-        "color": "indigo",
-        "host_subdomain": "claims",
-        "local_port": 3005,
-        "env_var": "CLAIMSIQ_PUBLIC_URL",
-    },
-    {
-        "key": "wingman",
-        "label": "Wingman",
-        "description": "Energy / commodity trading desk — Mispricing Lens, Forward Scenarios, Compliance Lens, Ops Watch, Desk Copilot. Bayesian + IsoForest + 18 trader-grade agents.",
-        "icon": "zap",
-        "color": "cyan",
-        "host_subdomain": "wm",
-        "local_port": 3006,
-        "env_var": "WINGMAN_PUBLIC_URL",
-    },
-]
+def _default_catalog_path() -> Path:
+    # repo-relative default: infra/use_cases_catalog.json
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "infra" / "use_cases_catalog.json"
+        if candidate.exists():
+            return candidate
+    return here.parent / "use_cases_catalog.json"
+
+
+def _load_catalog() -> list[dict[str, Any]]:
+    path = os.environ.get("USE_CASE_CATALOG_PATH", "").strip()
+    target = Path(path) if path else _default_catalog_path()
+    try:
+        with target.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+        logger.warning(
+            "USE_CASE_CATALOG file is not a JSON array — using empty catalog"
+        )
+    except FileNotFoundError:
+        logger.warning("USE_CASE_CATALOG not found at %s — using empty catalog", target)
+    except Exception as exc:
+        logger.warning(
+            "USE_CASE_CATALOG failed to load (%s) — using empty catalog", exc
+        )
+    return []
+
+
+CATALOG = _load_catalog()
 
 
 def _current_host(request: Request) -> str:

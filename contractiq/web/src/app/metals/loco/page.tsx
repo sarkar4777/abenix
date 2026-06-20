@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Truck, ChevronLeft, Loader2, Play, Shield, FileCheck2 } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -72,6 +73,7 @@ export default function LocoPage() {
             <p className="text-sm text-slate-400">Zurich / London / NY / Shanghai · premium vs benchmark · insurance · customs · chain of integrity.</p>
           </div>
         </div>
+        <div className="mb-4"><PageExplainer routeKey="metals-loco" /></div>
 
         {loading ? <Loader2 className="w-6 h-6 animate-spin text-slate-500 mx-auto block mt-20" /> : (
           <div className="space-y-3">

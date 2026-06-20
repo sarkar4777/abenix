@@ -112,6 +112,25 @@ export async function apiFetch<T = unknown>(
     String(fetchOpts.method || 'GET').toUpperCase()
   );
   const token = getToken();
+  // Skip the request entirely when no token is present. SWR sometimes
+  // fires the fetcher before the login flow stores the access_token,
+  // and an unauthenticated request to a protected endpoint returns 401
+  // — which the browser surfaces as a CORS error if the upstream did
+  // not attach the right headers. Short-circuiting here avoids the
+  // race and the misleading console error.
+  const isPublicPath =
+    path.startsWith('/api/auth/') ||
+    path.startsWith('/api/health') ||
+    path === '/api/public-settings';
+  if (!token && !isPublicPath && typeof window !== 'undefined') {
+    const detail: ApiErrorDetail = {
+      message: 'unauthenticated',
+      code: 401,
+      error_code: 'NO_TOKEN',
+    };
+    if (shouldThrow) throw new ApiError(detail);
+    return { data: null, error: 'unauthenticated', errorDetail: detail, meta: null };
+  }
   const headers: Record<string, string> = { ...fetchOpts.headers };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (fetchOpts.body && typeof fetchOpts.body === 'string') {

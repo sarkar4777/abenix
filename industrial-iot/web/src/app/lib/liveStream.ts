@@ -36,19 +36,37 @@ export function subscribeLive<T = unknown>(
 }
 
 // Toggle the simulator / listener trigger on the standalone API.
-// Returns true on success.
+// Returns a structured result so the UI can distinguish a real
+// subscription from a demo-mode fallback (when the trigger registry
+// isn't wired on the platform yet).
+export interface TriggerResult {
+  ok: boolean;       // forward succeeded end-to-end
+  demo: boolean;     // upstream returned 404 — caller should show "demo" badge
+  status?: number;   // upstream HTTP status when known
+  reason?: string;
+}
+
 export async function toggleLiveTrigger(
   agentSlug: string,
   enabled: boolean,
-): Promise<boolean> {
+): Promise<TriggerResult> {
   try {
     const r = await fetch('/api/industrial-iot/live/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_slug: agentSlug, enabled }),
     });
-    return r.ok;
+    let body: { ok?: boolean; status?: number; reason?: string } = {};
+    try { body = await r.json(); } catch { /* non-JSON — leave empty */ }
+    const status = body.status ?? r.status;
+    const demo = status === 404;
+    return {
+      ok: Boolean(body.ok ?? r.ok),
+      demo,
+      status,
+      reason: body.reason,
+    };
   } catch {
-    return false;
+    return { ok: false, demo: false };
   }
 }

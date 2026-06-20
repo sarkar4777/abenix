@@ -218,12 +218,12 @@ async def list_knowledge_bases(
         rollup_rows = (
             await db.execute(
                 select(
-                    Document.collection_id,
+                    Document.kb_id,
                     func.coalesce(func.sum(Document.chunk_count), 0),
                     func.coalesce(func.sum(Document.file_size), 0),
                 )
-                .where(Document.collection_id.in_(kb_ids))
-                .group_by(Document.collection_id)
+                .where(Document.kb_id.in_(kb_ids))
+                .group_by(Document.kb_id)
             )
         ).all()
         for cid, ck, sz in rollup_rows:

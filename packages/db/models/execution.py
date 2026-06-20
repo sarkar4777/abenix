@@ -40,6 +40,15 @@ class Execution(UUIDMixin, TenantMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), index=True
     )
+    # actAs delegation: when the SDK is called with `act_as=ActingSubject(...)`,
+    # the abenix-side user_id stays the API-key holder (the service account)
+    # but the END-USER who actually triggered the execution is recorded here.
+    # Standalone-app proxies (ContractIQ, etc.) match ownership on subject_id
+    # so the legitimate caller can read their own execution back.
+    subject_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    subject_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     input_message: Mapped[str] = mapped_column(Text)
     output_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ExecutionStatus] = mapped_column(
@@ -63,6 +72,8 @@ class Execution(UUIDMixin, TenantMixin, Base):
     other_cost: Mapped[float] = mapped_column(Numeric(10, 6), default=0, nullable=False)
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model_requested: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model_fallback_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     node_results: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

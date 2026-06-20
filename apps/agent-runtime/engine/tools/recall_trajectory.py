@@ -11,9 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
-TRAJECTORY_ROOT = Path(
-    os.environ.get("WINGMAN_TRAJECTORY_DIR", "/data/wingman-trajectories")
-)
+TRAJECTORY_ROOT = Path(os.environ.get("TRAJECTORY_DIR", "/data/trajectories"))
 _WORD_RX = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
 
 

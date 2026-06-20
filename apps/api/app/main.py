@@ -37,7 +37,10 @@ from app.routers import (
     a2a,
     admin_pricing,
     admin_scaling,
+    admin_model_availability,
+    llm_models,
     admin_settings,
+    public_settings,
     agent_comments,
     agent_favorites,
     agent_sharing,
@@ -131,6 +134,12 @@ app.openapi = _custom_openapi
 
 from app.core.ip_whitelist import IPWhitelistMiddleware
 
+# Inner middlewares first. In FastAPI/Starlette `add_middleware` uses
+# insert(0,...), so the LAST registered middleware is the OUTERMOST
+# wrapper. We register CORS dead last so it wraps every other middleware
+# and every exception handler — that way 401/403/429/5xx responses still
+# carry Access-Control-Allow-Origin and the browser shows the real status
+# instead of a misleading "CORS policy" error.
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(IPWhitelistMiddleware)
 # NOTE: GZipMiddleware removed — it buffers SSE streams and breaks real-time events.
@@ -157,6 +166,26 @@ app.add_middleware(
 )
 
 
+def _cors_headers_for(request: Request) -> dict[str, str]:
+    """Return the CORS headers that CORSMiddleware would add for this origin.
+
+    Used by exception handlers below — without this, a 401 raised inside a
+    route dependency can short-circuit past CORSMiddleware on some Starlette
+    versions, and the browser then reports the real error as a CORS failure.
+    """
+    origin = request.headers.get("origin")
+    if not origin:
+        return {}
+    allowed = app_settings.cors_origins
+    if "*" in allowed or origin in allowed:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    return {}
+
+
 @app.exception_handler(HTTPException)
 async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     detail = exc.detail
@@ -172,6 +201,7 @@ async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONR
     return JSONResponse(
         status_code=exc.status_code,
         content={"data": None, "error": payload},
+        headers=_cors_headers_for(request),
     )
 
 
@@ -190,6 +220,7 @@ async def _validation_exception_handler(
                 "details": {"errors": exc.errors()},
             },
         },
+        headers=_cors_headers_for(request),
     )
 
 
@@ -216,7 +247,11 @@ app.include_router(_invocations_mod.router)
 app.include_router(_archives_mod.router)
 app.include_router(admin_scaling.router)
 app.include_router(admin_settings.router)
+app.include_router(public_settings.router)
 app.include_router(admin_pricing.router)
+app.include_router(admin_model_availability.router)
+app.include_router(llm_models.router)
+app.include_router(llm_models.provider_router)
 app.include_router(use_cases.router)
 app.include_router(mcp.router)
 app.include_router(knowledge.router)

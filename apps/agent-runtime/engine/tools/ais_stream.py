@@ -6,7 +6,7 @@ this tool opens a short subscription, collects N position reports inside an
 optional bounding box and ship-type filter, then closes the connection and
 returns a structured snapshot.
 
-Set AISSTREAM_API_KEY on the agent-runtime pod (or wingman api pod). Free key:
+Set AISSTREAM_API_KEY on the agent-runtime pod. Free key:
 https://aisstream.io.
 
 Common ship-type codes:

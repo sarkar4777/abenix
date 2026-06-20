@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { BrainCircuit, Loader2, AlertTriangle, Sparkles } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
+import { PageExplainer } from '@/components/PageExplainer';
 
 type ModelDef = { name: string; family: string; sample_features: Record<string, number> };
 
@@ -31,7 +32,10 @@ export default function WorkbenchPage() {
   const [result, setResult] = useState<ShapResult | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { setFeatures(KNOWN_MODELS[modelIdx].sample_features); }, [modelIdx]);
+  useEffect(() => {
+    setFeatures(KNOWN_MODELS[modelIdx].sample_features);
+    setResult(null);
+  }, [modelIdx]);
 
   const run = async () => {
     setLoading(true);
@@ -49,7 +53,9 @@ export default function WorkbenchPage() {
     }
   };
 
-  useEffect(() => { run(); }, [modelIdx]);
+  const resetSample = () => {
+    setFeatures(KNOWN_MODELS[modelIdx].sample_features);
+  };
 
   const active = KNOWN_MODELS[modelIdx];
 
@@ -62,8 +68,9 @@ export default function WorkbenchPage() {
         </div>
         <p className="text-slate-400 max-w-3xl">
           Per-prediction explainability. Routes the (model, feature_vector) to the <span className="font-mono">shap_explainer</span> code-asset
-          hosted in Abenix. Falls back to <span className="font-mono">ml_model.explain()</span> when SHAP is unavailable. No hand-crafted narratives.
+          hosted in Abenix. Falls back to <span className="font-mono">ml_model.explain()</span> when SHAP is unavailable. Sample feature vector — edit before relying on the explanation.
         </p>
+        <PageExplainer routeKey="workbench" />
       </header>
 
       <div className="grid grid-cols-12 gap-6">
@@ -91,6 +98,15 @@ export default function WorkbenchPage() {
               <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded">{active.family}</span>
             </div>
 
+            <div className="flex items-center justify-between mb-3">
+              <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                Sample inputs
+              </span>
+              <button onClick={resetSample} className="text-[10px] uppercase tracking-wider text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 px-2 py-0.5 rounded">
+                Reset to sample values
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 gap-3 mb-4">
               {Object.entries(features).map(([k, v]) => (
                 <label key={k} className="block">
@@ -106,19 +122,53 @@ export default function WorkbenchPage() {
               ))}
             </div>
             <button onClick={run} disabled={loading} className="px-4 py-2 text-xs bg-emerald-600/80 hover:bg-emerald-600 disabled:bg-slate-700 text-white rounded-md inline-flex items-center gap-2">
-              {loading ? <><Loader2 className="w-3 h-3 animate-spin" /> Running</> : 'Run SHAP'}
+              {loading ? <><Loader2 className="w-3 h-3 animate-spin" /> Running</> : 'Run Explain'}
             </button>
           </div>
 
           <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
-            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-400" /> Feature attributions</h3>
+            {result?.ok && (
+              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-400" /> SHAP contributions</h3>
+            )}
+            {result?.ok === false && (
+              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Raw feature magnitudes (fallback)</h3>
+            )}
+            {result === null && !loading && (
+              <p className="text-xs text-slate-500">Click Run Explain to score the current feature vector.</p>
+            )}
             {result?.ok === false && (
               <div className="rounded-lg border border-amber-700/50 bg-amber-900/20 p-4 mb-3 flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
                 <div className="text-sm">
-                  <p className="font-semibold text-amber-200">Code-asset not registered yet</p>
-                  <p className="text-amber-300/80 text-xs mt-1 font-mono">{result.error ?? 'shap_explainer not found'}</p>
+                  <p className="font-semibold text-amber-200">Real SHAP unavailable, falling back to raw feature magnitudes. These are NOT attributions.</p>
+                  {result.error && (
+                    <p className="text-amber-300/80 text-xs mt-1 font-mono">{result.error}</p>
+                  )}
+                  {typeof result.prediction === 'number' && (
+                    <p className="text-amber-200/90 text-xs mt-2">
+                      Prediction (real, from ml-predict) <span className="font-mono text-white">{result.prediction.toFixed(3)}</span>
+                    </p>
+                  )}
                 </div>
+              </div>
+            )}
+            {result?.ok === false && (result.contributions ?? []).length > 0 && (
+              <div className="space-y-2.5">
+                {(result.contributions ?? []).slice(0, 10).map(c => {
+                  const pos = c.value >= 0;
+                  const mag = Math.min(100, Math.abs(c.value) * 25);
+                  return (
+                    <div key={c.feature}>
+                      <div className="flex items-baseline justify-between mb-1">
+                        <span className="text-xs font-mono text-slate-300">{c.feature}</span>
+                        <span className="text-xs font-mono text-slate-400">{pos ? '+' : ''}{c.value.toFixed(3)}</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-800 rounded overflow-hidden">
+                        <div className="h-full bg-slate-500/60" style={{ width: `${mag}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
             {result?.ok && (

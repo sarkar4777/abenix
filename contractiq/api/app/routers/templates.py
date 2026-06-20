@@ -212,7 +212,8 @@ async def ensure_starters(db: AsyncSession, user_id: uuid.UUID) -> None:
     )).scalars().all()
     have = set(existing)
     for cat, payload in STARTER_TEMPLATES.items():
-        if cat in have: continue
+        if cat in have:
+            continue
         db.add(ContractIQDealTemplate(
             user_id=user_id,
             category=cat,
@@ -359,29 +360,9 @@ async def generate_endur_json(
         for c in clauses
     ]
 
-    prompt = (
-        "You are an Endur deal-template populator.\n\n"
-        "INPUT shape (JSON):\n"
-        "  template:  the JSON skeleton with ${placeholder} tokens — populate these\n"
-        "  contract:  parent contract metadata\n"
-        "  cluster:   the deal cluster the user picked (with deal_legs)\n"
-        "  clauses:   the cluster's source clauses\n\n"
-        "OUTPUT shape — return ONLY a single JSON object with EXACTLY these keys:\n"
-        "  populated_json: the template with EVERY ${...} token resolved. Preserve the\n"
-        "                  template's structure and key names EXACTLY — do not rename,\n"
-        "                  re-order, escape, or wrap keys. If a placeholder has no\n"
-        "                  source value, set it to null (do NOT leave the literal\n"
-        "                  ${name} string in the output).\n"
-        "  _unfilled:      array of placeholder names you could not fill\n"
-        "  _provenance:    object mapping each filled JSON path → 'clause:<id>' or\n"
-        "                  'leg:<leg_key>.<field>' so analysts can audit.\n"
-        "  summary:        one-sentence English summary of what was filled.\n\n"
-        "HARD RULES:\n"
-        "- The output MUST be a single valid JSON object. No prose, no markdown fences.\n"
-        "- Keys in populated_json must match the template's keys verbatim. Do not\n"
-        "  insert HTML/XML fragments, escape sequences, or numeric prefixes.\n"
-        "- Never embed unresolved ${...} placeholders inside populated_json values."
-    )
+    # The Endur deal-template-filler agent (YAML in packages/db/seeds/agents/
+    # contractiq_endur_template_filler.yaml) owns the system prompt + structured
+    # output schema. Router just supplies the payload below.
     payload = {
         "template": template.template_json,
         "contract": {

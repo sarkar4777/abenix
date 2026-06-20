@@ -370,6 +370,16 @@ async def reset_monthly_quotas():
         logger.error("Failed to reset monthly quotas: %s", e, exc_info=True)
 
 
+async def ping_models() -> None:
+    """Hourly availability probe across every active LLM model."""
+    try:
+        from app.services.model_availability import run_pings
+
+        await run_pings()
+    except Exception as exc:
+        logger.exception("ping_models failed: %s", exc)
+
+
 def start_scheduler() -> None:
     """Start the APScheduler with the trigger check job."""
     scheduler = get_scheduler()
@@ -383,6 +393,16 @@ def start_scheduler() -> None:
         id="check_due_triggers",
         name="Check and execute due scheduled triggers",
         replace_existing=True,
+    )
+
+    scheduler.add_job(
+        ping_models,
+        trigger="interval",
+        minutes=60,
+        id="ping_models",
+        name="Hourly LLM availability probes",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
     )
 
     scheduler.add_job(

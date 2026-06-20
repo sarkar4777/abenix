@@ -45,12 +45,51 @@ class ActingSubject:
         return {k: v for k, v in asdict(self).items() if v is not None}
 
 
+def subject_columns_for(user) -> tuple[str | None, str | None]:
+    """Return (subject_id, subject_type) to stamp on an Execution row.
+
+    Every Execution-row creation site in apps/api/app/routers/* should pass
+    its FastAPI-resolved `user` here. Returns (None, None) when the user has
+    no actAs delegation, so the call is safe even for non-delegated flows.
+
+    Centralising the lookup means: any future change to how delegation is
+    attached (header name, scope shape, JWT claim) takes effect everywhere
+    at once. Without this helper, each call site has to remember to do
+    getattr(user, "_acting_subject", None) and risks dropping the stamp
+    silently — which is exactly the bug we just paid for fixing in 10 places.
+    """
+    subject = getattr(user, "_acting_subject", None)
+    if not subject:
+        return None, None
+    sid = str(subject.subject_id) if getattr(subject, "subject_id", None) else None
+    stype = (
+        str(subject.subject_type) if getattr(subject, "subject_type", None) else None
+    )
+    return sid, stype
+
+
 def can_delegate(api_key_scopes: dict | list | None) -> bool:
-    """Check if an API key has permission to delegate to other subjects."""
+    """Check if an API key has permission to delegate to other subjects.
+
+    Handles every shape the api_keys.scopes jsonb column ships with:
+      1. {"can_delegate": true}                         — explicit boolean
+      2. {"allowed_actions": ["can_delegate", ...]}     — production shape
+                                                          stamped by the
+                                                          seed_users.py
+                                                          standalone-key path
+      3. ["can_delegate", ...]                          — bare-list legacy shape
+    """
     if not api_key_scopes:
         return False
     if isinstance(api_key_scopes, dict):
-        return bool(api_key_scopes.get("can_delegate", False))
+        if bool(api_key_scopes.get("can_delegate", False)):
+            return True
+        allowed = (
+            api_key_scopes.get("allowed_actions") or api_key_scopes.get("scopes") or []
+        )
+        if isinstance(allowed, list) and "can_delegate" in allowed:
+            return True
+        return False
     if isinstance(api_key_scopes, list):
         return "can_delegate" in api_key_scopes
     return False

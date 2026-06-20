@@ -78,11 +78,16 @@ async def execute_pipeline(
         return error("Duplicate node IDs in pipeline definition", 400)
 
     # Create execution record
+    from app.core.acting_subject import subject_columns_for
+
+    _sid, _stype = subject_columns_for(user)
     execution = Execution(
         id=uuid.uuid4(),
         agent_id=agent.id,
         tenant_id=user.tenant_id,
         user_id=user.id,
+        subject_id=_sid,
+        subject_type=_stype,
         input_message=f"[pipeline:{len(body.nodes)} nodes]",
         status=ExecutionStatus.RUNNING,
         started_at=datetime.now(timezone.utc),
@@ -218,11 +223,16 @@ async def execute_saved_pipeline(
         return error("Duplicate node IDs in pipeline definition", 400)
 
     # Create execution record
+    from app.core.acting_subject import subject_columns_for
+
+    _sid, _stype = subject_columns_for(user)
     execution = Execution(
         id=uuid.uuid4(),
         agent_id=agent.id,
         tenant_id=user.tenant_id,
         user_id=user.id,
+        subject_id=_sid,
+        subject_type=_stype,
         input_message=f"[pipeline-saved:{len(raw_nodes)} nodes]",
         status=ExecutionStatus.RUNNING,
         started_at=datetime.now(timezone.utc),
@@ -317,11 +327,16 @@ async def execute_pipeline_stream(
     if len(node_ids) != len(set(node_ids)):
         return error("Duplicate node IDs in pipeline definition", 400)
 
+    from app.core.acting_subject import subject_columns_for
+
+    _sid, _stype = subject_columns_for(user)
     execution = Execution(
         id=uuid.uuid4(),
         agent_id=agent.id,
         tenant_id=user.tenant_id,
         user_id=user.id,
+        subject_id=_sid,
+        subject_type=_stype,
         input_message=f"[pipeline-stream:{len(body.nodes)} nodes]",
         status=ExecutionStatus.RUNNING,
         started_at=datetime.now(timezone.utc),
@@ -586,10 +601,15 @@ async def replay_pipeline(
     serialized = serialize_pipeline_result(result)
 
     # Create new execution record for the replay
+    from app.core.acting_subject import subject_columns_for
+
+    _sid, _stype = subject_columns_for(user)
     replay_exec = Execution(
         tenant_id=user.tenant_id,
         agent_id=agent.id,
         user_id=user.id,
+        subject_id=_sid,
+        subject_type=_stype,
         input_message=f"Replay from {start_from} (original: {execution_id})",
         status=(
             ExecutionStatus.COMPLETED
@@ -673,10 +693,18 @@ async def validate_pipeline_smart(
 
     tier3_dict: dict | None = None
     if deep:
+        # Honour the configurable Builder validation model. Falls back to the
+        # critic default inside `critique` when the setting is unset.
+        from app.core.platform_settings import get_setting as _ps_get
+
+        critic_model = (
+            await _ps_get("ai_builder.validation.model")
+        ) or "claude-sonnet-4-5-20250929"
         report = await critique(
             kind="pipeline",
             config={"nodes": nodes, "tools": tool_names},
             purpose=purpose,
+            model=critic_model,
         )
         tier3_dict = report.to_dict()
 

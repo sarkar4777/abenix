@@ -336,25 +336,24 @@ pipeline_config:
         - plan_maintenance
       position: { x: 360, y: 860 }
 
-    # Live-mode sink. Persists the diagnosed severity + key metrics
-    # to TimescaleDB so future runs can reference history. Idempotent;
-    # safe to keep in demo mode too — the tsdb_query tool is a no-op
-    # when no TSDB is wired.
+    # Live-mode sink. Reads back the last persisted severity for this
+    # sensor so the run carries forward-looking continuity. The pump_rpm
+    # metric is the canonical key — every pump asset emits it. tsdb_query
+    # is a read tool (no write counterpart yet) so this acts as a
+    # smoke-check that the asset is registered. Safe no-op when TSDB_URL
+    # is unset.
     - id: tsdb_sink
       tool_name: tsdb_query
-      label: "8a. Persist severity to TSDB"
+      label: "8a. Check TSDB continuity (last pump_rpm)"
       arguments:
-        operation: insert
-        table: pump_diagnoses
-        columns: ["ts", "sensor_id", "severity", "rms", "peak", "rul_hours"]
-        from_node: final_report
-        value_paths:
-          ts: "timestamp"
-          sensor_id: "sensor_id"
-          severity: "severity"
-          rms: "dsp.rms"
-          peak: "dsp.peak"
-          rul_hours: "rul_hours"
+        metric: "pump_rpm"
+        aggregation: "last"
+        since: "1970-01-01T00:00:00Z"
+        limit: 1
+      input_mappings:
+        asset_id:
+          source_node: final_report
+          source_field: sensor_id
       depends_on:
         - final_report
       position: { x: 100, y: 1020 }

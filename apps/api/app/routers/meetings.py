@@ -774,10 +774,15 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
             system_prompt = agent.system_prompt or ""
 
             # Persist an Execution row so the UI's executions view sees this
+            from app.core.acting_subject import subject_columns_for
+
+            _sid, _stype = subject_columns_for(user)
             execution = Execution(
                 tenant_id=user.tenant_id,
                 agent_id=agent.id,
                 user_id=user.id,
+                subject_id=_sid,
+                subject_type=_stype,
                 input_message=f"meeting_id={m.id}",
                 status=ExecutionStatus.RUNNING,
                 model_used=model,

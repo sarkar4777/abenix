@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -567,18 +568,18 @@ export default function KnowledgePage() {
           <h1 className="text-2xl font-bold text-white">Knowledge Bases</h1>
           <p className="text-sm text-slate-500 mt-1">
             Manage RAG data sources for your agents.{' '}
-            <a href="/knowledge/projects" className="text-emerald-400 hover:text-emerald-300">
+            <Link href="/knowledge/projects" className="text-emerald-400 hover:text-emerald-300">
               Group them into Projects →
-            </a>
+            </Link>
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <a
+          <Link
             href="/knowledge/projects"
             className="hidden sm:inline-flex items-center gap-2 px-3 py-2 border border-slate-700 hover:border-slate-600 text-slate-200 text-sm font-medium rounded-lg transition-colors"
           >
             Projects
-          </a>
+          </Link>
           <button
             onClick={() => setModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"

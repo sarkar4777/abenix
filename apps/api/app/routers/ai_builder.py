@@ -614,6 +614,10 @@ def _parse_builder_json(text: str, stop_reason: str | None = None) -> dict[str, 
 class BuildAgentRequest(BaseModel):
     description: str = Field(..., min_length=10, max_length=5000)
     mode: str = Field(default="auto", pattern="^(agent|pipeline|auto)$")
+    # Per-request override. When unset the builder uses the configurable
+    # `ai_builder.validation.model` admin setting; when set, the value MUST
+    # be a known model id from the platform catalog.
+    model: str | None = Field(default=None, max_length=80)
 
 
 @router.post("/build-agent")
@@ -782,11 +786,20 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
         f"Build an agent/pipeline for: {body.description}\nRequested mode: {body.mode}"
     )
 
+    # The Models page exposes `ai_builder.validation.model` as the single
+    # admin knob for both preview generation and Tier-3 validation. A
+    # per-request override (body.model) wins so UAT can pin a specific model.
+    builder_model = (
+        body.model
+        or (await _get_setting("ai_builder.validation.model"))
+        or (await _get_setting("ai_builder.model"))
+    )
+
     try:
         response = await llm.complete(
             messages=[{"role": "user", "content": user_msg}],
             system=system_prompt,
-            model=(await _get_setting("ai_builder.model")),
+            model=builder_model,
             temperature=0.3,
             # Large pipelines with many nodes + long prompts routinely exceed
             # the default 4096. 8192 is the practical sweet spot; going higher
@@ -992,7 +1005,7 @@ Respond ONLY with JSON: {{"score": 1-10, "issues": ["issue1", "issue2"], "sugges
             review_resp = await llm.complete(
                 messages=[{"role": "user", "content": review_prompt}],
                 system="You are a config reviewer. Be concise. Respond with JSON only.",
-                model=(await _get_setting("ai_builder.critic.model")),
+                model=builder_model,
                 temperature=0.1,
             )
             review_text = review_resp.content.strip()
@@ -1053,7 +1066,7 @@ Respond ONLY with JSON: {{"score": 1-10, "issues": ["issue1", "issue2"], "sugges
                         repair_resp = await llm.complete(
                             messages=[{"role": "user", "content": repair_user}],
                             system="You are a config repair specialist. Return ONLY the corrected JSON, no prose.",
-                            model=(await _get_setting("ai_builder.model")),
+                            model=builder_model,
                             temperature=0.0,
                             max_tokens=8192,
                         )
@@ -1098,6 +1111,7 @@ Respond ONLY with JSON: {{"score": 1-10, "issues": ["issue1", "issue2"], "sugges
                 **config,
                 "generated_by": "ai",
                 "model_used": response.model,
+                "validation_model": builder_model,
                 "generation_cost": response.cost,
                 "validation_issues": validation_issues + issues,
                 "dynamic_tools": dynamic_tools,
@@ -1229,10 +1243,13 @@ GUARDRAILS (hard rules — validator will reject the config and ask you to fix):
 {repair_context}
 """
     user_msg = f"Build a {mode} for: {description}"
+    model_id = (await _get_setting("ai_builder.validation.model")) or (
+        await _get_setting("ai_builder.model")
+    )
     resp = await llm.complete(
         messages=[{"role": "user", "content": user_msg}],
         system=system_prompt,
-        model=(await _get_setting("ai_builder.model")),
+        model=model_id,
         temperature=0.3,
         max_tokens=8192,
     )

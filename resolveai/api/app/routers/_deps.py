@@ -5,7 +5,7 @@ import os
 import uuid
 from typing import Any
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 
 from abenix_sdk import ActingSubject, Abenix
 

@@ -2,11 +2,18 @@ from __future__ import annotations
 
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 
-from engine.cache.orchestrator import cache_hits, cache_misses  # noqa: F401
-
 
 def _safe_metric(metric_cls, name: str, *args, **kwargs):
-    """Register a metric; reuse the existing one if a matching name is"""
+    """Register a metric; reuse the existing one if a matching name is
+    already in the global REGISTRY.
+
+    Single canonical entry point for the runtime — any module that needs
+    a Counter / Gauge / Histogram MUST come through here instead of
+    instantiating the prom_client class at import time. Bare construction
+    crashes the runtime when the same module gets imported twice via
+    different sys.path entries (the api host injects ``apps/agent-runtime``
+    on PYTHONPATH so this is a routine hazard).
+    """
     existing = getattr(REGISTRY, "_names_to_collectors", {}).get(name)
     if existing is not None:
         return existing
@@ -21,6 +28,40 @@ def _safe_metric(metric_cls, name: str, *args, **kwargs):
             **kwargs,
             registry=None,
         )
+
+
+def _safe_counter(name: str, doc: str, labelnames: list[str] | None = None):
+    """Counter convenience wrapper around _safe_metric. Kept around so the
+    older cache/orchestrator import surface stays stable."""
+    if labelnames:
+        return _safe_metric(Counter, name, doc, labelnames)
+    return _safe_metric(Counter, name, doc)
+
+
+def _safe_histogram(name: str, doc: str, labelnames: list[str] | None = None, **kw):
+    if labelnames:
+        return _safe_metric(Histogram, name, doc, labelnames, **kw)
+    return _safe_metric(Histogram, name, doc, **kw)
+
+
+def _safe_gauge(name: str, doc: str, labelnames: list[str] | None = None):
+    if labelnames:
+        return _safe_metric(Gauge, name, doc, labelnames)
+    return _safe_metric(Gauge, name, doc)
+
+
+# Cache layer metrics — moved here from engine/cache/orchestrator.py so
+# every metric in the runtime is defined once, in this module. The
+# orchestrator imports these symbols by name.
+cache_hits = _safe_counter(
+    "abenix_cache_hits_total",
+    "Cache hits by layer",
+    ["layer"],
+)
+cache_misses = _safe_counter(
+    "abenix_cache_misses_total",
+    "Cache misses (full waterfall miss)",
+)
 
 
 llm_tokens_total = _safe_metric(

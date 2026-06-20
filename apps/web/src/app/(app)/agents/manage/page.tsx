@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle,
@@ -11,9 +11,9 @@ import {
   Trash2,
 } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
-import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 
 interface Agent {
   id: string;
@@ -27,17 +27,45 @@ interface Agent {
 export default function ManageAgentsPage() {
   usePageTitle('Manage Agents');
 
-  const {
-    data: agents,
-    isLoading: loading,
-    mutate: mutateAgents,
-  } = useApi<Agent[]>('/api/agents?limit=100');
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const loadStartedAt = useRef<number>(0);
+
+  const loadAgents = useCallback(async () => {
+    setLoading(true);
+    loadStartedAt.current = Date.now();
+    setLoadProgress(null);
+    try {
+      const { agents: rows, total: t } = await fetchAllAgents<Agent>({
+        onProgress: (loaded, totalCount) => {
+          if (Date.now() - loadStartedAt.current > 2000) {
+            setLoadProgress({ loaded, total: totalCount });
+          }
+        },
+      });
+      setAgents(Array.isArray(rows) ? rows : []);
+      setTotal(t || (Array.isArray(rows) ? rows.length : 0));
+    } catch {
+      setAgents([]);
+      setTotal(0);
+    } finally {
+      setLoadProgress(null);
+      setLoading(false);
+    }
+  }, []);
+
+  const mutateAgents = useCallback(() => { loadAgents(); }, [loadAgents]);
+
+  useEffect(() => { loadAgents(); }, [loadAgents]);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkLoadingRemaining, setBulkLoadingRemaining] = useState<number | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
 
-  const agentList = agents ?? [];
+  const agentList = agents;
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -60,6 +88,19 @@ export default function ManageAgentsPage() {
     if (selected.size === 0) return;
     setBulkDeleting(true);
     try {
+      // If the page-load was interrupted and we know the API has more rows
+      // than we currently hold, top up first so a "Select All → Delete"
+      // really hits every agent.
+      if (total > agentList.length) {
+        const missing = total - agentList.length;
+        setBulkLoadingRemaining(missing);
+        const { agents: rows, total: t } = await fetchAllAgents<Agent>();
+        if (Array.isArray(rows)) {
+          setAgents(rows);
+          setTotal(t || rows.length);
+        }
+        setBulkLoadingRemaining(null);
+      }
       const res = await apiFetch<{ deleted: number; requested: number }>(
         '/api/agents/bulk',
         {
@@ -80,6 +121,7 @@ export default function ManageAgentsPage() {
     } catch {
       toastError('Failed to delete agents');
     } finally {
+      setBulkLoadingRemaining(null);
       setBulkDeleting(false);
     }
   };
@@ -146,6 +188,13 @@ export default function ManageAgentsPage() {
         </button>
       </div>
 
+      {loadProgress && (
+        <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 text-xs text-slate-300 flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+          Loading {loadProgress.loaded} of {loadProgress.total} agents…
+        </div>
+      )}
+
       {/* Bulk Actions Bar */}
       <AnimatePresence>
         {selected.size > 0 && (
@@ -156,8 +205,14 @@ export default function ManageAgentsPage() {
             className="flex items-center gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3"
           >
             <span className="text-sm text-cyan-300">
-              {selected.size} selected
+              {selected.size} selected of {total}
             </span>
+            {bulkLoadingRemaining !== null && (
+              <span className="text-xs text-slate-400 flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Loading remaining {bulkLoadingRemaining}…
+              </span>
+            )}
             <div className="flex-1" />
             {!confirmBulk ? (
               <button
@@ -196,6 +251,25 @@ export default function ManageAgentsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Select-all toolbar — shows the real catalog total so users know how
+          many rows the bulk action will actually hit. */}
+      {agentList.length > 0 && (
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <button
+            onClick={selectAll}
+            className="flex items-center gap-2 px-2 py-1 rounded hover:text-white transition-colors"
+          >
+            {selected.size === agentList.length && agentList.length > 0 ? (
+              <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+            ) : (
+              <Square className="w-3.5 h-3.5" />
+            )}
+            <span>Select All ({total || agentList.length})</span>
+          </button>
+          <span>Showing {agentList.length} of {total || agentList.length}</span>
+        </div>
+      )}
 
       {/* Agent Table */}
       <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">

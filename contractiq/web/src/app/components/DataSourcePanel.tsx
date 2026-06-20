@@ -6,9 +6,10 @@ import { Database, ChevronDown, ChevronUp, ExternalLink, Lock } from 'lucide-rea
 export interface DataSource {
   name: string;
   role: string;
-  status: 'live' | 'planned' | 'configurable' | 'demo-seed';
+  status: 'live' | 'planned' | 'configurable' | 'demo-seed' | 'unavailable';
   url?: string;
   notes?: string;
+  tooltip?: string;
 }
 
 export interface DataSourceGroup {
@@ -22,6 +23,7 @@ const STATUS_STYLE: Record<DataSource['status'], { tone: string; label: string }
   configurable: { tone: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200',           label: 'configurable' },
   planned:      { tone: 'border-amber-500/30 bg-amber-500/10 text-amber-200',         label: 'planned' },
   'demo-seed':  { tone: 'border-slate-700 bg-slate-800/40 text-slate-400',            label: 'demo seed' },
+  unavailable:  { tone: 'border-slate-700 bg-slate-800/40 text-slate-400',            label: 'unavailable' },
 };
 
 export default function DataSourcePanel({
@@ -51,9 +53,25 @@ export default function DataSourcePanel({
             <p className="text-sm font-semibold text-white">{title}</p>
             <p className="text-[11px] text-slate-500">
               {total} source{total === 1 ? '' : 's'} ·
-              <span className="text-emerald-400 ml-1">{live} live</span> ·
-              <span className="text-cyan-400 ml-1">{groups.reduce((a, g) => a + g.sources.filter(s => s.status === 'configurable').length, 0)} configurable</span> ·
-              <span className="text-amber-400 ml-1">{groups.reduce((a, g) => a + g.sources.filter(s => s.status === 'planned').length, 0)} planned</span>
+              <span className="text-emerald-400 ml-1">{live} live</span>
+              {groups.reduce((a, g) => a + g.sources.filter(s => s.status === 'configurable').length, 0) > 0 && (
+                <>
+                  {' · '}
+                  <span className="text-cyan-400">{groups.reduce((a, g) => a + g.sources.filter(s => s.status === 'configurable').length, 0)} configurable</span>
+                </>
+              )}
+              {groups.reduce((a, g) => a + g.sources.filter(s => s.status === 'planned').length, 0) > 0 && (
+                <>
+                  {' · '}
+                  <span className="text-amber-400">{groups.reduce((a, g) => a + g.sources.filter(s => s.status === 'planned').length, 0)} planned</span>
+                </>
+              )}
+              {groups.reduce((a, g) => a + g.sources.filter(s => s.status === 'unavailable').length, 0) > 0 && (
+                <>
+                  {' · '}
+                  <span className="text-slate-400">{groups.reduce((a, g) => a + g.sources.filter(s => s.status === 'unavailable').length, 0)} unavailable</span>
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -72,12 +90,15 @@ export default function DataSourcePanel({
                 {g.sources.map((s, si) => {
                   const st = STATUS_STYLE[s.status];
                   const body = (
-                    <div className={`rounded-md border p-2.5 ${st.tone} hover:opacity-90 transition-opacity`}>
+                    <div
+                      className={`rounded-md border p-2.5 ${st.tone} hover:opacity-90 transition-opacity`}
+                      title={s.tooltip}
+                    >
                       <div className="flex items-baseline justify-between gap-2 mb-0.5">
                         <p className="text-xs font-semibold flex items-center gap-1.5">
                           {s.name}
                           {s.url && <ExternalLink className="w-3 h-3 opacity-60" />}
-                          {!s.url && s.status !== 'demo-seed' && <Lock className="w-3 h-3 opacity-40" />}
+                          {!s.url && s.status !== 'demo-seed' && s.status !== 'unavailable' && <Lock className="w-3 h-3 opacity-40" />}
                         </p>
                         <span className="text-[9px] uppercase tracking-wider opacity-70 shrink-0">{st.label}</span>
                       </div>
@@ -93,8 +114,9 @@ export default function DataSourcePanel({
             </div>
           ))}
           <p className="text-[10px] text-slate-600 italic">
-            All live + configurable feeds are accessed through Abenix agents that hold the credentials and rate-limit centrally —
-            E&amp;C-Copilot never carries third-party API keys. Demo-seed values are static rows in Postgres for offline rendering.
+            Live feeds are accessed through Abenix agents that hold the credentials and rate-limit centrally —
+            E&amp;C-Copilot never carries third-party API keys. Unavailable sources require a paid contract this tenant does not hold.
+            Demo-seed values are static rows in Postgres for offline rendering.
           </p>
         </div>
       )}

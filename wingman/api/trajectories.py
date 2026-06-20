@@ -10,7 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-TRAJECTORY_ROOT = Path(os.environ.get("WINGMAN_TRAJECTORY_DIR", "/data/wingman-trajectories"))
+TRAJECTORY_ROOT = Path(
+    os.environ.get("TRAJECTORY_DIR")
+    or os.environ.get("WINGMAN_TRAJECTORY_DIR", "/data/wingman-trajectories")
+)
 TENANT = os.environ.get("WINGMAN_TRAJECTORY_TENANT", "shared")
 _WORD_RX = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
 

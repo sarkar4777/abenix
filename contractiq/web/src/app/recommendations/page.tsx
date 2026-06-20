@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { BellRing, ArrowUpRight, ShieldCheck, FileText, Sparkles, Loader2, AlertTriangle } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
 import { useContractIQExecutions } from '../components/ContractIQExecutionsProvider';
+import { PageExplainer } from '@/components/PageExplainer';
 
 type Evidence = { kind: string; source: string; value: any };
 type Rec = {
@@ -34,13 +35,12 @@ export default function RecommendationsPage() {
   const run = async () => {
     setLoading(true);
     try {
-      const me = await authFetch('/api/contractiq/auth/me').then(r => r.json()).catch(() => null);
-      const meData = me?.data ?? me ?? {};
-      const tenant_id = meData?.tenant_id || meData?.user?.tenant_id || '';
+      // tenant_id is resolved server-side from the JWT — never send it from
+      // the browser. Empty body keeps the engine call honest.
       const res = await authFetch('/api/contractiq/recommendations/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenant_id }),
+        body: JSON.stringify({}),
       });
       const j = await res.json();
       setOut(j);
@@ -76,6 +76,7 @@ export default function RecommendationsPage() {
           {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Running</> : 'Re-run engine'}
         </button>
       </header>
+      <PageExplainer routeKey="recommendations" />
 
       <div className="flex gap-2 mb-6">
         {(['all', 'trade', 'hedge', 'monitor'] as const).map(f => (

@@ -9,6 +9,7 @@ import {
   FileBarChart, Zap, Scale, Bot, Plus, Trash2, MessagesSquare,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -355,6 +356,7 @@ export default function ContractIQChatPage() {
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
               <Bot className="w-5 h-5 text-emerald-400" /> Cross-Contract Intelligence
             </h1>
+            <PageExplainer routeKey="chat" />
             <p className="text-xs text-slate-400 mt-0.5">
               AI-powered analysis across your entire contract portfolio
               {activeThreadId && <span className="text-emerald-400 ml-2">· Continuing thread</span>}
@@ -437,12 +439,26 @@ export default function ContractIQChatPage() {
 
         {/* Input */}
         <div className="border-t border-slate-800/50 px-6 py-4">
-          <div className="max-w-3xl mx-auto flex gap-2">
-            <input type="text" value={input} onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && !loading && sendMessage()}
+          <div className="max-w-3xl mx-auto flex items-end gap-2">
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onInput={e => {
+                const ta = e.currentTarget;
+                ta.style.height = 'auto';
+                ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!loading && input.trim()) sendMessage();
+                }
+              }}
+              rows={2}
               placeholder="Ask about your contracts — pricing, risks, clauses, counterparties..."
               disabled={loading}
-              className="flex-1 bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none disabled:opacity-50" />
+              className="flex-1 bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none disabled:opacity-50 resize-none max-h-32 overflow-y-auto"
+            />
             <button onClick={() => sendMessage()} disabled={loading || !input.trim()}
               className="px-5 py-3 rounded-xl bg-emerald-500 text-white hover:bg-emerald-400 disabled:opacity-50 transition-colors">
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

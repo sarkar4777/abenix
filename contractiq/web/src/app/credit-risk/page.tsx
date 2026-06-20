@@ -12,6 +12,7 @@ import {
 import TrafficLightDashboard from './components/TrafficLightDashboard';
 import ComplianceAlertsTicker from './components/ComplianceAlertsTicker';
 import DataSourcePanel from '../components/DataSourcePanel';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return localStorage.getItem('contractiq_token') || ''; }
@@ -60,6 +61,14 @@ interface PortfolioSummary {
   total_counterparties: number;
   assessed_count: number;
   unassessed: string[];
+}
+
+interface SeededCounterparty {
+  id: string;
+  legal_name: string;
+  credit_score_1_100: number | null;
+  risk_tier: 'green' | 'amber' | 'red' | 'unknown';
+  credit_utilisation_pct: number | null;
 }
 
 function RiskIcon({ level }: { level?: string }) {
@@ -112,6 +121,7 @@ export default function CreditRiskPage() {
   const [user, setUser] = useState<any>(null);
   const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
   const [assessments, setAssessments] = useState<CreditAssessment[]>([]);
+  const [seededCps, setSeededCps] = useState<SeededCounterparty[]>([]);
   const [loading, setLoading] = useState(true);
   const [assessing, setAssessing] = useState<string | null>(null);
   const [assessingAll, setAssessingAll] = useState(false);
@@ -122,18 +132,23 @@ export default function CreditRiskPage() {
     const token = getToken();
     if (!token) return;
     try {
-      const [portfolioRes, assessmentsRes] = await Promise.all([
+      const [portfolioRes, assessmentsRes, cpsRes] = await Promise.all([
         fetch(`${API_URL}/api/contractiq/insights/credit-risk/portfolio`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
         fetch(`${API_URL}/api/contractiq/insights/credit-risk`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
+        fetch(`${API_URL}/api/contractiq/counterparties`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       ]);
       const pData = await portfolioRes.json();
       const aData = await assessmentsRes.json();
+      const cData = await cpsRes.json();
       if (pData.data) setPortfolio(pData.data);
       if (aData.data) setAssessments(aData.data);
+      if (cData?.data?.items) setSeededCps(cData.data.items);
     } catch { /* silent */ }
     setLoading(false);
   }, []);
@@ -188,13 +203,28 @@ export default function CreditRiskPage() {
   if (!user || loading) return <div className="min-h-screen bg-[#0B0F19] flex items-center justify-center"><Loader2 className="w-8 h-8 text-emerald-400 animate-spin" /></div>;
 
   const completedAssessments = assessments.filter(a => a.status === 'completed');
-  const avgScore = completedAssessments.length > 0
-    ? Math.round(completedAssessments.reduce((s, a) => s + (a.credit_score || 0), 0) / completedAssessments.length)
-    : 0;
-  const highRisk = completedAssessments.filter(a => a.risk_level === 'High' || a.risk_level === 'Critical');
+
+  // KPIs are sourced off the seeded counterparty table so the strip stays
+  // consistent with the heat map below. Agentic assessments augment it when
+  // present, but never gate the headline numbers.
+  const cpCount = seededCps.length;
+  const assessedCp = seededCps.filter(c => (c.credit_score_1_100 ?? 0) > 0);
+  const scoredCount = Math.max(completedAssessments.length, assessedCp.length);
+  const avgScore = assessedCp.length > 0
+    ? Math.round(assessedCp.reduce((s, c) => s + (c.credit_score_1_100 || 0), 0) / assessedCp.length)
+    : (completedAssessments.length > 0
+        ? Math.round(completedAssessments.reduce((s, a) => s + (a.credit_score || 0), 0) / completedAssessments.length)
+        : 0);
+  const highRiskCount = seededCps.filter(c => c.risk_tier === 'red').length
+    + completedAssessments.filter(a => a.risk_level === 'High' || a.risk_level === 'Critical').length;
+  // No PD column on the seeded counterparty row — derive a heuristic from the
+  // 1-100 score (100 - score scaled to a 0-10% band). Agentic assessments
+  // override this when they exist because they carry a modelled PD.
   const avgPD = completedAssessments.length > 0
     ? completedAssessments.reduce((s, a) => s + (a.probability_of_default_pct || 0), 0) / completedAssessments.length
-    : 0;
+    : (assessedCp.length > 0
+        ? assessedCp.reduce((s, c) => s + Math.max(0, (100 - (c.credit_score_1_100 || 0)) / 10), 0) / assessedCp.length
+        : 0);
 
   return (
     <div className="min-h-screen bg-[#0B0F19] p-6">
@@ -236,6 +266,7 @@ export default function CreditRiskPage() {
             </button>
           </div>
         </div>
+        <PageExplainer routeKey="credit-risk-counterparty" />
 
         {/* KYC surface callout */}
         <a
@@ -256,57 +287,16 @@ export default function CreditRiskPage() {
           </div>
         </a>
 
-        <TrafficLightDashboard />
-        <ComplianceAlertsTicker />
-        <DataSourcePanel
-          title="Where this data comes from in production"
-          description="Counterparty risk + KYC + permits + alerts blend deterministic seed rows with Abenix-agent-driven feeds against the systems below. Live-tier sources execute through Abenix tools so credentials, rate limits, and audit trails live in one place."
-          groups={[
-            {
-              category: 'Sanctions + PEP screening',
-              sources: [
-                { name: 'OFAC SDN List',  role: 'US Treasury — daily refresh, primary sanctions list', status: 'live', url: 'https://sanctionslist.ofac.treas.gov' },
-                { name: 'EU Consolidated Sanctions', role: 'European Council restrictive measures', status: 'live', url: 'https://data.europa.eu/euodp/en/data/dataset/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions' },
-                { name: 'UN Consolidated List', role: 'UN Security Council resolutions', status: 'live', url: 'https://www.un.org/securitycouncil/content/un-sc-consolidated-list' },
-                { name: 'HMT (UK) Consolidated List', role: 'UK OFSI sanctions register', status: 'live' },
-                { name: 'OpenSanctions', role: 'Aggregator across 100+ lists, used for breadth', status: 'live', url: 'https://www.opensanctions.org' },
-                { name: 'World-Check (Refinitiv)', role: 'Premium PEP + adverse-media — keyed in Abenix', status: 'configurable' },
-                { name: 'LexisNexis Risk Solutions', role: 'Identity + PEP fallback', status: 'configurable' },
-              ],
-            },
-            {
-              category: 'Credit ratings + bureau',
-              sources: [
-                { name: "S&P Global Ratings", role: 'Long-term issuer ratings via Rating Xpress API', status: 'configurable' },
-                { name: "Moody's Investors Service", role: 'Issuer ratings + outlooks via Moody\'s API', status: 'configurable' },
-                { name: 'Fitch Connect', role: 'Fitch sovereign + corporate ratings', status: 'configurable' },
-                { name: 'Dun & Bradstreet', role: 'Private-company D-U-N-S + paydex', status: 'planned' },
-                { name: 'Creditsafe', role: 'EU SME bureau coverage', status: 'planned' },
-              ],
-            },
-            {
-              category: 'Regulatory + adverse media',
-              sources: [
-                { name: 'FERC eLibrary', role: 'Market-Based Rate authorities + filings', status: 'configurable', url: 'https://elibrary.ferc.gov' },
-                { name: 'EPA ECHO', role: 'Enforcement & compliance history', status: 'configurable', url: 'https://echo.epa.gov' },
-                { name: 'PHMSA Operator Search', role: 'US pipeline operator permit + incident data', status: 'configurable' },
-                { name: 'Companies House / Bundesanzeiger / RCS', role: 'Beneficial-ownership + filings in UK/DE/FR', status: 'configurable' },
-                { name: 'GDELT + Reuters Connect', role: 'Adverse-media event stream', status: 'planned' },
-              ],
-            },
-          ]}
-        />
-
-        {/* KPI Strip */}
-        <div className="grid grid-cols-5 gap-4">
+        {/* 1. KPI Strip — top */}
+        <div className="grid grid-cols-5 gap-4" data-testid="credit-risk-kpis">
           {[
-            { label: 'Counterparties', value: portfolio?.total_counterparties || 0, icon: Building2, color: 'text-cyan-400' },
-            { label: 'Assessed', value: completedAssessments.length, icon: CheckCircle2, color: 'text-emerald-400' },
-            { label: 'Avg Credit Score', value: avgScore, icon: BarChart3, color: avgScore >= 60 ? 'text-emerald-400' : avgScore >= 40 ? 'text-amber-400' : 'text-red-400' },
-            { label: 'High Risk', value: highRisk.length, icon: AlertTriangle, color: highRisk.length > 0 ? 'text-red-400' : 'text-emerald-400' },
-            { label: 'Avg PD', value: `${avgPD.toFixed(1)}%`, icon: Activity, color: avgPD > 5 ? 'text-red-400' : avgPD > 2 ? 'text-amber-400' : 'text-emerald-400' },
+            { label: 'Counterparties', value: cpCount || portfolio?.total_counterparties || 0, icon: Building2, color: 'text-cyan-400', testid: 'kpi-counterparties' },
+            { label: 'Assessed', value: scoredCount, icon: CheckCircle2, color: 'text-emerald-400', testid: 'kpi-assessed' },
+            { label: 'Avg Credit Score', value: avgScore, icon: BarChart3, color: avgScore >= 60 ? 'text-emerald-400' : avgScore >= 40 ? 'text-amber-400' : 'text-red-400', testid: 'kpi-avg-score' },
+            { label: 'High Risk', value: highRiskCount, icon: AlertTriangle, color: highRiskCount > 0 ? 'text-red-400' : 'text-emerald-400', testid: 'kpi-high-risk' },
+            { label: 'Avg PD', value: `${avgPD.toFixed(1)}%`, icon: Activity, color: avgPD > 5 ? 'text-red-400' : avgPD > 2 ? 'text-amber-400' : 'text-emerald-400', testid: 'kpi-avg-pd' },
           ].map((kpi) => (
-            <div key={kpi.label} className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
+            <div key={kpi.label} data-testid={kpi.testid} className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-2">
                 <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
                 <span className="text-xs text-slate-400">{kpi.label}</span>
@@ -315,6 +305,12 @@ export default function CreditRiskPage() {
             </div>
           ))}
         </div>
+
+        {/* 2. Compliance warnings — severity-sorted ticker */}
+        <ComplianceAlertsTicker />
+
+        {/* 3. Counterparty heat map — drill-down */}
+        <TrafficLightDashboard />
 
         {/* Unassessed Counterparties */}
         {portfolio?.unassessed && portfolio.unassessed.length > 0 && (
@@ -515,6 +511,45 @@ export default function CreditRiskPage() {
             </div>
           )}
         </div>
+
+        {/* Data sources — collapsed disclosure at the bottom */}
+        <DataSourcePanel
+          title="Where data comes from in production"
+          description="Counterparty risk + KYC + permits + alerts blend deterministic seed rows with Abenix-agent-driven feeds. Live sources are public registers and free APIs wired through Abenix tools. Premium bureaus and rating agencies are listed for transparency but are not active in this tenant — they require a paid contract."
+          groups={[
+            {
+              category: 'Live in this tenant',
+              description: 'Public registers and free APIs wired through Abenix tools',
+              sources: [
+                { name: 'OFAC SDN List', role: 'US Treasury — daily refresh, primary sanctions list', status: 'live', url: 'https://sanctionslist.ofac.treas.gov' },
+                { name: 'EU Consolidated Sanctions', role: 'European Council restrictive measures', status: 'live', url: 'https://data.europa.eu/euodp/en/data/dataset/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions' },
+                { name: 'UN Consolidated List', role: 'UN Security Council resolutions', status: 'live', url: 'https://www.un.org/securitycouncil/content/un-sc-consolidated-list' },
+                { name: 'HMT (UK) Consolidated List', role: 'UK OFSI sanctions register', status: 'live' },
+                { name: 'OpenSanctions', role: 'Aggregator across 100+ lists, used for breadth', status: 'live', url: 'https://www.opensanctions.org' },
+                { name: 'FERC eLibrary', role: 'Market-Based Rate authorities + filings', status: 'live', url: 'https://elibrary.ferc.gov' },
+                { name: 'EPA ECHO', role: 'Enforcement and compliance history', status: 'live', url: 'https://echo.epa.gov' },
+                { name: 'PHMSA Operator Search', role: 'US pipeline operator permit and incident data', status: 'live' },
+                { name: 'Companies House', role: 'UK beneficial-ownership and filings', status: 'live', url: 'https://find-and-update.company-information.service.gov.uk' },
+                { name: 'Bundesanzeiger', role: 'German company filings and ownership', status: 'live', url: 'https://www.bundesanzeiger.de' },
+                { name: 'SEC EDGAR', role: 'US issuer filings — 10-K, 10-Q, 8-K, ownership', status: 'live', url: 'https://www.sec.gov/edgar' },
+              ],
+            },
+            {
+              category: 'Unavailable in this tenant — premium contract required',
+              description: 'Listed for transparency. Contact procurement to negotiate a subscription.',
+              sources: [
+                { name: 'S&P Global Ratings', role: 'Long-term issuer ratings via Rating Xpress API', status: 'unavailable', tooltip: 'Requires a paid contract — contact procurement to negotiate.' },
+                { name: "Moody's Investors Service", role: "Issuer ratings and outlooks via Moody's API", status: 'unavailable', tooltip: 'Requires a paid contract — contact procurement to negotiate.' },
+                { name: 'Fitch Connect', role: 'Fitch sovereign and corporate ratings', status: 'unavailable', tooltip: 'Requires a paid contract — contact procurement to negotiate.' },
+                { name: 'World-Check (Refinitiv)', role: 'Premium PEP and adverse-media screening', status: 'unavailable', tooltip: 'Requires a paid contract — contact procurement to negotiate.' },
+                { name: 'LexisNexis Risk Solutions', role: 'Identity and PEP fallback', status: 'unavailable', tooltip: 'Requires a paid contract — contact procurement to negotiate.' },
+                { name: 'Dun & Bradstreet', role: 'Private-company D-U-N-S and paydex', status: 'unavailable', tooltip: 'Requires a paid contract — contact procurement to negotiate.' },
+                { name: 'Creditsafe', role: 'EU SME bureau coverage', status: 'unavailable', tooltip: 'Requires a paid contract — contact procurement to negotiate.' },
+                { name: 'GDELT + Reuters Connect', role: 'Adverse-media event stream', status: 'unavailable', tooltip: 'Requires a paid contract — contact procurement to negotiate.' },
+              ],
+            },
+          ]}
+        />
       </div>
     </div>
   );

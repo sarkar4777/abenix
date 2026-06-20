@@ -73,6 +73,8 @@ class LLMResponse:
     stop_reason: str | None = (
         None  # "end_turn" | "max_tokens" | "stop_sequence" | "tool_use"
     )
+    requested_model: str | None = None
+    fallback_reason: str | None = None
 
 
 @dataclass
@@ -88,9 +90,76 @@ _DB_PRICING_TTL = (
 )
 
 
+_DB_PROVIDER_CACHE: dict[str, str] = {}
+
+
+def _clear_stale_unavailable(model: str, latency_ms: int) -> None:
+    """Self-heal: a real call just succeeded, so wipe any stale 'unavailable'
+    marker the hourly prober left behind (e.g. from a previous bad API key).
+    Best-effort — never raises, never blocks the caller."""
+    if latency_ms >= 30_000:
+        return
+    import os as _os_s
+
+    db_url = _os_s.environ.get("DATABASE_URL", "")
+    if not db_url:
+        return
+    sync_url = db_url.replace("+asyncpg", "").replace(
+        "postgresql+asyncpg", "postgresql"
+    )
+    if "?" in sync_url:
+        base, query = sync_url.split("?", 1)
+        kept = [p for p in query.split("&") if not p.lower().startswith("ssl=")]
+        sync_url = base + (("?" + "&".join(kept)) if kept else "")
+    try:
+        import psycopg2
+
+        conn = psycopg2.connect(sync_url, connect_timeout=2)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE model_availability
+                       SET status = 'available',
+                           last_error = NULL,
+                           consecutive_failures = 0,
+                           status_since = NOW(),
+                           last_ok_at = NOW(),
+                           last_checked_at = NOW()
+                     WHERE model = %s AND status = 'unavailable'
+                    """,
+                    (model,),
+                )
+                updated = cur.rowcount
+                if updated > 0:
+                    cur.execute(
+                        """
+                        INSERT INTO model_availability_events (model, from_status, to_status, error)
+                        VALUES (%s, 'unavailable', 'available', 'self_heal_runtime_success')
+                        """,
+                        (model,),
+                    )
+                conn.commit()
+                if updated > 0:
+                    try:
+                        from engine.model_resolver import invalidate_cache as _inv
+
+                        _inv()
+                    except Exception:
+                        pass
+                    logger.info(
+                        "self_heal cleared stale unavailable marker for model=%s",
+                        model,
+                    )
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.debug("self_heal skipped for %s: %s", model, exc)
+
+
 def _load_db_pricing() -> dict[str, dict[str, float]]:
     """Fetch the current per-model pricing rows from `llm_model_pricing`."""
-    global _DB_PRICING_CACHE, _DB_PRICING_CACHE_AT
+    global _DB_PRICING_CACHE, _DB_PRICING_CACHE_AT, _DB_PROVIDER_CACHE
     import os as _os_i
     import time as _time_i
 
@@ -124,6 +193,7 @@ def _load_db_pricing() -> dict[str, dict[str, float]]:
                     """
                     SELECT DISTINCT ON (model)
                         model,
+                        provider,
                         input_per_m,
                         output_per_m,
                         cached_input_per_m
@@ -136,7 +206,8 @@ def _load_db_pricing() -> dict[str, dict[str, float]]:
         finally:
             conn.close()
         result = {}
-        for model, inp, out, cached in rows:
+        providers: dict[str, str] = {}
+        for model, provider, inp, out, cached in rows:
             result[model] = {
                 "input": float(inp) / 1_000_000,
                 "output": float(out) / 1_000_000,
@@ -144,7 +215,10 @@ def _load_db_pricing() -> dict[str, dict[str, float]]:
                     (float(cached) / 1_000_000) if cached is not None else None
                 ),
             }
+            if provider:
+                providers[model] = str(provider).lower()
         _DB_PRICING_CACHE = result
+        _DB_PROVIDER_CACHE = providers
         _DB_PRICING_CACHE_AT = now
         return result
     except Exception as e:
@@ -168,6 +242,8 @@ def _calc_cost(
 def _provider_for(model: str) -> str:
     """Map model id → provider label for Prometheus. Keeps the cardinality"""
     m = model.lower()
+    if m.startswith("azure-"):
+        return "azure"
     if m.startswith("claude"):
         return "anthropic"
     if m.startswith("gpt"):
@@ -214,6 +290,124 @@ def _anthropic_tools_schema(tools: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "input_schema": t["input_schema"],
             }
         )
+    return out
+
+
+def _translate_messages_for_openai(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Translate Anthropic-style message history into OpenAI chat format.
+
+    The agent executor records tool calls as Anthropic content blocks
+    (tool_use / tool_result). OpenAI's chat API wants tool_calls on the
+    assistant message and a separate role:"tool" message per result.
+    We also have to rewrite the toolu_* ids to call_* ids OpenAI accepts
+    and keep the mapping consistent across the assistant + tool turns.
+    """
+    import json as _json
+
+    out: list[dict[str, Any]] = []
+    tool_id_map: dict[str, str] = {}
+    counter = 0
+
+    def _map_id(anth_id: str) -> str:
+        nonlocal counter
+        if anth_id in tool_id_map:
+            return tool_id_map[anth_id]
+        if anth_id.startswith("call_"):
+            tool_id_map[anth_id] = anth_id
+            return anth_id
+        counter += 1
+        mapped = f"call_{counter}_{anth_id[-8:] if len(anth_id) > 8 else anth_id}"
+        tool_id_map[anth_id] = mapped
+        return mapped
+
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content")
+
+        if not isinstance(content, list):
+            out.append(
+                {"role": role, "content": content if content is not None else ""}
+            )
+            continue
+
+        if role == "assistant":
+            text_parts: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    text_parts.append(str(block))
+                    continue
+                btype = block.get("type")
+                if btype == "text":
+                    text_parts.append(block.get("text", ""))
+                elif btype == "tool_use":
+                    mapped = _map_id(block.get("id", ""))
+                    tool_calls.append(
+                        {
+                            "id": mapped,
+                            "type": "function",
+                            "function": {
+                                "name": block.get("name", ""),
+                                "arguments": _json.dumps(block.get("input", {}) or {}),
+                            },
+                        }
+                    )
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": "".join(text_parts) if text_parts else None,
+            }
+            if tool_calls:
+                assistant_msg["tool_calls"] = tool_calls
+            out.append(assistant_msg)
+            continue
+
+        if role == "user":
+            text_parts = []
+            tool_result_msgs: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    text_parts.append(str(block))
+                    continue
+                btype = block.get("type")
+                if btype == "text":
+                    text_parts.append(block.get("text", ""))
+                elif btype == "tool_result":
+                    raw = block.get("content", "")
+                    if isinstance(raw, list):
+                        flat = "".join(
+                            (b.get("text", "") if isinstance(b, dict) else str(b))
+                            for b in raw
+                        )
+                    elif isinstance(raw, (dict, list)):
+                        flat = _json.dumps(raw)
+                    else:
+                        flat = str(raw) if raw is not None else ""
+                    tool_result_msgs.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": _map_id(block.get("tool_use_id", "")),
+                            "content": flat,
+                        }
+                    )
+            # Emit any leading user text first, then each tool message.
+            if text_parts:
+                joined = "".join(text_parts)
+                if joined.strip() or not tool_result_msgs:
+                    out.append({"role": "user", "content": joined})
+            out.extend(tool_result_msgs)
+            continue
+
+        # system or anything else: flatten text blocks
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+            else:
+                text_parts.append(str(block))
+        out.append({"role": role, "content": "".join(text_parts)})
+
     return out
 
 
@@ -452,7 +646,7 @@ class OpenAIProvider(LLMProvider):
         api_messages: list[dict[str, Any]] = []
         if system:
             api_messages.append({"role": "system", "content": system})
-        api_messages.extend(messages)
+        api_messages.extend(_translate_messages_for_openai(messages))
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -782,10 +976,70 @@ class GoogleProvider(LLMProvider):
         )
 
 
+class AzureOpenAIProvider(OpenAIProvider):
+    DEFAULT_MODEL = "azure-gpt-4o"
+
+    def __init__(self) -> None:
+        endpoint = _os.environ.get("AZURE_OPENAI_API_BASE", "").rstrip("/")
+        if endpoint.endswith("/openai/deployments"):
+            endpoint = endpoint[: -len("/openai/deployments")]
+        if endpoint.endswith("/openai"):
+            endpoint = endpoint[: -len("/openai")]
+        api_key = _os.environ.get("AZURE_OPENAI_API_KEY", "")
+        api_version = _os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-01-preview")
+        self.client = openai.AsyncAzureOpenAI(
+            azure_endpoint=endpoint or "https://placeholder.invalid",
+            api_key=api_key or "placeholder",
+            api_version=api_version,
+        )
+
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float = 0.7,
+        stream: bool = False,
+        max_tokens: int = 4096,
+    ) -> LLMResponse | AsyncGenerator[StreamEvent, None]:
+        model_full = model or self.DEFAULT_MODEL
+        deployment = (
+            model_full[len("azure-") :]
+            if model_full.startswith("azure-")
+            else model_full
+        )
+        api_messages: list[dict[str, Any]] = []
+        if system:
+            api_messages.append({"role": "system", "content": system})
+        api_messages.extend(_translate_messages_for_openai(messages))
+        kwargs: dict[str, Any] = {
+            "model": deployment,
+            "messages": api_messages,
+            "temperature": temperature,
+        }
+        is_reasoning = (
+            deployment.startswith("gpt-5")
+            or deployment.startswith("o1")
+            or deployment.startswith("o3")
+        )
+        if is_reasoning:
+            kwargs["max_completion_tokens"] = max_tokens
+            kwargs.pop("temperature", None)
+        else:
+            kwargs["max_tokens"] = max_tokens
+        if tools:
+            kwargs["tools"] = _openai_tools_schema(tools)
+        if stream:
+            return self._stream(kwargs, model_full)
+        return await self._non_stream(kwargs, model_full)
+
+
 PROVIDER_MAP: dict[str, type[LLMProvider]] = {
     "anthropic": AnthropicProvider,
     "openai": OpenAIProvider,
     "google": GoogleProvider,
+    "azure": AzureOpenAIProvider,
 }
 
 MODEL_TO_PROVIDER: dict[str, str] = {
@@ -814,9 +1068,12 @@ class LLMRouter:
         return self._providers[name]
 
     def route(self, model: str) -> LLMProvider:
-        provider_name = MODEL_TO_PROVIDER.get(model)
+        _load_db_pricing()
+        provider_name = _DB_PROVIDER_CACHE.get(model) or MODEL_TO_PROVIDER.get(model)
         if not provider_name:
-            if model.startswith("claude"):
+            if model.startswith("azure-"):
+                provider_name = "azure"
+            elif model.startswith("claude"):
                 provider_name = "anthropic"
             elif model.startswith("gpt"):
                 provider_name = "openai"
@@ -836,8 +1093,30 @@ class LLMRouter:
         temperature: float = 0.7,
         max_tokens: int = 4096,
     ) -> LLMResponse | AsyncGenerator[StreamEvent, None]:
+        requested_model = model
+        fallback_reason: str | None = None
+        try:
+            from engine.model_resolver import resolve as _resolve
+
+            required = {"tools": True} if tools else {}
+            decision = _resolve(model, required_capabilities=required)
+            if decision.effective != model:
+                logger.warning(
+                    "model_resolver swap requested=%s effective=%s reason=%s chain=%s",
+                    decision.requested,
+                    decision.effective,
+                    decision.reason,
+                    decision.chain,
+                )
+                model = decision.effective
+                fallback_reason = decision.reason
+        except Exception as exc:
+            logger.debug("model_resolver bypass: %s", exc)
         provider = self.route(model)
-        provider_name = MODEL_TO_PROVIDER.get(model, "anthropic")
+        _load_db_pricing()
+        provider_name = _DB_PROVIDER_CACHE.get(model) or MODEL_TO_PROVIDER.get(
+            model, "anthropic"
+        )
         last_error: Exception | None = None
 
         for attempt in range(3):
@@ -852,6 +1131,8 @@ class LLMRouter:
                     max_tokens=max_tokens,
                 )
                 if not stream and isinstance(result, LLMResponse):
+                    result.requested_model = requested_model
+                    result.fallback_reason = fallback_reason
                     llm_tokens_total.labels(model=model, direction="input").inc(
                         result.input_tokens
                     )
@@ -880,6 +1161,19 @@ class LLMRouter:
                         result.cost,
                         result.latency_ms,
                     )
+                    # Self-heal: a real call just succeeded — clear any stale
+                    # 'unavailable' row the hourly prober left behind. Runs in
+                    # a thread so the DB hop never blocks the response.
+                    try:
+                        import asyncio as _asyncio_h
+
+                        _asyncio_h.create_task(
+                            _asyncio_h.to_thread(
+                                _clear_stale_unavailable, model, result.latency_ms
+                            )
+                        )
+                    except Exception:
+                        pass
                 return result
             except Exception as e:
                 last_error = e
@@ -895,11 +1189,15 @@ class LLMRouter:
                 if attempt < 2:
                     await asyncio.sleep(wait)
 
-        # Provider failover: try alternate providers before giving up
+        # Provider failover: try alternate providers before giving up.
+        # The azure entry keeps Azure-only deploys functional when a single
+        # Azure deployment 5xxs — degrades powerful -> least within Azure
+        # before reaching for cross-provider keys.
         fallback_models = {
-            "anthropic": "gpt-4o",
-            "openai": "claude-sonnet-4-5-20250929",
-            "google": "claude-sonnet-4-5-20250929",
+            "anthropic": "azure-gpt-4o",
+            "openai": "azure-gpt-4o",
+            "google": "azure-gpt-4o",
+            "azure": "azure-gpt-4o-mini",
         }
         fallback_model = fallback_models.get(provider_name)
         if fallback_model and fallback_model != model:
@@ -920,6 +1218,8 @@ class LLMRouter:
                     max_tokens=max_tokens,
                 )
                 if not stream and isinstance(result, LLMResponse):
+                    result.requested_model = requested_model
+                    result.fallback_reason = fallback_reason or "provider_failover"
                     _emit_llm_metrics(
                         fallback_model,
                         result.input_tokens,

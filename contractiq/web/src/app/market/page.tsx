@@ -11,6 +11,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   AreaChart, Area, CartesianGrid,
 } from 'recharts';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { if (typeof window === 'undefined') return null; return localStorage.getItem('contractiq_token'); }
@@ -166,6 +167,8 @@ export default function MarketPage() {
           </div>
         )}
 
+        <PageExplainer routeKey="market" />
+
         {loading ? (
           <div className="flex justify-center py-20"><div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" /></div>
         ) : (
@@ -178,39 +181,47 @@ export default function MarketPage() {
                 const fx = d?.market?.fx;
                 const unackAlerts = alerts.filter(a => !a.is_acknowledged).length;
                 const critical = alerts.some(a => a.severity === 'critical' && !a.is_acknowledged);
+                // metadata.average is source of truth for "live": an anchor without a numeric average is pending, not live.
+                const powerHasNumber = power?.metadata?.average != null;
+                const carbonHeadline = carbon?.available ? extractCarbonHeadline(carbon.content) : null;
+                const fxHasNumber = fx?.metadata?.latest_rate != null;
                 const indicators = [
                   {
                     label: 'Power (DE)',
                     icon: Zap,
                     color: 'text-cyan-400',
                     bg: 'bg-cyan-500/10',
-                    available: !!power?.available,
-                    primary: power?.metadata?.average != null
-                      ? `${power.metadata.average.toFixed(2)} ${power.metadata.unit || 'EUR/MWh'}`
+                    available: powerHasNumber,
+                    primary: powerHasNumber
+                      ? `${power!.metadata!.average!.toFixed(2)} ${power!.metadata!.unit || 'EUR/MWh'}`
                       : null,
                     secondary: power?.metadata?.point_count != null
                       ? `${power.metadata.point_count} obs · day-ahead`
-                      : 'live data unavailable',
+                      : power?.available
+                        ? 'live anchor present, recent metadata pending'
+                        : 'live data unavailable',
                   },
                   {
                     label: 'Carbon (EU ETS)',
                     icon: Flame,
                     color: 'text-amber-400',
                     bg: 'bg-amber-500/10',
-                    available: !!carbon?.available,
-                    primary: carbon?.available ? extractCarbonHeadline(carbon.content) : null,
+                    available: !!carbonHeadline,
+                    primary: carbonHeadline,
                     secondary: carbon?.metadata?.records != null
                       ? `${carbon.metadata.records} records · grid intensity`
-                      : 'live data unavailable',
+                      : carbon?.available
+                        ? 'live anchor present, recent metadata pending'
+                        : 'live data unavailable',
                   },
                   {
                     label: 'EUR/USD',
                     icon: DollarSign,
                     color: 'text-purple-400',
                     bg: 'bg-purple-500/10',
-                    available: !!fx?.available,
-                    primary: fx?.metadata?.latest_rate != null
-                      ? fx.metadata.latest_rate.toFixed(4)
+                    available: fxHasNumber,
+                    primary: fxHasNumber
+                      ? fx!.metadata!.latest_rate!.toFixed(4)
                       : null,
                     secondary: fx?.metadata?.latest_date
                       ? `as of ${fx.metadata.latest_date}${
@@ -218,7 +229,9 @@ export default function MarketPage() {
                             ? ` · ${fx.metadata.period_change_pct >= 0 ? '+' : ''}${fx.metadata.period_change_pct.toFixed(2)}%`
                             : ''
                         }`
-                      : 'live data unavailable',
+                      : fx?.available
+                        ? 'live anchor present, recent metadata pending'
+                        : 'live data unavailable',
                   },
                   {
                     label: 'Alerts',

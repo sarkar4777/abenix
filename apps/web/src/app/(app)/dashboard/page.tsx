@@ -76,7 +76,7 @@ const QUICK_ACTIONS = [
 ];
 
 function useSystemStatus() {
-  const [health, setHealth] = useState<{ status: string; postgres?: string; redis?: string } | null>(null);
+  const [health, setHealth] = useState<{ status: string } | null>(null);
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     // Use /api/health (fast, no Neo4j) instead of /api/health/ready (slow, checks Neo4j)
@@ -84,23 +84,18 @@ function useSystemStatus() {
     const timeout = setTimeout(() => controller.abort(), 3000);
     fetch(`${apiUrl}/api/health`, { signal: controller.signal })
       .then(res => res.json())
-      .then(data => setHealth({ status: data.status || 'ok', postgres: 'ok', redis: 'ok' }))
+      .then(data => setHealth({ status: data.status || 'ok' }))
       .catch(() => setHealth(null))
       .finally(() => clearTimeout(timeout));
   }, []);
 
+  // Only surface what we actually checked. /api/health is a single liveness
+  // probe — claiming Postgres/Redis state from it was a lie. Subsystem pills
+  // can come back when we wire /api/health/ready (which probes each one).
   if (!health) {
-    return [
-      { label: 'API Gateway', status: 'unknown' },
-      { label: 'PostgreSQL', status: 'unknown' },
-      { label: 'Redis Cache', status: 'unknown' },
-    ];
+    return [{ label: 'API gateway healthy (single check)', status: 'unknown' }];
   }
-  return [
-    { label: 'API Gateway', status: 'healthy' },
-    { label: 'PostgreSQL', status: health.postgres === 'ok' ? 'healthy' : 'unavailable' },
-    { label: 'Redis Cache', status: health.redis === 'ok' ? 'healthy' : 'unavailable' },
-  ];
+  return [{ label: 'API gateway healthy (single check)', status: 'healthy' }];
 }
 
 const statusIcon = (s: string) => {
@@ -159,8 +154,13 @@ export default function DashboardPage() {
     },
     {
       label: 'Success Rate',
-      value: Math.round(stats?.success_rate ?? 100),
-      suffix: '%',
+      // Honest rendering: no data → em-dash; zero runs today → "No runs today"; otherwise rounded %.
+      value: !stats
+        ? '—'
+        : stats.today_executions === 0
+          ? 'No runs today'
+          : Math.round(stats.success_rate),
+      suffix: stats && stats.today_executions > 0 ? '%' : '',
       change: stats ? `${stats.today_completed} completed` : '',
       changeColor: 'text-emerald-400',
       icon: TrendingUp,
@@ -222,7 +222,7 @@ export default function DashboardPage() {
       {stats && stats.total_agents === 0 && stats.today_executions === 0 && (
         <motion.div variants={item}>
           <div className="bg-gradient-to-br from-cyan-500/10 via-purple-500/5 to-transparent border border-cyan-500/20 rounded-xl p-6">
-            <h2 className="text-lg font-semibold text-white mb-1">Welcome to Abenix 👋</h2>
+            <h2 className="text-lg font-semibold text-white mb-1">Welcome to Abenix</h2>
             <p className="text-sm text-slate-300 mb-5">
               Three ways to get going in the next 5 minutes:
             </p>
@@ -306,7 +306,11 @@ export default function DashboardPage() {
               <span className={`text-xs ${kpi.changeColor}`}>{kpi.change}</span>
             </div>
             <p className="text-2xl font-bold text-white">
-              <CountUp target={kpi.value} prefix={kpi.prefix} suffix={kpi.suffix} />
+              {typeof kpi.value === 'number' ? (
+                <CountUp target={kpi.value} prefix={kpi.prefix} suffix={kpi.suffix} />
+              ) : (
+                <span>{kpi.prefix ?? ''}{kpi.value}{kpi.suffix ?? ''}</span>
+              )}
             </p>
             <p className="text-xs text-slate-500 mt-1">{kpi.label}</p>
           </div>

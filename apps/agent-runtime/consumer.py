@@ -102,6 +102,9 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
             "execution": execution,
             "agent_id": str(agent.id),
             "agent_name": agent.name,
+            # slug drives the per-agent post-processor lookup; without it
+            # the canonical-anchor guardrail can't bind to fairvalue runs.
+            "agent_slug": getattr(agent, "slug", "") or "",
             "agent_status": getattr(agent, "status", None),
             "is_pipeline": model_cfg.get("mode") == "pipeline",
             "model_cfg": model_cfg,
@@ -447,6 +450,12 @@ async def _run_one(payload: dict) -> None:
 
             _full_text_parts: list[str] = []
             _agg_tool_calls: list[dict[str, Any]] = []
+            # _tool_runs pairs each tool invocation with a compact summary of
+            # its result (status, metadata, etc) so per-agent post-processors
+            # can recompute against canonical data without going back to the
+            # tool. Filled from `node_trace` events, which carry the full
+            # ToolResult.metadata.
+            _tool_runs: list[dict[str, Any]] = []
             _last_done: dict[str, Any] = {}
             async for _ev in executor.stream(message):
                 if _ev.event == "done" and isinstance(_ev.data, dict):
@@ -468,6 +477,43 @@ async def _run_one(payload: dict) -> None:
                         await _append_tc(execution_id, _ev.data)
                     except Exception as _ape:
                         logger.debug("append_tool_call failed: %s", _ape)
+                elif _ev.event == "node_trace" and isinstance(_ev.data, dict):
+                    # node_trace fires per tool with the real result.metadata
+                    # attached — exactly what the post-processor needs to
+                    # reconstruct the canonical anchor. Prefer the new
+                    # output_summary field; fall back to a metadata projection
+                    # for compatibility with older executor builds.
+                    if (_ev.data.get("node_type") or "") == "tool_call":
+                        _meta = _ev.data.get("metadata") or {}
+                        _summary = _ev.data.get("output_summary") or {
+                            "status": (
+                                "ok"
+                                if not _ev.data.get("is_error")
+                                and _meta.get("status", "ok") == "ok"
+                                else _meta.get("status") or "error"
+                            ),
+                            "resolved_symbol": _meta.get("resolved_symbol")
+                            or _meta.get("symbol")
+                            or "",
+                            "symbol": _meta.get("symbol") or "",
+                            "closes": _meta.get("closes") or [],
+                            "prices_count": int(
+                                _meta.get("price_count")
+                                or len(_meta.get("closes") or [])
+                            ),
+                            "latest_close": _meta.get("latest_close"),
+                            "fetched_at": _meta.get("fetched_at")
+                            or _meta.get("last_refresh")
+                            or "",
+                            "currency": _meta.get("currency") or "",
+                        }
+                        _tool_runs.append(
+                            {
+                                "tool": _ev.data.get("tool") or "",
+                                "input": _ev.data.get("input") or {},
+                                "output_summary": _summary,
+                            }
+                        )
             result = SimpleNamespace(
                 output="".join(_full_text_parts),
                 tool_calls=_agg_tool_calls,
@@ -505,6 +551,32 @@ async def _run_one(payload: dict) -> None:
                         output = json.dumps(_normalized, default=str)
             except Exception as _e:
                 logger.warning("consumer: post_process skipped: %s", _e)
+
+            # Per-agent deterministic post-processor — runs AFTER the generic
+            # schema walker so domain knowledge (e.g. "TTF anchor must trump
+            # the agent's fabricated decay") overrides whatever the LLM said.
+            # No-op for agents that haven't registered one.
+            try:
+                _slug = loaded.get("agent_slug") or ""
+                if _slug:
+                    from engine.post_processors import get as _get_pp, run as _run_pp  # type: ignore
+                    from engine.post_process import _extract_json as _xj  # type: ignore
+
+                    if _get_pp(_slug) is not None:
+                        _parsed = (
+                            json.loads(output)
+                            if isinstance(output, str)
+                            and output.strip().startswith("{")
+                            else None
+                        )
+                        if _parsed is None and isinstance(output, str):
+                            _parsed = _xj(output)
+                        if isinstance(_parsed, dict):
+                            _rewritten = _run_pp(_slug, _parsed, _tool_runs, output)
+                            if isinstance(_rewritten, dict):
+                                output = json.dumps(_rewritten, default=str)
+            except Exception as _ppe:
+                logger.warning("consumer: per-agent post_processor skipped: %s", _ppe)
             # 50 KB cap matches /apps/api routers/agents.py and the DB
             # Text column. Bumped from 4_000 — the old cap silently
             # truncated long synthesizer briefs (OracleNet, executive

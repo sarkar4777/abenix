@@ -5,15 +5,12 @@ import json
 import logging
 import os
 import re
-import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Query, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import select, func, delete, update
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db, SessionLocal
@@ -23,8 +20,7 @@ from app.routers.auth import get_contractiq_user
 from app.models.contractiq_models import (
     ContractIQContract, ContractIQUser, ContractIQExtractedData,
     ContractIQClause, ContractIQAsset, ContractIQEvent,
-    ContractIQRiskAnalysis, ContractStatus, ContractType,
-    ClauseType, RiskLevel, ContractIQExtractionTaxonomy,
+    ContractIQRiskAnalysis, ContractStatus, ClauseType, RiskLevel, ContractIQExtractionTaxonomy,
 )
 
 logger = logging.getLogger(__name__)

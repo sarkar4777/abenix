@@ -3,11 +3,60 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
+
+
+logger = logging.getLogger(__name__)
+
+
+def _load_lexicon_overrides() -> dict[str, dict[str, float]]:
+    """Read tenant/app-specific domain-keyword overlays from a JSON file.
+
+    The engine ships an industry-neutral lexicon. Tenants that need extra
+    domain terms (e.g. an energy desk that wants "ppa" or "tolling" scored)
+    drop a JSON file at SENTIMENT_LEXICON_OVERRIDE_PATH with the shape:
+        {"<domain>": {"<term>": <float>, ...}, ...}
+    and the values are merged on top of _DOMAIN_KEYWORDS at first call.
+    """
+    raw = (os.environ.get("SENTIMENT_LEXICON_OVERRIDE_PATH") or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(Path(raw).read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("sentiment_analyzer: override load failed for %s: %s", raw, e)
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    if isinstance(data, dict):
+        for domain, terms in data.items():
+            if not isinstance(terms, dict):
+                continue
+            clean: dict[str, float] = {}
+            for k, v in terms.items():
+                try:
+                    clean[str(k).lower()] = float(v)
+                except Exception:
+                    continue
+            if clean:
+                out[str(domain).lower()] = clean
+    return out
+
+
+_LEXICON_OVERRIDES: dict[str, dict[str, float]] | None = None
+
+
+def _get_overrides() -> dict[str, dict[str, float]]:
+    global _LEXICON_OVERRIDES
+    if _LEXICON_OVERRIDES is None:
+        _LEXICON_OVERRIDES = _load_lexicon_overrides()
+    return _LEXICON_OVERRIDES
 
 
 class SentimentAnalyzerTool(BaseTool):
@@ -183,7 +232,6 @@ class SentimentAnalyzerTool(BaseTool):
             "fossil": -0.2,
             "coal": -0.3,
             "decommission": -0.3,
-            "ppa": 0.2,
             "offtake": 0.3,
             "merchant": -0.1,
         },
@@ -439,12 +487,15 @@ class SentimentAnalyzerTool(BaseTool):
         raw_score = 0.0
         keyword_count = 0
 
-        # Build combined keyword dict: base + domain overlay
+        # Build combined keyword dict: base + domain overlay + tenant overrides
         combined: dict[str, float] = {}
         combined.update(self._POSITIVE_KEYWORDS)
         combined.update(self._NEGATIVE_KEYWORDS)
         if domain in self._DOMAIN_KEYWORDS:
             combined.update(self._DOMAIN_KEYWORDS[domain])
+        overrides = _get_overrides()
+        if domain and domain in overrides:
+            combined.update(overrides[domain])
 
         # Scan for multi-word keywords first (phrases)
         for keyword, value in combined.items():

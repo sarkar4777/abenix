@@ -5,10 +5,7 @@ import json
 import logging
 import os
 import re
-import sys
 import uuid
-from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
@@ -20,8 +17,7 @@ from app.core.responses import error, success
 from app.routers.auth import get_contractiq_user
 
 from app.models.contractiq_models import (
-    ContractIQContract, ContractIQUser, ContractIQClause, ContractIQAsset,
-    ContractIQExtractedData, ContractIQRiskAnalysis, ContractIQComparison,
+    ContractIQContract, ContractIQUser, ContractIQClause, ContractIQExtractedData, ContractIQRiskAnalysis, ContractIQComparison,
     ContractIQEvent,
 )
 
@@ -877,14 +873,18 @@ async def market_data(
     user: ContractIQUser = Depends(get_contractiq_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Live market data with PnL and exposure calculations. Polled every 15s by frontend."""
+    """Live market data with PnL and exposure calculations. Polled every 15s by frontend.
+
+    Thin pass-through: read contracts (+ contract_price from extracted data) from DB,
+    derive a spot price from the cached market feed, then hand the whole bundle to
+    the `contractiq-market-exposure` agent. All capacity-factor / annual-MWh /
+    PnL / MTM / ITM-OTM math lives in the agent's prompt.
+    """
     from datetime import datetime, timezone
     from app.core.market_cache import fetch_all_market_data
 
-    # Fetch market data (cached, parallel)
     market = await fetch_all_market_data()
 
-    # Get user's contracts with pricing data
     contracts_result = await db.execute(
         select(ContractIQContract).where(
             ContractIQContract.user_id == user.id,
@@ -893,78 +893,91 @@ async def market_data(
     )
     contracts = contracts_result.scalars().all()
 
-    # Calculate PnL per contract
-    exposure_list = []
-    total_pnl = 0.0
-    total_mtm = 0.0
-    in_money = 0
-    out_money = 0
-
-    for c in contracts:
-        # Get contract price from extracted data
-        price_field = await db.execute(
-            select(ContractIQExtractedData).where(
-                ContractIQExtractedData.contract_id == c.id,
-                ContractIQExtractedData.field_name.in_([
-                    "contract_price", "contract_price_per_mwh",
-                    "fixed_price_per_mwh", "contract_price_per_mmbtu",
-                ]),
-            ).limit(1)
+    # Collect each contract's extracted contract_price (parsing the messy string).
+    # DB read + value cleanup only — no portfolio math here.
+    price_rows = await db.execute(
+        select(ContractIQExtractedData).where(
+            ContractIQExtractedData.contract_id.in_([c.id for c in contracts]) if contracts else False,
+            ContractIQExtractedData.field_name.in_([
+                "contract_price", "contract_price_per_mwh",
+                "fixed_price_per_mwh", "contract_price_per_mmbtu",
+            ]),
         )
-        price_row = price_field.scalar_one_or_none()
+    )
+    price_by_contract: dict[uuid.UUID, float] = {}
+    for row in price_rows.scalars().all():
+        if row.contract_id in price_by_contract:
+            continue
+        try:
+            val = row.field_value.replace("$", "").replace("€", "").replace(",", "")
+            nums = re.findall(r"[\d.]+", val)
+            if nums:
+                price_by_contract[row.contract_id] = float(nums[0])
+        except (ValueError, TypeError, AttributeError):
+            pass
 
-        contract_price = None
-        if price_row:
-            try:
-                val = price_row.field_value.replace("$", "").replace("€", "").replace(",", "")
-                # Extract numeric part
-                import re
-                nums = re.findall(r"[\d.]+", val)
-                if nums:
-                    contract_price = float(nums[0])
-            except (ValueError, TypeError, AttributeError):
-                pass
+    # Derive a single spot reference from the cached market feed (default 55 EUR/MWh)
+    spot_price = 55.0
+    try:
+        eu_power = (market or {}).get("eu_power") or {}
+        if isinstance(eu_power, dict) and eu_power.get("price") is not None:
+            spot_price = float(eu_power["price"])
+    except (TypeError, ValueError):
+        pass
 
-        # Estimate capacity factor and annual generation
-        capacity = float(c.total_capacity_mw or 0)
-        cap_factor = 0.25 if c.contract_type and c.contract_type.value == "ppa" else 0.85
-        annual_mwh = capacity * 8760 * cap_factor if capacity else 0
-
-        # Calculate remaining years
-        remaining_years = 0
-        if c.expiry_date:
-            delta = c.expiry_date - datetime.now(timezone.utc)
-            remaining_years = max(0, delta.days / 365.25)
-
-        # Simple PnL: assume spot price = 55 EUR/MWh as baseline
-        # (real implementation reads from market data tool response)
-        spot_price = 55.0  # Placeholder — enhanced by market data
-        pnl_per_mwh = (spot_price - contract_price) if contract_price else 0
-        annual_pnl = pnl_per_mwh * annual_mwh
-        mtm = annual_pnl * remaining_years
-
-        if contract_price and pnl_per_mwh > 0:
-            in_money += 1
-        elif contract_price and pnl_per_mwh < 0:
-            out_money += 1
-
-        total_pnl += annual_pnl
-        total_mtm += mtm
-
-        exposure_list.append({
+    payload_contracts = [
+        {
             "id": str(c.id),
             "title": c.title,
             "contract_type": c.contract_type.value if c.contract_type else None,
-            "contract_price": contract_price,
-            "spot_price": spot_price,
-            "pnl_per_mwh": round(pnl_per_mwh, 2),
-            "annual_pnl": round(annual_pnl, 0),
-            "mark_to_market": round(mtm, 0),
-            "capacity_mw": capacity,
-            "remaining_years": round(remaining_years, 1),
+            "total_capacity_mw": float(c.total_capacity_mw) if c.total_capacity_mw else None,
+            "contract_price": price_by_contract.get(c.id),
+            "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
             "risk_score": float(c.risk_score) if c.risk_score else None,
-            "direction": "in_money" if pnl_per_mwh > 0 else "out_of_money" if pnl_per_mwh < 0 else "at_par",
-        })
+        }
+        for c in contracts
+    ]
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    exposure_list: list[dict] = []
+    # totals: zero-initialized; keys (total_mtm, etc.) are field names from
+    # contractiq-market-exposure agent output, overwritten below if agent succeeds
+    totals = {
+        "total_annual_pnl": 0,
+        "total_mtm": 0,
+        "contracts_in_money": 0,
+        "contracts_out_of_money": 0,
+    }
+
+    if payload_contracts:
+        from abenix_sdk import Abenix, ActingSubject
+        api_key = os.environ.get("CONTRACTIQ_ABENIX_API_KEY", "")
+        api_base = os.environ.get("ABENIX_API_URL", "http://localhost:8000")
+        if api_key:
+            subject = ActingSubject(
+                subject_type="contractiq", subject_id=str(user.id),
+                email=user.email, display_name=user.full_name,
+            )
+            agent_payload = json.dumps({
+                "spot_price": spot_price,
+                "now": now_iso,
+                "contracts": payload_contracts,
+            })
+            try:
+                async with Abenix(api_key=api_key, base_url=api_base, act_as=subject, timeout=60.0) as forge:
+                    result = await forge.execute("contractiq-market-exposure", agent_payload)
+                parsed = _extract_json_from_agent_output(result.output or "") or {}
+                exposure_list = parsed.get("contracts", []) or []
+                t = parsed.get("totals") or {}
+                # totals fields (total_mtm etc.) are pass-through from contractiq-market-exposure agent
+                totals = {
+                    "total_annual_pnl": t.get("total_annual_pnl", 0),
+                    "total_mtm": t.get("total_mtm", 0),
+                    "contracts_in_money": t.get("contracts_in_money", 0),
+                    "contracts_out_of_money": t.get("contracts_out_of_money", 0),
+                }
+            except Exception:
+                logger.exception("market-exposure agent failed; returning empty exposure")
 
     # Recent alerts
     from app.models.contractiq_models import ContractIQMarketAlert
@@ -997,12 +1010,7 @@ async def market_data(
         "market": market,
         "exposure": {
             "contracts": exposure_list,
-            "totals": {
-                "total_annual_pnl": round(total_pnl, 0),
-                "total_mtm": round(total_mtm, 0),
-                "contracts_in_money": in_money,
-                "contracts_out_of_money": out_money,
-            },
+            "totals": totals,
         },
         "recent_alerts": recent_alerts,
     })

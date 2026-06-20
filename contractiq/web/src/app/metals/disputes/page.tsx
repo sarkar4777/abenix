@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, ChevronLeft, Loader2, Play } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -72,6 +73,7 @@ export default function MetalsDisputesPage() {
             <p className="text-sm text-slate-400">Assay × weight × brand × late-delivery × sanctioned-origin → expected $ exposure.</p>
           </div>
         </div>
+        <div className="mb-4"><PageExplainer routeKey="metals-disputes" /></div>
 
         {loading ? <Loader2 className="w-6 h-6 animate-spin text-slate-500 mx-auto block mt-20" /> : (
           <div className="space-y-3">

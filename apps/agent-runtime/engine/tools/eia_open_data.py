@@ -8,7 +8,7 @@ key is technically required but new keys are issued instantly at
 https://www.eia.gov/opendata/register.php and there's no rate cap that bites
 at demo scale.
 
-Common series_id shortcuts (used in the Wingman demo):
+Common series_id shortcuts:
   PROPANE_USGC_MB     Mont Belvieu Propane spot (USGC), weekly
   PROPANE_USA         US average wholesale propane, weekly
   WTI_SPOT            WTI Cushing spot, daily
@@ -135,6 +135,32 @@ _SHORTCUTS: dict[str, dict[str, Any]] = {
         },
         "unit": "$/gal",
         "label": "NY Harbor No.2 heating oil weekly spot",
+    },
+    # Wholesale electricity day-ahead LMP series. Used by the Power
+    # fair-value agent as a fall-back when Yahoo doesn't carry a clean
+    # power future for the region. EIA publishes daily day-ahead LMP for
+    # the major US ISOs at electricity/wholesale/prices/data/.
+    "ERCOT_NORTH_DA": {
+        "path": "electricity/wholesale/prices/data/",
+        "params": {
+            "frequency": "daily",
+            "data[0]": "value",
+            "facets[location][]": "HB_NORTH",
+            "facets[type][]": "DAM",
+        },
+        "unit": "$/MWh",
+        "label": "ERCOT North Hub day-ahead LMP (daily)",
+    },
+    "PJM_WEST_DA": {
+        "path": "electricity/wholesale/prices/data/",
+        "params": {
+            "frequency": "daily",
+            "data[0]": "value",
+            "facets[location][]": "WESTERN_HUB",
+            "facets[type][]": "DAM",
+        },
+        "unit": "$/MWh",
+        "label": "PJM Western Hub day-ahead LMP (daily)",
     },
     "GASOLINE_NYH": {
         "path": "petroleum/pri/spt/data/",

@@ -316,10 +316,25 @@ deploy_industrial_iot() {
   local iot_key="${INDUSTRIALIOT_ABENIX_API_KEY:-}"
   [ -z "${iot_key}" ] && warn "INDUSTRIALIOT_ABENIX_API_KEY not set — pipeline calls will 503"
 
+  # Web-tier shared secret that gates the standalone API's proxy
+  # passthroughs (/api/code-assets, /api/agents, /api/connectors). Reuse
+  # the existing value if the secret is already in the cluster so a
+  # rolling deploy doesn't break in-flight web pods; mint a fresh UUID
+  # otherwise.
+  local iot_web_secret
+  iot_web_secret=$(kubectl get secret industrial-iot-secrets -n "${NAMESPACE}" \
+    -o jsonpath='{.data.INDUSTRIALIOT_WEB_PROXY_SECRET}' 2>/dev/null | base64 -d 2>/dev/null)
+  # Reject the manifest's REPLACE_AT_DEPLOY_TIME placeholder so a real UUID
+  # is minted instead of re-using the shipped sentinel value.
+  if [ -z "${iot_web_secret}" ] || [ "${iot_web_secret}" = "REPLACE_AT_DEPLOY_TIME" ]; then
+    iot_web_secret=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid;print(uuid.uuid4())')
+  fi
+
   kubectl apply -f "${ROOT_DIR}/industrial-iot/k8s/industrial-iot.yaml" 2>&1 | tail -10
   kubectl create secret generic industrial-iot-secrets \
     --namespace="${NAMESPACE}" \
     --from-literal=INDUSTRIALIOT_ABENIX_API_KEY="${iot_key}" \
+    --from-literal=INDUSTRIALIOT_WEB_PROXY_SECRET="${iot_web_secret}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -3
   ok "Industrial-IoT deployed"
 

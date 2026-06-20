@@ -12,7 +12,7 @@ to be redirected, costing days.
 
 The data here is hand-curated from terminal operator websites + the IMO
 GISIS port database, covering the 30 LPG / CPP loading and discharge
-ports the Wingman corridors actually touch. Production adds a refresh
+ports the major corridors actually touch. Production adds a refresh
 job that pulls IMO GISIS quarterly.
 
 Three actions:
@@ -104,8 +104,8 @@ _VESSEL_AIR_DRAUGHT_M: dict[str, float] = {
     "Handysize": 25,
 }
 
-# Curated port table — focus is on liquid-bulk terminals where Wingman /
-# ContractIQ / chartering desks actually fix cargoes.
+# Curated port table — focus is on liquid-bulk terminals where
+# trading / chartering desks actually fix cargoes.
 _PORTS: dict[str, dict[str, Any]] = {
     "USHOU": {
         "name": "Houston, TX (Enterprise Houston Ship Channel LPG)",

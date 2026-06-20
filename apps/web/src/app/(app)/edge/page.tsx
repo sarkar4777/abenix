@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Cpu, Loader2, RefreshCw, Send, X, AlertTriangle, CheckCircle2, Clock, Wifi,
   Copy, ChevronDown, ChevronRight, Package, Terminal, Info,
 } from 'lucide-react';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 function getToken() {
@@ -98,6 +99,8 @@ export default function EdgePage() {
   const [error, setError] = useState<string | null>(null);
   const [modalGatewayId, setModalGatewayId] = useState<string | null>(null);
   const [deploying, setDeploying] = useState<string | null>(null);
+  const [agentLoadProgress, setAgentLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const loadStartedAt = useRef<number>(0);
   const [toast, setToast] = useState<string | null>(null);
   const [howOpen, setHowOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -135,17 +138,25 @@ export default function EdgePage() {
     const token = getToken();
     if (!token) { setLoading(false); setError('Not signed in'); return; }
     setError(null);
+    loadStartedAt.current = Date.now();
+    setAgentLoadProgress(null);
     try {
-      const [gr, ar, vr] = await Promise.all([
+      const [gr, agentsResult, vr] = await Promise.all([
         fetch(`${API_URL}/api/edge/gateways`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_URL}/api/agents?limit=500`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetchAllAgents({
+          token,
+          onProgress: (loaded, total) => {
+            if (Date.now() - loadStartedAt.current > 2000) {
+              setAgentLoadProgress({ loaded, total });
+            }
+          },
+        }),
         fetch(`${API_URL}/api/edge/runtime/download`),
       ]);
       const gj = await gr.json();
-      const aj = await ar.json();
       const vj = await vr.json();
       setGateways(gj?.data?.gateways || []);
-      const rawAgents: any[] = aj?.data?.agents || aj?.data?.items || aj?.data || [];
+      const rawAgents: any[] = Array.isArray(agentsResult.agents) ? agentsResult.agents : [];
       setAgents(
         rawAgents.map((a: any) => ({
           id: a.id,
@@ -158,6 +169,7 @@ export default function EdgePage() {
     } catch (e: any) {
       setError(e?.message || 'Failed to load');
     }
+    setAgentLoadProgress(null);
     setLoading(false);
   }, []);
 
@@ -222,6 +234,13 @@ export default function EdgePage() {
         {error && (
           <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200 text-sm flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" /> {error}
+          </div>
+        )}
+
+        {agentLoadProgress && (
+          <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 text-xs text-slate-300 flex items-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+            Loading {agentLoadProgress.loaded} of {agentLoadProgress.total} agents…
           </div>
         )}
 

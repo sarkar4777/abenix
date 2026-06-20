@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Workflow, RefreshCw, ChevronDown, ChevronRight, Box, Cpu, Cog, Server,
 } from 'lucide-react';
+import { formatCount } from '@/lib/format-stats';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 function getToken() {
@@ -168,9 +169,8 @@ export default function PipelineScalingPage() {
                       const style = KIND_STYLE[n.kind];
                       const Icon = style.icon;
                       return (
-                        <>
+                        <React.Fragment key={n.id}>
                           <div
-                            key={n.id}
                             className={`flex-shrink-0 w-56 rounded-lg border ${style.border} ${style.bg} p-3 flex flex-col`}
                           >
                             <div className={`flex items-center gap-1.5 text-[10px] uppercase ${style.text} mb-1`}>
@@ -208,15 +208,25 @@ export default function PipelineScalingPage() {
                                 </div>
                                 <div className="flex items-center justify-between text-slate-400">
                                   <span>qps</span>
-                                  <span className="font-mono">{n.tool_qps_global ?? 0}</span>
+                                  <span className={`font-mono ${n.tool_qps_global === 0 ? 'text-slate-600' : ''}`}>
+                                    {n.tool_qps_global == null ? '—' : formatCount(n.tool_qps_global)}
+                                  </span>
                                 </div>
                                 <div className="flex items-center justify-between text-slate-400">
                                   <span>inflight</span>
-                                  <span className="font-mono">{n.tool_inflight_global ?? '?'}</span>
+                                  <span className={`font-mono ${n.tool_inflight_global === 0 ? 'text-slate-600' : ''}`}>
+                                    {n.tool_inflight_global == null ? '—' : formatCount(n.tool_inflight_global)}
+                                  </span>
                                 </div>
                                 <div className="flex items-center justify-between text-slate-400">
                                   <span>cache</span>
-                                  <span className="font-mono">{n.tool_cache_ttl ? `${n.tool_cache_ttl}s` : 'off'}</span>
+                                  <span className="font-mono">
+                                    {n.tool_cache_ttl == null
+                                      ? <span className="text-slate-600">—</span>
+                                      : n.tool_cache_ttl > 0
+                                        ? `${n.tool_cache_ttl}s`
+                                        : <span className="text-slate-600">off</span>}
+                                  </span>
                                 </div>
                               </div>
                             )}
@@ -229,11 +239,11 @@ export default function PipelineScalingPage() {
                           </div>
 
                           {i < p.nodes.length - 1 && (
-                            <div key={`arrow-${i}`} className="flex items-center text-slate-700 flex-shrink-0">
+                            <div className="flex items-center text-slate-700 flex-shrink-0">
                               <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor"><path d="M0 9h14l-4-4 1-1 6 6-6 6-1-1 4-4H0z"/></svg>
                             </div>
                           )}
-                        </>
+                        </React.Fragment>
                       );
                     })}
                   </div>

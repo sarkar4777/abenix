@@ -2,11 +2,29 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import {
   Activity, Inbox, Ship, Beaker, Network, Sparkles,
   LineChart, Crosshair, ShieldCheck, Home, Anchor,
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+
+const EM_DASH = '—';
+
+type AuthUser = { full_name?: string; email?: string };
+
+function readStoredUser(): AuthUser | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem('wingman_user');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed as AuthUser;
+  } catch {
+    // bad json — ignore
+  }
+  return null;
+}
 
 const NAV = [
   { href: '/home', label: 'Home', icon: Home },
@@ -24,6 +42,33 @@ const NAV = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    const stored = readStoredUser();
+    if (stored) {
+      setUser(stored);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setUser({ full_name: data.full_name, email: data.email });
+      })
+      .catch(() => {
+        // unauthenticated — leave em-dashes
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const version = process.env.NEXT_PUBLIC_APP_VERSION || EM_DASH;
+  const fullName = user?.full_name || EM_DASH;
+  const email = user?.email || EM_DASH;
+
   return (
     <aside className="w-60 shrink-0 border-r border-slate-800 bg-[#0F172A] flex flex-col">
       <div className="px-5 py-5 border-b border-slate-800">
@@ -58,9 +103,9 @@ export default function Sidebar() {
         })}
       </nav>
       <div className="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500">
-        <div className="text-slate-300">Demo Trader</div>
-        <div className="text-slate-500 truncate">demo-trader@wingman.local</div>
-        <div className="mt-2 text-[10px] text-slate-600">Powered by Abenix · v0.1</div>
+        <div className="text-slate-300">{fullName}</div>
+        <div className="text-slate-500 truncate">{email}</div>
+        <div className="mt-2 text-[10px] text-slate-600">Powered by Abenix · {version}</div>
       </div>
     </aside>
   );

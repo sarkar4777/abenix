@@ -1,8 +1,9 @@
 // @ts-nocheck — Dynamic config fields from API use Record<string,unknown> casts
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Loader2, Sparkles, X, Zap, GitBranch, ArrowRight, Check, AlertTriangle, FileText, Copy, Repeat } from 'lucide-react';
+import { FallbackBadge } from '@/components/FallbackBadge';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -52,7 +53,24 @@ export default function AIBuilderDialog({ open, onClose, onApply }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<IterationEvent[]>([]);
   const [finalOutcome, setFinalOutcome] = useState<'success' | 'blocked' | null>(null);
+  const [builderModel, setBuilderModel] = useState<string>('azure-gpt-4o');
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const token = typeof window !== 'undefined'
+      ? window.localStorage.getItem('access_token')
+      : null;
+    fetch(`${API_URL}/api/settings/builder_model`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => r.json())
+      .then((body) => {
+        const v = body?.data?.value;
+        if (typeof v === 'string' && v) setBuilderModel(v);
+      })
+      .catch(() => {});
+  }, [open]);
 
   if (!open) return null;
 
@@ -134,7 +152,7 @@ export default function AIBuilderDialog({ open, onClose, onApply }: Props) {
       const resp = await fetch(`${API_URL}/api/ai/build-agent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ description, mode }),
+        body: JSON.stringify({ description, mode, model: builderModel }),
       });
       const body = await resp.json();
       if (body.data && body.data.name) {
@@ -161,6 +179,12 @@ export default function AIBuilderDialog({ open, onClose, onApply }: Props) {
             <div>
               <h2 className="text-sm font-semibold text-white">Build with AI</h2>
               <p className="text-[10px] text-slate-500">Describe what you want — AI generates the full config</p>
+              <p
+                className="text-[10px] text-cyan-300/80 font-mono mt-0.5"
+                data-testid="ai-builder-dialog-model"
+              >
+                using {builderModel}
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white">
@@ -305,6 +329,21 @@ export default function AIBuilderDialog({ open, onClose, onApply }: Props) {
                   {config.mode === 'pipeline' ? 'Pipeline' : 'Agent'}
                 </span>
               </div>
+
+              {(config as any).model_used && (
+                <div
+                  className="flex items-center gap-2 text-[10px] text-slate-400 font-mono flex-wrap"
+                  data-testid="ai-builder-validated-by"
+                >
+                  <span>Validated by</span>
+                  <span className="text-cyan-300">{(config as any).model_used}</span>
+                  <FallbackBadge
+                    actual_model={(config as any).model_used}
+                    requested_model={(config as any).validation_model || builderModel}
+                    reason={(config as any).fallback_reason}
+                  />
+                </div>
+              )}
 
               <p className="text-xs text-slate-400">{config.description}</p>
 

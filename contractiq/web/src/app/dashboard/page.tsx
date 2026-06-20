@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   FileSearch, Upload, BarChart3, MessageSquare, FileText, TrendingUp,
   LogOut, Plus, Zap, Calendar, ChevronRight, Shield,
@@ -153,14 +154,74 @@ export default function ContractIQDashboard() {
               <Plus className="w-4 h-4" /> Upload Contract
             </a>
           </div>
+          <PageExplainer routeKey="dashboard" />
 
           {loading ? (
             <div className="flex justify-center py-20"><div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" /></div>
           ) : !a || a.total_contracts === 0 ? (
-            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-16 text-center">
-              <FileText className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-              <p className="text-sm text-slate-400">Upload contracts to see analytics</p>
-              <a href="/upload" className="text-xs text-emerald-400 hover:underline mt-2 inline-block">Upload your first contract →</a>
+            <div className="relative">
+              {/* Sample portfolio banner */}
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+                Sample portfolio — upload your first contract to populate this dashboard with your real data.
+              </div>
+              {/* Ghosted demo dashboard behind the upload CTA */}
+              <div aria-hidden="true" className="opacity-30 pointer-events-none select-none space-y-6 mt-6">
+                <div className="grid grid-cols-5 gap-4">
+                  {[
+                    { label: 'Total Contracts', value: '—', icon: FileText, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
+                    { label: 'Total Capacity', value: 'XXX MW', icon: Zap, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+                    { label: 'Portfolio Value', value: '$X.XB', icon: DollarSign, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+                    { label: 'Avg Risk Score', value: '—', icon: Shield, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                    { label: 'Expiring <12mo', value: '—', icon: Clock, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                  ].map(kpi => (
+                    <div key={kpi.label} className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wider">{kpi.label}</span>
+                        <div className={`w-8 h-8 rounded-lg ${kpi.bg} flex items-center justify-center`}>
+                          <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+                        </div>
+                      </div>
+                      <p className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</p>
+                    </div>
+                  ))}
+                </div>
+                {/* Ghost sparkline */}
+                <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 h-[180px]">
+                  <div className="text-xs text-slate-500 mb-3">Portfolio risk trend</div>
+                  <svg viewBox="0 0 400 100" className="w-full h-[120px]" preserveAspectRatio="none">
+                    <polyline
+                      points="0,70 40,60 80,65 120,50 160,45 200,55 240,40 280,35 320,42 360,30 400,38"
+                      fill="none"
+                      stroke="#10b981"
+                      strokeWidth="2"
+                    />
+                    <polyline
+                      points="0,70 40,60 80,65 120,50 160,45 200,55 240,40 280,35 320,42 360,30 400,38 400,100 0,100"
+                      fill="#10b981"
+                      fillOpacity="0.1"
+                    />
+                  </svg>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 h-[160px]" />
+                  <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 h-[160px]" />
+                  <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 h-[160px]" />
+                </div>
+              </div>
+
+              {/* Overlay CTA */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="bg-slate-900/95 border border-emerald-500/30 rounded-xl px-8 py-6 max-w-md text-center shadow-2xl">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-500/10 mb-3">
+                    <Upload className="w-6 h-6 text-emerald-400" />
+                  </div>
+                  <p className="text-sm font-semibold text-white mb-1">Sample portfolio shown</p>
+                  <p className="text-xs text-slate-400 mb-4">Upload contracts to replace this preview with your own analytics.</p>
+                  <a href="/upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-400 transition-colors">
+                    <Plus className="w-4 h-4" /> Upload your first contract
+                  </a>
+                </div>
+              </div>
             </div>
           ) : (
             <>

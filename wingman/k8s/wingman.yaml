@@ -30,6 +30,15 @@ data:
   REDIS_URL: "redis://abenix-redis-master:6379/0"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://abenix-tempo:4317"
   OTEL_TRACES_SAMPLER_ARG: "0.1"
+  # Match the agent-runtime's PROGRESS_CHANNEL_PREFIX so narration.py
+  # subscribes to the same Redis channel the runtime publishes on. Bumped
+  # to keep wingman's stream namespaced when other apps share the cluster.
+  PROGRESS_CHANNEL_PREFIX: "wingman:progress:"
+  PROGRESS_PARENT_KEY_PREFIX: "wingman:parent:"
+  PROGRESS_PARENT_TTL: "1800"
+  # Per-app trajectory cache root. recall_trajectory tool reads TRAJECTORY_DIR;
+  # wingman api falls back to WINGMAN_TRAJECTORY_DIR for back-compat.
+  TRAJECTORY_DIR: "/data/wingman-trajectories"
 
 ---
 apiVersion: apps/v1

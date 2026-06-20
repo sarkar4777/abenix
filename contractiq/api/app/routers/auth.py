@@ -2,14 +2,11 @@
 from __future__ import annotations
 
 import hashlib
-import sys
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any
 
 import bcrypt
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 from sqlalchemy import select
@@ -29,6 +26,13 @@ CIQ_JWT_ALGORITHM = "HS256"
 CIQ_ACCESS_TOKEN_EXPIRE_MINUTES = 60
 CIQ_REFRESH_TOKEN_EXPIRE_DAYS = 30
 
+# RFC 6750 §3 — 401 responses MUST carry a WWW-Authenticate challenge.
+CONTRACTIQ_UNAUTH = HTTPException(
+    status_code=401,
+    detail="ContractIQ authentication required",
+    headers={"WWW-Authenticate": 'Bearer realm="contractiq"'},
+)
+
 
 def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -38,7 +42,12 @@ def _verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
-def _create_token(user_id: uuid.UUID, role: str, token_type: str = "access") -> str:
+def _create_token(
+    user_id: uuid.UUID,
+    role: str,
+    tenant_id: str | None = None,
+    token_type: str = "access",
+) -> str:
     now = datetime.now(timezone.utc)
     if token_type == "access":
         exp = now + timedelta(minutes=CIQ_ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -47,12 +56,18 @@ def _create_token(user_id: uuid.UUID, role: str, token_type: str = "access") -> 
     payload = {
         "sub": str(user_id),
         "role": role,
+        "tenant_id": tenant_id or str(user_id),
         "type": token_type,
         "iss": "contractiq",
         "exp": exp,
         "iat": now,
     }
     return jwt.encode(payload, CIQ_JWT_SECRET, algorithm=CIQ_JWT_ALGORITHM)
+
+
+def tenant_id_for(user: "ContractIQUser") -> str:
+    """Canonical tenant id for a CIQ user — falls back to user id when blank."""
+    return (user.tenant_id or str(user.id))
 
 
 def _verify_token(token: str) -> dict:
@@ -105,8 +120,7 @@ async def get_contractiq_user(
                 if user:
                     return user
 
-    from fastapi import HTTPException
-    raise HTTPException(status_code=401, detail="ContractIQ authentication required")
+    raise CONTRACTIQ_UNAUTH
 
 
 @router.post("/register")
@@ -129,20 +143,25 @@ async def register(body: dict, db: AsyncSession = Depends(get_db)) -> JSONRespon
     if existing.scalar_one_or_none():
         return error("Email already registered", 409)
 
+    user_id = uuid.uuid4()
     user = ContractIQUser(
-        id=uuid.uuid4(),
+        id=user_id,
         email=email,
         password_hash=_hash_password(password),
         full_name=full_name,
         organization=organization,
+        # Default tenant scope is the user's own id; users can be re-homed to
+        # a shared tenant later by an admin.
+        tenant_id=str(user_id),
         role=ContractIQUserRole.ANALYST,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
-    access_token = _create_token(user.id, user.role.value)
-    refresh_token = _create_token(user.id, user.role.value, "refresh")
+    tid = tenant_id_for(user)
+    access_token = _create_token(user.id, user.role.value, tid)
+    refresh_token = _create_token(user.id, user.role.value, tid, "refresh")
 
     return success({
         "access_token": access_token,
@@ -152,6 +171,7 @@ async def register(body: dict, db: AsyncSession = Depends(get_db)) -> JSONRespon
             "email": user.email,
             "full_name": user.full_name,
             "organization": user.organization,
+            "tenant_id": tid,
             "role": user.role.value,
         },
     })
@@ -176,8 +196,16 @@ async def login(body: dict, db: AsyncSession = Depends(get_db)) -> JSONResponse:
     if not user or not _verify_password(password, user.password_hash):
         return error("Invalid email or password", 401)
 
-    access_token = _create_token(user.id, user.role.value)
-    refresh_token = _create_token(user.id, user.role.value, "refresh")
+    # Backfill tenant_id for accounts created before the column existed so
+    # downstream callers always see a non-empty value.
+    if not user.tenant_id:
+        user.tenant_id = str(user.id)
+        await db.commit()
+        await db.refresh(user)
+
+    tid = tenant_id_for(user)
+    access_token = _create_token(user.id, user.role.value, tid)
+    refresh_token = _create_token(user.id, user.role.value, tid, "refresh")
 
     return success({
         "access_token": access_token,
@@ -187,6 +215,7 @@ async def login(body: dict, db: AsyncSession = Depends(get_db)) -> JSONResponse:
             "email": user.email,
             "full_name": user.full_name,
             "organization": user.organization,
+            "tenant_id": tid,
             "role": user.role.value,
         },
     })
@@ -202,6 +231,7 @@ async def get_me(
         "email": user.email,
         "full_name": user.full_name,
         "organization": user.organization,
+        "tenant_id": tenant_id_for(user),
         "role": user.role.value,
     })
 

@@ -29,7 +29,7 @@ The data here is curated from operator-published vessel specs (Avance
 Gas, BW LPG, Dorian) and standard product densities (API/ISO). Every
 field cites a source so the agent can quote it.
 
-The tool is intentionally generic — it has no opinion about Wingman.
+The tool is intentionally generic — no app-specific assumptions.
 Any energy/commodity trading agent can use it for freight math.
 """
 

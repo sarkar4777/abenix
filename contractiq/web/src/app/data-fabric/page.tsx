@@ -1,29 +1,110 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Database, AlertTriangle, CheckCircle2, Loader2, RefreshCw, Boxes, Brain } from 'lucide-react';
+import { Database, AlertTriangle, Loader2, RefreshCw, Boxes, Brain, Wrench } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
+import { PageExplainer } from '@/components/PageExplainer';
+
+type ToolStatus = 'live' | 'simulated' | 'unavailable';
 
 type FabricSource = {
-  id?: string;
-  kind?: string;
+  name: string;
+  category: string;
+  status: ToolStatus;
+  purpose?: string;
+  last_used_at?: string;
+};
+
+type MlModel = {
   name?: string;
+  version?: string;
   status?: string;
-  endpoint_url?: string;
-  last_polled_at?: string;
-  tags?: string[];
+  framework?: string;
+  last_run_at?: string;
+  purpose?: string;
 };
 
 type FabricResponse = {
   sources: FabricSource[];
   summary: {
     ml_models_registered?: number;
-    ml_models?: { name?: string; version?: string; status?: string; framework?: string }[];
+    ml_models?: MlModel[];
     recent_executions_by_status?: Record<string, number>;
     recent_executions_total?: number;
+    tools_total?: number;
+    tools_live?: number;
+    tools_simulated?: number;
+    tools_unavailable?: number;
+    tools_by_category?: Record<string, { total: number; live: number; simulated: number; unavailable: number }>;
   };
   errors: string[];
 };
+
+const CATEGORY_ORDER: string[] = [
+  'market-prices',
+  'search-and-news',
+  'filings-and-registry',
+  'credit-and-rating',
+  'weather',
+  'compute-and-explain',
+  'extraction',
+];
+
+const CATEGORY_LABEL: Record<string, string> = {
+  'market-prices': 'Market prices',
+  'search-and-news': 'Search and news',
+  'filings-and-registry': 'Filings and registry',
+  'credit-and-rating': 'Credit and rating',
+  'weather': 'Weather',
+  'compute-and-explain': 'Compute and explain',
+  'extraction': 'Extraction',
+};
+
+function statusBadgeClass(s: ToolStatus): string {
+  if (s === 'live') return 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30';
+  if (s === 'simulated') return 'bg-amber-500/10 text-amber-300 border-amber-500/30';
+  return 'bg-slate-700/40 text-slate-400 border-slate-600/40';
+}
+
+type ModelDomain = 'Forecasting' | 'Risk' | 'Pricing' | 'Compliance' | 'Other';
+
+// Lightweight catalog so we can group + describe models even when the backend
+// hasn't yet plumbed purpose/last_run into the response.
+const MODEL_CATALOG: Record<string, { domain: ModelDomain; purpose: string }> = {
+  // Forecasting
+  offtake_residential:       { domain: 'Forecasting', purpose: 'Residential load forecast (P10/P50/P90).' },
+  offtake_industrial:        { domain: 'Forecasting', purpose: 'Industrial baseload forecast.' },
+  offtake_storage_cycling:   { domain: 'Forecasting', purpose: 'Storage injection / withdrawal optimiser.' },
+  lng_send_out_optimiser:    { domain: 'Forecasting', purpose: 'LNG slot calendar optimisation.' },
+  // Pricing
+  price_fairvalue_gas_hubs:  { domain: 'Pricing',     purpose: 'Bayesian fair-value across TTF/THE/CEGH.' },
+  price_fairvalue_power_hubs:{ domain: 'Pricing',     purpose: 'Bayesian fair-value across DE/HU/PL/CZ/IT.' },
+  scenario_prior_gas:        { domain: 'Pricing',     purpose: 'Regime prior for gas scenarios.' },
+  scenario_prior_power:      { domain: 'Pricing',     purpose: 'Regime prior for power scenarios.' },
+  recommendation_thesis:     { domain: 'Pricing',     purpose: 'LLM-written thesis on top trades.' },
+  // Risk
+  price_anomaly:                 { domain: 'Risk', purpose: 'IsolationForest residual anomaly detector.' },
+  'contractiq-price-anomaly':    { domain: 'Risk', purpose: 'IsolationForest joint anomaly on contracts.' },
+  'contractiq-risk-tier-predictor':  { domain: 'Risk', purpose: 'Calibrated deal-risk tier (low/med/high/critical).' },
+  'contractiq-counterparty-default': { domain: 'Risk', purpose: 'Counterparty 12m P(default).' },
+  // Compliance
+  'contractiq-clause-classifier': { domain: 'Compliance', purpose: 'ETRM clause-type classifier (~30 classes).' },
+};
+
+function modelDomain(name?: string): ModelDomain {
+  if (!name) return 'Other';
+  if (MODEL_CATALOG[name]) return MODEL_CATALOG[name].domain;
+  const n = name.toLowerCase();
+  if (n.includes('forecast') || n.includes('offtake') || n.includes('load')) return 'Forecasting';
+  if (n.includes('price') || n.includes('fairvalue') || n.includes('scenario')) return 'Pricing';
+  if (n.includes('risk') || n.includes('anomaly') || n.includes('default') || n.includes('var')) return 'Risk';
+  if (n.includes('clause') || n.includes('compliance') || n.includes('kyc') || n.includes('sanction')) return 'Compliance';
+  return 'Other';
+}
+
+function modelPurpose(m: MlModel): string {
+  return m.purpose || (m.name && MODEL_CATALOG[m.name]?.purpose) || '—';
+}
 
 export default function DataFabricPage() {
   const [data, setData] = useState<FabricResponse | null>(null);
@@ -53,14 +134,16 @@ export default function DataFabricPage() {
             <h1 className="text-3xl font-bold text-white">Energy Data Fabric</h1>
           </div>
           <p className="text-slate-400 max-w-3xl">
-            Live view of what Abenix is actually connected to for this tenant: market-data sources, registered ML
-            models, and recent execution telemetry. Nothing is hardcoded — empty sections mean nothing is wired yet.
+            Live view of what this tenant can actually call: the market-data tools registered in the agent
+            runtime, the ML models in the registry, and recent execution telemetry. Everything below is pulled
+            from the platform at refresh time.
           </p>
         </div>
         <button onClick={load} disabled={loading} className="px-3 py-1.5 text-xs bg-cyan-600/20 hover:bg-cyan-600/30 disabled:bg-slate-700 text-cyan-200 border border-cyan-500/30 rounded-md inline-flex items-center gap-2">
           <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
         </button>
       </header>
+      <PageExplainer routeKey="data-fabric" />
 
       {(data?.errors ?? []).length > 0 && (
         <div className="rounded-lg border border-amber-700/40 bg-amber-900/15 p-3 mb-4 text-xs text-amber-300/90">
@@ -69,54 +152,96 @@ export default function DataFabricPage() {
       )}
 
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <Tile icon={Database} label="Market-data sources" value={loading ? '...' : String(data?.sources.length ?? 0)} caption="live + planned connectors" />
+        <Tile icon={Wrench} label="Market-data tools" value={loading ? '...' : String(data?.summary.tools_total ?? data?.sources.length ?? 0)} caption={`${data?.summary.tools_live ?? 0} live · ${data?.summary.tools_simulated ?? 0} simulated · ${data?.summary.tools_unavailable ?? 0} unavailable`} />
         <Tile icon={Brain} label="ML models" value={loading ? '...' : String(data?.summary.ml_models_registered ?? 0)} caption="registered for this tenant" />
         <Tile icon={Boxes} label="Recent executions" value={loading ? '...' : String(data?.summary.recent_executions_total ?? 0)} caption="last 200 across all agents" />
       </div>
 
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-6 mb-6">
-        <h2 className="text-sm font-semibold text-white mb-3">Connected sources</h2>
+        <h2 className="text-sm font-semibold text-white mb-1">Market-data tools available to agents</h2>
+        <p className="text-xs text-slate-400 mb-4 max-w-3xl">
+          Market data flows into agents through tools. Below is the registry of tools your tenant can call.
+          <span className="text-emerald-300"> Live</span> means the tool fetches from a real public source.
+          <span className="text-amber-300"> Simulated</span> means the tool produces output without an external call.
+          <span className="text-slate-400"> Unavailable</span> means the tool exists but the upstream feed needs a paid
+          subscription this tenant does not have.
+        </p>
         {loading ? (
-          <div className="text-center text-slate-500 py-8"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> querying Abenix...</div>
+          <div className="text-center text-slate-500 py-8"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> loading tool registry...</div>
         ) : (data?.sources ?? []).length === 0 ? (
-          <p className="text-xs text-slate-500 italic">
-            No market-data sources registered yet. Connectors are configured in Abenix admin (Market Data → Sources).
-            ContractIQ will surface them here automatically once they're added.
-          </p>
+          <div className="rounded-md border border-amber-700/40 bg-amber-900/15 px-3 py-2 text-xs text-amber-300/90 inline-flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5" /> No market-data tools registered. The agent runtime registry is empty.
+          </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="text-[10px] uppercase tracking-wider text-slate-500">
-              <tr><th className="text-left py-2">Name</th><th className="text-left">Kind</th><th className="text-left">Status</th><th className="text-left">Endpoint</th><th className="text-left">Last poll</th></tr>
-            </thead>
-            <tbody>
-              {data!.sources.map(s => (
-                <tr key={s.id ?? s.name} className="border-t border-slate-800/60">
-                  <td className="py-2 text-slate-200">{s.name ?? '—'}</td>
-                  <td className="text-slate-400 text-xs">{s.kind ?? '—'}</td>
-                  <td className={`text-xs ${s.status === 'healthy' || s.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'}`}>{s.status ?? '—'}</td>
-                  <td className="text-slate-500 text-xs font-mono truncate max-w-xs">{s.endpoint_url ?? '—'}</td>
-                  <td className="text-slate-500 text-xs">{s.last_polled_at ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          CATEGORY_ORDER.map(cat => {
+            const inCat = (data!.sources ?? []).filter(s => s.category === cat);
+            if (!inCat.length) return null;
+            const cs = data!.summary.tools_by_category?.[cat];
+            return (
+              <div key={cat} className="mb-5 last:mb-0">
+                <div className="flex items-baseline justify-between mb-2">
+                  <h3 className="text-[11px] uppercase tracking-wider text-slate-500">{CATEGORY_LABEL[cat] ?? cat}</h3>
+                  {cs && (
+                    <p className="text-[10px] text-slate-600 font-mono">
+                      {cs.live} live · {cs.simulated} sim · {cs.unavailable} unavail
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {inCat.map(s => (
+                    <div key={s.name} className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="text-xs font-mono text-slate-200 truncate">{s.name}</p>
+                        <span className={`text-[10px] uppercase tracking-wider font-mono px-1.5 py-0.5 rounded border ${statusBadgeClass(s.status)}`}>{s.status}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-snug">{s.purpose ?? '—'}</p>
+                      <p className="text-[10px] text-slate-500 mt-2">
+                        Last used: {s.last_used_at ? new Date(s.last_used_at).toLocaleString() : <span className="italic text-slate-600">not seen yet</span>}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })
         )}
+        <p className="text-[11px] text-slate-500 mt-5 leading-relaxed">
+          Adding a new tool: build it as a Python module under <span className="font-mono text-slate-400">apps/agent-runtime/engine/tools/</span> and register it.
+          Agents that include the tool in their YAML config can use it next deploy.
+        </p>
       </section>
 
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-6 mb-6">
         <h2 className="text-sm font-semibold text-white mb-3">ML models in the registry</h2>
         {(data?.summary.ml_models ?? []).length === 0 ? (
-          <p className="text-xs text-slate-500 italic">No models registered yet.</p>
-        ) : (
-          <div className="grid grid-cols-3 gap-2">
-            {data!.summary.ml_models!.map(m => (
-              <div key={(m.name ?? '') + (m.version ?? '')} className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
-                <p className="text-xs font-mono text-slate-200">{m.name}</p>
-                <p className="text-[10px] text-slate-500 mt-1">v{m.version ?? '?'} · {m.framework ?? '?'}</p>
-                <p className={`text-[10px] mt-0.5 ${m.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'}`}>{m.status ?? '?'}</p>
-              </div>
-            ))}
+          <div className="rounded-md border border-amber-700/40 bg-amber-900/15 px-3 py-2 text-xs text-amber-300/90 inline-flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5" /> No models registered yet. Run <span className="font-mono">scripts/dev-local.sh</span> from the agentforge root — it seeds the sample ML registry as part of the standard local bootstrap.
           </div>
+        ) : (
+          (['Forecasting', 'Risk', 'Pricing', 'Compliance', 'Other'] as ModelDomain[]).map(domain => {
+            const inDomain = (data!.summary.ml_models ?? []).filter(m => modelDomain(m.name) === domain);
+            if (!inDomain.length) return null;
+            return (
+              <div key={domain} className="mb-5 last:mb-0">
+                <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">{domain}</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {inDomain.map(m => (
+                    <div key={(m.name ?? '') + (m.version ?? '')} className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+                      <p className="text-xs font-mono text-slate-200 truncate">{m.name}</p>
+                      <p className="text-[11px] text-slate-400 mt-1 leading-snug">{modelPurpose(m)}</p>
+                      <div className="flex items-center justify-between mt-2 gap-2">
+                        <p className="text-[10px] text-slate-500">v{m.version ?? '?'} · {m.framework ?? '?'}</p>
+                        <p className={`text-[10px] ${m.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'}`}>{m.status ?? '?'}</p>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Last run: {m.last_run_at ? new Date(m.last_run_at).toLocaleString() : <span className="italic text-slate-600">not run yet</span>}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })
         )}
       </section>
 
@@ -131,7 +256,9 @@ export default function DataFabricPage() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-slate-500 italic">No executions yet.</p>
+          <div className="rounded-md border border-amber-700/40 bg-amber-900/15 px-3 py-2 text-xs text-amber-300/90 inline-flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5" /> No agent executions in the last batch — run any workflow to populate this panel.
+          </div>
         )}
       </section>
     </div>

@@ -19,6 +19,7 @@ import {
   CircleDot, Grid3x3, HelpCircle, Mouse,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import ModelPicker from '@/components/ModelPicker';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -801,18 +802,9 @@ export default function AtlasPage() {
               )}
             </div>
             {graph && (
-              <select
-                value={model} onChange={e => setModel(e.target.value)}
-                className="bg-slate-800/60 border border-slate-700 rounded-lg text-[11px] text-slate-200 px-2 py-1.5 shrink-0"
-                title="LLM used for natural-language parsing and extraction"
-              >
-                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
-                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-                <option value="gpt-4o">GPT-4o</option>
-                <option value="gpt-4o-mini">GPT-4o-mini</option>
-              </select>
+              <div className="shrink-0 min-w-[180px]" title="LLM used for natural-language parsing and extraction">
+                <ModelPicker value={model} onChange={setModel} />
+              </div>
             )}
           </div>
           {/* Toolbar row — wraps on narrow screens instead of overflowing */}

@@ -23,7 +23,7 @@ DATABASE_URL = os.environ.get(
 
 
 def _load_energy_contracts_template() -> dict | None:
-    """Pull the `energy_contracts` template from the API router module so"""
+    """Pull the `energy_contracts` template from the ContractIQ router."""
     try:
         # Import by file path so we don't drag FastAPI dependencies.
 
@@ -31,11 +31,11 @@ def _load_energy_contracts_template() -> dict | None:
         # parents: [0]=seeds, [1]=db, [2]=packages, [3]=abenix root
         router_path = (
             Path(__file__).resolve().parents[3]
-            / "apps"
+            / "contractiq"
             / "api"
             / "app"
             / "routers"
-            / "portfolio_schemas.py"
+            / "portfolio_schema_templates.py"
         )
         if not router_path.exists():
             return None

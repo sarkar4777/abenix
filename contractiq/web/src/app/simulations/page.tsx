@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -48,6 +49,31 @@ const SIM_TYPES: { id: SimType; label: string; icon: any; description: string; c
   { id: 'full_stress_test', label: 'Full Stress Test', icon: Gauge, description: 'Combined weather + price + sentiment + Monte Carlo — the works', color: 'emerald' },
 ];
 
+// Literal class lookup tables — Tailwind JIT can only keep classes it can see verbatim.
+const SIM_SELECTED_CLASSES: Record<string, string> = {
+  cyan:    'border-cyan-500/50 bg-cyan-500/10 ring-2 ring-cyan-500/20',
+  amber:   'border-amber-500/50 bg-amber-500/10 ring-2 ring-amber-500/20',
+  purple:  'border-purple-500/50 bg-purple-500/10 ring-2 ring-purple-500/20',
+  rose:    'border-rose-500/50 bg-rose-500/10 ring-2 ring-rose-500/20',
+  emerald: 'border-emerald-500/50 bg-emerald-500/10 ring-2 ring-emerald-500/20',
+};
+
+const SIM_ICON_BG_CLASSES: Record<string, string> = {
+  cyan:    'bg-cyan-500/10',
+  amber:   'bg-amber-500/10',
+  purple:  'bg-purple-500/10',
+  rose:    'bg-rose-500/10',
+  emerald: 'bg-emerald-500/10',
+};
+
+const SIM_ICON_TEXT_CLASSES: Record<string, string> = {
+  cyan:    'text-cyan-400',
+  amber:   'text-amber-400',
+  purple:  'text-purple-400',
+  rose:    'text-rose-400',
+  emerald: 'text-emerald-400',
+};
+
 // ─── Simulation Control Panel ──────────────────────────────────────────
 
 function SimTypeCard({ sim, selected, onClick }: { sim: typeof SIM_TYPES[0]; selected: boolean; onClick: () => void }) {
@@ -58,13 +84,13 @@ function SimTypeCard({ sim, selected, onClick }: { sim: typeof SIM_TYPES[0]; sel
       data-testid={`sim-type-${sim.id}`}
       className={`text-left p-4 rounded-xl border transition-all ${
         selected
-          ? `border-${sim.color}-500/50 bg-${sim.color}-500/10 ring-2 ring-${sim.color}-500/20`
+          ? (SIM_SELECTED_CLASSES[sim.color] ?? SIM_SELECTED_CLASSES.cyan)
           : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600/50'
       }`}
     >
       <div className="flex items-center gap-3 mb-2">
-        <div className={`w-9 h-9 rounded-lg bg-${sim.color}-500/10 flex items-center justify-center`}>
-          <Icon className={`w-5 h-5 text-${sim.color}-400`} />
+        <div className={`w-9 h-9 rounded-lg ${SIM_ICON_BG_CLASSES[sim.color] ?? SIM_ICON_BG_CLASSES.cyan} flex items-center justify-center`}>
+          <Icon className={`w-5 h-5 ${SIM_ICON_TEXT_CLASSES[sim.color] ?? SIM_ICON_TEXT_CLASSES.cyan}`} />
         </div>
         <div>
           <p className="text-sm font-semibold text-white">{sim.label}</p>
@@ -608,6 +634,8 @@ export default function SimulationsPage() {
           <span className="text-[10px] text-slate-500">{history.length} simulation{history.length > 1 ? 's' : ''} this session</span>
         )}
       </div>
+
+      <PageExplainer routeKey="simulations" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Controls */}

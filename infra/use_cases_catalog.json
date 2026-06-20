@@ -1,0 +1,70 @@
+[
+  {
+    "key": "contractiq",
+    "label": "ContractIQ",
+    "description": "Standalone app — PPA & gas contract intelligence.",
+    "icon": "contractiq",
+    "color": "emerald",
+    "host_subdomain": "ciq",
+    "local_port": 3001,
+    "env_var": "CONTRACTIQ_PUBLIC_URL"
+  },
+  {
+    "key": "mideasttourism",
+    "label": "Mideast Tourism",
+    "description": "KSA Ministry of Tourism analytics — visitor data, simulations, AI reports.",
+    "icon": "globe",
+    "color": "green",
+    "host_subdomain": "tourism",
+    "local_port": 3002,
+    "env_var": "MIDEASTTOURISM_PUBLIC_URL"
+  },
+  {
+    "key": "industrial-iot",
+    "label": "Industrial IoT",
+    "description": "Standalone app — pump vibration + cold-chain telemetry, live pipelines on streamed sensor data.",
+    "icon": "zap",
+    "color": "purple",
+    "host_subdomain": "iot",
+    "local_port": 3003,
+    "env_var": "INDUSTRIAL_IOT_PUBLIC_URL"
+  },
+  {
+    "key": "oraclenet",
+    "label": "OracleNet",
+    "description": "Strategic decision analysis with 7 AI agents. Simulates consequences before you decide.",
+    "icon": "cpu",
+    "color": "cyan",
+    "inline_path": "/oraclenet"
+  },
+  {
+    "key": "resolveai",
+    "label": "ResolveAI",
+    "description": "Customer-service AI that resolves tickets, cites policy, and predicts CSAT.",
+    "icon": "headphones",
+    "color": "rose",
+    "host_subdomain": "care",
+    "local_port": 3004,
+    "env_var": "RESOLVEAI_PUBLIC_URL"
+  },
+  {
+    "key": "claimsiq",
+    "label": "ClaimsIQ",
+    "description": "Insurance FNOL adjudication — multimodal damage assessment, fraud screening, and live pipeline DAG. Java + Vaadin Flow demonstrating the JVM SDK.",
+    "icon": "shield",
+    "color": "indigo",
+    "host_subdomain": "claims",
+    "local_port": 3005,
+    "env_var": "CLAIMSIQ_PUBLIC_URL"
+  },
+  {
+    "key": "wingman",
+    "label": "Wingman",
+    "description": "Energy / commodity trading desk — Mispricing Lens, Forward Scenarios, Compliance Lens, Ops Watch, Desk Copilot. Bayesian + IsoForest + 18 trader-grade agents.",
+    "icon": "zap",
+    "color": "cyan",
+    "host_subdomain": "wm",
+    "local_port": 3006,
+    "env_var": "WINGMAN_PUBLIC_URL"
+  }
+]

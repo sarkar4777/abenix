@@ -1,7 +1,6 @@
 """Integration-style tests for the Inbound Resolution pipeline."""
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 import pytest

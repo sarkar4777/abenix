@@ -192,12 +192,15 @@ class SandboxedJobTool(BaseTool):
                         "allow_network"
                     ].strip().lower() in ("1", "true", "yes")
                 if "allowed_images" in raw and raw["allowed_images"].strip():
+                    # Union with env defaults rather than replace — operators
+                    # set the cluster-wide baseline via Helm; tenant Settings
+                    # should only ADD images, never silently drop golang or
+                    # node from under a code_asset that needs them.
+                    tenant_images = {
+                        i.strip() for i in raw["allowed_images"].split(",") if i.strip()
+                    }
                     settings["allowed_images"] = sorted(
-                        {
-                            i.strip()
-                            for i in raw["allowed_images"].split(",")
-                            if i.strip()
-                        }
+                        set(settings["allowed_images"]) | tenant_images
                     )
         except Exception:
             pass  # Redis blip → fall back to env defaults silently

@@ -9,6 +9,7 @@ import {
   TrendingUp, Diamond, AlertTriangle, Truck, Globe, Radar, Cpu, Database, ArrowRight,
   Workflow, Zap, Network, Eye, Search,
 } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 type Feature = {
   slug: string;
@@ -552,6 +553,8 @@ export default function FeaturesPage() {
             This page is the long-form tour — what each module does, which agent backs it, what goes in, what comes out.
           </p>
         </motion.div>
+
+        <PageExplainer routeKey="features" />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 mb-12">
           {PILLARS.map((p, i) => (

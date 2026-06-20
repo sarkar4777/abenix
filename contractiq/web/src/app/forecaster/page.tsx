@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { TrendingUp, Factory, Users, Database, Sparkles, Loader2, AlertTriangle } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
 import { useContractIQExecutions } from '../components/ContractIQExecutionsProvider';
+import { PageExplainer } from '@/components/PageExplainer';
 
 type Surface = 'residential' | 'industrial' | 'storage';
 
@@ -105,8 +106,9 @@ export default function ForecasterPage() {
         <p className="text-slate-400 max-w-3xl">
           Calls the <span className="font-mono text-emerald-300">{meta.model}</span> model registered in Abenix via
           the <span className="font-mono">ciq-offtake-forecaster</span> agent. Fan + drivers come from the model's
-          training metrics + SHAP / feature importance. No values are synthesised.
+          training metrics + SHAP / feature importance. Analyst-driven what-if inputs — change them to test scenarios.
         </p>
+        <PageExplainer routeKey="forecaster" />
       </header>
 
       <div className="grid grid-cols-3 gap-3 mb-6">
@@ -181,6 +183,14 @@ export default function ForecasterPage() {
           </svg>
         )}
       </section>
+
+      <div className="rounded-lg border border-amber-700/40 bg-amber-900/15 p-3 mb-6 flex items-start gap-3">
+        <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="text-xs text-amber-200/90">
+          <span className="font-semibold text-amber-200">Sample feature vector.</span>{' '}
+          The inputs below seed the model with analyst-set values (HDD, PMI, plant utilisation, spreads). Move the sliders to test scenarios — the forecast, drivers and metrics that come back are produced by the registered model.
+        </div>
+      </div>
 
       <div className="grid grid-cols-3 gap-6">
         <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">

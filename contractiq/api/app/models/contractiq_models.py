@@ -5,9 +5,9 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean, DateTime, Enum, Float, ForeignKey, Index,
-    Integer, Numeric, String, Text, func,
+    Integer, Numeric, String, Text, func, text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin
@@ -95,6 +95,11 @@ class ContractIQUser(UUIDMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     full_name: Mapped[str] = mapped_column(String(255))
     organization: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Tenant scope. Every CIQ user belongs to exactly one tenant; default at
+    # registration is str(user.id) so each user is its own tenant. Keeping the
+    # column lets us collapse several users under one tenant later without
+    # touching auth or downstream agents.
+    tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     role: Mapped[ContractIQUserRole] = mapped_column(
         Enum(ContractIQUserRole, name="contractiq_user_role", values_callable=lambda e: [m.value for m in e]),
         default=ContractIQUserRole.ANALYST,
@@ -503,6 +508,17 @@ class ContractIQCreditRisk(UUIDMixin, Base):
     __table_args__ = (
         Index("ix_contractiq_credit_user", "user_id"),
         Index("ix_contractiq_credit_counterparty", "counterparty_name"),
+        # Unique partial index — one active row per (user, counterparty).
+        # Failed rows are excluded so retries after a transient agent error
+        # don't collide with the failure record. Matches alembic migration
+        # c0a1d2e3f4b5 so fresh create_all paths get the same constraint.
+        Index(
+            "ix_ciq_credit_risk_user_cp",
+            "user_id",
+            "counterparty_name",
+            unique=True,
+            postgresql_where=text("status != 'failed'"),
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
@@ -593,17 +609,46 @@ class ContractIQKycCheck(UUIDMixin, Base):
     general_comments: Mapped[str | None] = mapped_column(Text, nullable=True)
     legal_consulted: Mapped[bool] = mapped_column(default=False)
     legal_opinion_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    outcome_of_check: Mapped[str | None] = mapped_column(String(20), nullable=True)  # positive/negative
+    # 4-state outcome — positive / positive_with_conditions / negative / pending
+    outcome_of_check: Mapped[str | None] = mapped_column(String(40), nullable=True)
     top_recommendations: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
     supporting_docs_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Currency the indicator_ii notional was captured in (EUR/GBP/USD/CHF/PLN)
+    notional_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # End-date of check stamped on COMPLETED
+    end_date_of_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Next review window: Standard=36m, Enhanced=24m, Special=12m from completed_at
+    next_review_due: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Per-role sign-off (3 roles)
     local_kyc_expert_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    local_kyc_signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    local_kyc_signer_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    compliance_mgr_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    compliance_mgr_signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    compliance_mgr_signer_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    group_compliance_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    group_compliance_signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    group_compliance_signer_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Legacy fields preserved for backward compat — `signed_at` mirrors local_kyc_signed_at
     signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     signed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Counterparty-dedup: link this KYC run to a parent it refreshes
+    refresh_of_kyc_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Moody's references panel — populated by the agent
+    moodys_references: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # ── Raw agent output for audit ──
     raw_agent_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tool_warnings: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # SHA-256 hex of imported PDF bytes for dedup. Indexed per (user, hash).
+    source_pdf_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # When the source PDF was uploaded (distinct from signed_at on the PDF).
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Officer-facing requires-human-review flag, set by server-side rules.
+    requires_human_review: Mapped[bool] = mapped_column(default=False)
+    # Step log for the long-running import (extracting / running tools / reconciling / done).
+    status_steps: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # ── Meta ──
     status: Mapped[str] = mapped_column(String(20), default=InsightStatus.PENDING.value)
@@ -1088,7 +1133,15 @@ class ContractIQCounterparty(UUIDMixin, Base):
     """Canonical counterparty record. KYC + financials + permits hang off this."""
 
     __tablename__ = "contractiq_counterparties"
+    __table_args__ = (
+        Index("ix_contractiq_counterparties_tenant_id", "tenant_id"),
+    )
 
+    # Tenant scope — every counterparty row belongs to exactly one tenant. Reads
+    # and writes in the routers filter on this so tenant B can never see tenant
+    # A's counterparties. String(64) mirrors contractiq_users.tenant_id so the
+    # join is a plain text equality without casts.
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
     legal_name: Mapped[str] = mapped_column(String(300), unique=True, index=True)
     ticker: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     sector: Mapped[str | None] = mapped_column(String(80), nullable=True)

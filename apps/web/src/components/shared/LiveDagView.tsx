@@ -12,6 +12,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react';
+import { FallbackBadge } from '@/components/FallbackBadge';
 
 // ─── Types (mirror the Java/Python SDK DagSnapshot records) ─────────────────
 
@@ -30,6 +31,10 @@ interface Node {
   tokens_in?: number | null;
   tokens_out?: number | null;
   error?: string | null;
+  model?: string | null;
+  actual_model?: string | null;
+  requested_model?: string | null;
+  fallback_reason?: string | null;
 }
 
 interface Edge { from: string; to: string; field?: string | null }
@@ -262,6 +267,16 @@ export function LiveDagView({ executionId, apiUrl, watchPath, token, palette }: 
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-[11px] flex-shrink-0" style={{ color: p.subtle }}>
+                  {(n.actual_model || n.model) && (
+                    <span className="font-mono text-[10px]" title="Model that ran this node">
+                      {n.actual_model || n.model}
+                    </span>
+                  )}
+                  <FallbackBadge
+                    actual_model={(n.actual_model || n.model) || ''}
+                    requested_model={n.requested_model || ''}
+                    reason={n.fallback_reason || undefined}
+                  />
                   <span>{formatMs(n.duration_ms)}</span>
                   <span>{formatCost(n.cost)}</span>
                   {hasIO && (isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />)}

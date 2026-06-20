@@ -704,10 +704,19 @@ async def get_child_executions(
 
 
 def _serialize_execution(e: Execution) -> dict:
+    model_requested = getattr(e, "model_requested", None)
+    fallback_reason = getattr(e, "model_fallback_reason", None)
+    # `actual_model` mirrors `model_used` under the name the AI Builder UI
+    # expects — the runtime records the requested model on `model_requested`
+    # and the model that actually ran on `model_used`.
+    actual_model = e.model_used
     data = {
         "id": str(e.id),
         "agent_id": str(e.agent_id),
         "user_id": str(e.user_id),
+        "tenant_id": (
+            str(e.tenant_id) if hasattr(e, "tenant_id") and e.tenant_id else None
+        ),
         "input_message": e.input_message,
         "output_message": e.output_message,
         "status": e.status.value if hasattr(e.status, "value") else str(e.status),
@@ -715,6 +724,9 @@ def _serialize_execution(e: Execution) -> dict:
         "output_tokens": e.output_tokens,
         "cost": float(e.cost) if e.cost else None,
         "model_used": e.model_used,
+        "model_requested": model_requested,
+        "actual_model": actual_model,
+        "fallback_reason": fallback_reason,
         "duration_ms": e.duration_ms,
         "trace_id": getattr(e, "trace_id", None),
         "tool_calls": e.tool_calls,
@@ -737,4 +749,8 @@ def _serialize_execution(e: Execution) -> dict:
         )
     if hasattr(e, "retry_count"):
         data["retry_count"] = e.retry_count
+    if hasattr(e, "subject_id") and e.subject_id:
+        data["subject_id"] = str(e.subject_id)
+    if hasattr(e, "subject_type") and e.subject_type:
+        data["subject_type"] = str(e.subject_type)
     return data

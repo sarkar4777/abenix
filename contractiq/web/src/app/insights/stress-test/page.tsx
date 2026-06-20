@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   Activity, ChevronLeft, Sparkles, Loader2, Target, AlertTriangle,
 } from 'lucide-react';
@@ -46,12 +47,22 @@ export default function StressTestPage() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [contractId, setContractId] = useState('');
   const [scope, setScope] = useState<'single' | 'portfolio'>('single');
   const [iterations, setIterations] = useState(1000);
   const [powerShock, setPowerShock] = useState(30);
   const [fxShock, setFxShock] = useState(15);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ kind: 'ok' | 'warn' | 'err'; msg: string } | null>(null);
+
+  useEffect(() => {
+    if (!running) return;
+    const start = Date.now();
+    setElapsed(0);
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [running]);
 
   const load = async () => {
     setLoading(true);
@@ -69,9 +80,10 @@ export default function StressTestPage() {
 
   const run = async () => {
     setRunning(true);
+    setToast(null);
     const token = getToken();
     try {
-      await fetch(`${API_URL}/api/contractiq/insights/stress-test`, {
+      const res = await fetch(`${API_URL}/api/contractiq/insights/stress-test`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -85,9 +97,24 @@ export default function StressTestPage() {
           },
         }),
       });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.error) {
+        setToast({ kind: 'err', msg: body?.error?.message || body?.error_message || `Stress test failed (${res.status})` });
+      } else {
+        const d = body?.data || body || {};
+        const cost = d.cost_usd ?? d.cost ?? null;
+        if (d.error_message) {
+          setToast({ kind: 'warn', msg: `${d.error_message}${cost != null ? ` · $${Number(cost).toFixed(4)}` : ''}` });
+        } else {
+          setToast({ kind: 'ok', msg: `Stress test complete${cost != null ? ` · $${Number(cost).toFixed(4)}` : ''}` });
+        }
+      }
       await load();
+    } catch (e: any) {
+      setToast({ kind: 'err', msg: `Network error: ${e?.message || 'unknown'}` });
     } finally {
       setRunning(false);
+      setTimeout(() => setToast(null), 8000);
     }
   };
 
@@ -108,6 +135,7 @@ export default function StressTestPage() {
             </div>
           </div>
         </div>
+        <PageExplainer routeKey="insights-stress-test" />
 
         {/* Run form */}
         <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-5 mb-8">
@@ -148,8 +176,20 @@ export default function StressTestPage() {
           </div>
           <button onClick={run} disabled={running || (scope === 'single' && !contractId)}
             className="w-full px-4 py-2.5 rounded-lg bg-gradient-to-r from-orange-500 to-red-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-orange-500/25 disabled:opacity-50 flex items-center justify-center gap-2">
-            {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Running Monte Carlo...</> : <><Sparkles className="w-4 h-4" /> Run Stress Test</>}
+            {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Agent running... {elapsed}s elapsed</> : <><Sparkles className="w-4 h-4" /> Run Stress Test</>}
           </button>
+          {running && (
+            <p className="text-[11px] text-slate-400 mt-2 text-center">
+              Monte Carlo runs server-side via <code className="text-orange-300">code_executor</code>. Typical runs take 30-60s. Watch the live activity rail for tool calls.
+            </p>
+          )}
+          {toast && !running && (
+            <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+              toast.kind === 'ok' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' :
+              toast.kind === 'warn' ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' :
+              'border-red-500/40 bg-red-500/10 text-red-300'
+            }`}>{toast.msg}</div>
+          )}
         </div>
 
         {loading ? (

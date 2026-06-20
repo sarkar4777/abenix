@@ -249,6 +249,14 @@ class EntsoETool(BaseTool):
         if not all_points:
             return ToolResult(
                 content=f"No data points found in TimeSeries for {data_type} in {area}.",
+                metadata={
+                    "data_type": data_type,
+                    "area": area,
+                    "status": "empty",
+                    "prices": [],
+                    "closes": [],
+                    "point_count": 0,
+                },
             )
 
         # Sort by timestamp
@@ -294,6 +302,31 @@ class EntsoETool(BaseTool):
             else:
                 lines.append(f"  {p['timestamp']}: {p['value']:.2f}")
 
+        # Collapse hourly day-ahead points to daily closes (last hour of each
+        # date) so realized_vol_calc + monte_carlo_curve can drop entso_e in
+        # as a yahoo_finance replacement without any shape gymnastics.
+        # `prices` mirrors the {date, close} shape yahoo_finance emits.
+        daily: dict[str, float] = {}
+        for p in all_points:
+            ts = p.get("timestamp") or ""
+            if not ts:
+                continue
+            day = ts[:10]
+            # last value of the day wins (chronological sort already applied)
+            daily[day] = float(p["value"])
+        prices = [{"date": d, "close": round(v, 4)} for d, v in sorted(daily.items())]
+        closes = [round(v, 4) for _, v in sorted(daily.items())]
+        latest_close = closes[-1] if closes else None
+
+        # Front-load a CANONICAL_SPOT line so agents that share the
+        # yahoo_finance "copy CANONICAL_SPOT verbatim" rule (e.g. ContractIQ
+        # Power Fair-Value) can use entso_e identically.
+        if latest_close is not None:
+            lines.insert(
+                0,
+                f"CANONICAL_SPOT={latest_close:.2f}  # use this exact value for spot_anchor",
+            )
+
         return ToolResult(
             content="\n".join(lines),
             metadata={
@@ -304,5 +337,10 @@ class EntsoETool(BaseTool):
                 "min": round(min_val, 2),
                 "max": round(max_val, 2),
                 "unit": unit,
+                "status": "ok",
+                "prices": prices,
+                "closes": closes,
+                "price_count": len(prices),
+                "latest_close": latest_close,
             },
         )

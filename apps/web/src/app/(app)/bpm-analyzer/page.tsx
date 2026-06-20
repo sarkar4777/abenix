@@ -10,6 +10,7 @@ import {
   Download, Image as ImageIcon, Music, Film, FileType,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import ModelPicker from '@/components/ModelPicker';
 
 interface Thread {
   id: string;
@@ -242,9 +243,6 @@ export default function BPMAnalyzerPage() {
   const [loadingThreads, setLoadingThreads] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [model, setModel] = useState('gemini-2.5-pro');
-  const [models, setModels] = useState<Array<{ id: string; label?: string; provider?: string }>>([
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google' },
-  ]);
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -259,15 +257,8 @@ export default function BPMAnalyzerPage() {
       if (r.data?.threads) setThreads(r.data.threads);
       setLoadingThreads(false);
       const m = await apiFetch<any>('/api/bpm-analyzer/models');
-      if (m.data) {
-        // Master list returns rich model objects; tolerate the older
-        // string-only shape too for backwards compatibility.
-        const raw = m.data.models || [];
-        const normalised = raw.map((x: any) =>
-          typeof x === 'string' ? { id: x, label: x } : x,
-        );
-        setModels(normalised);
-        setModel(m.data.default || 'gemini-2.5-pro');
+      if (m.data?.default) {
+        setModel(m.data.default);
       }
     })();
   }, []);
@@ -437,17 +428,7 @@ export default function BPMAnalyzerPage() {
           </p>
           <div className="mt-3">
             <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-1">Vision model</label>
-            <select
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              className="w-full bg-slate-900/60 border border-slate-700 rounded text-[11px] text-white px-2 py-1.5"
-            >
-              {models.map(m => (
-                <option key={m.id} value={m.id}>
-                  {m.label || m.id}{m.provider ? ` · ${m.provider}` : ''}
-                </option>
-              ))}
-            </select>
+            <ModelPicker value={model} onChange={setModel} />
             <p className="text-[9px] text-slate-600 mt-1">
               Master list — manage at /admin/llm-settings
             </p>

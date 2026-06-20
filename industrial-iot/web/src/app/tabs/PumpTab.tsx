@@ -90,6 +90,7 @@ export default function PumpTab() {
   // pump.vibration.raw (the simulator agent publishes them every 15s).
   // Demo mode keeps the in-browser synthetic.ts trajectory.
   const [liveMode, setLiveMode] = useState(false);
+  const [liveDemo, setLiveDemo] = useState(false);
   const liveSubRef = useRef<{ close: () => void } | null>(null);
 
   useEffect(() => {
@@ -151,8 +152,14 @@ export default function PumpTab() {
     if (liveMode) {
       // Flip the simulator trigger on so the broker starts receiving
       // vibration windows; subscribe to SSE for the live feed.
-      await toggleLiveTrigger('iot-pump-data-simulator', true);
-      setCurrentLog((p) => [...p, 'Live mode: simulator trigger enabled, waiting on pump.vibration.raw…']);
+      const trig = await toggleLiveTrigger('iot-pump-data-simulator', true);
+      setLiveDemo(trig.demo);
+      setCurrentLog((p) => [
+        ...p,
+        trig.demo
+          ? 'Live mode: trigger not wired on abenix-api (running in demo mode).'
+          : 'Live mode: simulator trigger enabled, waiting on pump.vibration.raw…',
+      ]);
       let i = 0;
       liveSubRef.current = subscribeLive<Record<string, unknown>>('pump.vibration.raw', async (msg) => {
         if (abortRef.current?.signal.aborted) return;
@@ -348,6 +355,7 @@ export default function PumpTab() {
     }
     if (liveMode) {
       await toggleLiveTrigger('iot-pump-data-simulator', false);
+      setLiveDemo(false);
     }
     setStreaming(false);
   };
@@ -390,6 +398,7 @@ export default function PumpTab() {
           value={liveMode}
           onChange={setLiveMode}
           disabled={streaming}
+          demoMode={liveDemo}
           hint="Demo: in-browser scripted trajectory. Live: simulator publishes to MQTT pump.vibration.raw."
         />
       </div>

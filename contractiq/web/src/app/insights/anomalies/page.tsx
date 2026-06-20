@@ -2,12 +2,27 @@
 
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { PageExplainer } from '@/components/PageExplainer';
 import {
   Telescope, ChevronLeft, Sparkles, Loader2, X, AlertTriangle,
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
+
+function ToastBody({ kind, msg }: { kind: 'ok' | 'warn' | 'err'; msg: string }) {
+  // Render a [text](href) markdown-style link inline; everything else as plain text.
+  const m = msg.match(/^(.*?)\[([^\]]+)\]\(([^)]+)\)(.*)$/);
+  if (!m) return <>{msg}</>;
+  const [, before, label, href, after] = m;
+  return (
+    <>
+      {before}
+      <a href={href} className="underline font-semibold hover:text-white">{label}</a>
+      {after}
+    </>
+  );
+}
 
 interface Anomaly {
   id: string;
@@ -57,7 +72,9 @@ export default function AnomaliesPage() {
         setToast({ kind: 'err', msg: body?.error?.message || `Scan failed (${res.status})` });
       } else {
         const d = body?.data || {};
-        if (d.warning) {
+        if ((d.scanned_clauses ?? 0) === 0) {
+          setToast({ kind: 'warn', msg: 'No clauses to scan — [Upload a contract](/upload) first.' });
+        } else if (d.warning) {
           setToast({ kind: 'warn', msg: d.scan_summary || `Warning: ${d.warning}` });
         } else {
           setToast({ kind: 'ok', msg: `Scan complete — ${d.anomalies_persisted ?? 0} anomalies found across ${d.scanned_clauses ?? 0} clauses.` });
@@ -103,12 +120,13 @@ export default function AnomaliesPage() {
             {scanning ? <><Loader2 className="w-4 h-4 animate-spin" /> Scanning...</> : <><Sparkles className="w-4 h-4" /> Scan for Anomalies</>}
           </button>
         </div>
+        <PageExplainer routeKey="insights-anomalies" />
         {toast && (
           <div className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
             toast.kind === 'ok' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' :
             toast.kind === 'warn' ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' :
             'border-red-500/40 bg-red-500/10 text-red-300'
-          }`}>{toast.msg}</div>
+          }`}><ToastBody kind={toast.kind} msg={toast.msg} /></div>
         )}
 
         {loading ? (

@@ -17,6 +17,9 @@ export interface DoneData {
   cost: number;
   duration_ms: number;
   model: string;
+  effective_model?: string;
+  requested_model?: string;
+  fallback_reason?: string;
   confidence_score?: number;
   pipeline_status?: string;
   execution_path?: string[];

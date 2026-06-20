@@ -18,6 +18,11 @@ export default function DevDocsRedirect() {
   return (
     <main className="min-h-[60vh] flex items-center justify-center text-slate-400">
       <p className="text-sm">Redirecting to /docs…</p>
+      <noscript>
+        <a href="/docs" className="text-sm text-cyan-300 underline ml-2">
+          Open documentation
+        </a>
+      </noscript>
     </main>
   );
 }

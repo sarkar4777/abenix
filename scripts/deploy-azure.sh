@@ -216,6 +216,9 @@ _build_secrets_flags() {
   [ -n "${ANTHROPIC_API_KEY:-}" ]        && flags="${flags} --set secrets.anthropicApiKey=${ANTHROPIC_API_KEY}"
   [ -n "${OPENAI_API_KEY:-}" ]           && flags="${flags} --set secrets.openaiApiKey=${OPENAI_API_KEY}"
   [ -n "${GOOGLE_API_KEY:-}" ]           && flags="${flags} --set secrets.googleApiKey=${GOOGLE_API_KEY}"
+  [ -n "${AZURE_OPENAI_API_KEY:-}" ]     && flags="${flags} --set secrets.azureOpenaiApiKey=${AZURE_OPENAI_API_KEY}"
+  [ -n "${AZURE_OPENAI_API_BASE:-}" ]    && flags="${flags} --set secrets.azureOpenaiApiBase=${AZURE_OPENAI_API_BASE}"
+  [ -n "${AZURE_OPENAI_API_VERSION:-}" ] && flags="${flags} --set secrets.azureOpenaiApiVersion=${AZURE_OPENAI_API_VERSION}"
   [ -n "${PINECONE_API_KEY:-}" ]         && flags="${flags} --set secrets.pineconeApiKey=${PINECONE_API_KEY}"
   [ -n "${TAVILY_API_KEY:-}" ]           && flags="${flags} --set secrets.tavilyApiKey=${TAVILY_API_KEY}"
   [ -n "${BRAVE_SEARCH_API_KEY:-}" ]     && flags="${flags} --set secrets.braveSearchApiKey=${BRAVE_SEARCH_API_KEY}"
@@ -1119,9 +1122,24 @@ deploy_industrial_iot() {
     -e "s|imagePullPolicy: IfNotPresent|imagePullPolicy: Always|g" \
     "${manifest}" | kubectl apply -f - 2>&1 | tail -5
 
+  # Web-tier shared secret that gates the standalone API's proxy
+  # passthroughs (/api/code-assets, /api/agents, /api/connectors). Reuse
+  # the existing value if already in the cluster so rolling pods stay in
+  # sync; mint a fresh UUID otherwise.
+  local iot_web_secret
+  iot_web_secret=$(kubectl get secret industrial-iot-secrets -n "${NAMESPACE}" \
+    -o jsonpath='{.data.INDUSTRIALIOT_WEB_PROXY_SECRET}' 2>/dev/null | base64 -d 2>/dev/null)
+  # Also mint a fresh UUID if the existing value is the placeholder that
+  # ships in the k8s manifest — re-using REPLACE_AT_DEPLOY_TIME defeats the
+  # whole point of a shared secret.
+  if [ -z "${iot_web_secret}" ] || [ "${iot_web_secret}" = "REPLACE_AT_DEPLOY_TIME" ]; then
+    iot_web_secret=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid;print(uuid.uuid4())')
+  fi
+
   kubectl create secret generic industrial-iot-secrets \
     --namespace="${NAMESPACE}" \
     --from-literal=INDUSTRIALIOT_ABENIX_API_KEY="${iot_key}" \
+    --from-literal=INDUSTRIALIOT_WEB_PROXY_SECRET="${iot_web_secret}" \
     --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -2
 
   # Always restart both — see deploy_wingman comment about envFrom +

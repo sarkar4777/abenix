@@ -41,6 +41,7 @@ from models.marketplace import Subscription
 from models.mcp_connection import AgentMCPTool, UserMCPConnection
 from models.user import User
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 # Lazy singleton for cache orchestrator
@@ -280,6 +281,7 @@ async def list_agents(
     search: str = Query(
         "", max_length=255, description="Search by name or description"
     ),
+    slug: str = Query("", max_length=255, description="Exact-match filter on slug"),
     category: str = Query("", description="Filter by category"),
     status: str = Query("", description="Filter by status: active, draft, archived"),
     mode: str = Query("", description="Filter by mode: agent, pipeline"),
@@ -357,6 +359,10 @@ async def list_agents(
                 Agent.slug.ilike(f"%{search}%"),
             )
         )
+    if slug:
+        # Exact slug match — used by standalones that hold the slug and
+        # need the row without a full-catalog scan.
+        query = query.where(Agent.slug == slug)
     if category:
         query = query.where(Agent.category == category)
     if status:
@@ -377,13 +383,45 @@ async def list_agents(
     count_query = select(func.count()).select_from(query.subquery())
     total = await db.scalar(count_query) or 0
 
+    # Cap offset at total so callers asking for offset=10_000 against a
+    # 50-row table get back an empty page rather than burning a full scan
+    # in the DB. The capped value is also what we echo in meta.offset so
+    # the client sees what actually happened.
+    effective_offset = min(offset, int(total))
+
     # Apply pagination
-    query = query.limit(limit).offset(offset)
+    query = query.limit(limit).offset(effective_offset)
 
     result = await db.execute(query)
     agents = result.scalars().all()
     data = [_serialize_agent_summary(a) for a in agents]
-    return success(data, meta={"total": total, "limit": limit, "offset": offset})
+    return success(
+        data, meta={"total": total, "limit": limit, "offset": effective_offset}
+    )
+
+
+@router.get("/by-slug/{slug}")
+async def get_agent_by_slug(
+    slug: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Resolve an agent by slug. Returns 404 when not found or not visible."""
+    result = await db.execute(
+        select(Agent).where(
+            Agent.slug == slug,
+            or_(
+                Agent.tenant_id == user.tenant_id,
+                Agent.agent_type == AgentType.OOB,
+            ),
+        )
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return error("Agent not found", 404)
+    if agent.status == AgentStatus.ARCHIVED and agent.agent_type != AgentType.OOB:
+        return error("Agent not found", 404)
+    return success(_serialize_agent(agent))
 
 
 @router.get("/{agent_id}/export")
@@ -1245,10 +1283,17 @@ async def validate_agent_smart(
         }
         if nodes:
             config_snapshot["pipeline_config"] = {"nodes": nodes}
+        # Honour the admin-configured Builder validation model.
+        from app.core.platform_settings import get_setting as _ps_get
+
+        critic_model = (
+            await _ps_get("ai_builder.validation.model")
+        ) or "claude-sonnet-4-5-20250929"
         report = await critique(
             kind="pipeline" if nodes else "agent",
             config=config_snapshot,
             purpose=agent.description or "",
+            model=critic_model,
         )
         tier3_dict = report.to_dict()
 
@@ -1280,6 +1325,132 @@ async def validate_agent_smart(
             "tier2": tier2_dict,
             "tier3": tier3_dict,
             "overall": {"valid": valid, "severity": severity, "score": score},
+        }
+    )
+
+
+@router.get("/{agent_id}/preview-validation")
+async def preview_validation(
+    agent_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Resolve which model the agent would actually run on right now.
+
+    Used by the AI Builder UI to show "ran on azure-gpt-4o (fallback from
+    claude-sonnet-4-5)" so the user understands when their requested model
+    isn't actually available in this deployment.
+    """
+    # UUID or slug — match self-check / validate-smart contract.
+    agent: Agent | None = None
+    try:
+        uid = uuid.UUID(agent_id)
+        result = await db.execute(
+            select(Agent).where(
+                Agent.id == uid,
+                or_(
+                    Agent.tenant_id == user.tenant_id,
+                    Agent.agent_type == AgentType.OOB,
+                ),
+            )
+        )
+        agent = result.scalar_one_or_none()
+    except (ValueError, TypeError):
+        pass
+    if agent is None:
+        result = await db.execute(
+            select(Agent).where(
+                Agent.slug == agent_id,
+                or_(
+                    Agent.tenant_id == user.tenant_id,
+                    Agent.agent_type == AgentType.OOB,
+                ),
+            )
+        )
+        agent = result.scalar_one_or_none()
+    if agent is None:
+        return error("Agent not found", 404)
+
+    cfg = agent.model_config_ or {}
+    requested = (cfg.get("model") or cfg.get("model_id") or "").strip()
+    tool_names = cfg.get("tools") or []
+
+    # Ask the runtime resolver what it would pick. If the resolver isn't
+    # reachable we still answer — the UI just shows "no swap detected".
+    effective = requested
+    fallback_reason: str | None = None
+    chain: list[str] = [requested] if requested else []
+    try:
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+        )
+        from engine.model_resolver import resolve as _resolve  # type: ignore
+
+        required: dict[str, bool] = {}
+        if tool_names:
+            required["tools"] = True
+        decision = _resolve(
+            requested or "claude-sonnet-4-5-20250929", required_capabilities=required
+        )
+        effective = decision.effective
+        fallback_reason = (
+            decision.reason if decision.effective != decision.requested else None
+        )
+        chain = list(decision.chain or [])
+    except Exception as exc:
+        logger.debug("preview_validation resolver bypass: %s", exc)
+
+    # Probe the provider key for the effective model so the UI can warn
+    # when the deployment is misconfigured before the user clicks run.
+    from app.routers.llm_models import _probe_providers, _provider_from_model  # type: ignore
+
+    providers = await _probe_providers(db)
+    prov_name = _provider_from_model(effective, None)
+    prov_info = providers.get(prov_name) or {"configured": True, "reason": None}
+
+    # Also surface the most recent execution's actual_model/fallback_reason
+    # so the UI can render the "last ran on …" hint without an extra hop.
+    last_exec = (
+        await db.execute(
+            select(Execution)
+            .where(
+                Execution.agent_id == agent.id,
+                Execution.tenant_id == user.tenant_id,
+            )
+            .order_by(Execution.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    last_run = None
+    if last_exec is not None:
+        last_run = {
+            "execution_id": str(last_exec.id),
+            "actual_model": last_exec.model_used,
+            "model_requested": getattr(last_exec, "model_requested", None),
+            "fallback_reason": getattr(last_exec, "model_fallback_reason", None),
+            "status": (
+                last_exec.status.value
+                if hasattr(last_exec.status, "value")
+                else str(last_exec.status)
+            ),
+            "completed_at": (
+                last_exec.completed_at.isoformat() if last_exec.completed_at else None
+            ),
+        }
+
+    swap = bool(requested) and effective != requested
+    return success(
+        {
+            "agent_id": str(agent.id),
+            "requested_model": requested or None,
+            "actual_model": effective or None,
+            "fallback_reason": fallback_reason,
+            "swap": swap,
+            "chain": chain,
+            "provider": prov_name,
+            "provider_available": bool(prov_info.get("configured", True)),
+            "provider_unavailable_reason": prov_info.get("reason"),
+            "last_run": last_run,
         }
     )
 
@@ -1431,13 +1602,23 @@ async def execute_agent(
 
     mcp_connections = await _fetch_mcp_connections(db, agent.id, user.tenant_id)
 
+    # actAs delegation: stamp the end-user identity onto the execution row so
+    # standalone-app proxies (ContractIQ, etc.) can match ownership on the
+    # original caller, not the SDK service account.
+    from app.core.acting_subject import subject_columns_for
+
+    _subj_id, _subj_type = subject_columns_for(user)
+
     execution = Execution(
         tenant_id=user.tenant_id,
         agent_id=agent.id,
         user_id=user.id,
+        subject_id=_subj_id,
+        subject_type=_subj_type,
         input_message=sanitized_message,
         status=ExecutionStatus.RUNNING,
         model_used=model if not is_pipeline else "pipeline",
+        model_requested=model if not is_pipeline else "pipeline",
     )
     db.add(execution)
     await db.commit()
@@ -2699,6 +2880,14 @@ async def _stream_execution(
                 execution.duration_ms = final_data.get("duration_ms")
                 execution.tool_calls = all_tool_calls if all_tool_calls else None
                 execution.completed_at = datetime.now(timezone.utc)
+                actual_model = final_data.get("effective_model") or final_data.get(
+                    "model"
+                )
+                if actual_model and actual_model != execution.model_requested:
+                    execution.model_used = actual_model
+                    execution.model_fallback_reason = (
+                        final_data.get("fallback_reason") or "resolver_swap"
+                    )
                 try:
                     emit_outcome_metric(
                         outcome="SUCCESS",

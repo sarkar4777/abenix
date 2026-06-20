@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -25,6 +25,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { SkeletonAgentCard } from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 
@@ -38,6 +39,8 @@ interface Agent {
   version: string;
   icon_url: string | null;
   category: string | null;
+  creator_id?: string;
+  is_published?: boolean;
   model_config: {
     model: string;
     temperature: number;
@@ -104,9 +107,37 @@ export default function AgentsPage() {
   const apiUrl = `/api/agents?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&sort=${sortBy}&limit=${LIMIT}&offset=${page * LIMIT}${typeParam}`;
   const { data: agents, isLoading: loading, meta, mutate } = useApi<Agent[]>(apiUrl);
 
+  // Used to bucket the "My Agents" tab count against the active session.
+  const { data: perms } = useApi<{ user_id: string }>('/api/me/permissions');
+  const currentUserId = perms?.user_id ?? null;
+
+  // Fan out one unbounded list-fetch so each tab can carry its own count
+  // independent of the paginated visible slice. Without this the header
+  // showed the global total ("162 agents available") while the My Agents
+  // tab rendered a single card — clients clicked thinking it was broken.
+  const [tabCounts, setTabCounts] = useState<Record<Tab, number>>({ my: 0, prebuilt: 0, marketplace: 0 });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { agents: all } = await fetchAllAgents<Agent>();
+      if (cancelled) return;
+      const myCount = currentUserId
+        ? all.filter((a) => a.creator_id === currentUserId).length
+        : 0;
+      const prebuiltCount = all.filter((a) => a.agent_type === 'oob').length;
+      const marketplaceCount = all.filter((a) => a.is_published === true).length;
+      setTabCounts({ my: myCount, prebuilt: prebuiltCount, marketplace: marketplaceCount });
+    })();
+    return () => { cancelled = true; };
+  }, [currentUserId, agents]);
+
   const filtered = agents ?? [];
 
-  const total = (meta?.total as number) || filtered.length;
+  // Header now reflects the active tab, not the global total.
+  const total = tabCounts[tab];
+  // Paginator still needs the server's authoritative count for the
+  // current tab — meta.total is already scope-aware via typeParam above.
+  const paginationTotal = (meta?.total as number) || filtered.length;
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'my', label: 'My Agents' },
@@ -149,7 +180,7 @@ export default function AgentsPage() {
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              {t.label}
+              {t.label} ({tabCounts[t.key]})
             </button>
           ))}
         </div>
@@ -359,10 +390,10 @@ export default function AgentsPage() {
       )}
 
       {/* Pagination */}
-      {total > LIMIT && (
+      {paginationTotal > LIMIT && (
         <div className="flex items-center justify-between mt-6">
           <p className="text-xs text-slate-500">
-            Showing {page * LIMIT + 1}&ndash;{Math.min((page + 1) * LIMIT, total)} of {total} agents
+            Showing {page * LIMIT + 1}&ndash;{Math.min((page + 1) * LIMIT, paginationTotal)} of {paginationTotal} agents
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -374,7 +405,7 @@ export default function AgentsPage() {
             </button>
             <button
               onClick={() => setPage(p => p + 1)}
-              disabled={(page + 1) * LIMIT >= total}
+              disabled={(page + 1) * LIMIT >= paginationTotal}
               className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 disabled:opacity-50"
             >
               Next

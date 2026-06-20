@@ -1,0 +1,61 @@
+name: contractiq-risk-quant
+description: >-
+  Deterministic VaR / CVaR / correlation / marginal-VaR engine for the
+  ContractIQ risk lens. Reads a JSON envelope on stdin with an `op`
+  field — supports parametric / historical / filtered-historical VaR,
+  CVaR (expected shortfall), EWMA correlation matrix, and marginal VaR
+  contribution for a proposed position. Pure numpy. Keeps every number
+  the UI shows in the audit log instead of buried inside the router.
+
+input_schema:
+  type: object
+  required: [op]
+  properties:
+    op:
+      type: string
+      enum: [var, portfolio_var, marginal_var, correlations]
+      description: "Which risk calculation to run."
+    returns:
+      type: array
+      items: { type: number }
+      description: "Log-returns. Optional — if absent and `series` is supplied, returns are derived."
+    series:
+      type: array
+      items:
+        type: object
+        properties:
+          close: { type: number }
+          ts:    { type: string }
+      description: "Price-level series (use when `returns` is empty)."
+    notional_usd:    { type: number }
+    confidence:      { type: number, default: 0.95 }
+    horizon_days:    { type: integer, default: 1 }
+    method:
+      type: string
+      enum: [parametric, historical, filtered_historical]
+      default: filtered_historical
+    positions:
+      type: array
+      description: "For op=portfolio_var: list of {notional_usd, returns|series, source}."
+    base_positions:
+      type: array
+      description: "For op=marginal_var: the existing portfolio."
+    proposed_position:
+      type: object
+      description: "For op=marginal_var: the new position whose contribution we want."
+    correlations_series:
+      type: object
+      description: "For op=correlations: {source_slug: returns[] | series[] | {returns|series}}."
+    decay:           { type: number, default: 0.94 }
+
+output_schema:
+  type: object
+  description: "Shape depends on `op` — see main.py for per-op envelopes."
+
+example_input:
+  op: var
+  returns: [0.001, -0.002, 0.003, -0.004, 0.005, -0.001, 0.002]
+  notional_usd: 1000000
+  confidence: 0.95
+  horizon_days: 1
+  method: filtered_historical

@@ -159,6 +159,17 @@ async def get_current_user(
     if token.startswith("af_"):
         user = await _authenticate_via_api_key(token, db)
         if user:
+            # Same actAs delegation as the X-API-Key branch above — the
+            # Python SDK (and every standalone app proxy) uses Bearer af_<key>
+            # by default, so dropping the X-Abenix-Subject header here breaks
+            # ownership stamping on the Execution row.
+            from app.core.acting_subject import ActingSubject, can_delegate
+
+            scopes = getattr(user, "_api_key_scopes", None)
+            if can_delegate(scopes):
+                subject = ActingSubject.from_header(x_abenix_subject)
+                if subject:
+                    user._acting_subject = subject  # type: ignore[attr-defined]
             return user
         raise _auth_error()
     payload = verify_token(token)

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Diamond, ChevronLeft, Loader2, Play, FileText } from 'lucide-react';
+import { PageExplainer } from '@/components/PageExplainer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('contractiq_token') : null; }
@@ -99,6 +100,7 @@ export default function MetalsExtractPage() {
             <p className="text-sm text-slate-400">Second-pass extraction of metals-specific fields per contract.</p>
           </div>
         </div>
+        <div className="mb-4"><PageExplainer routeKey="metals-extract" /></div>
 
         {toast && (
           <div className="mb-4 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-sm text-cyan-200">{toast}</div>

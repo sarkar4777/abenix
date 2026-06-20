@@ -6,7 +6,7 @@ freight-cost approximation we use the public Ship & Bunker price feed
 prices for VLSFO, MGO, HFO every business day.
 
 The output is a freight-rate proxy, not an assessed Baltic rate. We
-clearly label it as such — every Wingman card that uses this tool prints
+clearly label it as such — every UI card that uses this tool prints
 'Bunker-derived freight estimate' with a link to swap in a Baltic feed.
 
 Bunker price drives ~60-70% of voyage cost on the major LPG corridors,
@@ -38,8 +38,8 @@ _FALLBACK_VLSFO_USD_MT: dict[str, float] = {
     "New York": 605.0,
 }
 
-# Approximate sailing distances in nautical miles between the ports we
-# plot in the Wingman demo. Pre-computed from great-circle + Suez/Panama
+# Approximate sailing distances in nautical miles between the major
+# corridor ports. Pre-computed from great-circle + Suez/Panama
 # routing where applicable.
 _CORRIDOR_NM: dict[tuple[str, str], int] = {
     ("Houston", "Rotterdam"): 4_900,

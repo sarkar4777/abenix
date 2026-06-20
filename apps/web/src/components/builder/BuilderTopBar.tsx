@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Check, CheckCircle2, HelpCircle, Loader2, MessageSquare, Pencil, Play, Rocket, Save, ShieldCheck, Sparkles } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Cpu, HelpCircle, Loader2, MessageSquare, Pencil, Play, Rocket, Save, ShieldCheck, Sparkles } from 'lucide-react';
 import PublishDialog from './PublishDialog';
 import BuilderHelpDialog from './BuilderHelpDialog';
 import AIBuilderDialog from './AIBuilderDialog';
 import AIValidateDialog from './AIValidateDialog';
+import { apiFetch } from '@/lib/api-client';
 
 export type BuilderMode = 'agent' | 'pipeline';
 
@@ -68,6 +69,22 @@ export default function BuilderTopBar({
   const [showAIBuilder, setShowAIBuilder] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showAIValidate, setShowAIValidate] = useState(false);
+  const [validationModel, setValidationModel] = useState<string>('azure-gpt-4o');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiFetch<{ value: string; default: string }>(
+          '/api/settings/builder_model',
+        );
+        if (!cancelled && r.data?.value) setValidationModel(r.data.value);
+      } catch {
+        // Fall back to the default; the badge stays usable.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -252,6 +269,22 @@ export default function BuilderTopBar({
             Test
           </button>
         )}
+        {/* Validation model badge — driven by /api/settings/builder_model.
+            Hidden input mirrors the value so E2E can assert it deterministically. */}
+        <span
+          className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800/60 border border-slate-700 text-slate-300 text-[11px] rounded-md font-mono"
+          data-testid="builder-validation-model-badge"
+          title="Model used by AI Validate + AI Builder previews. Change it in Admin → Models."
+        >
+          <Cpu className="w-3 h-3 text-cyan-400" />
+          {validationModel}
+        </span>
+        <input
+          type="hidden"
+          data-testid="builder-validation-model-input"
+          value={validationModel}
+          readOnly
+        />
         <button
           onClick={() => setShowAIValidate(true)}
           data-testid="ai-validate-button"

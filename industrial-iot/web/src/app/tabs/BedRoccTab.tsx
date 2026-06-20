@@ -177,6 +177,7 @@ export default function BedRoccTab() {
   // Live mode swaps the bundled SAMPLE_ALARMS stream for an SSE feed
   // of real MQTT messages on alarms.realtime. Demo path is unchanged.
   const [liveMode, setLiveMode] = useState(false);
+  const [liveDemo, setLiveDemo] = useState(false);
   const liveSubRef = useRef<{ close: () => void } | null>(null);
   // Approval ID returned by /api/approvals when the operator confirms
   // a reset. Polled until status flips to approved/denied/expired.
@@ -202,8 +203,9 @@ export default function BedRoccTab() {
     }
     let cancelled = false;
     (async () => {
-      await toggleLiveTrigger('iot-bedrocc-alarm-listener', true);
+      const trig = await toggleLiveTrigger('iot-bedrocc-alarm-listener', true);
       if (cancelled) return;
+      setLiveDemo(trig.demo);
       liveSubRef.current = subscribeLive<RawAlarm>('alarms.realtime', (msg) => {
         setAlarms((prev) => [{ ...msg, status: 'NEW' as AlarmStatus }, ...prev]);
         if (pipelineId) setTimeout(() => triageAlarm(msg.alarm_id), 50);
@@ -213,6 +215,7 @@ export default function BedRoccTab() {
       cancelled = true;
       if (liveSubRef.current) { liveSubRef.current.close(); liveSubRef.current = null; }
       toggleLiveTrigger('iot-bedrocc-alarm-listener', false);
+      setLiveDemo(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveMode, pipelineId]);
@@ -584,6 +587,7 @@ export default function BedRoccTab() {
           <LiveModeToggle
             value={liveMode}
             onChange={setLiveMode}
+            demoMode={liveDemo}
             hint="Live: subscribe to alarms.realtime via SSE; demo: scripted 30-event stream."
           />
         </div>

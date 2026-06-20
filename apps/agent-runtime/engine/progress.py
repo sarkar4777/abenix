@@ -1,13 +1,16 @@
-"""Pub/sub progress events for the Desk Copilot narration stream.
+"""Pub/sub progress events for live-narration streams.
 
-Every runtime worker publishes tool-level progress events to Redis on channel
-`wingman:progress:<root_execution_id>`. Sub-agents inherit the root id from
-the parent's call (set by invoke_agent before kicking off the sub-execution
-and looked up here when the runtime starts processing a task).
+Every runtime worker publishes tool-level progress events to a Redis channel
+keyed off the root_execution_id. Sub-agents inherit the root id from the
+parent's call (set by invoke_agent before kicking off the sub-execution and
+looked up here when the runtime starts processing a task).
+
+The channel + parent-key prefixes are env-driven so each consuming app
+namespaces its own stream (set PROGRESS_CHANNEL_PREFIX +
+PROGRESS_PARENT_KEY_PREFIX on the pod). Defaults stay generic.
 
 If REDIS_URL is unset or unreachable, all helpers degrade to no-ops — the
-runtime keeps working, the Desk page just shows the platform-level events
-without the rich narration overlay.
+runtime keeps working, callers just lose the rich narration overlay.
 """
 
 from __future__ import annotations
@@ -22,9 +25,15 @@ from typing import Any, AsyncIterator
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
-CHANNEL_PREFIX = "wingman:progress:"
-PARENT_KEY_PREFIX = "wingman:parent:"
-PARENT_TTL_SECONDS = int(os.environ.get("WINGMAN_PARENT_TTL", "1800"))
+CHANNEL_PREFIX = os.environ.get("PROGRESS_CHANNEL_PREFIX", "progress:")
+PARENT_KEY_PREFIX = os.environ.get("PROGRESS_PARENT_KEY_PREFIX", "parent:")
+PARENT_TTL_SECONDS = int(os.environ.get("PROGRESS_PARENT_TTL", "1800"))
+
+# Back-compat alias: legacy code shipped with a hard-coded channel
+# prefix. Until every consumer is on PROGRESS_CHANNEL_PREFIX we mirror
+# every publish onto the old channel name too so subscribers built
+# against either side keep working. Empty string disables the alias.
+LEGACY_CHANNEL_PREFIX = os.environ.get("PROGRESS_LEGACY_CHANNEL_PREFIX", "")
 
 _client_singleton: Any | None = None
 _client_lock = asyncio.Lock()
@@ -107,10 +116,18 @@ async def publish(
         "root_execution_id": root,
         **event,
     }
+    payload = json.dumps(event, default=str)
     try:
-        await c.publish(channel_for(root), json.dumps(event, default=str))
+        await c.publish(channel_for(root), payload)
     except Exception as e:
         logger.debug("progress.publish failed: %s", e)
+    # Mirror to the legacy channel name so subscribers still pinned to
+    # the old prefix keep receiving events during the cutover.
+    if LEGACY_CHANNEL_PREFIX and LEGACY_CHANNEL_PREFIX != CHANNEL_PREFIX:
+        try:
+            await c.publish(f"{LEGACY_CHANNEL_PREFIX}{root}", payload)
+        except Exception as e:
+            logger.debug("progress.publish legacy mirror failed: %s", e)
 
 
 async def subscribe(root_execution_id: str) -> AsyncIterator[dict[str, Any]]:

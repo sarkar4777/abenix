@@ -391,6 +391,44 @@ def _resolve_templates(
     return resolved
 
 
+def _resolve_from_node_args(
+    arguments: dict[str, Any],
+    node_outputs: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolve `<x>_from_node` + `<x>_field` indirection pairs.
+
+    A DSL node can pass `{asset_id_from_node: "validate_input",
+    asset_id_field: "alarm.asset.turbine"}` and have the runtime swap that
+    pair for `asset_id: <resolved value>` before the tool sees the args.
+    Used by IoT seeds (windowed_state, mqtt_publish, approval_gate, …) so
+    they don't have to template the value through a string.
+    """
+    resolved = dict(arguments)
+    pairs: list[tuple[str, str, str]] = []
+    for key in list(resolved.keys()):
+        if key.endswith("_from_node"):
+            base = key[: -len("_from_node")]
+            field_key = f"{base}_field"
+            if field_key in resolved:
+                pairs.append((base, key, field_key))
+    for base, from_key, field_key in pairs:
+        src_node = resolved.pop(from_key, None)
+        src_field = resolved.pop(field_key, None)
+        if base in resolved and resolved[base] not in (None, "", "[not available]"):
+            # Caller already supplied a direct value — leave it alone.
+            continue
+        if not src_node:
+            continue
+        src = node_outputs.get(str(src_node))
+        if src is None:
+            continue
+        value = _extract_field(src, str(src_field)) if src_field else src
+        if value is None:
+            continue
+        resolved[base] = value
+    return resolved
+
+
 _engine_cache: dict[str, Any] = {}
 _engine_cache_lock: asyncio.Lock | None = None
 
@@ -792,6 +830,8 @@ class PipelineExecutor:
         # Resolve input mappings, then substitute {{template}} variables
         resolved_args = _resolve_inputs(node, node_outputs)
         resolved_args = _resolve_templates(resolved_args, node_outputs)
+        # Generic <x>_from_node + <x>_field indirection (IoT seeds use this)
+        resolved_args = _resolve_from_node_args(resolved_args, node_outputs)
 
         # Fallback: if common input args are missing or unresolved, pull from
         # the initial user_message in node_outputs (merged from context).
@@ -891,14 +931,21 @@ class PipelineExecutor:
         # agent row and inline its system_prompt / tools / model into the
         # agent_step arguments. This lets pipeline YAMLs reference agents
         # by slug rather than duplicating the prompt.
-        if node.agent_slug:
-            agent_row = await self._resolve_agent_by_slug(node.agent_slug)
+        # Also catches DSL nodes that drop `agent_slug` inside `arguments`
+        # rather than at node level (tool_name: agent_step + agent_slug arg).
+        effective_slug = node.agent_slug or (
+            resolved_args.pop("agent_slug", None)
+            if node.tool_name == "agent_step"
+            else None
+        )
+        if effective_slug:
+            agent_row = await self._resolve_agent_by_slug(effective_slug)
             if agent_row is None:
                 return NodeResult(
                     node_id=node.id,
                     status="failed",
-                    error=f"agent_slug '{node.agent_slug}' not found in DB",
-                    error_message=f"agent_slug '{node.agent_slug}' not found in DB",
+                    error=f"agent_slug '{effective_slug}' not found in DB",
+                    error_message=f"agent_slug '{effective_slug}' not found in DB",
                     error_type="validation",
                     tool_name=node.tool_name,
                     resolved_arguments=resolved_args,
@@ -1665,8 +1712,8 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
             "attempt": nr.attempt,
         }
         # Include output for completed nodes (truncate large outputs).
-        # Bumped from 10K→128K to keep multi-stage briefs (OracleNet
-        # synthesizer, ContractIQ executive briefing, etc.) intact when the
+        # Bumped from 10K→128K to keep multi-stage briefs (synthesiser,
+        # executive briefing, etc.) intact when the
         # client renders them. JSON loads can't round-trip a sliced string,
         # so on truncation we emit the raw string + an "output_truncated"
         # flag so the UI can show a "view raw" affordance.

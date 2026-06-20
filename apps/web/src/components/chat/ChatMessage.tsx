@@ -116,10 +116,14 @@ interface ChatMessageProps {
   role: 'user' | 'assistant';
   blocks: ContentBlock[];
   isStreaming?: boolean;
+  model?: string;
+  requestedModel?: string;
+  fallbackReason?: string;
 }
 
-export default function ChatMessage({ role, blocks, isStreaming }: ChatMessageProps) {
+export default function ChatMessage({ role, blocks, isStreaming, model, requestedModel, fallbackReason }: ChatMessageProps) {
   const isUser = role === 'user';
+  const hasFallback = !!(model && requestedModel && model !== requestedModel);
 
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -200,6 +204,22 @@ export default function ChatMessage({ role, blocks, isStreaming }: ChatMessagePr
               <span className="w-1 h-1 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }} />
               <span className="w-1 h-1 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }} />
             </span>
+          </div>
+        )}
+
+        {!isUser && !isStreaming && model && (
+          <div
+            data-testid="chat-message-model"
+            className="mt-2 text-[10px] text-slate-500 font-mono flex items-center gap-1.5 flex-wrap"
+            title={hasFallback && fallbackReason ? `Fallback reason: ${fallbackReason.replace(/_/g, ' ')}` : undefined}
+          >
+            <span>{model}</span>
+            {hasFallback && (
+              <>
+                <span className="text-amber-400">&larr;</span>
+                <span className="text-amber-300">fallback from {requestedModel}</span>
+              </>
+            )}
           </div>
         )}
       </div>
