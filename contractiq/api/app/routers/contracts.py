@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db, SessionLocal
 from app.core.responses import error, success
-from app.routers.auth import get_contractiq_user
+from app.routers.auth import get_contractiq_user, tenant_id_for
 
 from app.models.contractiq_models import (
     ContractIQContract, ContractIQUser, ContractIQExtractedData,
@@ -39,10 +39,14 @@ async def list_contracts(
     user: ContractIQUser = Depends(get_contractiq_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """List contracts. Users see only their own; admins see all."""
-    query = select(ContractIQContract)
+    """List contracts. Tenant scope is enforced for every role — admins see
+    every contract within their own tenant, analysts see only their own."""
+    tid = tenant_id_for(user)
+    # Tenant filter is applied unconditionally. This is the hard wall — an
+    # admin token from tenant B must never see tenant A's contracts. The
+    # user_id filter for non-admins narrows further WITHIN the tenant.
+    query = select(ContractIQContract).where(ContractIQContract.tenant_id == tid)
 
-    # RBAC: non-admin users see only their own contracts
     if user.role.value != "admin":
         query = query.where(ContractIQContract.user_id == user.id)
 
@@ -107,6 +111,7 @@ async def create_contract(
     contract = ContractIQContract(
         id=uuid.uuid4(),
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         contract_type=body.get("contract_type", "ppa"),
         title=body.get("title", "Untitled Contract"),
         counterparty_a=body.get("counterparty_a"),
@@ -165,6 +170,7 @@ async def upload_contract(
     contract = ContractIQContract(
         id=uuid.uuid4(),
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         contract_type=contract_type,
         title=title,
         counterparty_a=counterparty_a or None,
@@ -476,7 +482,11 @@ async def extract_contract(
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """Run LLM-based extraction on an uploaded contract. Streams SSE progress."""
-    query = select(ContractIQContract).where(ContractIQContract.id == contract_id)
+    query = (
+        select(ContractIQContract)
+        .where(ContractIQContract.id == contract_id)
+        .where(ContractIQContract.tenant_id == tenant_id_for(user))
+    )
     if user.role.value != "admin":
         query = query.where(ContractIQContract.user_id == user.id)
     result = await db.execute(query)
@@ -715,6 +725,7 @@ async def extract_contract(
                     risk_scores.append(score)
                     s.add(ContractIQRiskAnalysis(
                         id=uuid.uuid4(),
+                        tenant_id=tenant_id_for(user),
                         contract_id=contract_id,
                         analysis_type="single",
                         risk_category=risk_data.get("category", "operational"),
@@ -861,7 +872,11 @@ async def deep_extract_contract(
 ) -> StreamingResponse:
     """Run multi-pass deep extraction to get 100+ fields from a contract.
     Uses contract-type-specific schemas with 4 targeted extraction passes."""
-    query = select(ContractIQContract).where(ContractIQContract.id == contract_id)
+    query = (
+        select(ContractIQContract)
+        .where(ContractIQContract.id == contract_id)
+        .where(ContractIQContract.tenant_id == tenant_id_for(user))
+    )
     if user.role.value != "admin":
         query = query.where(ContractIQContract.user_id == user.id)
     result = await db.execute(query)
@@ -994,7 +1009,11 @@ async def get_contract(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Get full contract details with extracted data, clauses, assets, events."""
-    query = select(ContractIQContract).where(ContractIQContract.id == contract_id)
+    query = (
+        select(ContractIQContract)
+        .where(ContractIQContract.id == contract_id)
+        .where(ContractIQContract.tenant_id == tenant_id_for(user))
+    )
     if user.role.value != "admin":
         query = query.where(ContractIQContract.user_id == user.id)
 
@@ -1070,7 +1089,11 @@ async def delete_contract(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Delete a contract and all related data. Owner or admin only."""
-    query = select(ContractIQContract).where(ContractIQContract.id == contract_id)
+    query = (
+        select(ContractIQContract)
+        .where(ContractIQContract.id == contract_id)
+        .where(ContractIQContract.tenant_id == tenant_id_for(user))
+    )
     if user.role.value != "admin":
         query = query.where(ContractIQContract.user_id == user.id)
 
@@ -1092,9 +1115,12 @@ async def list_deal_clusters(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Aggregate deal clusters from every analyzed contract in the user's"""
-    q = select(ContractIQContract).where(ContractIQContract.user_id == user.id)
-    if user.role.value == "admin" and False:  # admin sees own by default too
-        pass
+    # Tenant filter is the hard wall — admins still see only their own tenant.
+    q = select(ContractIQContract).where(
+        ContractIQContract.tenant_id == tenant_id_for(user)
+    )
+    if user.role.value != "admin":
+        q = q.where(ContractIQContract.user_id == user.id)
     rows = (await db.execute(q)).scalars().all()
 
     # Pre-load clause rows for each contract so we can link cluster.clauses
@@ -1181,12 +1207,14 @@ async def list_timeline(
     status: str = Query(""),
 ) -> JSONResponse:
     """Aggregate every event across the caller's contracts into a"""
-    # Tenant scope: admins see all events; analysts see only their own.
+    # Tenant scope: admins see every event WITHIN their tenant; analysts see
+    # only their own. Tenant filter on the joined contract is unconditional.
     base = (
         select(ContractIQEvent, ContractIQContract.id, ContractIQContract.title,
                ContractIQContract.contract_type, ContractIQContract.counterparty_a,
                ContractIQContract.counterparty_b)
         .join(ContractIQContract, ContractIQEvent.contract_id == ContractIQContract.id)
+        .where(ContractIQContract.tenant_id == tenant_id_for(user))
     )
     if user.role.value != "admin":
         base = base.where(ContractIQContract.user_id == user.id)
@@ -1265,10 +1293,12 @@ async def list_clauses(
     """Cross-contract Clause Library."""
     from sqlalchemy import or_, func as sa_func
 
+    tid = tenant_id_for(user)
     base = (
         select(ContractIQClause, ContractIQContract.title.label("contract_title"),
                ContractIQContract.contract_type.label("contract_type"))
         .join(ContractIQContract, ContractIQClause.contract_id == ContractIQContract.id)
+        .where(ContractIQContract.tenant_id == tid)
     )
     if user.role.value != "admin":
         base = base.where(ContractIQContract.user_id == user.id)
@@ -1308,23 +1338,27 @@ async def list_clauses(
             "created_at": clause.created_at.isoformat() if clause.created_at else None,
         })
 
-    # Aggregates over the unfiltered scope (so chips don't disappear when filtered)
-    scope = select(ContractIQClause).join(ContractIQContract, ContractIQClause.contract_id == ContractIQContract.id)
-    if user.role.value != "admin":
-        scope = scope.where(ContractIQContract.user_id == user.id)
-    by_type_q = await db.execute(
+    # Aggregates over the unfiltered scope (so chips don't disappear when
+    # filtered). Tenant guard goes on every join so the role check only
+    # narrows ownership within the tenant.
+    by_type_base = (
         select(ContractIQClause.clause_type, sa_func.count())
         .join(ContractIQContract, ContractIQClause.contract_id == ContractIQContract.id)
-        .where(ContractIQContract.user_id == user.id if user.role.value != "admin" else True)
-        .group_by(ContractIQClause.clause_type)
+        .where(ContractIQContract.tenant_id == tid)
     )
+    if user.role.value != "admin":
+        by_type_base = by_type_base.where(ContractIQContract.user_id == user.id)
+    by_type_q = await db.execute(by_type_base.group_by(ContractIQClause.clause_type))
     by_type = {(t.value if hasattr(t, "value") else str(t)): int(c) for t, c in by_type_q.all()}
-    by_risk_q = await db.execute(
+
+    by_risk_base = (
         select(ContractIQClause.risk_level, sa_func.count())
         .join(ContractIQContract, ContractIQClause.contract_id == ContractIQContract.id)
-        .where(ContractIQContract.user_id == user.id if user.role.value != "admin" else True)
-        .group_by(ContractIQClause.risk_level)
+        .where(ContractIQContract.tenant_id == tid)
     )
+    if user.role.value != "admin":
+        by_risk_base = by_risk_base.where(ContractIQContract.user_id == user.id)
+    by_risk_q = await db.execute(by_risk_base.group_by(ContractIQClause.risk_level))
     by_risk = {(r.value if hasattr(r, "value") else str(r)): int(c) for r, c in by_risk_q.all()}
 
     return success({
@@ -1345,9 +1379,13 @@ async def clause_gaps(
     """Missing-clauses gap analysis."""
     from sqlalchemy import func as sa_func
 
+    tid = tenant_id_for(user)
     # Standard set: every type the portfolio has ever produced (excluding 'other')
-    type_q = select(ContractIQClause.clause_type).distinct().join(
-        ContractIQContract, ContractIQClause.contract_id == ContractIQContract.id
+    type_q = (
+        select(ContractIQClause.clause_type)
+        .distinct()
+        .join(ContractIQContract, ContractIQClause.contract_id == ContractIQContract.id)
+        .where(ContractIQContract.tenant_id == tid)
     )
     if user.role.value != "admin":
         type_q = type_q.where(ContractIQContract.user_id == user.id)
@@ -1357,8 +1395,12 @@ async def clause_gaps(
     ]
     standard = sorted([t for t in seen_types if t and t != "other"])
 
-    # Per-contract presence map
-    contracts_q = select(ContractIQContract).where(ContractIQContract.status != ContractStatus.UPLOADED)
+    # Per-contract presence map — tenant filter is unconditional.
+    contracts_q = (
+        select(ContractIQContract)
+        .where(ContractIQContract.status != ContractStatus.UPLOADED)
+        .where(ContractIQContract.tenant_id == tid)
+    )
     if user.role.value != "admin":
         contracts_q = contracts_q.where(ContractIQContract.user_id == user.id)
     contracts = (await db.execute(contracts_q.order_by(ContractIQContract.created_at.desc()).limit(200))).scalars().all()

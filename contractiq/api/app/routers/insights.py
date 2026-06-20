@@ -30,7 +30,7 @@ from tenacity import (
 
 from app.core.deps import get_db
 from app.core.responses import error, success
-from app.routers.auth import get_contractiq_user
+from app.routers.auth import get_contractiq_user, tenant_id_for
 
 from app.models.contractiq_models import (
     ContractIQUser,
@@ -359,6 +359,7 @@ async def generate_briefing(
 
     row = ContractIQBriefing(
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         for_date=today,
         status=InsightStatus.RUNNING.value,
     )
@@ -415,7 +416,7 @@ async def get_today_briefing(
         await db.execute(
             select(ContractIQBriefing)
             .where(
-                ContractIQBriefing.user_id == user.id,
+                ContractIQBriefing.tenant_id == tenant_id_for(user),
                 ContractIQBriefing.for_date >= today,
             )
             .order_by(ContractIQBriefing.created_at.desc())
@@ -435,7 +436,7 @@ async def list_briefings(
         (
             await db.execute(
                 select(ContractIQBriefing)
-                .where(ContractIQBriefing.user_id == user.id)
+                .where(ContractIQBriefing.tenant_id == tenant_id_for(user))
                 .order_by(ContractIQBriefing.created_at.desc())
                 .limit(limit)
             )
@@ -533,6 +534,7 @@ async def generate_renewal_packet(
 
     row = ContractIQRenewalPacket(
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         contract_id=contract_id,
         status=InsightStatus.RUNNING.value,
         days_to_expiry=days_to_expiry,
@@ -581,7 +583,7 @@ async def list_renewal_packets(
         (
             await db.execute(
                 select(ContractIQRenewalPacket)
-                .where(ContractIQRenewalPacket.user_id == user.id)
+                .where(ContractIQRenewalPacket.tenant_id == tenant_id_for(user))
                 .order_by(ContractIQRenewalPacket.created_at.desc())
                 .limit(50)
             )
@@ -602,7 +604,7 @@ async def get_renewal_packet(
         await db.execute(
             select(ContractIQRenewalPacket).where(
                 ContractIQRenewalPacket.id == packet_id,
-                ContractIQRenewalPacket.user_id == user.id,
+                ContractIQRenewalPacket.tenant_id == tenant_id_for(user),
             )
         )
     ).scalar_one_or_none()
@@ -718,6 +720,7 @@ async def run_fm_scan(
                 pass
         row = ContractIQFMNotice(
             user_id=user.id,
+            tenant_id=tenant_id_for(user),
             contract_id=cid,
             trigger_type=(n.get("trigger_type") or "regulation")[:100],
             trigger_description=n.get("trigger_description", ""),
@@ -752,7 +755,7 @@ async def list_fm_notices(
         (
             await db.execute(
                 select(ContractIQFMNotice)
-                .where(ContractIQFMNotice.user_id == user.id)
+                .where(ContractIQFMNotice.tenant_id == tenant_id_for(user))
                 .order_by(ContractIQFMNotice.created_at.desc())
                 .limit(50)
             )
@@ -775,7 +778,7 @@ async def review_fm_notice(
         await db.execute(
             select(ContractIQFMNotice).where(
                 ContractIQFMNotice.id == notice_id,
-                ContractIQFMNotice.user_id == user.id,
+                ContractIQFMNotice.tenant_id == tenant_id_for(user),
             )
         )
     ).scalar_one_or_none()
@@ -850,6 +853,7 @@ async def reconcile_invoice(
 
     row = ContractIQReconciliation(
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         contract_id=cid,
         invoice_filename=filename,
         invoice_period=invoice_period,
@@ -902,7 +906,7 @@ async def list_reconciliations(
         (
             await db.execute(
                 select(ContractIQReconciliation)
-                .where(ContractIQReconciliation.user_id == user.id)
+                .where(ContractIQReconciliation.tenant_id == tenant_id_for(user))
                 .order_by(ContractIQReconciliation.created_at.desc())
                 .limit(50)
             )
@@ -944,7 +948,7 @@ async def list_families(
         (
             await db.execute(
                 select(ContractIQContractFamily)
-                .where(ContractIQContractFamily.user_id == user.id)
+                .where(ContractIQContractFamily.tenant_id == tenant_id_for(user))
                 .order_by(ContractIQContractFamily.updated_at.desc())
             )
         )
@@ -968,6 +972,7 @@ async def create_family(
 
     row = ContractIQContractFamily(
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         family_name=family_name[:500],
         description=body.get("description"),
         master_contract_id=uuid.UUID(master_id) if master_id else None,
@@ -990,7 +995,7 @@ async def update_family(
         await db.execute(
             select(ContractIQContractFamily).where(
                 ContractIQContractFamily.id == family_id,
-                ContractIQContractFamily.user_id == user.id,
+                ContractIQContractFamily.tenant_id == tenant_id_for(user),
             )
         )
     ).scalar_one_or_none()
@@ -1023,7 +1028,7 @@ async def delete_family(
         await db.execute(
             select(ContractIQContractFamily).where(
                 ContractIQContractFamily.id == family_id,
-                ContractIQContractFamily.user_id == user.id,
+                ContractIQContractFamily.tenant_id == tenant_id_for(user),
             )
         )
     ).scalar_one_or_none()
@@ -1150,6 +1155,7 @@ async def scan_clause_anomalies(
             continue
         row = ContractIQClauseAnomaly(
             user_id=user.id,
+            tenant_id=tenant_id_for(user),
             clause_id=clause_id,
             contract_id=contract_id,
             anomaly_score=float(a.get("anomaly_score", 0.0)),
@@ -1186,7 +1192,7 @@ async def list_anomalies(
             await db.execute(
                 select(ContractIQClauseAnomaly)
                 .where(
-                    ContractIQClauseAnomaly.user_id == user.id,
+                    ContractIQClauseAnomaly.tenant_id == tenant_id_for(user),
                     ContractIQClauseAnomaly.is_dismissed.is_(False),
                 )
                 .order_by(ContractIQClauseAnomaly.anomaly_score.desc())
@@ -1209,7 +1215,7 @@ async def dismiss_anomaly(
         await db.execute(
             select(ContractIQClauseAnomaly).where(
                 ContractIQClauseAnomaly.id == anomaly_id,
-                ContractIQClauseAnomaly.user_id == user.id,
+                ContractIQClauseAnomaly.tenant_id == tenant_id_for(user),
             )
         )
     ).scalar_one_or_none()
@@ -1269,6 +1275,7 @@ async def run_version_diff(
 
     row = ContractIQVersionDiff(
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         base_contract_id=base_id,
         new_contract_id=new_id,
         status=InsightStatus.RUNNING.value,
@@ -1310,7 +1317,7 @@ async def list_version_diffs(
         (
             await db.execute(
                 select(ContractIQVersionDiff)
-                .where(ContractIQVersionDiff.user_id == user.id)
+                .where(ContractIQVersionDiff.tenant_id == tenant_id_for(user))
                 .order_by(ContractIQVersionDiff.created_at.desc())
                 .limit(50)
             )
@@ -1376,6 +1383,7 @@ async def run_stress_test(
 
     row = ContractIQStressTest(
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         contract_id=contract_id,
         scope=scope,
         name=name[:500],
@@ -1432,7 +1440,7 @@ async def list_stress_tests(
         (
             await db.execute(
                 select(ContractIQStressTest)
-                .where(ContractIQStressTest.user_id == user.id)
+                .where(ContractIQStressTest.tenant_id == tenant_id_for(user))
                 .order_by(ContractIQStressTest.created_at.desc())
                 .limit(50)
             )
@@ -1453,7 +1461,7 @@ async def get_stress_test(
         await db.execute(
             select(ContractIQStressTest).where(
                 ContractIQStressTest.id == test_id,
-                ContractIQStressTest.user_id == user.id,
+                ContractIQStressTest.tenant_id == tenant_id_for(user),
             )
         )
     ).scalar_one_or_none()
@@ -1511,6 +1519,7 @@ async def recommend_hedges(
     risk_tolerance = body.get("risk_tolerance", "medium")
     row = ContractIQHedgeRecommendation(
         user_id=user.id,
+        tenant_id=tenant_id_for(user),
         contract_id=contract_id,
         status=InsightStatus.RUNNING.value,
     )
@@ -1559,7 +1568,7 @@ async def list_hedge_recommendations(
         (
             await db.execute(
                 select(ContractIQHedgeRecommendation)
-                .where(ContractIQHedgeRecommendation.user_id == user.id)
+                .where(ContractIQHedgeRecommendation.tenant_id == tenant_id_for(user))
                 .order_by(ContractIQHedgeRecommendation.created_at.desc())
                 .limit(50)
             )
@@ -1642,7 +1651,7 @@ async def get_overview(
                 select(sqlfunc.count())
                 .select_from(ContractIQBriefing)
                 .where(
-                    ContractIQBriefing.user_id == user.id,
+                    ContractIQBriefing.tenant_id == tenant_id_for(user),
                     ContractIQBriefing.for_date >= today,
                 )
             )
@@ -1666,7 +1675,7 @@ async def get_overview(
                 select(sqlfunc.count())
                 .select_from(ContractIQFMNotice)
                 .where(
-                    ContractIQFMNotice.user_id == user.id,
+                    ContractIQFMNotice.tenant_id == tenant_id_for(user),
                     ContractIQFMNotice.status == "awaiting_review",
                 )
             )
@@ -1676,7 +1685,7 @@ async def get_overview(
             await db.execute(
                 select(sqlfunc.count())
                 .select_from(ContractIQReconciliation)
-                .where(ContractIQReconciliation.user_id == user.id)
+                .where(ContractIQReconciliation.tenant_id == tenant_id_for(user))
             )
         ).scalar()
         or 0,
@@ -1684,7 +1693,7 @@ async def get_overview(
             await db.execute(
                 select(sqlfunc.count())
                 .select_from(ContractIQContractFamily)
-                .where(ContractIQContractFamily.user_id == user.id)
+                .where(ContractIQContractFamily.tenant_id == tenant_id_for(user))
             )
         ).scalar()
         or 0,
@@ -1693,7 +1702,7 @@ async def get_overview(
                 select(sqlfunc.count())
                 .select_from(ContractIQClauseAnomaly)
                 .where(
-                    ContractIQClauseAnomaly.user_id == user.id,
+                    ContractIQClauseAnomaly.tenant_id == tenant_id_for(user),
                     ContractIQClauseAnomaly.is_dismissed.is_(False),
                 )
             )
@@ -1703,7 +1712,7 @@ async def get_overview(
             await db.execute(
                 select(sqlfunc.count())
                 .select_from(ContractIQVersionDiff)
-                .where(ContractIQVersionDiff.user_id == user.id)
+                .where(ContractIQVersionDiff.tenant_id == tenant_id_for(user))
             )
         ).scalar()
         or 0,
@@ -1711,7 +1720,7 @@ async def get_overview(
             await db.execute(
                 select(sqlfunc.count())
                 .select_from(ContractIQStressTest)
-                .where(ContractIQStressTest.user_id == user.id)
+                .where(ContractIQStressTest.tenant_id == tenant_id_for(user))
             )
         ).scalar()
         or 0,
@@ -1719,7 +1728,7 @@ async def get_overview(
             await db.execute(
                 select(sqlfunc.count())
                 .select_from(ContractIQHedgeRecommendation)
-                .where(ContractIQHedgeRecommendation.user_id == user.id)
+                .where(ContractIQHedgeRecommendation.tenant_id == tenant_id_for(user))
             )
         ).scalar()
         or 0,
@@ -1727,7 +1736,7 @@ async def get_overview(
             await db.execute(
                 select(sqlfunc.count())
                 .select_from(ContractIQCreditRisk)
-                .where(ContractIQCreditRisk.user_id == user.id)
+                .where(ContractIQCreditRisk.tenant_id == tenant_id_for(user))
             )
         ).scalar()
         or 0,
@@ -1796,7 +1805,7 @@ async def list_credit_risks(
     """List all credit risk assessments for this user."""
     result = await db.execute(
         select(ContractIQCreditRisk)
-        .where(ContractIQCreditRisk.user_id == user.id)
+        .where(ContractIQCreditRisk.tenant_id == tenant_id_for(user))
         .order_by(ContractIQCreditRisk.assessed_at.desc())
     )
     rows = result.scalars().all()
@@ -1833,7 +1842,7 @@ async def get_portfolio_credit_summary(
         result = await db.execute(
             select(ContractIQCreditRisk)
             .where(
-                ContractIQCreditRisk.user_id == user.id,
+                ContractIQCreditRisk.tenant_id == tenant_id_for(user),
                 ContractIQCreditRisk.counterparty_name == name,
                 ContractIQCreditRisk.status == InsightStatus.COMPLETED.value,
             )
@@ -1887,7 +1896,7 @@ async def assess_credit_risk(
     existing = (
         await db.execute(
             select(ContractIQCreditRisk).where(
-                ContractIQCreditRisk.user_id == user.id,
+                ContractIQCreditRisk.tenant_id == tenant_id_for(user),
                 ContractIQCreditRisk.counterparty_name == counterparty_name,
                 ContractIQCreditRisk.status != InsightStatus.FAILED.value,
             )
@@ -1901,6 +1910,7 @@ async def assess_credit_risk(
     else:
         row = ContractIQCreditRisk(
             user_id=user.id,
+            tenant_id=tenant_id_for(user),
             counterparty_name=counterparty_name,
             status=InsightStatus.RUNNING.value,
         )
@@ -2034,7 +2044,7 @@ async def assess_all_counterparties(
         recent = await db.execute(
             select(ContractIQCreditRisk)
             .where(
-                ContractIQCreditRisk.user_id == user.id,
+                ContractIQCreditRisk.tenant_id == tenant_id_for(user),
                 ContractIQCreditRisk.counterparty_name == name,
                 ContractIQCreditRisk.assessed_at
                 > datetime.now(timezone.utc) - timedelta(hours=1),
@@ -2046,6 +2056,7 @@ async def assess_all_counterparties(
 
         row = ContractIQCreditRisk(
             user_id=user.id,
+            tenant_id=tenant_id_for(user),
             counterparty_name=name,
             status=InsightStatus.RUNNING.value,
         )

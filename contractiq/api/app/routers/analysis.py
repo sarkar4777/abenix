@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.core.responses import error, success
-from app.routers.auth import get_contractiq_user
+from app.routers.auth import get_contractiq_user, tenant_id_for
 
 from app.models.contractiq_models import (
     ContractIQContract, ContractIQUser, ContractIQClause, ContractIQExtractedData, ContractIQRiskAnalysis, ContractIQComparison,
@@ -133,7 +133,11 @@ async def analyze_contract(
     agent to produce an updated risk assessment + clause re-classification,
     and persists fresh ContractIQRiskAnalysis rows + an updated risk_score.
     """
-    query = select(ContractIQContract).where(ContractIQContract.id == contract_id)
+    query = (
+        select(ContractIQContract)
+        .where(ContractIQContract.id == contract_id)
+        .where(ContractIQContract.tenant_id == tenant_id_for(user))
+    )
     if user.role.value != "admin":
         query = query.where(ContractIQContract.user_id == user.id)
     result = await db.execute(query)
@@ -228,6 +232,7 @@ async def analyze_contract(
         risk_scores.append(score)
         row = ContractIQRiskAnalysis(
             id=uuid.uuid4(),
+            tenant_id=tenant_id_for(user),
             contract_id=contract_id,
             analysis_type="deep_reanalysis",
             risk_category=str(r.get("category", "operational"))[:100],
@@ -284,7 +289,11 @@ async def compare_contracts(
         except ValueError:
             continue
 
-        query = select(ContractIQContract).where(ContractIQContract.id == uid)
+        query = (
+            select(ContractIQContract)
+            .where(ContractIQContract.id == uid)
+            .where(ContractIQContract.tenant_id == tenant_id_for(user))
+        )
         if user.role.value != "admin":
             query = query.where(ContractIQContract.user_id == user.id)
         result = await db.execute(query)

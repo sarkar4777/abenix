@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
-from app.routers.auth import get_contractiq_user
+from app.routers.auth import get_contractiq_user, tenant_id_for
 from app.models.contractiq_models import (
     ContractIQContract,
     ContractIQClause,
@@ -328,8 +328,12 @@ async def generate_endur_json(
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
+    # Tenant filter goes on the SELECT itself — admin from tenant B must never
+    # be able to load a contract from tenant A even before the user_id check.
     contract = (await db.execute(
-        select(ContractIQContract).where(ContractIQContract.id == uuid.UUID(contract_id))
+        select(ContractIQContract)
+        .where(ContractIQContract.id == uuid.UUID(contract_id))
+        .where(ContractIQContract.tenant_id == tenant_id_for(user))
     )).scalar_one_or_none()
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")

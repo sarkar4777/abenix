@@ -118,9 +118,14 @@ class ContractIQContract(UUIDMixin, Base):
     __table_args__ = (
         Index("ix_contractiq_contracts_user", "user_id"),
         Index("ix_contractiq_contracts_type", "contract_type"),
+        Index("ix_contractiq_contracts_tenant_id", "tenant_id"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
+    # Tenant scope — routers filter on this unconditionally so an admin in
+    # tenant B can never see tenant A's contracts. String(64) mirrors
+    # contractiq_users.tenant_id so equality joins do not need casts.
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     contract_type: Mapped[ContractType] = mapped_column(Enum(ContractType, name="contract_type", values_callable=lambda e: [m.value for m in e]))
     title: Mapped[str] = mapped_column(String(500))
     counterparty_a: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -237,7 +242,11 @@ class ContractIQEvent(UUIDMixin, Base):
 class ContractIQRiskAnalysis(UUIDMixin, Base):
     """Risk assessment results."""
     __tablename__ = "contractiq_risk_analyses"
+    __table_args__ = (
+        Index("ix_contractiq_risk_analyses_tenant_id", "tenant_id"),
+    )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"))
     analysis_type: Mapped[str] = mapped_column(String(50))  # single, comparison, portfolio
     risk_category: Mapped[str] = mapped_column(String(100))  # market, credit, operational, regulatory, legal, technology
@@ -267,8 +276,10 @@ class ContractIQMarketAlert(UUIDMixin, Base):
     __table_args__ = (
         Index("ix_contractiq_alerts_contract", "contract_id"),
         Index("ix_contractiq_alerts_severity", "severity"),
+        Index("ix_contractiq_market_alerts_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"))
     alert_type: Mapped[str] = mapped_column(String(100))  # price_breach, fx_risk, carbon_risk, escalation_risk, market_favorable
     severity: Mapped[str] = mapped_column(String(20))  # info, warning, critical
@@ -301,8 +312,10 @@ class ContractIQBriefing(UUIDMixin, Base):
     __tablename__ = "contractiq_briefings"
     __table_args__ = (
         Index("ix_contractiq_briefings_user_date", "user_id", "for_date"),
+        Index("ix_contractiq_briefings_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     for_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     status: Mapped[str] = mapped_column(String(20), default=InsightStatus.PENDING.value)
@@ -323,8 +336,10 @@ class ContractIQRenewalPacket(UUIDMixin, Base):
     __table_args__ = (
         Index("ix_contractiq_renewal_user", "user_id"),
         Index("ix_contractiq_renewal_contract", "contract_id"),
+        Index("ix_contractiq_renewal_packets_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(20), default=InsightStatus.PENDING.value)
@@ -347,8 +362,10 @@ class ContractIQFMNotice(UUIDMixin, Base):
     __table_args__ = (
         Index("ix_contractiq_fm_user", "user_id"),
         Index("ix_contractiq_fm_contract", "contract_id"),
+        Index("ix_contractiq_fm_notices_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"))
     trigger_type: Mapped[str] = mapped_column(String(100))  # curtailment, pipeline_outage, fx_shock, regulation, weather
@@ -371,8 +388,10 @@ class ContractIQReconciliation(UUIDMixin, Base):
     __table_args__ = (
         Index("ix_contractiq_recon_user", "user_id"),
         Index("ix_contractiq_recon_contract", "contract_id"),
+        Index("ix_contractiq_reconciliations_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="SET NULL"), nullable=True)
     invoice_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -396,8 +415,10 @@ class ContractIQContractFamily(UUIDMixin, Base):
     __tablename__ = "contractiq_contract_families"
     __table_args__ = (
         Index("ix_contractiq_family_user", "user_id"),
+        Index("ix_contractiq_contract_families_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     family_name: Mapped[str] = mapped_column(String(500))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -415,8 +436,10 @@ class ContractIQClauseAnomaly(UUIDMixin, Base):
     __table_args__ = (
         Index("ix_contractiq_anomaly_user", "user_id"),
         Index("ix_contractiq_anomaly_clause", "clause_id"),
+        Index("ix_contractiq_clause_anomalies_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     clause_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_clauses.id", ondelete="CASCADE"))
     contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"))
@@ -434,8 +457,10 @@ class ContractIQVersionDiff(UUIDMixin, Base):
     __tablename__ = "contractiq_version_diffs"
     __table_args__ = (
         Index("ix_contractiq_diff_user", "user_id"),
+        Index("ix_contractiq_version_diffs_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     base_contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"))
     new_contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"))
@@ -454,8 +479,10 @@ class ContractIQStressTest(UUIDMixin, Base):
     __tablename__ = "contractiq_stress_tests"
     __table_args__ = (
         Index("ix_contractiq_stress_user", "user_id"),
+        Index("ix_contractiq_stress_tests_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"), nullable=True)
     scope: Mapped[str] = mapped_column(String(20), default="single")  # single | portfolio
@@ -484,8 +511,10 @@ class ContractIQHedgeRecommendation(UUIDMixin, Base):
     __table_args__ = (
         Index("ix_contractiq_hedge_user", "user_id"),
         Index("ix_contractiq_hedge_contract", "contract_id"),
+        Index("ix_contractiq_hedge_recommendations_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_contracts.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(20), default=InsightStatus.PENDING.value)
@@ -519,8 +548,10 @@ class ContractIQCreditRisk(UUIDMixin, Base):
             unique=True,
             postgresql_where=text("status != 'failed'"),
         ),
+        Index("ix_contractiq_credit_risks_tenant_id", "tenant_id"),
     )
 
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contractiq_users.id"))
     counterparty_name: Mapped[str] = mapped_column(String(255))
     ticker: Mapped[str | None] = mapped_column(String(40), nullable=True)
