@@ -116,6 +116,23 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
         }
 
 
+async def _mark_started(execution_id: str) -> None:
+    """Stamp started_at when the consumer picks up the row. No-op if already set."""
+    from datetime import datetime, timezone
+    from sqlalchemy import update
+    from models.execution import Execution  # type: ignore
+
+    Session = await _get_session_factory()
+    async with Session() as db:
+        await db.execute(
+            update(Execution)
+            .where(Execution.id == uuid.UUID(execution_id))
+            .where(Execution.started_at.is_(None))
+            .values(started_at=datetime.now(timezone.utc))
+        )
+        await db.commit()
+
+
 async def _mark_done(
     execution_id: str,
     status: str,
@@ -132,7 +149,7 @@ async def _mark_done(
     duration_ms: int | None = None,
 ) -> None:
     from datetime import datetime, timezone
-    from sqlalchemy import update
+    from sqlalchemy import select, update
     from models.execution import Execution, ExecutionStatus  # type: ignore
 
     Session = await _get_session_factory()
@@ -140,11 +157,12 @@ async def _mark_done(
     target_status = (
         ExecutionStatus.COMPLETED if status == "completed" else ExecutionStatus.FAILED
     )
+    completed_at = datetime.now(timezone.utc)
     values: dict[str, Any] = {
         "status": target_status,
         "output_message": output,
         "error_message": error,
-        "completed_at": datetime.now(timezone.utc),
+        "completed_at": completed_at,
     }
     if input_tokens is not None:
         values["input_tokens"] = input_tokens
@@ -183,6 +201,25 @@ async def _mark_done(
             # Fallback: a generic code so /alerts at least groups by something.
             values["failure_code"] = "PIPELINE_NODE_FAILED"
     async with Session() as db:
+        # Backfill started_at + derive duration_ms when the runtime didn't
+        # supply one. Without this, /executions surfaces null duration_ms
+        # for every row this consumer touched.
+        row = (
+            await db.execute(
+                select(Execution.started_at, Execution.created_at).where(
+                    Execution.id == uuid.UUID(execution_id)
+                )
+            )
+        ).one_or_none()
+        if row is not None:
+            started_at, created_at = row
+            if started_at is None:
+                started_at = created_at or completed_at
+                values["started_at"] = started_at
+            if "duration_ms" not in values and started_at is not None:
+                values["duration_ms"] = int(
+                    (completed_at - started_at).total_seconds() * 1000
+                )
         await db.execute(
             update(Execution)
             .where(Execution.id == uuid.UUID(execution_id))
@@ -192,6 +229,32 @@ async def _mark_done(
 
 
 _redis_pool: Any = None
+
+
+def _emit_outcome(
+    *,
+    outcome: str,
+    failure_code: str = "",
+    agent_type: str = "agent",
+    tenant_id: str = "",
+) -> None:
+    """Forward the runtime-side terminal outcome to the same Prometheus
+    counters the API path emits to. Without this, executions that ran
+    out-of-process (Wave-2 remote runtime) never hit
+    executions_completed_total / executions_failed_total and never
+    decremented active_executions, leaving both counters dead and the
+    gauge drifting up by N for every runtime-completed run."""
+    try:
+        from app.core.failure_codes import emit_outcome_metric  # type: ignore
+
+        emit_outcome_metric(
+            outcome=outcome,
+            failure_code=failure_code,
+            agent_type=agent_type,
+            tenant_id=tenant_id,
+        )
+    except Exception as e:
+        logger.warning("consumer _emit_outcome failed: %s", e)
 
 
 async def _publish(execution_id: str, event: dict) -> None:
@@ -239,6 +302,13 @@ async def _run_one(payload: dict) -> None:
             execution_id, {"event": "error", "error": "execution row missing"}
         )
         return
+
+    # First real work on this row — stamp started_at so duration_ms can be
+    # computed at _mark_done time. No-op if the API path already stamped it.
+    try:
+        await _mark_started(execution_id)
+    except Exception as _ms_err:
+        logger.debug("consumer: _mark_started failed: %s", _ms_err)
 
     agent_name = loaded["agent_name"]
     tenant_id = loaded["tenant_id"]
@@ -396,6 +466,14 @@ async def _run_one(payload: dict) -> None:
                 node_results=serialized.get("node_results"),
                 execution_trace=serialized,
                 duration_ms=serialized.get("duration_ms"),
+            )
+            _emit_outcome(
+                outcome="SUCCESS" if pipeline_status == "completed" else "FAILED",
+                failure_code=(
+                    "" if pipeline_status == "completed" else "PIPELINE_NODE_FAILED"
+                ),
+                agent_type="pipeline",
+                tenant_id=str(tenant_id) if tenant_id else "",
             )
             _pipe_evt: dict[str, Any] = {
                 "event": "done" if pipeline_status == "completed" else "error",
@@ -614,6 +692,12 @@ async def _run_one(payload: dict) -> None:
                 execution_trace=_exec_trace,
                 duration_ms=getattr(result, "duration_ms", None) or None,
             )
+            _emit_outcome(
+                outcome="SUCCESS",
+                failure_code="",
+                agent_type="agent",
+                tenant_id=str(tenant_id) if tenant_id else "",
+            )
             _done_evt: dict[str, Any] = {
                 "event": "done",
                 "execution_id": execution_id,
@@ -634,6 +718,23 @@ async def _run_one(payload: dict) -> None:
             pass
         await _mark_done(
             execution_id, "failed", None, str(e)[:2000], trace_id=_tid_fail
+        )
+        # Classify + emit the runtime-side terminal outcome. Without this,
+        # every remote-runtime failure left active_executions stuck +1
+        # and never bumped executions_failed_total.
+        _failure_code = "UNKNOWN_ERROR"
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
+            from app.core.failure_codes import classify_exception  # type: ignore
+
+            _failure_code = classify_exception(e)
+        except Exception:
+            pass
+        _emit_outcome(
+            outcome="FAILED",
+            failure_code=_failure_code,
+            agent_type="pipeline" if is_pipeline else "agent",
+            tenant_id=str(tenant_id) if tenant_id else "",
         )
         await _publish(execution_id, {"event": "error", "error": str(e)[:2000]})
 

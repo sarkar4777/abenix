@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.3.3 — 2026-06-21
+
+### Added
+
+- **`/api/admin/alerts` endpoint.** Admin-only proxy to the Prometheus `/api/v1/alerts` endpoint that returns the active alerting state in a clean shape with counts (firing, pending, inactive) and the upstream `prometheus_url`. Closes the 404 on the alerts page promised in the dev docs.
+- **`active_executions` gauge reconciler.** New 5-minute APScheduler job in `apps/api/app/core/scheduler.py` that re-syncs `abenix_active_executions` from the DB (`SELECT tenant_id, COUNT(*) FROM executions WHERE status='RUNNING' GROUP BY tenant_id`). The gauge had been drifting upward whenever an inc/dec pair was split across a crashed worker or a swallowed exception. Sourcing the full tenant set from `SELECT DISTINCT tenant_id FROM executions` means tenants whose last RUNNING just finished get reset to 0 (necessary under prometheus multiprocess mode where `_metrics.keys()` is per-worker).
+- **`provider` label on `abenix_llm_errors_total`.** All four providers' streaming paths (Anthropic, OpenAI, Azure, Google) are now wrapped in a try/except that increments the counter with the right provider label then re-raises. The Gemini 429 RESOURCE_EXHAUSTED flood used to never count because the API call was lazy and happened after the router's try/except had already returned the generator.
+
+### Fixed
+
+- **`abenix_executions_completed_total` and `abenix_executions_failed_total` stayed at zero despite real completions.** Three-layer cascade. (1) `apps/api/app/core/failure_codes.py` was wrapped in `try/except: pass` so any failure to inc was silently swallowed. Replaced with `except Exception as e: logger.warning(...)`. (2) The agent-runtime image didn't ship `failure_codes.py` / `telemetry.py`, so every runtime-side emit raised `ImportError: No module named 'app.core.failure_codes'`. `docker/Dockerfile.agent-runtime` now COPYs both. (3) `telemetry.py` and `engine/metrics.py` were both registering `abenix_http_requests` (and others) into the default Prometheus registry, raising `ValueError: Duplicated timeseries` on the second import. Every metric in `telemetry.py` now goes through `_safe_counter` / `_safe_gauge` / `_safe_histogram` helpers that catch the duplicate registration and return the existing collector instead. The three fixes together produce real counter ticks (`executions_completed_total{status="success"} 4.0` on the runtime pod immediately after a probe firing two executions, zero import / duplicate-timeseries warnings).
+- **`emit_outcome_metric` call-site audit.** Several terminal paths in `apps/api/app/routers/agents.py` (streaming agent outer exception, pipeline exception, moderation block) never called `emit_outcome_metric` at all. All terminal transitions now emit with `tenant_id` threaded through so the gauge dec lands.
+- **Prometheus rules silently never loaded.** `infra/helm/abenix/templates/prometheus-rules.yaml` and `scaling-alerts.yaml` shipped as `monitoring.coreos.com/v1 PrometheusRule` CRDs that needed the Prometheus Operator. The cluster runs a plain single-binary Prometheus so both files were silently ignored and every alert (`HighErrorRate`, `HighLatency`, `ExecutionFailureRate`, `PostgresDown`, `RedisDown`, plus 4 scaling alerts) was a no-op. Both converted to regular ConfigMaps (`abenix-alerts`, `abenix-scaling-alerts`). `infra/observability/prometheus.yaml` gains `rule_files: [/etc/prometheus/rules/*.yml]` and mounts both ConfigMaps at `/etc/prometheus/rules`. `values-azure.yaml` flips `monitoring.prometheusRules.enabled` and `scaling.alerts.enabled` to true.
+- **Stale-execution sweeper TTL 30 -> 10 minutes.** Stuck UI spinners now turn into FAILED toasts within minutes instead of half an hour. `apps/web/public/dev-docs/02-runtime/09-state-machines.md` aligned with the code (5-minute sweep interval, 10-minute TTL, failure_code `STALE_SWEEP`).
+- **`started_at` + `duration_ms`.** Both were null on completed and failed runs because the transition only set `completed_at`. Now set `started_at` on the first RUNNING update and compute `duration_ms = (completed_at - started_at).total_seconds() * 1000` at the terminal transition. UI duration column now renders.
+
 ## v2.3.2 — 2026-06-21
 
 ### Added

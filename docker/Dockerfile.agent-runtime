@@ -22,6 +22,13 @@ RUN mkdir -p ./apps/api/app/core
 COPY apps/api/app/__init__.py ./apps/api/app/__init__.py
 COPY apps/api/app/core/__init__.py ./apps/api/app/core/__init__.py
 COPY apps/api/app/core/execution_state.py ./apps/api/app/core/execution_state.py
+# Runtime-side emit_outcome_metric path needs failure_codes.py to be
+# importable. Without this the agent-runtime pod fails the import and
+# every executions_completed_total / executions_failed_total bump from
+# the runtime side is silently dropped, leaving the dashboard panels
+# with HELP/TYPE lines and zero samples.
+COPY apps/api/app/core/failure_codes.py ./apps/api/app/core/failure_codes.py
+COPY apps/api/app/core/telemetry.py ./apps/api/app/core/telemetry.py
 # Standalone-app code assets — the code_asset tool unpacks and executes
 # the agentforge.yaml + main.py bundles inside the runtime container.
 # Without these copies, agents that invoke code_asset(name='contractiq-risk-quant')

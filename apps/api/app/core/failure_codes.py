@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 # Order matters — first match wins. Regexes are case-insensitive on the
 # exception's message + class name combined.
@@ -64,9 +67,12 @@ def emit_outcome_metric(
     agent_type: str = "agent",
     tenant_id: str = "",
 ) -> None:
+    # Counter inc and gauge dec are split into independent try blocks so a
+    # failure in one never silently nukes the other. Earlier the whole
+    # thing was wrapped in `try/except: pass`, which is what put both
+    # counters at zero for weeks.
     try:
         from app.core.telemetry import (
-            active_executions,
             execution_outcomes_total,
             executions_completed_total,
             executions_failed_total,
@@ -81,13 +87,16 @@ def emit_outcome_metric(
         executions_completed_total.labels(status=status_label).inc()
         if outcome != "SUCCESS":
             executions_failed_total.labels(failure_code=failure_code or "UNKNOWN").inc()
-        if tenant_id:
-            try:
-                active_executions.labels(tenant_id=tenant_id).dec()
-            except Exception:
-                pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("emit_outcome_metric counter inc failed: %s", e)
+
+    if tenant_id:
+        try:
+            from app.core.telemetry import active_executions
+
+            active_executions.labels(tenant_id=tenant_id).dec()
+        except Exception as e:
+            logger.warning("emit_outcome_metric active_executions.dec failed: %s", e)
 
 
 def emit_started_metric(agent_type: str = "agent") -> None:
@@ -95,5 +104,5 @@ def emit_started_metric(agent_type: str = "agent") -> None:
         from app.core.telemetry import executions_started_total
 
         executions_started_total.labels(agent_type=agent_type).inc()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("emit_started_metric failed: %s", e)

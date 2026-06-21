@@ -55,13 +55,14 @@ def test_llm_request_duration_observes():
 
 
 def test_llm_errors_counter():
-    before = _sample_value(
-        "abenix_llm_errors", {"model": "test-model", "error_type": "TimeoutError"}
-    )
-    llm_errors_total.labels(model="test-model", error_type="TimeoutError").inc()
-    after = _sample_value(
-        "abenix_llm_errors", {"model": "test-model", "error_type": "TimeoutError"}
-    )
+    labels = {
+        "model": "test-model",
+        "error_type": "TimeoutError",
+        "provider": "anthropic",
+    }
+    before = _sample_value("abenix_llm_errors", labels)
+    llm_errors_total.labels(**labels).inc()
+    after = _sample_value("abenix_llm_errors", labels)
     assert after - before == 1
 
 

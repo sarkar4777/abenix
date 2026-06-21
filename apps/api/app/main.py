@@ -353,9 +353,11 @@ app.include_router(approvals_router.router)
 app.include_router(admin_dlq_router.router)
 
 from app.routers import search as search_router, admin_cluster as admin_cluster_router
+from app.routers import admin_alerts as admin_alerts_router
 
 app.include_router(search_router.router)
 app.include_router(admin_cluster_router.router)
+app.include_router(admin_alerts_router.router)
 
 # ContractIQ has been extracted to /contractiq/ as a standalone application.
 # It uses the Abenix SDK for AI features via the actAs delegation pattern.

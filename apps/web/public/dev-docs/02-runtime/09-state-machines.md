@@ -34,9 +34,9 @@ Three paths.
 
 1. **Normal completion** — runtime finishes the ReAct loop, writes `output_message`, marks status. Most executions.
 2. **Failure with code** — runtime catches the exception, maps it to a `failure_code`, marks status `failed`. The runtime tries hard to attribute every failure to a stable, queryable code (see below).
-3. **Stuck-running sweep** — every 60s, a Celery beat job (`worker.tasks.sweepers.expire_running_executions`) looks for `running` rows older than `RUNNING_EXECUTION_TTL` (default 1800s). It marks them `failed` with `failure_code = 'sweeper_stuck'`. This catches the rare case where a runtime pod crashed mid-execution before NATS redelivered.
+3. **Stuck-running sweep** — every 5min, an APScheduler job (`app.core.scheduler.sweep_stale_executions`) looks for `running` rows older than `STALE_EXECUTION_MAX_MINUTES` (default 10). It marks them `failed` with `failure_code = 'STALE_SWEEP'`. This catches the rare case where a runtime pod crashed mid-execution before NATS redelivered.
 
-Without the sweeper, a pod death between "started" and "wrote terminal status" would leave executions running forever. With it, the maximum visible "running" age is `running_ttl + sweeper_interval ≈ 30min`.
+Without the sweeper, a pod death between "started" and "wrote terminal status" would leave executions running forever. With it, the maximum visible "running" age is `stale_max + sweeper_interval ≈ 15min`.
 
 ### Failure code taxonomy
 
@@ -54,7 +54,7 @@ Without the sweeper, a pod death between "started" and "wrote terminal status" w
 | `sandbox_violation` | runtime | a tool tried to escape the sandbox (network domain not whitelisted) |
 | `cancelled_by_user` | API | explicit cancel |
 | `cancelled_by_quota` | API | tenant exceeded daily execution cap mid-run |
-| `sweeper_stuck` | beat | sweeper rescued a row stuck in running |
+| `STALE_SWEEP` | beat | sweeper rescued a row stuck in running |
 | `agent_not_found` | API | slug typo at submission time |
 | `permission_denied` | API | RBAC check failed at submission |
 | `internal_error` | anywhere | uncategorised — should be rare. Investigate every occurrence. |
@@ -279,7 +279,7 @@ No. Re-approve by creating a new approval row. The old row stays as audit.
 It produced output, some nodes failed but `on_error: continue` was set. Check `node_errors`. Probably you want to alert on this.
 
 **Q: An execution has been `running` for 6 hours. What now?**
-Either the agent is genuinely doing something (rare — most agents are sub-minute), or a runtime pod died and the sweeper hasn't caught up yet. If `started_at` is in the last 30 minutes, wait. If older, the sweeper is misbehaving — investigate.
+Either the agent is genuinely doing something (rare — most agents are sub-minute), or a runtime pod died and the sweeper hasn't caught up yet. If `started_at` is in the last 15 minutes, wait. If older, the sweeper is misbehaving — investigate.
 
 **Q: Two clients sent the same `client_token` simultaneously. Which wins?**
 The first INSERT wins (Postgres serialises). The second sees the existing pending row and returns the same execution_id. Both clients end up watching the same SSE stream.

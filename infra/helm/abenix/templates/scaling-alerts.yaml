@@ -1,9 +1,13 @@
 {{- /*
 Scaling alert rules — P1–P4 (see SCALING_PLAN.md §7 alerting).
 
-Writes a PrometheusRule so existing Prometheus picks them up without a
-scrape-config change. Conditional on scaling.alerts.enabled so local
-dev stays noise-free.
+Packaged as a regular ConfigMap (not a PrometheusRule CRD) because the
+Abenix cluster runs the thin single-binary Prometheus deployed by
+infra/observability/prometheus.yaml — no prometheus-operator on this
+cluster, so CRD-form rules would silently never load.
+
+Mounted at /etc/prometheus/rules/ and picked up via rule_files: in
+prometheus.yml.
 
 Action semantics:
   P1 — customer-visible outage. Page on-call.
@@ -17,75 +21,76 @@ Action semantics:
 {{- $alertsEnabled := true }}
 {{- if hasKey $alerts "enabled" }}{{- $alertsEnabled = $alerts.enabled }}{{- end }}
 {{- if and .Values.scaling.enabled $alertsEnabled }}
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
+apiVersion: v1
+kind: ConfigMap
 metadata:
   name: {{ .Release.Name }}-scaling-alerts
   namespace: {{ .Release.Namespace }}
   labels:
     release: {{ .Release.Name }}
     abenix.io/rulegroup: scaling
-spec:
-  groups:
-    - name: abenix.scaling.p1
-      interval: 30s
-      rules:
-        - alert: Abenix_Http5xxRate
-          expr: |
-            (
-              sum(rate(abenix_http_requests_total{status=~"5.."}[5m]))
-              /
-              sum(rate(abenix_http_requests_total[5m]))
-            ) > 0.01
-          for: 5m
-          labels: { severity: p1, tier: customer_visible }
-          annotations:
-            summary: "5xx rate > 1% for 5m"
-            runbook: "https://docs/abenix/runbooks/http-5xx"
+data:
+  scaling-alerts.yml: |
+    groups:
+      - name: abenix.scaling.p1
+        interval: 30s
+        rules:
+          - alert: Abenix_Http5xxRate
+            expr: |
+              (
+                sum(rate(abenix_http_requests_total{status=~"5.."}[5m]))
+                /
+                sum(rate(abenix_http_requests_total[5m]))
+              ) > 0.01
+            for: 5m
+            labels: { severity: p1, tier: customer_visible }
+            annotations:
+              summary: "5xx rate > 1% for 5m"
+              runbook: "https://docs/abenix/runbooks/http-5xx"
 
-    - name: abenix.scaling.p2
-      interval: 30s
-      rules:
-        - alert: Abenix_P95LatencyHigh
-          expr: |
-            histogram_quantile(
-              0.95,
-              sum by (le, pool) (rate(abenix_execution_duration_seconds_bucket[10m]))
-            ) > 3 * (
+      - name: abenix.scaling.p2
+        interval: 30s
+        rules:
+          - alert: Abenix_P95LatencyHigh
+            expr: |
               histogram_quantile(
                 0.95,
-                sum by (le, pool) (rate(abenix_execution_duration_seconds_bucket[6h] offset 6h))
+                sum by (le, pool) (rate(abenix_execution_duration_seconds_bucket[10m]))
+              ) > 3 * (
+                histogram_quantile(
+                  0.95,
+                  sum by (le, pool) (rate(abenix_execution_duration_seconds_bucket[6h] offset 6h))
+                )
               )
-            )
-          for: 10m
-          labels: { severity: p2, tier: degraded_ux }
-          annotations:
-            summary: "p95 latency on pool {{`{{ $labels.pool }}`}} is 3× baseline"
+            for: 10m
+            labels: { severity: p2, tier: degraded_ux }
+            annotations:
+              summary: "p95 latency on pool {{`{{ $labels.pool }}`}} is 3× baseline"
 
-    - name: abenix.scaling.p3
-      interval: 30s
-      rules:
-        - alert: Abenix_PoolNearMax
-          expr: |
-            max by (pool) (keda_scaler_metrics_value{scaledObject=~".*agent-runtime.*"})
-            >= 0.80 * max by (pool) (kube_deployment_spec_replicas{deployment=~".*agent-runtime.*"})
-          for: 15m
-          labels: { severity: p3, tier: capacity }
-          annotations:
-            summary: "Pool {{`{{ $labels.pool }}`}} at ≥ 80% of maxReplicas for 15m"
-            action: "Consider raising max_replicas in /admin/scaling"
+      - name: abenix.scaling.p3
+        interval: 30s
+        rules:
+          - alert: Abenix_PoolNearMax
+            expr: |
+              max by (pool) (keda_scaler_metrics_value{scaledObject=~".*agent-runtime.*"})
+              >= 0.80 * max by (pool) (kube_deployment_spec_replicas{deployment=~".*agent-runtime.*"})
+            for: 15m
+            labels: { severity: p3, tier: capacity }
+            annotations:
+              summary: "Pool {{`{{ $labels.pool }}`}} at ≥ 80% of maxReplicas for 15m"
+              action: "Consider raising max_replicas in /admin/scaling"
 
-    - name: abenix.scaling.p4
-      interval: 60s
-      rules:
-        - alert: Abenix_TenantBudgetBreach
-          expr: |
-            (sum by (tenant_id) (rate(abenix_llm_cost_usd_total[1h])) * 3600)
-            > on(tenant_id) group_left()
-            max by (tenant_id) (abenix_tenant_daily_budget_usd)
-          for: 1m
-          labels: { severity: p4, tier: budget }
-          annotations:
-            summary: "Tenant {{`{{ $labels.tenant_id }}`}} hourly spend > daily budget"
-            action: "Auto-pause triggered via webhook; review /admin/scaling"
+      - name: abenix.scaling.p4
+        interval: 60s
+        rules:
+          - alert: Abenix_TenantBudgetBreach
+            expr: |
+              (sum by (tenant_id) (rate(abenix_llm_cost_usd_total[1h])) * 3600)
+              > on(tenant_id) group_left()
+              max by (tenant_id) (abenix_tenant_daily_budget_usd)
+            for: 1m
+            labels: { severity: p4, tier: budget }
+            annotations:
+              summary: "Tenant {{`{{ $labels.tenant_id }}`}} hourly spend > daily budget"
+              action: "Auto-pause triggered via webhook; review /admin/scaling"
 {{- end }}

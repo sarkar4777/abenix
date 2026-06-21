@@ -577,39 +577,55 @@ class AnthropicProvider(LLMProvider):
         current_tool: dict[str, Any] | None = None
         tool_json_buf = ""
 
-        async with self.client.messages.stream(**kwargs) as stream:
-            async for event in stream:
-                if event.type == "message_start":
-                    input_tokens = event.message.usage.input_tokens
-                elif event.type == "content_block_start":
-                    if event.content_block.type == "tool_use":
-                        current_tool = {
-                            "id": event.content_block.id,
-                            "name": event.content_block.name,
-                        }
-                        tool_json_buf = ""
-                elif event.type == "content_block_delta":
-                    if event.delta.type == "text_delta":
-                        yield StreamEvent(event="token", data=event.delta.text)
-                    elif event.delta.type == "input_json_delta":
-                        tool_json_buf += event.delta.partial_json
-                elif event.type == "content_block_stop":
-                    if current_tool:
-                        import json
+        # Stream exceptions surface during iteration, NOT when the router
+        # awaits provider.complete(). Catch them here so the outer counter
+        # actually sees Anthropic 429/5xx/timeouts.
+        try:
+            async with self.client.messages.stream(**kwargs) as stream:
+                async for event in stream:
+                    if event.type == "message_start":
+                        input_tokens = event.message.usage.input_tokens
+                    elif event.type == "content_block_start":
+                        if event.content_block.type == "tool_use":
+                            current_tool = {
+                                "id": event.content_block.id,
+                                "name": event.content_block.name,
+                            }
+                            tool_json_buf = ""
+                    elif event.type == "content_block_delta":
+                        if event.delta.type == "text_delta":
+                            yield StreamEvent(event="token", data=event.delta.text)
+                        elif event.delta.type == "input_json_delta":
+                            tool_json_buf += event.delta.partial_json
+                    elif event.type == "content_block_stop":
+                        if current_tool:
+                            import json
 
-                        try:
-                            args = json.loads(tool_json_buf) if tool_json_buf else {}
-                        except json.JSONDecodeError:
-                            args = {}
-                        current_tool["arguments"] = args
-                        tool_calls.append(current_tool)
-                        yield StreamEvent(
-                            event="tool_call",
-                            data={"name": current_tool["name"], "arguments": args},
-                        )
-                        current_tool = None
-                elif event.type == "message_delta":
-                    output_tokens = event.usage.output_tokens
+                            try:
+                                args = (
+                                    json.loads(tool_json_buf) if tool_json_buf else {}
+                                )
+                            except json.JSONDecodeError:
+                                args = {}
+                            current_tool["arguments"] = args
+                            tool_calls.append(current_tool)
+                            yield StreamEvent(
+                                event="tool_call",
+                                data={
+                                    "name": current_tool["name"],
+                                    "arguments": args,
+                                },
+                            )
+                            current_tool = None
+                    elif event.type == "message_delta":
+                        output_tokens = event.usage.output_tokens
+        except Exception as e:
+            llm_errors_total.labels(
+                model=model,
+                error_type=type(e).__name__,
+                provider="anthropic",
+            ).inc()
+            raise
 
         latency = int((time.monotonic() - start) * 1000)
         cost = _calc_cost(model, input_tokens, output_tokens)
@@ -702,37 +718,51 @@ class OpenAIProvider(LLMProvider):
         start = time.monotonic()
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
-        resp = await self.client.chat.completions.create(**kwargs)
 
         input_tokens = 0
         output_tokens = 0
         tool_calls_buf: dict[int, dict[str, Any]] = {}
 
-        async for chunk in resp:
-            if chunk.usage:
-                input_tokens = chunk.usage.prompt_tokens
-                output_tokens = chunk.usage.completion_tokens
-            if not chunk.choices:
-                continue
+        # OpenAI/Azure raise on the initial `create` for 401/429/5xx and
+        # during chunk iteration for mid-stream drops — wrap both.
+        provider_label = "azure" if model.startswith("azure-") else "openai"
+        try:
+            resp = await self.client.chat.completions.create(**kwargs)
 
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield StreamEvent(event="token", data=delta.content)
-            if delta.tool_calls:
-                for tc in delta.tool_calls:
-                    idx = tc.index
-                    if idx not in tool_calls_buf:
-                        tool_calls_buf[idx] = {
-                            "id": tc.id or "",
-                            "name": (
-                                tc.function.name
-                                if tc.function and tc.function.name
-                                else ""
-                            ),
-                            "arguments_str": "",
-                        }
-                    if tc.function and tc.function.arguments:
-                        tool_calls_buf[idx]["arguments_str"] += tc.function.arguments
+            async for chunk in resp:
+                if chunk.usage:
+                    input_tokens = chunk.usage.prompt_tokens
+                    output_tokens = chunk.usage.completion_tokens
+                if not chunk.choices:
+                    continue
+
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    yield StreamEvent(event="token", data=delta.content)
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_calls_buf:
+                            tool_calls_buf[idx] = {
+                                "id": tc.id or "",
+                                "name": (
+                                    tc.function.name
+                                    if tc.function and tc.function.name
+                                    else ""
+                                ),
+                                "arguments_str": "",
+                            }
+                        if tc.function and tc.function.arguments:
+                            tool_calls_buf[idx][
+                                "arguments_str"
+                            ] += tc.function.arguments
+        except Exception as e:
+            llm_errors_total.labels(
+                model=model,
+                error_type=type(e).__name__,
+                provider=provider_label,
+            ).inc()
+            raise
 
         tool_calls: list[dict[str, Any]] = []
         for buf in tool_calls_buf.values():
@@ -921,45 +951,58 @@ class GoogleProvider(LLMProvider):
         config: google_types.GenerateContentConfig,
     ) -> AsyncGenerator[StreamEvent, None]:
         start = time.monotonic()
-        resp = await asyncio.to_thread(
-            self.client.models.generate_content_stream,
-            model=model_name,
-            contents=contents,
-            config=config,
-        )
-
         input_tokens = 0
         output_tokens = 0
         tool_calls: list[dict[str, Any]] = []
 
-        for chunk in resp:
-            if chunk.candidates and chunk.candidates[0].content:
-                for part in chunk.candidates[0].content.parts:
-                    if hasattr(part, "function_call") and part.function_call:
-                        from uuid import uuid4
+        # Gemini 429 RESOURCE_EXHAUSTED + safety blocks raise from either
+        # the initial generate_content_stream call or while we iterate the
+        # generator. The router's try/except never sees these because we
+        # return an AsyncGenerator before any provider work happens. Catch
+        # both sites so abenix_llm_errors_total actually moves.
+        try:
+            resp = await asyncio.to_thread(
+                self.client.models.generate_content_stream,
+                model=model_name,
+                contents=contents,
+                config=config,
+            )
 
-                        tc = {
-                            "id": f"call_{uuid4().hex[:8]}",
-                            "name": part.function_call.name,
-                            "arguments": (
-                                dict(part.function_call.args)
-                                if part.function_call.args
-                                else {}
-                            ),
-                        }
-                        tool_calls.append(tc)
-                        yield StreamEvent(
-                            event="tool_call",
-                            data={
-                                "name": tc["name"],
-                                "arguments": tc["arguments"],
-                            },
-                        )
-                    elif hasattr(part, "text") and part.text:
-                        yield StreamEvent(event="token", data=part.text)
-            if chunk.usage_metadata:
-                input_tokens = chunk.usage_metadata.prompt_token_count or 0
-                output_tokens = chunk.usage_metadata.candidates_token_count or 0
+            for chunk in resp:
+                if chunk.candidates and chunk.candidates[0].content:
+                    for part in chunk.candidates[0].content.parts:
+                        if hasattr(part, "function_call") and part.function_call:
+                            from uuid import uuid4
+
+                            tc = {
+                                "id": f"call_{uuid4().hex[:8]}",
+                                "name": part.function_call.name,
+                                "arguments": (
+                                    dict(part.function_call.args)
+                                    if part.function_call.args
+                                    else {}
+                                ),
+                            }
+                            tool_calls.append(tc)
+                            yield StreamEvent(
+                                event="tool_call",
+                                data={
+                                    "name": tc["name"],
+                                    "arguments": tc["arguments"],
+                                },
+                            )
+                        elif hasattr(part, "text") and part.text:
+                            yield StreamEvent(event="token", data=part.text)
+                if chunk.usage_metadata:
+                    input_tokens = chunk.usage_metadata.prompt_token_count or 0
+                    output_tokens = chunk.usage_metadata.candidates_token_count or 0
+        except Exception as e:
+            llm_errors_total.labels(
+                model=model_name,
+                error_type=type(e).__name__,
+                provider="google",
+            ).inc()
+            raise
 
         latency = int((time.monotonic() - start) * 1000)
         cost = _calc_cost(model_name, input_tokens, output_tokens)
@@ -1177,7 +1220,11 @@ class LLMRouter:
                 return result
             except Exception as e:
                 last_error = e
-                llm_errors_total.labels(model=model, error_type=type(e).__name__).inc()
+                llm_errors_total.labels(
+                    model=model,
+                    error_type=type(e).__name__,
+                    provider=provider_name,
+                ).inc()
                 wait = 2**attempt
                 logger.warning(
                     "llm_complete attempt=%d/%d failed: %s, retrying in %ds",

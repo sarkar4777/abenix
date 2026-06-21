@@ -115,6 +115,22 @@ async def _drift_enabled(agent: Agent | None) -> bool:
     return env not in ("0", "false", "no", "off")
 
 
+def _finalize_execution_timing(execution: Execution) -> None:
+    """Backfill started_at and compute duration_ms on terminal transition.
+
+    Older code paths only stamped completed_at, leaving started_at null and
+    duration_ms uncomputable. Call right before the terminal commit.
+    """
+    now = datetime.now(timezone.utc)
+    if execution.started_at is None:
+        execution.started_at = execution.created_at or now
+    if execution.completed_at is None:
+        execution.completed_at = now
+    if execution.duration_ms is None and execution.started_at is not None:
+        delta = execution.completed_at - execution.started_at
+        execution.duration_ms = int(delta.total_seconds() * 1000)
+
+
 def _get_cache_orchestrator() -> Any:
     """Lazily initialize the cache orchestrator. Returns None on failure."""
     global _cache_orchestrator
@@ -1659,6 +1675,7 @@ async def execute_agent(
         status=ExecutionStatus.RUNNING,
         model_used=model if not is_pipeline else "pipeline",
         model_requested=model if not is_pipeline else "pipeline",
+        started_at=datetime.now(timezone.utc),
     )
     db.add(execution)
     await db.commit()
@@ -2277,7 +2294,7 @@ async def _stream_pipeline_execution(
                 else ExecutionStatus.FAILED
             )
             execution.duration_ms = pr.total_duration_ms
-            execution.completed_at = datetime.now(timezone.utc)
+            _finalize_execution_timing(execution)
             try:
                 from app.core.failure_codes import emit_outcome_metric
 
@@ -2289,6 +2306,7 @@ async def _stream_pipeline_execution(
                     ),
                     failure_code=execution.failure_code or "",
                     agent_type="pipeline",
+                    tenant_id=str(tenant_id) if tenant_id else "",
                 )
             except Exception:
                 pass
@@ -2475,8 +2493,13 @@ async def _non_stream_pipeline_execution(
         from app.core.failure_codes import classify_exception, emit_outcome_metric
 
         execution.failure_code = classify_exception(e)
-        execution.completed_at = datetime.now(timezone.utc)
-        emit_outcome_metric(outcome="FAILED", failure_code=execution.failure_code)
+        _finalize_execution_timing(execution)
+        emit_outcome_metric(
+            outcome="FAILED",
+            failure_code=execution.failure_code,
+            agent_type="pipeline",
+            tenant_id=str(tenant_id) if tenant_id else "",
+        )
         await db.commit()
         await fail_state(str(execution.id), tenant_id, str(e))
         # Return 200 with a failed-result envelope so callers can drill into
@@ -2509,7 +2532,7 @@ async def _non_stream_pipeline_execution(
     if result.status != "completed" and not execution.failure_code:
         execution.failure_code = "PIPELINE_NODE_FAILED"
     execution.duration_ms = result.total_duration_ms
-    execution.completed_at = datetime.now(timezone.utc)
+    _finalize_execution_timing(execution)
     try:
         from app.core.failure_codes import emit_outcome_metric
 
@@ -2519,6 +2542,7 @@ async def _non_stream_pipeline_execution(
             ),
             failure_code=execution.failure_code or "",
             agent_type="pipeline",
+            tenant_id=str(tenant_id) if tenant_id else "",
         )
     except Exception:
         pass
@@ -2902,12 +2926,13 @@ async def _stream_execution(
                 execution.cost = float(final_data.get("cost") or 0.0)
                 execution.duration_ms = final_data.get("duration_ms")
                 execution.tool_calls = all_tool_calls if all_tool_calls else None
-                execution.completed_at = datetime.now(timezone.utc)
+                _finalize_execution_timing(execution)
                 try:
                     emit_outcome_metric(
                         outcome="FAILED",
                         failure_code="MODERATION_BLOCKED",
                         agent_type="agent",
+                        tenant_id=str(tenant_id) if tenant_id else "",
                     )
                 except Exception:
                     pass
@@ -2919,7 +2944,7 @@ async def _stream_execution(
                 execution.cost = final_data.get("cost")
                 execution.duration_ms = final_data.get("duration_ms")
                 execution.tool_calls = all_tool_calls if all_tool_calls else None
-                execution.completed_at = datetime.now(timezone.utc)
+                _finalize_execution_timing(execution)
                 actual_model = final_data.get("effective_model") or final_data.get(
                     "model"
                 )
@@ -2933,6 +2958,7 @@ async def _stream_execution(
                         outcome="SUCCESS",
                         failure_code="",
                         agent_type="agent",
+                        tenant_id=str(tenant_id) if tenant_id else "",
                     )
                 except Exception:
                     pass
@@ -3026,7 +3052,26 @@ async def _stream_execution(
         if execution:
             execution.status = ExecutionStatus.FAILED
             execution.error_message = str(e)
-            execution.completed_at = datetime.now(timezone.utc)
+            # Classify + emit outcome so the dashboards see this terminal
+            # path. Earlier this branch updated the DB row but never
+            # touched executions_failed_total / active_executions, which
+            # was one of the reasons both counters drifted to zero.
+            try:
+                from app.core.failure_codes import (
+                    classify_exception,
+                    emit_outcome_metric,
+                )
+
+                execution.failure_code = classify_exception(e)
+                emit_outcome_metric(
+                    outcome="FAILED",
+                    failure_code=execution.failure_code,
+                    agent_type="agent",
+                    tenant_id=str(tenant_id) if tenant_id else "",
+                )
+            except Exception:
+                pass
+            _finalize_execution_timing(execution)
             await db.commit()
 
             # Mark live execution failed
@@ -3196,11 +3241,12 @@ async def _non_stream_execution(
             execution.output_tokens = result.output_tokens
             execution.cost = float(result.cost)
             execution.duration_ms = result.duration_ms
-            execution.completed_at = datetime.now(timezone.utc)
+            _finalize_execution_timing(execution)
             emit_outcome_metric(
                 outcome="FAILED",
                 failure_code="MODERATION_BLOCKED",
                 agent_type="agent",
+                tenant_id=str(tenant_id) if tenant_id else "",
             )
         else:
             execution.status = ExecutionStatus.COMPLETED
@@ -3210,12 +3256,13 @@ async def _non_stream_execution(
             execution.cost = float(result.cost)
             execution.duration_ms = result.duration_ms
             execution.tool_calls = result.tool_calls if result.tool_calls else None
-            execution.completed_at = datetime.now(timezone.utc)
+            _finalize_execution_timing(execution)
             try:
                 emit_outcome_metric(
                     outcome="SUCCESS",
                     failure_code="",
                     agent_type="agent",
+                    tenant_id=str(tenant_id) if tenant_id else "",
                 )
             except Exception:
                 pass
@@ -3329,8 +3376,13 @@ async def _non_stream_execution(
         from app.core.failure_codes import classify_exception, emit_outcome_metric
 
         execution.failure_code = classify_exception(e)
-        execution.completed_at = datetime.now(timezone.utc)
-        emit_outcome_metric(outcome="FAILED", failure_code=execution.failure_code)
+        _finalize_execution_timing(execution)
+        emit_outcome_metric(
+            outcome="FAILED",
+            failure_code=execution.failure_code,
+            agent_type="agent",
+            tenant_id=str(tenant_id) if tenant_id else "",
+        )
         await db.commit()
 
         try:

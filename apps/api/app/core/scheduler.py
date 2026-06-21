@@ -212,7 +212,7 @@ async def sweep_stale_executions() -> None:
 
     from models.execution import Execution, ExecutionStatus
 
-    max_minutes = int(os.environ.get("STALE_EXECUTION_MAX_MINUTES", "30"))
+    max_minutes = int(os.environ.get("STALE_EXECUTION_MAX_MINUTES", "10"))
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_minutes)
 
     # Postgres advisory lock so only one API replica runs the sweep
@@ -341,6 +341,53 @@ async def sweep_stale_executions() -> None:
         logger.error("sweep_stale_executions failed: %s", e, exc_info=True)
 
 
+async def reconcile_active_executions_gauge() -> None:
+    """Re-sync abenix_active_executions to the true RUNNING count per
+    tenant. The gauge drifts whenever an inc/dec pair gets split across
+    a crashed worker or a swallowed exception in the emit path. Run
+    every 5 min so drift never exceeds one window."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
+
+    from sqlalchemy import func, select
+    from app.core.deps import async_session
+    from app.core.telemetry import active_executions
+    from models.execution import Execution, ExecutionStatus
+
+    try:
+        async with async_session() as db:
+            # True per-tenant RUNNING count.
+            r = await db.execute(
+                select(Execution.tenant_id, func.count(Execution.id))
+                .where(Execution.status == ExecutionStatus.RUNNING)
+                .group_by(Execution.tenant_id)
+            )
+            counts = {str(tid): int(n) for tid, n in r.all() if tid is not None}
+
+            # Every tenant that has ever had work — we need to touch
+            # ALL of them to zero the gauge for tenants whose last
+            # RUNNING row just terminated. Reading from active_executions
+            # ._metrics is unreliable under prometheus multiprocess mode
+            # (per-worker dicts that don't share), so source-of-truth is
+            # the DB.
+            r2 = await db.execute(select(Execution.tenant_id).distinct())
+            all_tenants = {str(tid) for (tid,) in r2.all() if tid is not None}
+
+        # Set every known tenant's gauge to its true RUNNING count
+        # (defaulting to 0 for tenants whose last RUNNING just finished).
+        for tid in all_tenants:
+            active_executions.labels(tenant_id=tid).set(counts.get(tid, 0))
+
+        if counts:
+            logger.debug(
+                "reconcile_active_executions_gauge: synced %d tenants", len(counts)
+            )
+    except Exception as e:
+        logger.error("reconcile_active_executions_gauge failed: %s", e, exc_info=True)
+
+
 async def reset_monthly_quotas():
     """Reset all users' and API keys' monthly usage counters."""
     from app.core.deps import async_session
@@ -411,6 +458,15 @@ def start_scheduler() -> None:
         minutes=5,
         id="sweep_stale_executions",
         name="Mark stale RUNNING executions as FAILED",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        reconcile_active_executions_gauge,
+        trigger="interval",
+        minutes=5,
+        id="reconcile_active_executions_gauge",
+        name="Re-sync abenix_active_executions gauge to DB truth",
         replace_existing=True,
     )
 

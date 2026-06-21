@@ -82,7 +82,7 @@ llm_errors_total = _safe_metric(
     Counter,
     "abenix_llm_errors_total",
     "LLM request errors",
-    ["model", "error_type"],
+    ["model", "error_type", "provider"],
 )
 
 agent_execution_duration_seconds = _safe_metric(

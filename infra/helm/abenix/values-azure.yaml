@@ -194,6 +194,10 @@ mlModels:
   servingImage: your-acr.azurecr.io/model-serving:wave2
 monitoring:
   enabled: false
+  prometheusRules:
+    # Rules ship as a ConfigMap mounted on the thin Prometheus pod
+    # (infra/observability/prometheus.yaml) — no operator required.
+    enabled: true
 pdb:
   enabled: false
 
@@ -219,9 +223,9 @@ scaling:
     enabled: true               # Set false if KEDA operator isn't on the cluster
     prometheusUrl: "http://abenix-prometheus.abenix.svc.cluster.local:9090"
   alerts:
-    # PrometheusRule CRDs require prometheus-operator. Flip to true once
-    # the cluster has the operator (AKS ships it as an add-on).
-    enabled: false
+    # Rules ship as a ConfigMap mounted on the thin Prometheus pod
+    # (infra/observability/prometheus.yaml) — no operator required.
+    enabled: true
   pools:
     # min=1 so there's always one warm worker for the default pool —
     # smooths out "first request after idle" latency.
