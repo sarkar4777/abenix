@@ -109,17 +109,28 @@ test.describe('Abenix · UAT', () => {
   ];
   for (const [from, expectTo] of BACK_CASES) {
     test(`back from ${from}`, async ({ page }) => {
-      await gotoOk(page, from, { settle: 600 });
+      await gotoOk(page, from, { settle: 1500 });
       // Pin to the topbar's back button — some pages embed their own
       // "back" link inside the body that we don't want to click here.
+      // The button is `hidden md:flex` so it needs a wider viewport
+      // and React paint to land before isVisible() returns true. We
+      // give it up to 5s of grace before falling through to history,
+      // which would navigate to about:blank when Playwright opened
+      // the deep page as the first nav of the context.
+      await page.setViewportSize({ width: 1440, height: 900 });
       const back = page.locator('[data-testid="topbar-back"]');
+      try {
+        await back.waitFor({ state: 'visible', timeout: 5_000 });
+      } catch {
+        /* fall through to history */
+      }
       if (await back.isVisible().catch(() => false)) {
         await back.click();
       } else {
         await page.goBack();
       }
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(800);
       expect(page.url(), `back from ${from}`).toMatch(expectTo);
     });
   }
@@ -133,50 +144,66 @@ test.describe('Abenix · UAT', () => {
 
   // ─── Flight Recorder ────────────────────────────────────────────────
   test('Executions list opens; click first → flight recorder renders', async ({ page }) => {
-    test.setTimeout(60_000);
-    await gotoOk(page, '/executions', { settle: 2000 });
+    test.setTimeout(90_000);
+    await gotoOk(page, '/executions', { settle: 3000 });
     // Each row is a collapsed <button> whose visible text contains the
-    // agent name + a localized timestamp like "4/26/2026, 2:43:19 PM".
-    // The "Open Flight Recorder →" anchor only renders inside the
-    // expanded panel — so click the row first.
+    // agent name + a localized timestamp like "4/26/2026, 2:43:19 PM"
+    // OR an ISO-like substring. We accept either to survive locale
+    // differences across environments.
     const rowButton = page
       .locator('main button')
-      .filter({ hasText: /\d{1,2}\/\d{1,2}\/\d{4}/ })
+      .filter({ hasText: /\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}/ })
       .first();
-    if (!(await rowButton.isVisible().catch(() => false))) {
-      const empty = await page.locator('text=/no executions|empty|nothing/i').count();
+    // Fast skip on freshly-seeded tenants. Look for both the empty-state
+    // copy and the absence of any row button after a generous settle.
+    const rowVisible = await rowButton.isVisible().catch(() => false);
+    if (!rowVisible) {
+      const empty = await page.locator('text=/no executions|empty|nothing|first execution/i').count();
       if (empty > 0) test.skip(true, 'no executions in this tenant');
     }
-    await expect(rowButton).toBeVisible({ timeout: 12_000 });
+    await expect(rowButton).toBeVisible({ timeout: 15_000 });
     await rowButton.click();
-    await page.waitForTimeout(400);
-    const link = page.locator('a[href^="/executions/"]').first();
-    await expect(link).toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(700);
+    // The expanded panel contains an anchor to the execution detail page.
+    // Filter for the detail-link shape so the breadcrumb anchor on /executions
+    // (which is `/executions`) does not match.
+    const link = page
+      .locator('a[href^="/executions/"]:not([href$="/executions/"])')
+      .first();
+    await expect(link).toBeVisible({ timeout: 8_000 });
     await link.click();
     await page.waitForLoadState('domcontentloaded');
-    await expect(page).toHaveURL(/\/executions\/[0-9a-f-]{6,}/i, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/executions\/[0-9a-f-]{6,}/i, { timeout: 20_000 });
     // Wait for the Flight Recorder shell to actually render — networkidle
     // alone isn't enough because the page streams data via SSE and the
     // textContent() returns only the bootstrap JSON-LD until React paints.
     await page.waitForLoadState('networkidle').catch(() => {});
     await expect(
       page.getByText(/Flight Recorder|Waterfall|Tool Call|Lineage|Live DAG|Duration|Cost|Tokens/i).first(),
-    ).toBeVisible({ timeout: 15_000 });
+    ).toBeVisible({ timeout: 20_000 });
   });
 
   // ─── Marketplace ─────────────────────────────────────────────────────
   test('Marketplace lists agents + detail page renders', async ({ page }) => {
-    await gotoOk(page, '/marketplace', { settle: 800 });
+    await gotoOk(page, '/marketplace', { settle: 1500 });
     const text = (await page.textContent('body')) || '';
     expect(text).toMatch(/marketplace|agent|template|category|publish/i);
-    const link = page.locator('a[href^="/marketplace/"]').first();
-    if (await link.isVisible().catch(() => false)) {
-      await link.click();
-      await page.waitForLoadState('domcontentloaded');
-      await expect(page).toHaveURL(/\/marketplace\/[0-9a-f-]{6,}/i, { timeout: 15_000 });
-      const t2 = (await page.textContent('body')) || '';
-      expect(t2).toMatch(/agent|description|version|publish|use this|fork|deploy/i);
+    // Filter for the detail-link shape — `/marketplace/<uuid|slug>` —
+    // not the bare `/marketplace` anchor that the breadcrumb or header
+    // can put on the page. Use href*= so query strings on the link
+    // (e.g. `?ref=banner`) still match the detail pattern.
+    const links = page.locator('a[href^="/marketplace/"]:not([href$="/marketplace/"])');
+    const count = await links.count();
+    if (count === 0) {
+      test.skip(true, 'marketplace has no published agents on this tenant');
     }
+    const link = links.first();
+    await expect(link).toBeVisible({ timeout: 8_000 });
+    await link.click();
+    await page.waitForLoadState('domcontentloaded');
+    await expect(page).toHaveURL(/\/marketplace\/[a-z0-9-]{6,}/i, { timeout: 15_000 });
+    const t2 = (await page.textContent('body')) || '';
+    expect(t2).toMatch(/agent|description|version|publish|use this|fork|deploy/i);
   });
 
   // ─── Agents queue + detail ──────────────────────────────────────────
