@@ -35,6 +35,10 @@ def _serialize(k: ApiKey) -> dict:
         "is_active": k.is_active,
         "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
         "created_at": k.created_at.isoformat() if k.created_at else None,
+        "scopes": getattr(k, "scopes", None),
+        "expires_at": (
+            k.expires_at.isoformat() if getattr(k, "expires_at", None) else None
+        ),
         "tokens_used": int(getattr(k, "tokens_used", 0) or 0),
         "cost_used": float(getattr(k, "cost_used", 0) or 0.0),
         "max_monthly_tokens": getattr(k, "max_monthly_tokens", None),
@@ -50,6 +54,29 @@ def _is_admin(user: User) -> bool:
     role = getattr(user, "role", None)
     role_val = getattr(role, "value", role) if role is not None else ""
     return str(role_val).lower() == "admin"
+
+
+def _is_superadmin(user: User) -> bool:
+    role = getattr(user, "role", None)
+    role_val = getattr(role, "value", role) if role is not None else ""
+    return str(role_val).lower() in ("superadmin", "super_admin", "platform_admin")
+
+
+def _normalize_scopes(scopes: dict | None) -> dict | None:
+    """Accept the two production shapes and reject anything else.
+
+    Valid:
+      {"can_delegate": true, ...}
+      {"allowed_actions": [...]}
+    """
+    if scopes is None:
+        return None
+    if not isinstance(scopes, dict):
+        return None
+    if "can_delegate" in scopes or "allowed_actions" in scopes:
+        return scopes
+    # Unknown shape — drop it rather than persist garbage that silently breaks delegation.
+    return None
 
 
 @router.get("")
@@ -77,12 +104,24 @@ async def create_api_key(
     raw_key = f"af_{secrets.token_urlsafe(32)}"
     prefix = raw_key[:7] + "****" + raw_key[-4:]
 
+    # Only platform superadmin can mint cross-tenant; everyone else stamps own tenant.
+    target_tenant = user.tenant_id
+    if body.tenant_id and _is_superadmin(user):
+        try:
+            target_tenant = uuid.UUID(body.tenant_id)
+        except (ValueError, AttributeError):
+            target_tenant = user.tenant_id
+
     key = ApiKey(
-        tenant_id=user.tenant_id,
+        tenant_id=target_tenant,
         user_id=user.id,
         name=body.name,
         key_hash=_hash_key(raw_key),
         key_prefix=prefix,
+        scopes=_normalize_scopes(body.scopes),
+        expires_at=body.expires_at,
+        max_monthly_tokens=body.max_monthly_tokens,
+        max_monthly_cost=body.max_monthly_cost,
     )
     db.add(key)
     await db.commit()

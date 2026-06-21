@@ -30,6 +30,8 @@ At the moment every standalone key in the cluster lives under the single Abenix 
 
 Each standalone application keeps its own separate user table. ContractIQ has `contractiq_users`. MidEast Tourism has `mideasttourism_users`. ResolveAI follows the same pattern. Wingman has no user table at all and runs as a single hardcoded demo trader. Industrial IoT similarly has no user table.
 
+Standalone ports for reference. ContractIQ runs on 8001, MidEast Tourism on 8002, Industrial IoT on 8003, ResolveAI on 8004, Wingman on 8006.
+
 Each end user row carries its own `tenant_id` column. Importantly, this is not a foreign key into the platform `tenants` table. It is a local scope that the standalone application owns and uses to partition its own data. The values in `contractiq_users.tenant_id` are completely separate from `tenants.id` over in Abenix.
 
 ## How one request flows from a browser to the database
@@ -66,8 +68,10 @@ The fastest way. The registration endpoint creates both a platform tenant and an
 ```bash
 curl -X POST $ABENIX_URL/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@newcustomer.com","password":"<strong>","tenant_name":"New Customer Corp","plan":"pro"}'
+  -d '{"email":"admin@newcustomer.com","password":"<strong>","full_name":"Admin User","tenant_name":"New Customer Corp","plan":"pro"}'
 ```
+
+`full_name` is required by the register endpoint. `tenant_name` and `plan` are honored once the register fix lands. Until then the new tenant takes the default name and the free plan regardless of what you pass.
 
 ### Way B. Insert a platform tenant directly into the database
 
@@ -94,10 +98,12 @@ This is the path you want if you have a customer who should run their own copy o
 2. Mint a standalone key against that tenant.
 
 ```bash
-curl -X POST $ABENIX_URL/api/admin/api-keys \
+curl -X POST $ABENIX_URL/api/api-keys \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"name":"standalone-contractiq-newcustomer","tenant_id":"<the-uuid>","scopes":{"allowed_actions":["can_delegate","execute","list","read"]}}'
 ```
+
+`scopes` is honored once the api_keys fix lands. The endpoint already accepts the field but earlier versions stored a default `{}` regardless of input. Verify with `GET /api/api-keys/<id>` after creation.
 
 3. Set `CONTRACTIQ_ABENIX_API_KEY` to the new key value in the new customer's ContractIQ deployment secrets.
 
@@ -124,6 +130,18 @@ If your goal is to let an analyst at an existing customer have their own contrac
 If your goal is to spin up a separate ContractIQ deployment for a specific customer, create their platform tenant, mint a `standalone-contractiq-<their-name>` key against it, then point their ContractIQ pod at that key. Combine ways A or B, then C, then D.
 
 If your goal is just to give someone a login on an existing standalone application, create a user inside that application's user table. Use way D.
+
+## Cleanup
+
+To drop a test tenant and every user that belongs to it, run this against the database pod. Replace the email or uuid in the WHERE clause to target your test row.
+
+```sql
+DELETE FROM api_keys WHERE tenant_id = (SELECT id FROM tenants WHERE name = 'New Customer Corp');
+DELETE FROM users    WHERE tenant_id = (SELECT id FROM tenants WHERE name = 'New Customer Corp');
+DELETE FROM tenants  WHERE name = 'New Customer Corp';
+```
+
+If foreign keys complain, run the same DELETE against `executions`, `agents`, `code_assets`, and `knowledge_collections` first, all keyed on the same tenant_id. The platform never hard deletes in normal flows, so this path is for test cleanup only.
 
 ## The takeaway
 

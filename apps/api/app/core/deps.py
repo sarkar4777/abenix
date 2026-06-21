@@ -146,6 +146,18 @@ async def get_current_user(
                 subject = ActingSubject.from_header(x_abenix_subject)
                 if subject:
                     user._acting_subject = subject  # type: ignore[attr-defined]
+            elif x_abenix_subject:
+                # Fail loud rather than silently drop the subject header.
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "API key lacks can_delegate scope; X-Abenix-Subject "
+                        "cannot be honored. Add can_delegate to scopes via "
+                        "PATCH /api/api-keys/{id}."
+                    ),
+                )
             return user
         raise _auth_error()
 
@@ -170,6 +182,18 @@ async def get_current_user(
                 subject = ActingSubject.from_header(x_abenix_subject)
                 if subject:
                     user._acting_subject = subject  # type: ignore[attr-defined]
+            elif x_abenix_subject:
+                # Same loud-fail as the X-API-Key branch above.
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "API key lacks can_delegate scope; X-Abenix-Subject "
+                        "cannot be honored. Add can_delegate to scopes via "
+                        "PATCH /api/api-keys/{id}."
+                    ),
+                )
             return user
         raise _auth_error()
     payload = verify_token(token)

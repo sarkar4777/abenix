@@ -5,6 +5,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str
+    tenant_name: str | None = None
+    plan: str | None = None
 
 
 class LoginRequest(BaseModel):

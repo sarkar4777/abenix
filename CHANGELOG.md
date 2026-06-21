@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.3.2 — 2026-06-21
+
+### Added
+
+- **`/api/api-keys` honors `scopes` on create.** The endpoint was reading `body.name` only and dropping the rest. Now persists `scopes`, `expires_at`, `max_monthly_tokens`, `max_monthly_cost`. `_normalize_scopes` allow-lists the two production shapes (`{can_delegate: true, ...}` and `{allowed_actions: [...]}`) and rejects garbage so the column never holds a poisoned value. `tenant_id` from body is honored only when the caller is `superadmin` / `platform_admin` (cross-tenant key mint); everyone else self-mints under `user.tenant_id`. Response serializer echoes `scopes` + `expires_at` so callers can confirm persistence after create.
+- **`/api/auth/register` honors `tenant_name` and `plan`.** Both fields were being silently dropped — the new tenant ended up named `"<First>'s Workspace"` on the free plan regardless of what the operator passed. `RegisterRequest` now declares both as optional, and the handler uses them when supplied with safe fallbacks. Coerces `plan` through `TenantPlan` so unknown values land on `FREE` instead of 500ing.
+- **`/api/agents/{agent_id_or_slug}/execute` accepts slugs.** The route was UUID-only; passing a slug like `contractiq-correlations` returned 422 `uuid_parsing`. Handler now tries UUID parse first, falls through to `Agent.slug` lookup with the same tenant / OOB / subscription / share auth gate. 404 on miss. Downstream code unchanged.
+- **TENANTS.md** updated to match deployed reality. Way A documents `full_name` as required. Way C points at `/api/api-keys` (the path that actually exists) and documents the `scopes` shape. Standalone-app port table added inline to Layer Three (ContractIQ 8001, MidEast Tourism 8002, Industrial IoT 8003, ResolveAI 8004, Wingman 8006). New Cleanup section with the SQL to drop a test tenant + users + keys.
+
+### Fixed
+
+- **Silent X-Abenix-Subject drop when key lacks `can_delegate`.** Both API-key auth branches (X-API-Key and Bearer `af_`) now raise 403 with a clear message (`"API key lacks can_delegate scope; X-Abenix-Subject cannot be honored. Add can_delegate to scopes via PATCH /api/api-keys/{id}."`) instead of dropping the header and producing executions with `NULL subject_id`. Onboarding bugs surface immediately instead of slipping through QA.
+- **Onboarding e2e verified 5/5 on Azure.** Two-tenant probe walked register tenant_name + plan, scopes persistence, slug execution, 403 on silent drop, and subject stamping end-to-end on the cluster.
+
 ## v2.3.1 — 2026-06-21
 
 ### Added

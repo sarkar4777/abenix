@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.moderation_policy import ModerationAction, ModerationPolicy
-from models.tenant import Tenant
+from models.tenant import Tenant, TenantPlan
 from models.user import User, UserRole
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -54,10 +54,22 @@ async def register(
     if existing.scalar_one_or_none():
         return error("Email already registered", 409)
 
+    # Honour caller-supplied tenant_name / plan; fall back to the legacy
+    # derivation so existing {email, password, full_name}-only callers keep
+    # working.
+    tenant_name = (body.tenant_name or "").strip() or f"{body.full_name}'s Workspace"
+    slug_seed = body.tenant_name.strip() if body.tenant_name else body.full_name
+    plan_value = (body.plan or "free").strip().lower()
+    try:
+        tenant_plan = TenantPlan(plan_value)
+    except ValueError:
+        tenant_plan = TenantPlan.FREE
+
     tenant = Tenant(
         id=uuid.uuid4(),
-        name=f"{body.full_name}'s Workspace",
-        slug=_slugify(f"{body.full_name}-{uuid.uuid4().hex[:6]}"),
+        name=tenant_name,
+        slug=_slugify(f"{slug_seed}-{uuid.uuid4().hex[:6]}"),
+        plan=tenant_plan,
     )
     db.add(tenant)
     await db.flush()

@@ -1455,9 +1455,9 @@ async def preview_validation(
     )
 
 
-@router.post("/{agent_id}/execute", response_model=None)
+@router.post("/{agent_id_or_slug}/execute", response_model=None)
 async def execute_agent(
-    agent_id: uuid.UUID,
+    agent_id_or_slug: str,
     body: ExecuteRequest,
     request: Request,
     user: User = Depends(get_current_user),
@@ -1465,6 +1465,43 @@ async def execute_agent(
 ) -> StreamingResponse | JSONResponse:
     from app.core.usage import check_limit, check_user_quota
     from datetime import timedelta as _td
+
+    # Accept either a UUID or a slug. Resolve to a concrete agent up front so
+    # the rest of the handler can treat agent_id as a UUID like before.
+    agent: Agent | None = None
+    agent_id: uuid.UUID | None = None
+    try:
+        agent_id = uuid.UUID(agent_id_or_slug)
+    except (ValueError, AttributeError):
+        agent_id = None
+    if agent_id is None:
+        _slug_lookup = await db.execute(
+            select(Agent).where(
+                Agent.slug == agent_id_or_slug,
+                or_(
+                    Agent.tenant_id == user.tenant_id,
+                    Agent.agent_type == AgentType.OOB,
+                    Agent.id.in_(
+                        select(Subscription.agent_id).where(
+                            Subscription.user_id == user.id,
+                            Subscription.status == "active",
+                        )
+                    ),
+                    Agent.id.in_(
+                        select(AgentShare.agent_id).where(
+                            AgentShare.shared_with_user_id == user.id,
+                            AgentShare.permission.in_(
+                                [SharePermission.EXECUTE, SharePermission.EDIT]
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        agent = _slug_lookup.scalar_one_or_none()
+        if agent is None:
+            return error("Agent not found", 404)
+        agent_id = agent.id
 
     idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get(
         "idempotency-key"
@@ -1537,34 +1574,37 @@ async def execute_agent(
     if quota_error:
         return error(quota_error, 429)
 
-    result = await db.execute(
-        select(Agent).where(
-            Agent.id == agent_id,
-            or_(
-                Agent.tenant_id == user.tenant_id,
-                Agent.agent_type == AgentType.OOB,
-                # Subscribers can execute published agents from other tenants
-                Agent.id.in_(
-                    select(Subscription.agent_id).where(
-                        Subscription.user_id == user.id,
-                        Subscription.status == "active",
-                    )
+    # When the path arg was a slug we already resolved `agent` above; only
+    # fetch by UUID when we haven't picked one up yet.
+    if agent is None:
+        result = await db.execute(
+            select(Agent).where(
+                Agent.id == agent_id,
+                or_(
+                    Agent.tenant_id == user.tenant_id,
+                    Agent.agent_type == AgentType.OOB,
+                    # Subscribers can execute published agents from other tenants
+                    Agent.id.in_(
+                        select(Subscription.agent_id).where(
+                            Subscription.user_id == user.id,
+                            Subscription.status == "active",
+                        )
+                    ),
+                    # Shared agents with execute or edit permission
+                    Agent.id.in_(
+                        select(AgentShare.agent_id).where(
+                            AgentShare.shared_with_user_id == user.id,
+                            AgentShare.permission.in_(
+                                [SharePermission.EXECUTE, SharePermission.EDIT]
+                            ),
+                        )
+                    ),
                 ),
-                # Shared agents with execute or edit permission
-                Agent.id.in_(
-                    select(AgentShare.agent_id).where(
-                        AgentShare.shared_with_user_id == user.id,
-                        AgentShare.permission.in_(
-                            [SharePermission.EXECUTE, SharePermission.EDIT]
-                        ),
-                    )
-                ),
-            ),
+            )
         )
-    )
-    agent = result.scalar_one_or_none()
-    if not agent:
-        return error("Agent not found", 404)
+        agent = result.scalar_one_or_none()
+        if not agent:
+            return error("Agent not found", 404)
 
     if agent.status not in (AgentStatus.ACTIVE, AgentStatus.DRAFT):
         return error("Agent is not in an executable state", 400)
