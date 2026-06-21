@@ -1818,19 +1818,26 @@ async def execute_agent(
                         return
                     from models.approval import Approval as _Apv
 
+                    # Must NOT reuse the request's `db` here — this coroutine
+                    # runs concurrently with _collect() via asyncio.wait, and
+                    # asyncpg's single connection cannot serve two queries at
+                    # once. Open a fresh session for the polling loop.
+                    from app.core.deps import fresh_session
+
                     while True:
                         await _asyncio.sleep(1.0)
-                        gres = await db.execute(
-                            select(_Apv)
-                            .where(
-                                _Apv.tenant_id == user.tenant_id,
-                                _Apv.agent_execution_id == execution.id,
-                                _Apv.status == "pending",
+                        async with fresh_session() as _gate_db:
+                            gres = await _gate_db.execute(
+                                select(_Apv)
+                                .where(
+                                    _Apv.tenant_id == user.tenant_id,
+                                    _Apv.agent_execution_id == execution.id,
+                                    _Apv.status == "pending",
+                                )
+                                .order_by(_Apv.created_at.desc())
+                                .limit(1)
                             )
-                            .order_by(_Apv.created_at.desc())
-                            .limit(1)
-                        )
-                        row = gres.scalar_one_or_none()
+                            row = gres.scalar_one_or_none()
                         if row is not None:
                             paused_at = {
                                 "approval_id": str(row.id),
@@ -2778,6 +2785,13 @@ async def _stream_execution(
             db_url=os.environ.get("DATABASE_URL", ""),
             kb_ids=kb_ids,
             model_config=agent_model_config,
+            # Forward grounded-response contract to the runtime router
+            # so both _stream_embedded and _stream_remote enforce it.
+            # Without this the guardrail no-ops in RUNTIME_MODE=remote.
+            require_knowledge_search=bool(
+                agent_model_config.get("require_knowledge_search", False)
+            ),
+            user_id=str(enterprise_ctx.get("user_id") or ""),
         )
         event_source = stream_agent(exec_config)
     else:
@@ -2929,6 +2943,17 @@ async def _stream_execution(
                     final_data["confidence_score"] = confidence
                 except Exception:
                     confidence = None
+                # Surface moderation_block as a distinct SSE event before
+                # `done` so the UI can render a policy banner without
+                # parsing the done payload. The done event still fires
+                # for back-compat with existing clients.
+                if final_data.get("moderation_blocked") or (
+                    final_data.get("error") == "moderation_blocked"
+                ):
+                    yield (
+                        "event: moderation_block\n"
+                        f"data: {json.dumps({'source': final_data.get('moderation_block_source', 'pre_llm'), 'message': 'Request blocked by moderation policy.'})}\n\n"
+                    )
                 yield f"event: done\ndata: {json.dumps(final_data)}\n\n"
             elif event_type == "error":
                 err_msg = (

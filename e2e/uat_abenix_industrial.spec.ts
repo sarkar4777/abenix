@@ -272,8 +272,11 @@ test.describe('Industrial · Knowledge', () => {
         body: fd as any,
       });
       expect(upResp.ok, `upload ok: ${upResp.status}`).toBeTruthy();
-      // Poll until terminal — accept either ready OR failed; we require
-      // a concrete state transition (not stuck in processing).
+      // Poll until terminal — accept ready, failed, OR degraded (the
+      // v2.3.5 honest-failure pipeline marks docs DEGRADED with a
+      // populated error_message when neither embedding provider is
+      // reachable; that's a truthful terminal state, not a regression).
+      const TERMINAL = new Set(['ready', 'failed', 'degraded']);
       let status = 'processing', terminal = false;
       const start = Date.now();
       while (!terminal && Date.now() - start < 180_000) {
@@ -281,9 +284,9 @@ test.describe('Industrial · Knowledge', () => {
         const fresh = await api<any>(`/api/knowledge-bases/${kb.id}`);
         const docs = fresh.documents || [];
         status = docs[0]?.status || fresh.status || 'unknown';
-        if (status === 'ready' || status === 'failed') terminal = true;
+        if (TERMINAL.has(status)) terminal = true;
       }
-      expect(['ready', 'failed']).toContain(status);
+      expect([...TERMINAL]).toContain(status);
       // KB list page should show the KB now.
       await gotoOk(page, '/knowledge', 1500);
       await expect(page.getByText(kbName).first()).toBeVisible({ timeout: 10_000 });

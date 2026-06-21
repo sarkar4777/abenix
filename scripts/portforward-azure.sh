@@ -40,6 +40,10 @@ SERVICES=(
 PID_DIR="/tmp/abenix-az-portforward"
 mkdir -p "${PID_DIR}"
 
+# Cache of the last seen ingress LoadBalancer IP — used to detect drift
+# across AKS scale events / cluster recreations.
+LB_IP_CACHE="${PID_DIR}/last-lb-ip"
+
 # ── Colors ──────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
   G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; C='\033[0;36m'; B='\033[1m'; N='\033[0m'
@@ -100,6 +104,34 @@ stop_all() {
   ok "All forwards stopped"
 }
 
+# ── LB IP drift detector ───────────────────────────────────────────────
+# Queries the ingress controller's LoadBalancer IP and compares to the
+# cached value from the last `start`. Drift means the cluster recreated
+# its LB (scale event, NodePool change, full recreate). Port-forwards
+# still work — they tunnel through kubectl directly — but the public
+# .nip.io URL has changed, which matters for anything probing the
+# ingress (UAT scripts, status banner, browser bookmarks).
+check_lb_drift() {
+  local current
+  current=$(kubectl -n ingress-nginx get svc ingress-nginx-controller \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+  if [ -z "${current}" ]; then
+    warn "Ingress controller has no LoadBalancer IP yet (or namespace missing)."
+    return
+  fi
+  local prior=""
+  [ -f "${LB_IP_CACHE}" ] && prior=$(cat "${LB_IP_CACHE}" 2>/dev/null || echo "")
+  if [ -n "${prior}" ] && [ "${prior}" != "${current}" ]; then
+    warn "Ingress LoadBalancer IP CHANGED since last run:"
+    warn "  prior:   ${prior}"
+    warn "  current: ${current}"
+    warn "  Update any bookmarks / .azure-endpoint files."
+  else
+    ok "Ingress LB IP: ${current}"
+  fi
+  echo "${current}" > "${LB_IP_CACHE}" 2>/dev/null || true
+}
+
 start_one() {
   local spec="$1"
   local svc local_port remote_port health_path label
@@ -128,7 +160,10 @@ start_one() {
 start_all() {
   local open_browser="${1:-true}"
   check_prereqs
+  # Idempotent: stop_all clears any prior forwards + any process bound
+  # to one of our local ports. Safe to call before every start.
   stop_all
+  check_lb_drift
   log "Starting ${#SERVICES[@]} port-forwards to ${AKS_NAME} (namespace: ${NAMESPACE})..."
   for spec in "${SERVICES[@]}"; do
     start_one "${spec}"
@@ -285,10 +320,15 @@ URLS
 
 status_cmd() {
   check_prereqs
-  echo -e "${B}Port-forward processes:${N}"
+  echo ""
+  echo -e "${B}Port-forward keeper processes (PID + service):${N}"
   if command -v pgrep &>/dev/null; then
-    pgrep -fa "start-azure.sh-keeper" 2>/dev/null || echo "  (none)"
+    pgrep -fa "start-azure.sh-keeper" 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+  else
+    echo "  (pgrep not available — use 'ps aux | grep start-azure.sh-keeper')"
   fi
+  echo ""
+  check_lb_drift
   print_urls
 }
 

@@ -30,6 +30,7 @@ PLAN_*.md
 BUILDOUT_*.md
 logs/uat/
 logs/build-*.log
+.local-logs/
 
 # Turbo
 .turbo/

@@ -35,6 +35,22 @@ from engine.moderation_gate import GateConfig  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
+# Built-in PII regex set for the auto-seeded default policy. New
+# tenants get these out of the box so common PII (SSN, credit cards,
+# AWS keys, bearer tokens) is blocked at /api/agents/{id}/execute
+# without any admin configuration. Tenants can edit the list at
+# /moderation; this is just the safe default. Mirrors engine.dlp's
+# pattern set so the two surfaces stay aligned.
+DEFAULT_PII_PATTERNS: list[str] = [
+    r"\b\d{3}-\d{2}-\d{4}\b",  # US SSN
+    r"\b(?:\d{4}[-\s]?){3}\d{4}\b",  # 16-digit card
+    r"\b(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b",  # AWS access key
+    r"(?i)aws_secret_access_key\s*[=:]\s*[\w/+=]{40}",  # AWS secret
+    r"Bearer\s+[A-Za-z0-9\-._~+/]+=*",  # bearer token
+    r"(?i)(?:api[_-]?key|token|secret|password)\s*[=:]\s*['\"]?[\w-]{20,}['\"]?",
+]
+
+
 @dataclass
 class ModerationGateContext:
     """Wraps a GateConfig + its collected events for post-hoc persistence."""

@@ -195,6 +195,7 @@ def _gate_proxy_request(request: Request) -> None:
 
 
 @app.get("/health")
+@app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "industrial-iot-api"}
 

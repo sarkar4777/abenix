@@ -133,6 +133,8 @@ class PipelineNode:
     error_branch_node: str | None = None  # node ID to route to on failure
     switch: SwitchConfig | None = None
     merge: MergeConfig | None = None
+    node_type: str = "tool"  # "tool" | "agent" — selects dispatch path
+    agent_id: str | None = None
     agent_slug: str | None = None
     # When set, this node is a pure output-assembly step: it template-
     # resolves its `arguments` against node_outputs and returns them as a
@@ -538,6 +540,25 @@ class PipelineExecutor:
         skipped_nodes: list[str] = []
         failed_nodes: list[str] = []
 
+        # Validate dependencies BEFORE topo sort so callers get a precise
+        # "unknown dependency" error per offending node instead of a generic
+        # cycle/missing message. Returns a failed PipelineResult — never raises.
+        known_ids = {n.id for n in nodes}
+        dep_errors: dict[str, str] = {}
+        for n in nodes:
+            for dep in n.depends_on:
+                if dep not in known_ids:
+                    dep_errors[n.id] = f"unknown dependency: {dep}"
+                    break
+        if dep_errors:
+            return PipelineResult(
+                status="failed",
+                total_duration_ms=int((time.monotonic() - start) * 1000),
+                final_output={"error": "unknown_dependency", "details": dep_errors},
+                node_errors=dep_errors,
+                failed_nodes=list(dep_errors.keys()),
+            )
+
         try:
             layers = _topological_sort(nodes)
         except ValueError as e:
@@ -545,6 +566,7 @@ class PipelineExecutor:
                 status="failed",
                 total_duration_ms=int((time.monotonic() - start) * 1000),
                 final_output={"error": str(e)},
+                node_errors={n.id: str(e) for n in nodes},
             )
 
         for layer in layers:
@@ -1624,10 +1646,11 @@ def parse_pipeline_nodes(raw_nodes: list[dict[str, Any]]) -> list[PipelineNode]:
         tool_name = raw.get("tool_name") or raw.get("tool") or ""
         arguments = dict(raw.get("arguments") or {})
         agent_slug = raw.get("agent_slug")
+        agent_id = raw.get("agent_id")
         structured_output = False
         required_if = raw.get("required_if")
 
-        if node_type == "agent" and agent_slug:
+        if node_type == "agent" and (agent_slug or agent_id):
             # Will be executed via agent_step, with prompt/tools pulled
             # from the seeded agent row at exec time.
             tool_name = "agent_step"
@@ -1689,6 +1712,8 @@ def parse_pipeline_nodes(raw_nodes: list[dict[str, Any]]) -> list[PipelineNode]:
                 error_branch_node=raw.get("error_branch_node"),
                 switch=switch_config,
                 merge=merge_config,
+                node_type=(node_type or "tool"),
+                agent_id=agent_id,
                 agent_slug=agent_slug,
                 structured_output=structured_output,
             )

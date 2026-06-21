@@ -19,3 +19,7 @@ java {
     withSourcesJar()
     withJavadocJar()
 }
+
+tasks.test {
+    useJUnitPlatform()
+}

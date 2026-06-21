@@ -369,20 +369,43 @@ class AgentExecutor:
             if cache_result.hit and cache_result.response:
                 duration = int((time.monotonic() - start) * 1000)
                 agent_execution_duration_seconds.observe(duration / 1000)
+                # A cached response by definition didn't invoke the
+                # knowledge_search tool on this run — if the agent
+                # requires grounding, we must fail the cache hit too.
+                # Otherwise the guardrail silently passes warm-cache
+                # answers that bypass the grounding contract.
+                _ground_cache = _grounding_violated(
+                    self.require_knowledge_search, all_tool_calls
+                )
                 return ExecutionResult(
-                    output=cache_result.response.get("content", ""),
+                    output=(
+                        GROUNDING_REQUIRED_ERROR
+                        if _ground_cache
+                        else cache_result.response.get("content", "")
+                    ),
                     duration_ms=duration,
                     model=cache_result.response.get("model", self.model),
                     cache_hit=cache_result.layer,
                     node_traces=node_traces,
+                    grounding_violation=_ground_cache,
+                    grounding_block_source=(
+                        "no_knowledge_search_invocation" if _ground_cache else ""
+                    ),
                 )
 
         for iteration in range(self.max_iterations):
             if not self.sandbox.check_timeout():
                 duration = int((time.monotonic() - start) * 1000)
                 agent_execution_duration_seconds.observe(duration / 1000)
+                _ground_to = _grounding_violated(
+                    self.require_knowledge_search, all_tool_calls
+                )
                 return ExecutionResult(
-                    output="Execution timed out.",
+                    output=(
+                        GROUNDING_REQUIRED_ERROR
+                        if _ground_to
+                        else "Execution timed out."
+                    ),
                     input_tokens=total_input,
                     output_tokens=total_output,
                     cost=total_cost,
@@ -390,6 +413,10 @@ class AgentExecutor:
                     tool_calls=all_tool_calls,
                     model=self.model,
                     node_traces=node_traces,
+                    grounding_violation=_ground_to,
+                    grounding_block_source=(
+                        "no_knowledge_search_invocation" if _ground_to else ""
+                    ),
                 )
 
             # Anthropic forces streaming when max_tokens could breach the

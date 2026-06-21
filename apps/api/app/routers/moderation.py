@@ -185,6 +185,8 @@ async def _seed_default_policy(
 ) -> ModerationPolicy:
     # Mirrors the auto-seed in apps/api/app/routers/auth.py register flow so
     # tenants that predate that path still get a working gate on first visit.
+    from app.core.moderation_glue import DEFAULT_PII_PATTERNS
+
     policy = ModerationPolicy(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -200,7 +202,7 @@ async def _seed_default_policy(
         default_threshold=0.5,
         category_actions={},
         default_action=ModerationAction.BLOCK,
-        custom_patterns=[],
+        custom_patterns=list(DEFAULT_PII_PATTERNS),
         redaction_mask="█████",
         fail_closed=True,
         created_by=created_by,
@@ -264,6 +266,20 @@ async def vet(
         redaction_mask=redaction_mask,
         model=provider_model,
     )
+
+    # fail-closed: if the policy is configured to block on provider failure
+    # and the provider DID fail (decision.error set), force the action to
+    # block + outcome to blocked. The persisted policy column is the source
+    # of truth — overriding the underlying decision here keeps every caller
+    # (vet API, agent execute path, CIQ proxy) consistent.
+    if decision.error and policy and bool(getattr(policy, "fail_closed", False)):
+        decision.action = "block"
+        decision.outcome = "blocked"
+        decision.flagged = True
+        decision.reason = (
+            decision.reason
+            or "Moderation provider unavailable; policy fail_closed=true forced block."
+        )
 
     persisted_provider_response = dict(decision.provider_response or {})
     if decision.error:

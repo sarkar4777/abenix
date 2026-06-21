@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from croniter import croniter
@@ -98,11 +97,17 @@ async def _check_due_triggers() -> None:
                     agent.name,
                 )
 
-                # Spawn background execution task
-                asyncio.create_task(
-                    _run_trigger(trigger, agent, db),
+                # Spawn background execution task. We pass only the ids — the
+                # task opens its OWN session. Sharing this scope's `db` across
+                # N concurrent tasks races the single asyncpg connection
+                # ("another operation is in progress") and outlives the
+                # `async with` below, leaving the task with a closed session.
+                _task = asyncio.create_task(
+                    _run_trigger(str(trigger.id), str(agent.id)),
                     name=f"trigger-{trigger.id}",
                 )
+                _BACKGROUND_TASKS.add(_task)
+                _task.add_done_callback(_BACKGROUND_TASKS.discard)
 
                 # Update next_run_at immediately so we don't re-trigger
                 trigger.last_run_at = now
@@ -119,68 +124,94 @@ async def _check_due_triggers() -> None:
         logger.error("Scheduler check failed: %s", e, exc_info=True)
 
 
-async def _run_trigger(trigger: Any, agent: Any, db: Any) -> None:
-    """Execute a single trigger's agent in the background."""
+async def _run_trigger(trigger_id: str, agent_id: str) -> None:
+    """Execute a single trigger's agent in the background.
+
+    Receives ids (not ORM instances or a session) and opens its OWN session
+    so concurrent triggers don't race the shared asyncpg connection.
+    """
     try:
         import asyncio as _asyncio
 
         from sqlalchemy import select as _select
 
+        from app.core.deps import fresh_session
         from app.routers.triggers import _execute_triggered_agent, _get_db_url
+        from models.agent import Agent  # type: ignore
+        from models.agent_trigger import AgentTrigger  # type: ignore
         from models.execution import Execution, ExecutionStatus  # type: ignore
         from models.user import User as UserModel  # type: ignore
 
-        trigger_user = (
-            await db.execute(
-                _select(UserModel).where(UserModel.id == trigger.created_by)
-            )
-        ).scalar_one_or_none()
-        if trigger_user is None:
-            raise RuntimeError(
-                f"trigger {trigger.id} owner {trigger.created_by} not found"
-            )
+        async with fresh_session() as db:
+            trigger = (
+                await db.execute(
+                    _select(AgentTrigger).where(AgentTrigger.id == trigger_id)
+                )
+            ).scalar_one_or_none()
+            agent = (
+                await db.execute(_select(Agent).where(Agent.id == agent_id))
+            ).scalar_one_or_none()
+            if trigger is None or agent is None:
+                raise RuntimeError(
+                    f"trigger {trigger_id} or agent {agent_id} not found"
+                )
 
-        execution = Execution(
-            tenant_id=trigger.tenant_id,
-            agent_id=agent.id,
-            user_id=trigger.created_by,
-            input_message=trigger.default_message or "Scheduled execution",
-            status=ExecutionStatus.RUNNING,
-            model_used=(
-                agent.model_config_.get("model", "claude-sonnet-4-5-20250929")
-                if agent.model_config_
-                else "claude-sonnet-4-5-20250929"
-            ),
-        )
-        db.add(execution)
-        trigger.run_count = (trigger.run_count or 0) + 1
-        from datetime import datetime as _dt, timezone as _tz
+            trigger_user = (
+                await db.execute(
+                    _select(UserModel).where(UserModel.id == trigger.created_by)
+                )
+            ).scalar_one_or_none()
+            if trigger_user is None:
+                raise RuntimeError(
+                    f"trigger {trigger.id} owner {trigger.created_by} not found"
+                )
 
-        trigger.last_run_at = _dt.now(_tz.utc)
-        await db.commit()
-        await db.refresh(execution)
+            execution = Execution(
+                tenant_id=trigger.tenant_id,
+                agent_id=agent.id,
+                user_id=trigger.created_by,
+                input_message=trigger.default_message or "Scheduled execution",
+                status=ExecutionStatus.RUNNING,
+                model_used=(
+                    agent.model_config_.get("model", "claude-sonnet-4-5-20250929")
+                    if agent.model_config_
+                    else "claude-sonnet-4-5-20250929"
+                ),
+            )
+            db.add(execution)
+            trigger.run_count = (trigger.run_count or 0) + 1
+            from datetime import datetime as _dt, timezone as _tz
+
+            trigger.last_run_at = _dt.now(_tz.utc)
+            await db.commit()
+            await db.refresh(execution)
+
+            execution_id = str(execution.id)
+            trigger_uuid = str(trigger.id)
+            default_message = trigger.default_message or "Scheduled execution"
+            default_context = (
+                trigger.default_context
+                if isinstance(trigger.default_context, dict)
+                else {}
+            )
 
         _t = _asyncio.create_task(
             _execute_triggered_agent(
-                execution_id=str(execution.id),
+                execution_id=execution_id,
                 agent=agent,
                 user=trigger_user,
-                message=trigger.default_message or "Scheduled execution",
-                context=(
-                    trigger.default_context
-                    if isinstance(trigger.default_context, dict)
-                    else {}
-                ),
-                trigger_id=str(trigger.id),
+                message=default_message,
+                context=default_context,
+                trigger_id=trigger_uuid,
                 db_url=str(_get_db_url()),
             )
         )
         _BACKGROUND_TASKS.add(_t)
         _t.add_done_callback(_BACKGROUND_TASKS.discard)
 
-        logger.info("Trigger %s executed successfully", trigger.id)
+        logger.info("Trigger %s executed successfully", trigger_id)
     except Exception as e:
-        logger.error("Trigger %s execution failed: %s", trigger.id, e, exc_info=True)
+        logger.error("Trigger %s execution failed: %s", trigger_id, e, exc_info=True)
         # Update last_status via a fresh session
         try:
             from app.core.deps import async_session

@@ -18,6 +18,20 @@ class EmbeddingProviderError(Exception):
     """Embedding provider (e.g. OpenAI) failed — distinct from empty-corpus."""
 
 
+_AZURE_STRIP_WARNED = False
+
+
+def _normalize_azure_endpoint(raw: str) -> str:
+    """Strip the /openai/deployments path the SDK adds itself. Trailing slashes too."""
+    if not raw:
+        return raw
+    s = raw.rstrip("/")
+    for suffix in ("/openai/deployments", "/openai"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)]
+    return s.rstrip("/")
+
+
 async def _embed_query(query: str) -> list[float] | None:
     """Embed a search query using Azure OpenAI if configured, else direct
     OpenAI. Returns None when no provider is configured so callers can fall
@@ -25,9 +39,18 @@ async def _embed_query(query: str) -> list[float] | None:
     import os
 
     azure_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-    azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
+    azure_endpoint_raw = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
         "AZURE_OPENAI_API_BASE", ""
     )
+    azure_endpoint = _normalize_azure_endpoint(azure_endpoint_raw)
+    if azure_endpoint != azure_endpoint_raw.rstrip("/"):
+        global _AZURE_STRIP_WARNED
+        if not _AZURE_STRIP_WARNED:
+            logger.warning(
+                "AZURE endpoint had /openai/deployments suffix; stripped "
+                "defensively. Fix .env or your deploy values to avoid this."
+            )
+            _AZURE_STRIP_WARNED = True
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     openai_model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
@@ -337,8 +360,9 @@ async def _vector_search(
         from pinecone import Pinecone
 
         azure_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-        azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
-            "AZURE_OPENAI_API_BASE", ""
+        azure_endpoint = _normalize_azure_endpoint(
+            os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+            or os.environ.get("AZURE_OPENAI_API_BASE", "")
         )
         openai_key = os.environ.get("OPENAI_API_KEY", "")
         pinecone_key = os.environ.get("PINECONE_API_KEY", "")

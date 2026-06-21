@@ -40,6 +40,120 @@ find_python() {
 PYTHON=$(find_python)
 log "Using Python: $PYTHON ($($PYTHON --version 2>&1))"
 
+# ── Normalise AZURE_OPENAI_* in .env BEFORE we source it ──────
+# The Azure OpenAI Python SDK builds URLs as
+# `{azure_endpoint}/openai/deployments/{deployment}/{action}`. If the
+# endpoint already ends in `/openai/deployments` (or `/openai`), the
+# resulting URL doubles up and Azure 404s. Human-edited .env files keep
+# drifting back to the bad shape, so we sanity-check and fix in place
+# the same way scripts/deploy-azure.sh does for cluster secrets.
+#
+# Idempotent: re-running this is a no-op unless something actually
+# changed. No duplicate keys, no spurious WARN.
+_normalize_env_azure_endpoints() {
+  local env_file="$ROOT_DIR/.env"
+  [ -f "$env_file" ] || return 0
+
+  local tmp="$env_file.tmp"
+  local changed=false
+  local has_base=false
+  local base_value=""
+  local has_endpoint=false
+  local endpoint_value=""
+
+  # First pass: rewrite any AZURE_OPENAI_API_BASE / AZURE_OPENAI_ENDPOINT
+  # line that has the bad suffix, leave every other line untouched.
+  : > "$tmp"
+  while IFS= read -r line || [ -n "$line" ]; do
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    # Only touch our two keys; pass everything else through verbatim.
+    if [ "$key" = "AZURE_OPENAI_API_BASE" ] || [ "$key" = "AZURE_OPENAI_ENDPOINT" ]; then
+      local raw="$value"
+      local cleaned="${raw%$'\r'}"
+      cleaned="${cleaned%/}"
+      cleaned="${cleaned%/openai/deployments}"
+      cleaned="${cleaned%/openai}"
+      cleaned="${cleaned%/}"
+      if [ "$cleaned" != "${raw%$'\r'}" ]; then
+        changed=true
+        line="$key=$cleaned"
+      fi
+      if [ "$key" = "AZURE_OPENAI_API_BASE" ]; then
+        has_base=true
+        base_value="$cleaned"
+      else
+        has_endpoint=true
+        endpoint_value="$cleaned"
+      fi
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$env_file"
+
+  # Second consideration: if BASE is set + non-empty and ENDPOINT is
+  # missing/empty, mirror BASE → ENDPOINT (matches deploy-azure.sh).
+  # Both vars are read by the embedder code; aliasing makes the next
+  # dev's env match .env.example.
+  if [ "$has_base" = true ] && [ -n "$base_value" ]; then
+    if [ "$has_endpoint" = false ]; then
+      printf '%s\n' "AZURE_OPENAI_ENDPOINT=$base_value" >> "$tmp"
+      changed=true
+    elif [ -z "$endpoint_value" ]; then
+      # Rewrite the empty ENDPOINT line in place with BASE's value.
+      local tmp2="$tmp.2"
+      while IFS= read -r line || [ -n "$line" ]; do
+        if [ "${line%%=*}" = "AZURE_OPENAI_ENDPOINT" ] && [ -z "${line#*=}" ]; then
+          printf '%s\n' "AZURE_OPENAI_ENDPOINT=$base_value" >> "$tmp2"
+        else
+          printf '%s\n' "$line" >> "$tmp2"
+        fi
+      done < "$tmp"
+      mv "$tmp2" "$tmp"
+      changed=true
+    fi
+  fi
+
+  if [ "$changed" = true ]; then
+    mv "$tmp" "$env_file"
+    warn "Normalized AZURE_* endpoint in .env (stripped /openai/deployments)"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+_normalize_env_azure_endpoints
+
+# ── Tear down any active kubectl port-forwards ────────────────
+# Local probes against http://localhost:8000 etc are silently routed
+# to whichever Azure pod the dev forgot to disconnect. The user's
+# rule: dev-local owns the local stack, so if any port-forward is
+# active when we start, force-stop it before launching local processes.
+# We try the canonical script first (portforward-azure.sh stop), then
+# pkill as a fallback for stray `kubectl port-forward` left running
+# from `kubectl port-forward` invocations not tracked by the script.
+_force_stop_azure_portforwards() {
+  local any=false
+  if pgrep -fa "kubectl.*port-forward" >/dev/null 2>&1; then
+    any=true
+  elif command -v powershell.exe >/dev/null 2>&1; then
+    if powershell.exe -NoProfile -Command 'Get-Process kubectl -ErrorAction SilentlyContinue | Select-Object -First 1' 2>/dev/null | grep -q kubectl; then
+      any=true
+    fi
+  fi
+  [ "$any" = false ] && return 0
+  warn "Detected active kubectl port-forward(s) — tearing down before local boot"
+  if [ -x "$ROOT_DIR/scripts/portforward-azure.sh" ]; then
+    bash "$ROOT_DIR/scripts/portforward-azure.sh" stop >/dev/null 2>&1 || true
+  fi
+  pkill -f "kubectl.*port-forward" 2>/dev/null || true
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -Command "Get-Process kubectl -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue" >/dev/null 2>&1 || true
+  fi
+  sleep 1
+  ok "kubectl port-forwards stopped"
+}
+_force_stop_azure_portforwards
+
 if [ -f "$ROOT_DIR/.env" ]; then
   while IFS='=' read -r key value; do
     # Skip comments and empty lines
@@ -82,7 +196,60 @@ mkdir -p "$EXPORT_DIR" "$UPLOAD_DIR" "$ML_MODELS_DIR" \
          "$CODE_ASSET_STORE" "$CODE_ASSET_BUILD_CACHE" 2>/dev/null || true
 export EXPORT_DIR UPLOAD_DIR ML_MODELS_DIR CODE_ASSET_STORE CODE_ASSET_BUILD_CACHE
 
+# ── Per-process log directory (must exist before any helper runs) ─────
+LOG_DIR="${LOG_DIR:-$ROOT_DIR/.local-logs}"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+# ── Canonical port + label registry (single source of truth) ──────────
+# Every entry: "<port>|<label>|<log-basename>". Used by kill_port loop,
+# wait_port_listening, --status, and self-heal-at-start. Add new apps
+# here ONCE and they participate in every lifecycle path.
+ALL_PORTS=(
+  "8000|API server|abenix-api"
+  "3000|Web server|abenix-web"
+  "8001|ContractIQ API|contractiq-api"
+  "3001|ContractIQ Web|contractiq-web"
+  "8002|Mideast Tourism API|mideasttourism-api"
+  "3002|Mideast Tourism Web|mideasttourism-web"
+  "8003|Industrial-IoT API|industrial-iot-api"
+  "3003|Industrial-IoT Web|industrial-iot-web"
+  "8004|ResolveAI API|resolveai-api"
+  "3004|ResolveAI Web|resolveai-web"
+  "3005|ClaimsIQ|claimsiq"
+  "8006|Wingman API|wingman-api"
+  "3006|Wingman Web|wingman-web"
+)
+
+# ── Detect if a port is currently LISTENING ───────────────────────────
+port_listening() {
+  local port=$1
+  if [ "$IS_WINDOWS" = true ]; then
+    netstat -ano 2>/dev/null | grep -q ":${port} .*LISTENING"
+  else
+    if command -v lsof >/dev/null 2>&1; then
+      lsof -ti:"$port" >/dev/null 2>&1
+    else
+      ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":${port}$"
+    fi
+  fi
+}
+
+# ── Find the PID listening on a port (cross-platform) ─────────────────
+pid_on_port() {
+  local port=$1
+  if [ "$IS_WINDOWS" = true ]; then
+    netstat -ano 2>/dev/null | grep ":${port} .*LISTENING" | awk '{print $5}' | sort -u | tr -d '\r' | head -1
+  else
+    if command -v lsof >/dev/null 2>&1; then
+      lsof -ti:"$port" 2>/dev/null | head -1
+    else
+      ss -ltnp 2>/dev/null | awk -v p=":${port}" '$4 ~ p {print $NF}' | sed 's/.*pid=\([0-9]*\).*/\1/' | head -1
+    fi
+  fi
+}
+
 # ── Kill process on a port (cross-platform) ──────────────────
+# Idempotent. Returns 0 whether or not anything was running.
 kill_port() {
   local port=$1
   local label=$2
@@ -119,6 +286,63 @@ kill_port() {
   return 0
 }
 
+# ── Wait for a port to start listening, with a hard cap ───────────────
+# Usage: wait_port_listening <port> <label> <timeout_sec> [<log_basename>] [<pid>]
+# On timeout, kills the started PID (if given), tails the log file,
+# prints a clear remediation hint, then exits 1. No silent hangs.
+wait_port_listening() {
+  local port=$1
+  local label=$2
+  local timeout=${3:-30}
+  local log_base="${4:-}"
+  local pid="${5:-}"
+  local elapsed=0
+  while [ "$elapsed" -lt "$timeout" ]; do
+    if port_listening "$port"; then
+      ok "$label is listening on :$port (after ${elapsed}s)"
+      return 0
+    fi
+    # Bail early if the launched PID already died — no point waiting the full window.
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      err "$label process (PID $pid) exited before opening port $port"
+      if [ -n "$log_base" ] && [ -f "$LOG_DIR/${log_base}.log" ]; then
+        err "Last 30 log lines from $LOG_DIR/${log_base}.log:"
+        tail -30 "$LOG_DIR/${log_base}.log" 2>/dev/null | sed 's/^/      /'
+      fi
+      err "Hint: bash scripts/dev-local.sh --restart   (clears stale state and retries)"
+      return 1
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  err "$label did not start listening on :$port within ${timeout}s"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    err "  Killing stuck PID $pid"
+    if [ "$IS_WINDOWS" = true ]; then
+      taskkill //F //PID "$pid" >/dev/null 2>&1 || true
+    else
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
+  fi
+  if [ -n "$log_base" ] && [ -f "$LOG_DIR/${log_base}.log" ]; then
+    err "Last 30 log lines from $LOG_DIR/${log_base}.log:"
+    tail -30 "$LOG_DIR/${log_base}.log" 2>/dev/null | sed 's/^/      /'
+  fi
+  err "Hint: tail -f $LOG_DIR/${log_base}.log   (full log)"
+  err "      bash scripts/dev-local.sh --restart   (clears stale state and retries)"
+  return 1
+}
+
+# ── Reap every port in ALL_PORTS in one pass ──────────────────────────
+reap_all_ports() {
+  for entry in "${ALL_PORTS[@]}"; do
+    local port="${entry%%|*}"
+    local rest="${entry#*|}"
+    local label="${rest%%|*}"
+    kill_port "$port" "$label"
+  done
+}
+
 # ── Clean stale Python bytecode ───────────────────────────────
 clean_pycache() {
   for dir in \
@@ -137,21 +361,32 @@ clean_pycache() {
   ok "Bytecode caches cleaned"
 }
 
-# ── Kill old processes ────────────────────────────────────────
+# ── Kill old processes (idempotent — second call is a no-op) ──────────
 kill_processes() {
   log "Stopping Abenix processes..."
-  kill_port 8000 "API server"
-  kill_port 3000 "Web server"
-  kill_port 8001 "ContractIQ API"
-  kill_port 3001 "ContractIQ Web"
-  kill_port 8002 "Mideast Tourism API"
-  kill_port 3002 "Mideast Tourism Web"
-  kill_port 8003 "Industrial-IoT API"
-  kill_port 3003 "Industrial-IoT Web"
-  kill_port 8004 "ResolveAI API"
-  kill_port 3004 "ResolveAI Web"
-  kill_port 8006 "Wingman API"
-  kill_port 3006 "Wingman Web"
+  # Quick precheck — if nothing's listening on any tracked port AND no
+  # Celery/uvicorn/consumer processes are running, this is the second
+  # invocation of --stop. Say so and return 0.
+  local anything=false
+  for entry in "${ALL_PORTS[@]}"; do
+    local port="${entry%%|*}"
+    if port_listening "$port"; then anything=true; break; fi
+  done
+  if [ "$anything" = false ]; then
+    if [ "$IS_WINDOWS" = true ]; then
+      if ! tasklist 2>/dev/null | grep -qi "celery.exe"; then
+        ok "Already stopped (no tracked ports listening, no celery/uvicorn)"
+        return 0
+      fi
+    else
+      if ! pgrep -f "celery.*worker\|uvicorn.*app.main\|python.*consumer\.py" >/dev/null 2>&1; then
+        ok "Already stopped (no tracked ports listening, no celery/uvicorn)"
+        return 0
+      fi
+    fi
+  fi
+
+  reap_all_ports
 
   # Kill celery and orphaned python processes (including the Wave-2
   # NATS consumer we launched as `python consumer.py`).
@@ -171,7 +406,21 @@ kill_processes() {
   clean_pycache
 }
 
-# ── Status check ──────────────────────────────────────────────
+# ── Resolve health-check URL for a port (per-app) ─────────────────────
+_health_url_for_port() {
+  case "$1" in
+    8000) echo "http://localhost:8000/api/health" ;;
+    8001) echo "http://localhost:8001/api/health" ;;
+    8002) echo "http://localhost:8002/api/health" ;;
+    8003) echo "http://localhost:8003/health" ;;
+    8004) echo "http://localhost:8004/health" ;;
+    8006) echo "http://localhost:8006/health" ;;
+    3005) echo "http://localhost:3005/actuator/health/liveness" ;;
+    *)    echo "http://localhost:$1" ;;
+  esac
+}
+
+# ── Status check — PID + port + health per app, table-of-record ───────
 check_status() {
   log "Service status:"
   echo ""
@@ -185,102 +434,119 @@ check_status() {
   fi
   echo ""
 
-  # API
-  if curl -s --max-time 3 http://localhost:8000/api/health >/dev/null 2>&1; then
-    ok "API server — http://localhost:8000"
-  else
-    err "API server not responding on :8000"
-  fi
+  printf "  %-22s %-6s %-8s %-7s %s\n" "Service" "Port" "PID" "Health" "Log"
+  printf "  %-22s %-6s %-8s %-7s %s\n" "──────" "────" "───" "──────" "───"
 
-  # Web
-  if curl -s --max-time 3 http://localhost:3000 -o /dev/null 2>&1; then
-    ok "Web server — http://localhost:3000"
-  else
-    err "Web server not responding on :3000"
-  fi
+  local green=0 red=0
+  for entry in "${ALL_PORTS[@]}"; do
+    local port="${entry%%|*}"
+    local rest="${entry#*|}"
+    local label="${rest%%|*}"
+    local log_base="${rest##*|}"
+    local pid health verdict url log_path
 
-  # Neo4j
+    pid=$(pid_on_port "$port" 2>/dev/null)
+    [ -z "$pid" ] && pid="-"
+    url=$(_health_url_for_port "$port")
+    log_path="$LOG_DIR/${log_base}.log"
+
+    if curl -s --max-time 3 -o /dev/null "$url" 2>/dev/null; then
+      health="OK"
+      verdict="${GREEN}${health}${NC}"
+      green=$((green+1))
+    else
+      health="DOWN"
+      verdict="${RED}${health}${NC}"
+      red=$((red+1))
+    fi
+    printf "  %-22s %-6s %-8s " "$label" "$port" "$pid"
+    echo -e "${verdict}\t$log_path"
+  done
+
+  echo ""
+
+  # Neo4j (infra — not in ALL_PORTS)
   if curl -s --max-time 3 http://localhost:7474 >/dev/null 2>&1; then
     ok "Neo4j — http://localhost:7474 (Browser) / bolt://localhost:7687"
   else
     err "Neo4j not responding on :7474"
   fi
 
-  # ContractIQ
-  if curl -s --max-time 3 http://localhost:8001/api/health >/dev/null 2>&1; then
-    ok "ContractIQ API — http://localhost:8001"
-  else
-    warn "ContractIQ API not responding on :8001"
-  fi
-  if curl -s --max-time 3 http://localhost:3001 -o /dev/null 2>&1; then
-    ok "ContractIQ Web — http://localhost:3001"
-  else
-    warn "ContractIQ Web not responding on :3001"
-  fi
-
-  # Mideast Tourism
-  if curl -s --max-time 3 http://localhost:8002/api/health >/dev/null 2>&1; then
-    ok "Mideast Tourism API — http://localhost:8002"
-  else
-    warn "Mideast Tourism API not responding on :8002"
-  fi
-  if curl -s --max-time 3 http://localhost:3002 -o /dev/null 2>&1; then
-    ok "Mideast Tourism Web — http://localhost:3002"
-  else
-    warn "Mideast Tourism Web not responding on :3002"
-  fi
-
-  # Industrial IoT
-  if curl -s --max-time 3 http://localhost:8003/health >/dev/null 2>&1; then
-    ok "Industrial-IoT API — http://localhost:8003"
-  else
-    warn "Industrial-IoT API not responding on :8003"
-  fi
-  if curl -s --max-time 3 http://localhost:3003 -o /dev/null 2>&1; then
-    ok "Industrial-IoT Web — http://localhost:3003"
-  else
-    warn "Industrial-IoT Web not responding on :3003"
-  fi
-
-  # ResolveAI
-  if curl -s --max-time 3 http://localhost:8004/health >/dev/null 2>&1; then
-    ok "ResolveAI API — http://localhost:8004"
-  else
-    warn "ResolveAI API not responding on :8004"
-  fi
-  if curl -s --max-time 3 http://localhost:3004 -o /dev/null 2>&1; then
-    ok "ResolveAI Web — http://localhost:3004"
-  else
-    warn "ResolveAI Web not responding on :3004"
-  fi
-
   # Celery
   if [ "$IS_WINDOWS" = true ]; then
-    if tasklist 2>/dev/null | grep -qi "celery\|python" && [ -f "$ROOT_DIR/logs/celery.log" ]; then
-      ok "Celery worker — logs/celery.log"
+    if tasklist 2>/dev/null | grep -qi "celery\|python" && [ -f "$LOG_DIR/celery.log" ]; then
+      ok "Celery worker — $LOG_DIR/celery.log"
     else
       warn "Celery worker may not be running"
     fi
   else
     if pgrep -f "celery.*worker" >/dev/null 2>&1; then
-      ok "Celery worker — logs/celery.log"
+      ok "Celery worker — $LOG_DIR/celery.log"
     else
       warn "Celery worker not running"
     fi
   fi
+
   echo ""
+  echo -e "  Summary: ${GREEN}${green} green${NC} / ${RED}${red} down${NC} (of ${#ALL_PORTS[@]} tracked services)"
+  echo ""
+  # Exit code conveys aggregate health — callers/scripts can branch on it.
+  if [ "$red" -gt 0 ]; then return 1; fi
+  return 0
 }
 
-# ── Handle --stop and --status ────────────────────────────────
-if [ "${1:-}" = "--stop" ]; then
-  kill_processes
-  log "All Abenix processes stopped."
-  exit 0
-fi
+# ── Handle --stop, --status, --restart, --help ────────────────
+case "${1:-}" in
+  --stop)
+    kill_processes
+    log "All Abenix processes stopped."
+    exit 0
+    ;;
+  --status)
+    # check_status returns non-zero if anything's down; surface that exit
+    # code to the caller so scripts (CI, /loop, etc.) can branch on it.
+    if check_status; then exit 0; else exit 1; fi
+    ;;
+  --restart)
+    log "Restart requested — running --stop then a clean start..."
+    kill_processes
+    log "All Abenix processes stopped. Re-launching..."
+    # Fall through to the normal start path below.
+    ;;
+  --help|-h)
+    cat <<EOF
+Usage: bash scripts/dev-local.sh [flag]
 
-if [ "${1:-}" = "--status" ]; then
-  check_status
-  exit 0
+Flags:
+  (no flag)   Start every service (idempotent — self-heals stale ports).
+  --stop      Stop every tracked service. Re-running is a clean no-op.
+  --status    Print PID + port + health table. Exit 0 if all green, 1 otherwise.
+  --restart   Stop everything, then run a clean start.
+  --help      This message.
+
+Logs:        $LOG_DIR/<service>.log
+EOF
+    exit 0
+    ;;
+esac
+
+# ── Self-heal preamble (no-flag start path) ───────────────────
+# If any tracked port is already listening when we enter the start path,
+# the previous run left state behind. Per the operating contract this
+# script self-heals — we run the --stop branch implicitly to reach a
+# clean baseline, then continue. No silent EADDRINUSE.
+if [ "${1:-}" != "--restart" ]; then
+  _busy_ports=""
+  for entry in "${ALL_PORTS[@]}"; do
+    port="${entry%%|*}"
+    if port_listening "$port"; then
+      _busy_ports="${_busy_ports} ${port}"
+    fi
+  done
+  if [ -n "$_busy_ports" ]; then
+    warn "Detected existing listeners on:${_busy_ports} — self-healing (auto --stop + continue)"
+    kill_processes
+  fi
 fi
 
 # ── Pre-flight: SDK drift gate ────────────────────────────────
@@ -545,29 +811,41 @@ fi
 # ── Step 7: Start services ───────────────────────────────────
 log "Step 7/7 — Starting services..."
 
-mkdir -p "$ROOT_DIR/logs"
+mkdir -p "$LOG_DIR" "$ROOT_DIR/logs"
+
+# Belt-and-braces: reap 8000/3000 right before we spawn. The standalone
+# start.sh files do the same for their own ports — but the core API/Web
+# launch had no such guard, which is why a half-stuck previous run could
+# hit EADDRINUSE and silently exit. With the self-heal preamble + this
+# guard, that path is now closed.
+kill_port 8000 "API server"
+kill_port 3000 "Web server"
 
 # Start API server (DEBUG=true for local dev — allows default secrets).
-# --reload picks up engine/translator/router edits without a manual kill;
-# without it the API runs stale bytecode after every code edit (was a
-# real 4-minute UAT trap for abenix-api PID 87416).
+# --reload picks up engine/translator/router edits without a manual kill.
 cd "$ROOT_DIR/apps/api"
 DEBUG=true PGSSLMODE=disable IS_LOCAL_DEV=1 ENVIRONMENT=local \
   PYTHONPATH=".:../../packages/db:../../apps/agent-runtime" $PYTHON -m uvicorn app.main:app \
   --host 0.0.0.0 --port 8000 --reload \
   --reload-dir . --reload-dir ../../packages/db --reload-dir ../../apps/agent-runtime \
-  > "$ROOT_DIR/logs/api.log" 2>&1 &
+  > "$LOG_DIR/abenix-api.log" 2>&1 &
 API_PID=$!
 cd "$ROOT_DIR"
-ok "API server starting (PID $API_PID) — port 8000"
+ok "API server starting (PID $API_PID) — port 8000 — log: $LOG_DIR/abenix-api.log"
+
+# Hard-cap wait for the API to actually open the port. If it doesn't,
+# wait_port_listening kills the PID and bails with a tailed log.
+wait_port_listening 8000 "API server" 45 "abenix-api" "$API_PID" || exit 1
 
 # Start Web server
 cd "$ROOT_DIR/apps/web"
 npx next dev --port 3000 \
-  > "$ROOT_DIR/logs/web.log" 2>&1 &
+  > "$LOG_DIR/abenix-web.log" 2>&1 &
 WEB_PID=$!
 cd "$ROOT_DIR"
-ok "Web server starting (PID $WEB_PID) — port 3000"
+ok "Web server starting (PID $WEB_PID) — port 3000 — log: $LOG_DIR/abenix-web.log"
+
+wait_port_listening 3000 "Web server" 60 "abenix-web" "$WEB_PID" || exit 1
 
 # Start Celery worker (handles document processing, cognify, and memify)
 # On Python 3.13 the prefork pool's `fast_trace_task` crashes with
@@ -578,10 +856,10 @@ PYTHONPATH=".:../../packages/db:../agent-runtime" $PYTHON -m celery \
   -A worker.celery_app worker \
   -Q documents,cognify,agents \
   -l info --pool=solo \
-  > "$ROOT_DIR/logs/celery.log" 2>&1 &
+  > "$LOG_DIR/celery.log" 2>&1 &
 CELERY_PID=$!
 cd "$ROOT_DIR"
-ok "Celery worker starting (PID $CELERY_PID, pool=solo) — queues: documents, cognify, agents"
+ok "Celery worker starting (PID $CELERY_PID, pool=solo) — queues: documents, cognify, agents — log: $LOG_DIR/celery.log"
 
 # Start the Wave-2 per-pool consumer — this is what drains NATS agent
 # jobs locally. Same binary the AKS per-pool Deployment runs, so the
@@ -594,28 +872,16 @@ if [ "$QUEUE_BACKEND" = "nats" ]; then
     DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://abenix:abenix@localhost:5432/abenix}" \
     REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}" \
     $PYTHON consumer.py \
-    > "$ROOT_DIR/logs/consumer.log" 2>&1 &
+    > "$LOG_DIR/consumer.log" 2>&1 &
   CONSUMER_PID=$!
   cd "$ROOT_DIR"
-  ok "NATS consumer starting (PID $CONSUMER_PID) — pool=default, backend=nats"
+  ok "NATS consumer starting (PID $CONSUMER_PID) — pool=default, backend=nats — log: $LOG_DIR/consumer.log"
 fi
 
-# ── Wait for services to be ready ─────────────────────────────
-log "Waiting for services to be ready..."
-READY=false
-for i in $(seq 1 60); do
-  API_OK=false
-  WEB_OK=false
-
-  curl -s --max-time 2 http://localhost:8000/api/health >/dev/null 2>&1 && API_OK=true
-  curl -s --max-time 2 http://localhost:3000 -o /dev/null 2>&1 && WEB_OK=true
-
-  if [ "$API_OK" = true ] && [ "$WEB_OK" = true ]; then
-    READY=true
-    break
-  fi
-  sleep 1
-done
+# Both API + Web are already verified-listening by wait_port_listening
+# above. No need for the legacy second curl loop. Mark READY for the
+# downstream branches that print the standalone-app launch banner.
+READY=true
 
 if [ "$READY" = true ]; then
   # Sync MCP registry and tool catalog after API is ready
@@ -782,28 +1048,31 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   echo -e "    Celery:  PID $CELERY_PID — queues: documents, cognify, agents"
   echo -e "    Neo4j:   bolt://localhost:7687 (user: neo4j, pass: abenix)"
   echo ""
-  echo -e "  ${YELLOW}Logs:${NC}"
-  echo -e "    API:     tail -f logs/api.log"
-  echo -e "    Web:     tail -f logs/web.log"
-  echo -e "    Celery:  tail -f logs/celery.log"
+  echo -e "  ${YELLOW}Logs:${NC} (per-process — $LOG_DIR/)"
+  echo -e "    API:     tail -f $LOG_DIR/abenix-api.log"
+  echo -e "    Web:     tail -f $LOG_DIR/abenix-web.log"
+  echo -e "    Celery:  tail -f $LOG_DIR/celery.log"
+  echo -e "    Consumer:tail -f $LOG_DIR/consumer.log"
   echo ""
-  echo -e "  ${YELLOW}Stop:${NC}  bash scripts/dev-local.sh --stop"
-  echo -e "  ${YELLOW}Tests:${NC} npx playwright test --headed"
+  echo -e "  ${YELLOW}Stop:${NC}     bash scripts/dev-local.sh --stop"
+  echo -e "  ${YELLOW}Restart:${NC}  bash scripts/dev-local.sh --restart"
+  echo -e "  ${YELLOW}Status:${NC}   bash scripts/dev-local.sh --status"
+  echo -e "  ${YELLOW}Tests:${NC}    npx playwright test --headed"
   echo ""
 else
-  warn "Services did not become ready within 60s."
+  warn "Services did not become ready."
   warn "Check logs:"
-  warn "  API: tail -f $ROOT_DIR/logs/api.log"
-  warn "  Web: tail -f $ROOT_DIR/logs/web.log"
+  warn "  API: tail -f $LOG_DIR/abenix-api.log"
+  warn "  Web: tail -f $LOG_DIR/abenix-web.log"
   echo ""
   # Show last few lines of logs for debugging
-  if [ -f "$ROOT_DIR/logs/api.log" ]; then
+  if [ -f "$LOG_DIR/abenix-api.log" ]; then
     log "Last API log lines:"
-    tail -5 "$ROOT_DIR/logs/api.log" 2>/dev/null | sed 's/^/      /'
+    tail -5 "$LOG_DIR/abenix-api.log" 2>/dev/null | sed 's/^/      /'
   fi
-  if [ -f "$ROOT_DIR/logs/web.log" ]; then
+  if [ -f "$LOG_DIR/abenix-web.log" ]; then
     log "Last Web log lines:"
-    tail -5 "$ROOT_DIR/logs/web.log" 2>/dev/null | sed 's/^/      /'
+    tail -5 "$LOG_DIR/abenix-web.log" 2>/dev/null | sed 's/^/      /'
   fi
 fi
 

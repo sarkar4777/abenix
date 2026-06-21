@@ -88,6 +88,11 @@ async def register(
     # Seed a default moderation policy so the gate is wired the moment a
     # tenant exists. Categories with no explicit action fall back to BLOCK
     # at threshold 0.5; admins can soften per-category from /moderation.
+    # Custom patterns: ship the canonical PII regex set so SSN / credit
+    # card / API-key style input is blocked at execute-time without any
+    # tenant configuration. Otherwise Bug #2 reproduces every fresh tenant.
+    from app.core.moderation_glue import DEFAULT_PII_PATTERNS
+
     policy = ModerationPolicy(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
@@ -103,7 +108,7 @@ async def register(
         default_threshold=0.5,
         category_actions={},
         default_action=ModerationAction.BLOCK,
-        custom_patterns=[],
+        custom_patterns=list(DEFAULT_PII_PATTERNS),
         redaction_mask="█████",
         fail_closed=True,
         created_by=user.id,
