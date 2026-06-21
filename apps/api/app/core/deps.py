@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import sys
 import uuid
@@ -55,6 +56,27 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session() as session:
+        yield session
+
+
+@contextlib.asynccontextmanager
+async def fresh_session() -> AsyncGenerator[AsyncSession, None]:
+    """Open a brand-new AsyncSession for use inside a concurrent task or
+    background job.
+
+    Use this — NOT the request-scoped `db: AsyncSession = Depends(get_db)` —
+    whenever you need DB access from:
+      * an `asyncio.create_task(...)` fire-and-forget background job, or
+      * any coroutine that runs in parallel with another await on the same
+        session (e.g. siblings inside `asyncio.gather` / `asyncio.wait`).
+
+    asyncpg's underlying connection is single-threaded: two overlapping
+    `await session.execute(...)` calls on the same session produce
+    `InterfaceError: another operation is in progress`. Passing the
+    request's `db` into a task also outlives the request — the request's
+    `async with` will close the session out from under the task.
+    """
     async with async_session() as session:
         yield session
 

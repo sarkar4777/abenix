@@ -1,8 +1,8 @@
 """Schemas for pipeline execution API."""
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PipelineConditionSchema(BaseModel):
@@ -45,7 +45,12 @@ class MergeConfigSchema(BaseModel):
 
 class PipelineNodeSchema(BaseModel):
     id: str
-    tool_name: str
+    # type="tool" keeps the original tool_name path; type="agent" routes
+    # the node through agent_step with a seeded agent's system_prompt.
+    type: Literal["tool", "agent"] = "tool"
+    tool_name: str | None = None
+    agent_id: str | None = None
+    agent_slug: str | None = None
     arguments: dict[str, Any] = Field(default_factory=dict)
     depends_on: list[str] = Field(default_factory=list)
     condition: PipelineConditionSchema | None = None
@@ -58,6 +63,16 @@ class PipelineNodeSchema(BaseModel):
     error_branch_node: str | None = None
     switch: SwitchConfigSchema | None = None
     merge: MergeConfigSchema | None = None
+
+    @model_validator(mode="after")
+    def _validate_node_type(self) -> "PipelineNodeSchema":
+        if self.type == "tool":
+            if not self.tool_name:
+                raise ValueError("tool_name is required when type='tool'")
+        elif self.type == "agent":
+            if not (self.agent_id or self.agent_slug):
+                raise ValueError("agent_id or agent_slug is required when type='agent'")
+        return self
 
 
 class ExecutePipelineRequest(BaseModel):

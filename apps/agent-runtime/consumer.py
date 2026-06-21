@@ -116,6 +116,64 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
         }
 
 
+async def _load_moderation_gate(
+    tenant_id: str,
+) -> Any:
+    """Build a GateConfig for the tenant's active moderation policy.
+
+    Queue-routed runs don't pass through the API-side build_gate_context
+    helper, so the consumer recreates the same shape here. Returns None
+    when there's no active policy (gate-off path stays a no-op).
+    """
+    try:
+        from sqlalchemy import desc, select
+
+        from engine.moderation_gate import GateConfig
+        from models.moderation_policy import (  # type: ignore
+            ModerationAction,
+            ModerationPolicy,
+        )
+    except Exception:
+        return None
+    try:
+        Session = await _get_session_factory()
+        async with Session() as db:
+            res = await db.execute(
+                select(ModerationPolicy)
+                .where(ModerationPolicy.tenant_id == uuid.UUID(tenant_id))
+                .where(ModerationPolicy.is_active.is_(True))
+                .order_by(desc(ModerationPolicy.updated_at))
+                .limit(1)
+            )
+            policy = res.scalars().first()
+            if policy is None:
+                return None
+            return GateConfig(
+                policy_id=str(policy.id),
+                tenant_id=str(policy.tenant_id),
+                user_id="",
+                pre_llm=bool(policy.pre_llm),
+                post_llm=bool(policy.post_llm),
+                on_tool_output=bool(policy.on_tool_output),
+                provider_model=str(policy.provider_model or "omni-moderation-latest"),
+                thresholds=dict(policy.thresholds or {}),
+                default_threshold=float(policy.default_threshold),
+                category_actions=dict(policy.category_actions or {}),
+                default_action=(
+                    policy.default_action.value
+                    if isinstance(policy.default_action, ModerationAction)
+                    else str(policy.default_action)
+                ),
+                custom_patterns=list(policy.custom_patterns or []),
+                redaction_mask=str(policy.redaction_mask or "█████"),
+                fail_closed=bool(getattr(policy, "fail_closed", False)),
+                event_sink=None,
+            )
+    except Exception as e:
+        logger.warning("could not load moderation gate for tenant %s: %s", tenant_id, e)
+        return None
+
+
 async def _update_usage_counters(
     api_key_id: str | None,
     user_id: str | None,
@@ -564,6 +622,13 @@ async def _run_one(payload: dict) -> None:
             llm_router = LLMRouter()
             _tool_cfg = loaded["model_cfg"].get("tool_config") or {}
             _asset_schemas = await resolve_asset_schemas(_tool_cfg)
+            # Pull the grounded-response contract and the moderation gate
+            # for queue-routed runs too. Without this, RUNTIME_MODE=remote
+            # plus QUEUE_BACKEND=nats silently bypassed both controls.
+            _require_kb = bool(
+                loaded["model_cfg"].get("require_knowledge_search", False)
+            )
+            _moderation_gate = await _load_moderation_gate(tenant_id)
             executor = AgentExecutor(
                 llm_router=llm_router,
                 tool_registry=registry,
@@ -579,6 +644,8 @@ async def _run_one(payload: dict) -> None:
                 # consumer path behaves the same as the inline path.
                 tool_config=_tool_cfg,
                 asset_schemas=_asset_schemas,
+                require_knowledge_search=_require_kb,
+                moderation_gate=_moderation_gate,
             )
             # Stream so per-iteration events reach Redis pub/sub live; invoke() only emits start+done.
             from types import SimpleNamespace

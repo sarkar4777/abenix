@@ -28,23 +28,56 @@ public final class Abenix implements AutoCloseable {
     private final HttpClient http;
     private final ActingSubject defaultActingSubject;
     private final ApprovalsClient approvals;
+    private final AgentsClient agents;
+    private final ToolsClient tools;
+    private final PresetsClient presets;
+    private final MLModelsClient mlModels;
+    private final KnowledgeClient knowledge;
+    private final ChatClient chat;
+    private final ExecutionsClient executions;
 
     private Abenix(Builder b) {
         this.baseUrl = stripTrailingSlash(Objects.requireNonNull(b.baseUrl, "baseUrl"));
-        this.apiKey = Objects.requireNonNull(b.apiKey, "apiKey");
+        // Defensive: a mounted-secret file with a stray CR/LF turns the
+        // X-API-Key into an illegal header value and every SDK call dies.
+        // Match the Python SDK and strip those.
+        String key = Objects.requireNonNull(b.apiKey, "apiKey");
+        this.apiKey = key.strip();
         this.timeout = b.timeout;
         this.defaultActingSubject = b.actingSubject;
         this.http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
             .version(HttpClient.Version.HTTP_1_1)      // SSE is happier on 1.1
             .build();
+        HttpKit kit = new HttpKit(this.baseUrl, this.apiKey, this.http, this.defaultActingSubject, this.timeout);
         this.approvals = new ApprovalsClient(this.baseUrl, this.apiKey, this.http, this.defaultActingSubject, this.timeout);
+        this.agents = new AgentsClient(kit);
+        this.tools = new ToolsClient(kit);
+        this.presets = new PresetsClient(kit);
+        this.mlModels = new MLModelsClient(kit);
+        this.knowledge = new KnowledgeClient(kit);
+        this.chat = new ChatClient(kit);
+        this.executions = new ExecutionsClient(kit);
     }
 
     public static Builder builder() { return new Builder(); }
 
     /** HITL approvals client — list, get, sign off, and wait on approvals. */
     public ApprovalsClient approvals() { return approvals; }
+    /** Agent registry read surface. */
+    public AgentsClient agents() { return agents; }
+    /** Tool catalogue + direct execute. */
+    public ToolsClient tools() { return tools; }
+    /** Per-tenant tool presets. */
+    public PresetsClient presets() { return presets; }
+    /** ML model registry. */
+    public MLModelsClient mlModels() { return mlModels; }
+    /** Knowledge Engine — Cognify, graph, hybrid search. */
+    public KnowledgeClient knowledge() { return knowledge; }
+    /** Persistent multi-turn chat threads. */
+    public ChatClient chat() { return chat; }
+    /** Read-side executions helpers (live, replay, tree, …). */
+    public ExecutionsClient executions() { return executions; }
 
     // ─────────────────────────── Public verbs ───────────────────────────
 
@@ -178,6 +211,47 @@ public final class Abenix implements AutoCloseable {
             return JSON.treeToValue(data, ExecutionResult.class);
         } catch (IOException e) {
             throw new AbenixException("Bad execute response shape: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Approve an in-flight HITL gate by execution + gate id. Mirrors the
+     * Python {@code Abenix.approve(execution_id, gate_id, comment)} call.
+     * Prefer {@link ApprovalsClient#approve(String, String)} when you
+     * already hold an {@code approval_id}.
+     */
+    public void approve(String executionId, String gateId, String comment) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", "approved");
+        body.put("comment", comment == null ? "" : comment);
+        sendDecide(executionId, gateId, body, "approve");
+    }
+
+    /** Reject an in-flight HITL gate by execution + gate id. */
+    public void reject(String executionId, String gateId, String comment) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", "rejected");
+        body.put("comment", comment == null ? "" : comment);
+        sendDecide(executionId, gateId, body, "reject");
+    }
+
+    private void sendDecide(String executionId, String gateId, Map<String, Object> body, String op) {
+        String path = "/api/executions/" + executionId + "/approve?gate_id="
+            + java.net.URLEncoder.encode(gateId, java.nio.charset.StandardCharsets.UTF_8);
+        HttpRequest req = authHeaders(HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + path))
+            .timeout(Duration.ofSeconds(30))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(toJson(body))), defaultActingSubject)
+            .build();
+        try {
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() >= 400) {
+                throw new AbenixException(op + "(" + executionId + ", " + gateId + ") HTTP "
+                    + resp.statusCode() + " — " + truncate(resp.body(), 400));
+            }
+        } catch (IOException | InterruptedException e) {
+            throw new AbenixException(op + " failed: " + e.getMessage(), e);
         }
     }
 

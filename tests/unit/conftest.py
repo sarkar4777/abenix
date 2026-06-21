@@ -21,8 +21,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # Order matters: app/ resolves to apps/api/app, engine/ to
-# apps/agent-runtime/engine, models/ to packages/db/models.
-for sub in ("apps/api", "apps/agent-runtime", "packages/db"):
+# apps/agent-runtime/engine, models/ to packages/db/models, worker/
+# to apps/worker/worker.
+for sub in ("apps/api", "apps/agent-runtime", "packages/db", "apps/worker"):
     p = str(ROOT / sub)
     if p not in sys.path:
         sys.path.insert(0, p)

@@ -28,6 +28,20 @@ class EmbeddingProviderError(Exception):
     """No usable embedding provider configured (no Azure + no OpenAI key)."""
 
 
+_AZURE_STRIP_WARNED = False
+
+
+def _normalize_azure_endpoint(raw: str) -> str:
+    """Strip the /openai/deployments path the SDK adds itself. Trailing slashes too."""
+    if not raw:
+        return raw
+    s = raw.rstrip("/")
+    for suffix in ("/openai/deployments", "/openai"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)]
+    return s.rstrip("/")
+
+
 def _strip_file_scheme(p: str) -> str:
     """Normalise a storage URL to a filesystem path."""
     if p is None:
@@ -93,19 +107,31 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
     """Returns (embeddings, used_real_model). Provider selection:
       1. Azure OpenAI if AZURE_OPENAI_API_KEY + endpoint are set (preferred —
          that's what the production cluster pays for).
-      2. Direct OpenAI if OPENAI_API_KEY is set.
+      2. Direct OpenAI fallback if OPENAI_API_KEY is set and Azure errored
+         or wasn't configured.
       3. Otherwise raise EmbeddingProviderError so the caller flags failure
          loudly instead of silently storing zero vectors.
 
-    A live provider call that still errors (quota, transport) degrades to
-    zero vectors so a single bad doc can't take down the whole KB ingest —
-    keyword search keeps working, semantic on that doc only is degraded."""
+    A live provider call that still errors (quota, transport) after both
+    providers were attempted returns the (zero-vectors, False) tuple. The
+    caller marks the document DEGRADED with the honest reason in
+    documents.error_message; the KB rollup goes DEGRADED so the UI never
+    paints a green checkmark over a doc that nothing can actually search."""
     import asyncio
 
     azure_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-    azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
+    azure_endpoint_raw = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
         "AZURE_OPENAI_API_BASE", ""
     )
+    azure_endpoint = _normalize_azure_endpoint(azure_endpoint_raw)
+    if azure_endpoint != azure_endpoint_raw.rstrip("/"):
+        global _AZURE_STRIP_WARNED
+        if not _AZURE_STRIP_WARNED:
+            logger.warning(
+                "AZURE endpoint had /openai/deployments suffix; stripped "
+                "defensively. Fix .env or your deploy values to avoid this."
+            )
+            _AZURE_STRIP_WARNED = True
     if azure_key and azure_endpoint:
         try:
             from openai import AsyncAzureOpenAI
@@ -145,8 +171,9 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
                 )
             else:
                 logger.warning(
-                    "Azure embedding call failed (%s) and no OPENAI_API_KEY fallback "
-                    "is configured; degrading to zero vectors so doc stays usable",
+                    "Azure embedding call failed (%s) and no OPENAI_API_KEY "
+                    "fallback is configured; marking doc DEGRADED with the "
+                    "honest reason so search returns 503 instead of an empty 200",
                     exc,
                 )
                 return [[0.0] * EMBEDDING_DIM for _ in chunks], False
@@ -166,7 +193,8 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
             return embeddings, True
         except Exception as exc:
             logger.warning(
-                "OpenAI embedding call failed (%s); falling back to zero vectors so doc stays usable",
+                "OpenAI embedding call failed (%s); both providers exhausted, "
+                "doc will be marked DEGRADED with the honest provider error",
                 exc,
             )
             return [[0.0] * EMBEDDING_DIM for _ in chunks], False

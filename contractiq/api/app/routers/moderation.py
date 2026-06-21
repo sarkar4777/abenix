@@ -106,6 +106,110 @@ async def list_policies(
         return JSONResponse({"data": [], "error": str(e)})
 
 
+@router.post("/policies")
+async def create_policy(
+    body: dict,
+    user: ContractIQUser = Depends(get_contractiq_user),
+) -> JSONResponse:
+    """Proxy POST /api/moderation/policies. CIQ tenant scoped via X-Abenix-Subject."""
+    if not API_KEY:
+        raise HTTPException(status_code=503, detail="CONTRACTIQ_ABENIX_API_KEY not configured")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(
+                f"{ABENIX_URL}/api/moderation/policies",
+                headers={**_headers(user), "Content-Type": "application/json"},
+                json=body,
+            )
+            if r.status_code >= 500:
+                raise HTTPException(status_code=503, detail=f"moderation upstream {r.status_code}")
+            try:
+                j = r.json()
+            except Exception:
+                raise HTTPException(status_code=503, detail="moderation upstream returned non-JSON")
+            data = j.get("data") if isinstance(j, dict) else j
+            if r.status_code >= 400:
+                err = (j.get("error") or {}) if isinstance(j, dict) else {}
+                msg = err.get("message") or err or "policy create failed"
+                raise HTTPException(status_code=r.status_code, detail=msg)
+            return JSONResponse(data if data is not None else {}, status_code=r.status_code)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("moderation policy create proxy failed: %r", e)
+        raise HTTPException(status_code=503, detail=f"moderation upstream unreachable: {e}")
+
+
+@router.patch("/policies/{policy_id}")
+async def update_policy(
+    policy_id: str,
+    body: dict,
+    user: ContractIQUser = Depends(get_contractiq_user),
+) -> JSONResponse:
+    """Proxy PATCH /api/moderation/policies/{id}."""
+    if not API_KEY:
+        raise HTTPException(status_code=503, detail="CONTRACTIQ_ABENIX_API_KEY not configured")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.patch(
+                f"{ABENIX_URL}/api/moderation/policies/{policy_id}",
+                headers={**_headers(user), "Content-Type": "application/json"},
+                json=body,
+            )
+            if r.status_code >= 500:
+                raise HTTPException(status_code=503, detail=f"moderation upstream {r.status_code}")
+            try:
+                j = r.json()
+            except Exception:
+                raise HTTPException(status_code=503, detail="moderation upstream returned non-JSON")
+            data = j.get("data") if isinstance(j, dict) else j
+            if r.status_code >= 400:
+                err = (j.get("error") or {}) if isinstance(j, dict) else {}
+                msg = err.get("message") or err or "policy update failed"
+                raise HTTPException(status_code=r.status_code, detail=msg)
+            return JSONResponse(data if data is not None else {}, status_code=r.status_code)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("moderation policy update proxy failed: %r", e)
+        raise HTTPException(status_code=503, detail=f"moderation upstream unreachable: {e}")
+
+
+@router.delete("/policies/{policy_id}")
+async def delete_policy(
+    policy_id: str,
+    user: ContractIQUser = Depends(get_contractiq_user),
+) -> JSONResponse:
+    """Proxy DELETE /api/moderation/policies/{id}. 409 propagates verbatim."""
+    if not API_KEY:
+        raise HTTPException(status_code=503, detail="CONTRACTIQ_ABENIX_API_KEY not configured")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.delete(
+                f"{ABENIX_URL}/api/moderation/policies/{policy_id}",
+                headers=_headers(user),
+            )
+            if r.status_code >= 500:
+                raise HTTPException(status_code=503, detail=f"moderation upstream {r.status_code}")
+            try:
+                j = r.json()
+            except Exception:
+                j = {}
+            if r.status_code == 409:
+                err = (j.get("error") or {}) if isinstance(j, dict) else {}
+                raise HTTPException(status_code=409, detail=err or {"error_code": "policy_has_referenced_events"})
+            if r.status_code >= 400:
+                err = (j.get("error") or {}) if isinstance(j, dict) else {}
+                raise HTTPException(status_code=r.status_code, detail=err or "policy delete failed")
+            data = j.get("data") if isinstance(j, dict) else j
+            return JSONResponse(data if data is not None else {"deleted": True}, status_code=r.status_code)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("moderation policy delete proxy failed: %r", e)
+        raise HTTPException(status_code=503, detail=f"moderation upstream unreachable: {e}")
+
+
 @router.post("/vet")
 async def vet(
     body: dict,

@@ -16,6 +16,23 @@ RELEASE_NAME="${RELEASE_NAME:-abenix}"
 IMAGE_TAG="${IMAGE_TAG:-$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || echo latest)}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
 
+# Edge runtime images (edge-runtime, edge-runtime-rust, edge-runtime-c) are
+# built ONCE per release and pinned by version in each chart's values.yaml.
+# They are NOT rebuilt every deploy, so passing the current git SHA as
+# image.tag has historically broken them (ImagePullBackOff against a tag
+# the deploy never pushed — see the v1.5.x "abenix-edge-edge-runtime stuck"
+# regression). Default to the empty string — the deploy script will then
+# skip the --set image.tag override and the chart's pinned value wins.
+# Operators cutting a new edge image can override with EDGE_IMAGE_TAG=1.2.0
+# (or whatever they pushed to ACR by hand).
+EDGE_IMAGE_TAG="${EDGE_IMAGE_TAG:-}"
+
+# Set REAPER_DELETE_ORPHANS=true to authorise the reconcile phase to delete
+# orphan deployments / statefulsets that aren't owned by any current helm
+# release. Default is OFF — orphans are only warned about, never deleted
+# without an explicit operator opt-in.
+REAPER_DELETE_ORPHANS="${REAPER_DELETE_ORPHANS:-false}"
+
 # ACR names must be globally unique AND 5-50 alphanumerics. Derive a stable
 # suffix from the subscription+rg hash so repeated runs reuse the same ACR.
 _default_acr_name() {
@@ -108,7 +125,12 @@ Flags:
   --skip-build      On deploy: don't rebuild images (use whatever is in ACR).
 
 Environment overrides: AZ_RESOURCE_GROUP, AZ_LOCATION, AKS_NAME, AKS_NODE_SIZE,
-  AKS_NODE_COUNT, ACR_NAME, NAMESPACE, RELEASE_NAME, IMAGE_TAG.
+  AKS_NODE_COUNT, ACR_NAME, NAMESPACE, RELEASE_NAME, IMAGE_TAG,
+  EDGE_IMAGE_TAG (pinned per-release version for edge runtimes; default ""
+    keeps each chart's pinned values.yaml tag — DO NOT use the git SHA),
+  REAPER_DELETE_ORPHANS=true (allow Phase 6 to delete orphan helm releases;
+    default false — orphans are warned but not removed),
+  RECONCILE_WAIT_SECS (Phase 6 settle window, default 300s).
 
 Current values:
   RG        = ${AZ_RESOURCE_GROUP}
@@ -208,6 +230,114 @@ _should_do() {
     [ "$s" = "${svc}" ] && return 0
   done
   return 1
+}
+
+# ── Secret/config sanity gate ─────────────────────────────────────────
+# The Azure OpenAI SDK appends /openai/deployments/<deploy>/... to
+# AZURE_OPENAI_API_BASE / AZURE_OPENAI_ENDPOINT itself. A `.env` value
+# like https://<resource>.openai.azure.com/openai/deployments leads to
+# the SDK building https://...openai/deployments/openai/deployments/...
+# (double-prefix), which 404s every chat call in production. Auto-strip
+# the suffix and warn the operator so the .env gets fixed too.
+#
+# Also normalises live cluster secrets BEFORE the helm upgrade so a
+# previously-broken value in abenix-secrets gets corrected on the next
+# rollout, not silently carried forward.
+_sanity_check_azure_endpoints() {
+  step "Sanity gate — Azure OpenAI endpoint URLs"
+  local fixed_any=false
+
+  for var in AZURE_OPENAI_API_BASE AZURE_OPENAI_ENDPOINT; do
+    local val="${!var:-}"
+    [ -z "${val}" ] && continue
+    # Strip trailing slash + the common bad suffix.
+    local cleaned="${val%/}"
+    cleaned="${cleaned%/openai/deployments}"
+    cleaned="${cleaned%/openai}"
+    if [ "${cleaned}" != "${val%/}" ]; then
+      warn "${var} contained '/openai/deployments' (the SDK appends this itself)."
+      warn "  was:    ${val}"
+      warn "  using:  ${cleaned}"
+      warn "  Please update .env to the cleaned value to avoid this warning."
+      export "${var}=${cleaned}"
+      fixed_any=true
+    elif [[ "${val}" != http* ]]; then
+      err "${var}='${val}' doesn't look like a URL (missing scheme). Aborting deploy."
+      exit 6
+    fi
+  done
+
+  # If a live secret already has the bad suffix, fix it in-cluster so
+  # the pod rollout that follows picks up a correct value.
+  if kubectl get secret abenix-secrets -n "${NAMESPACE}" >/dev/null 2>&1; then
+    for key in AZURE_OPENAI_API_BASE AZURE_OPENAI_ENDPOINT; do
+      local b64; b64=$(kubectl get secret abenix-secrets -n "${NAMESPACE}" \
+        -o jsonpath="{.data.${key}}" 2>/dev/null || echo "")
+      [ -z "${b64}" ] && continue
+      local live; live=$(echo "${b64}" | base64 -d 2>/dev/null || echo "")
+      [ -z "${live}" ] && continue
+      local cleaned="${live%/}"
+      cleaned="${cleaned%/openai/deployments}"
+      cleaned="${cleaned%/openai}"
+      if [ "${cleaned}" != "${live%/}" ]; then
+        warn "Live abenix-secrets.${key} has '/openai/deployments' suffix — patching in-cluster."
+        local new_b64; new_b64=$(printf '%s' "${cleaned}" | base64 | tr -d '\n')
+        kubectl patch secret abenix-secrets -n "${NAMESPACE}" --type='json' \
+          -p="[{\"op\":\"replace\",\"path\":\"/data/${key}\",\"value\":\"${new_b64}\"}]" \
+          >/dev/null 2>&1 || true
+        fixed_any=true
+      fi
+    done
+  fi
+
+  if [ "${fixed_any}" = "true" ]; then
+    warn "Azure OpenAI endpoint values were normalised — proceeding."
+  else
+    ok "Azure OpenAI endpoint URLs look clean."
+  fi
+}
+
+# ── Drift detectors (run alongside Phase 6 reconcile) ─────────────────
+# 1) Configmaps not owned by a currently-installed helm release.
+# 2) Deployments where managed-by isn't 'Helm' (raw kubectl apply
+#    fingerprints — these miss every helm upgrade and silently drift).
+# Both are surface-only — the operator decides whether to clean up.
+_warn_unmanaged_configmaps() {
+  local owned_pattern
+  # Anything labelled with one of our helm release names is OK.
+  owned_pattern=$(helm list -n "${NAMESPACE}" -q 2>/dev/null | paste -sd'|' -)
+  if [ -z "${owned_pattern}" ]; then owned_pattern='__none__'; fi
+  local unmanaged
+  unmanaged=$(kubectl get configmap -n "${NAMESPACE}" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.app\.kubernetes\.io/managed-by}{"\t"}{.metadata.labels.app\.kubernetes\.io/instance}{"\n"}{end}' 2>/dev/null \
+    | awk -F'\t' -v pat="${owned_pattern}" '
+        $1 == "" { next }
+        $1 == "kube-root-ca.crt" { next }
+        $2 != "Helm" { print $1 " (managed-by=" ($2 == "" ? "<none>" : $2) ")"; next }
+        $3 !~ "^("pat")$" { print $1 " (instance=" $3 " not in current helm releases)"; }
+      ')
+  if [ -n "${unmanaged}" ]; then
+    warn "  Unmanaged / stale configmap(s):"
+    echo "${unmanaged}" | sed 's/^/      /'
+  else
+    ok "  All configmaps owned by current helm releases."
+  fi
+}
+
+_warn_unmanaged_deployments() {
+  local unmanaged
+  unmanaged=$(kubectl get deploy -n "${NAMESPACE}" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.app\.kubernetes\.io/managed-by}{"\t"}{.spec.template.spec.containers[0].image}{"\n"}{end}' 2>/dev/null \
+    | awk -F'\t' '
+        $1 == "" { next }
+        $2 != "Helm" { print $1 "  managed-by=" ($2 == "" ? "<none>" : $2) "  image=" $3 }
+      ')
+  if [ -n "${unmanaged}" ]; then
+    warn "  Deployment(s) NOT managed by Helm (won't get future helm upgrades):"
+    echo "${unmanaged}" | sed 's/^/      /'
+  else
+    ok "  All Deployments are Helm-managed."
+  fi
 }
 
 # Secrets helper (Helm --set flags, mirrors deploy.sh contract)
@@ -550,10 +680,23 @@ deploy_edge_runtime() {
     local edge_token edge_pubkey
     edge_token=$(_generate_abenix_api_key 2>/dev/null || echo "")
     edge_pubkey=$(_fetch_edge_signing_pubkey || echo "")
+    # Tag override only when EDGE_IMAGE_TAG is explicitly set — otherwise the
+    # chart's pinned values.yaml tag wins. Passing the git SHA here is what
+    # caused the 4-day ImagePullBackOff: the SHA tag was never pushed.
+    local edge_tag_flag=""
+    if [ -n "${EDGE_IMAGE_TAG}" ]; then
+      edge_tag_flag="--set image.tag=${EDGE_IMAGE_TAG}"
+    fi
+    # --reset-values: drop user-supplied values from prior revisions BEFORE
+    # re-applying the chart defaults + our --set flags. Without this, a
+    # historical bad value (e.g. image.tag: 84de886 from a buggy v1.5.x run)
+    # would carry forward forever, even after we stopped passing it.
+    # shellcheck disable=SC2086
     helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
       --namespace "${NAMESPACE}" \
+      --reset-values \
       --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime" \
-      --set image.tag="${IMAGE_TAG}" \
+      ${edge_tag_flag} \
       --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
       --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
       --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
@@ -605,10 +748,16 @@ deploy_edge_runtime_rust() {
   else
     log "  Signing pubkey fetched ($(printf '%s' "${edge_pubkey}" | wc -c) bytes)"
   fi
+  local edge_tag_flag=""
+  if [ -n "${EDGE_IMAGE_TAG}" ]; then
+    edge_tag_flag="--set image.tag=${EDGE_IMAGE_TAG}"
+  fi
+  # shellcheck disable=SC2086
   helm upgrade --install abenix-edge-rust "${ROOT_DIR}/infra/helm/edge-runtime-rust" \
     --namespace "${NAMESPACE}" \
+    --reset-values \
     --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime-rust" \
-    --set image.tag="${IMAGE_TAG}" \
+    ${edge_tag_flag} \
     --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-rust" \
     --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-rust" \
     --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
@@ -630,10 +779,16 @@ deploy_edge_runtime_c() {
     warn "  Could not mint platform token for edge-c"
   fi
   edge_pubkey=$(_fetch_edge_signing_pubkey || echo "")
+  local edge_tag_flag=""
+  if [ -n "${EDGE_IMAGE_TAG}" ]; then
+    edge_tag_flag="--set image.tag=${EDGE_IMAGE_TAG}"
+  fi
+  # shellcheck disable=SC2086
   helm upgrade --install abenix-edge-c "${ROOT_DIR}/infra/helm/edge-runtime-c" \
     --namespace "${NAMESPACE}" \
+    --reset-values \
     --set image.repository="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}/abenix/edge-runtime-c" \
-    --set image.tag="${IMAGE_TAG}" \
+    ${edge_tag_flag} \
     --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-c" \
     --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-c" \
     --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
@@ -657,6 +812,9 @@ deploy_abenix_helm() {
 
   # Ensure namespace
   kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - &>/dev/null
+
+  # Sanity gate — never let a malformed AZURE_OPENAI_API_BASE reach a pod.
+  _sanity_check_azure_endpoints
 
   helm_deps
 
@@ -1499,7 +1657,280 @@ deploy_all() {
   install_observability || warn "Observability install failed (non-fatal)"
   setup_ingress || warn "Ingress setup failed — you can still port-forward"
 
+  # Phase 6 — the gate. Every redeploy MUST end with a clean cluster.
+  # reconcile_cluster_state exits non-zero (and bubbles via set -e) if any
+  # pod is still stuck after a 5-minute settle window. reconcile_standalone_apps
+  # cross-checks the per-app deploy/svc state.
+  local reconcile_rc=0
+  reconcile_cluster_state || reconcile_rc=$?
+  local standalone_rc=0
+  reconcile_standalone_apps || standalone_rc=$?
+  if [ "${reconcile_rc}" != "0" ] || [ "${standalone_rc}" != "0" ]; then
+    err "Deployment finished with stale cluster state — fix above and rerun."
+    exit 9
+  fi
+
   ok "Deployment complete"
+}
+
+# ── Phase 6 — Cluster reconciliation ────────────────────────────────────────
+# Sweeps the abenix namespace at the END of every deploy:
+#   1. Reaps always-safe leftovers (Completed/Failed pods, curl-exec debug
+#      pods left by `kubectl run --rm` calls that didn't get a TTY hangup).
+#   2. Waits up to 5 minutes for any post-deploy pods to settle.
+#   3. Classifies anything still bad: stale-image / crashloop / pending /
+#      completed-leftover, with actionable log output for each.
+#   4. Reports orphan helm releases (chart name not in the known-good list).
+#   5. Exits non-zero if anything's still off after the wait window — so the
+#      script becomes the gate that catches stale state, not the operator's
+#      eyeballs the next morning.
+#
+# Knobs:
+#   REAPER_DELETE_ORPHANS=true → permits deleting orphan deployments / sts.
+#     Default off — reversibility matters; we just warn.
+#   RECONCILE_WAIT_SECS=300    → upper bound for the "let new pods settle"
+#                                wait loop.
+
+# Always-safe cleanup: delete every Completed pod (kubectl run --rm
+# leftovers, init-container Jobs that finished, etc.) and any Failed pod
+# whose only purpose was to crash. Both classes are by definition recoverable
+# from spec (their controllers will recreate them if needed).
+_reap_completed_failed_pods() {
+  local completed_count failed_count curl_debug_count
+  completed_count=$(kubectl get pods -n "${NAMESPACE}" \
+    --field-selector=status.phase=Succeeded --no-headers 2>/dev/null \
+    | wc -l | tr -d '[:space:]')
+  failed_count=$(kubectl get pods -n "${NAMESPACE}" \
+    --field-selector=status.phase=Failed --no-headers 2>/dev/null \
+    | wc -l | tr -d '[:space:]')
+  if [ "${completed_count}" -gt 0 ]; then
+    log "  Reaping ${completed_count} Completed pod(s)..."
+    kubectl delete pod -n "${NAMESPACE}" \
+      --field-selector=status.phase=Succeeded \
+      --grace-period=0 --wait=false 2>&1 | tail -3 || true
+  fi
+  if [ "${failed_count}" -gt 0 ]; then
+    log "  Reaping ${failed_count} Failed pod(s)..."
+    kubectl delete pod -n "${NAMESPACE}" \
+      --field-selector=status.phase=Failed \
+      --grace-period=0 --wait=false 2>&1 | tail -3 || true
+  fi
+  # curl-exec-* / uat-probe-* pods are debug shells from prior sessions
+  # (kubectl run with --rm but no TTY close = orphan). They're harmless but
+  # they pollute `kubectl get pods` output; nuke any older than 1h.
+  curl_debug_count=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+    | awk '/^(curl-exec-|uat-probe-)/ { print $1 }' | wc -l | tr -d '[:space:]')
+  if [ "${curl_debug_count}" -gt 0 ]; then
+    log "  Reaping ${curl_debug_count} curl-exec-* / uat-probe-* debug pod(s)..."
+    kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+      | awk '/^(curl-exec-|uat-probe-)/ { print $1 }' \
+      | xargs -r kubectl delete pod -n "${NAMESPACE}" --grace-period=0 --wait=false 2>&1 \
+      | tail -3 || true
+  fi
+}
+
+# Wait up to RECONCILE_WAIT_SECS for any not-Running pods to settle. Returns
+# the LIST of still-bad pod names on stdout; empty stdout = clean cluster.
+_wait_for_settle() {
+  local timeout="${RECONCILE_WAIT_SECS:-300}"
+  local start=$SECONDS
+  local bad=""
+  while true; do
+    bad=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+      | awk '$3 !~ /^(Running|Completed|Succeeded)$/ { print $1 }')
+    if [ -z "${bad}" ]; then break; fi
+    local elapsed=$((SECONDS - start))
+    if [ "${elapsed}" -ge "${timeout}" ]; then break; fi
+    sleep 10
+  done
+  echo "${bad}"
+}
+
+# Classify one bad pod and print a one-line diagnosis + remediation hint.
+# Returns 0 always (caller aggregates).
+_classify_bad_pod() {
+  local pod="$1"
+  local phase reason image owner_kind owner_name
+  phase=$(kubectl get pod -n "${NAMESPACE}" "${pod}" -o jsonpath='{.status.phase}' 2>/dev/null)
+  # waiting reason on the FIRST container that's stuck
+  reason=$(kubectl get pod -n "${NAMESPACE}" "${pod}" \
+    -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
+  image=$(kubectl get pod -n "${NAMESPACE}" "${pod}" \
+    -o jsonpath='{.spec.containers[0].image}' 2>/dev/null)
+  owner_kind=$(kubectl get pod -n "${NAMESPACE}" "${pod}" \
+    -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)
+  owner_name=$(kubectl get pod -n "${NAMESPACE}" "${pod}" \
+    -o jsonpath='{.metadata.ownerReferences[0].name}' 2>/dev/null)
+
+  case "${reason}" in
+    ImagePullBackOff|ErrImagePull)
+      err "  ${pod}: STALE-IMAGE (${reason})"
+      err "    image:  ${image}"
+      err "    owner:  ${owner_kind}/${owner_name}"
+      err "    fix:    rebuild + push that tag, or rerun deploy without --only=... to restore canonical state"
+      echo "stale-image"
+      ;;
+    CrashLoopBackOff)
+      err "  ${pod}: CRASHLOOP (last 50 log lines):"
+      kubectl logs -n "${NAMESPACE}" "${pod}" --tail=50 2>&1 | sed 's/^/      /' || true
+      echo "crashloop"
+      ;;
+    CreateContainerConfigError|CreateContainerError|InvalidImageName)
+      err "  ${pod}: CONTAINER-CONFIG (${reason})"
+      kubectl describe pod -n "${NAMESPACE}" "${pod}" 2>&1 | grep -E "^\s*(Reason|Message):" | head -4 | sed 's/^/      /' || true
+      echo "container-config"
+      ;;
+    "")
+      if [ "${phase}" = "Pending" ]; then
+        err "  ${pod}: PENDING — describing node-selector / PVC / quota cause:"
+        kubectl describe pod -n "${NAMESPACE}" "${pod}" 2>&1 \
+          | grep -E "(FailedScheduling|Insufficient|PersistentVolumeClaim|nodeSelector)" \
+          | head -4 | sed 's/^/      /' || true
+        echo "pending"
+      else
+        warn "  ${pod}: phase=${phase} (no waiting reason); kubectl describe for details"
+        echo "unknown"
+      fi
+      ;;
+    *)
+      warn "  ${pod}: ${reason} (phase=${phase})"
+      echo "${reason}"
+      ;;
+  esac
+}
+
+# Cross-check helm releases against the known-good set. Anything else is an
+# orphan candidate — chart was removed from the repo but the release lives
+# on. Warns; never deletes (chart-level cleanup is operator's call).
+_warn_orphan_helm_releases() {
+  local known_pattern='^(abenix|abenix-edge|abenix-edge-c|abenix-edge-rust|abenix-mosquitto|abenix-timescaledb|abenix-observability|abenix-keda-mqtt-trigger|abenix-livekit)$'
+  local orphans
+  orphans=$(helm list -n "${NAMESPACE}" -q 2>/dev/null \
+    | grep -Ev "${known_pattern}" || true)
+  if [ -n "${orphans}" ]; then
+    warn "  Orphan helm release(s) — chart not in canonical set, please review:"
+    echo "${orphans}" | sed 's/^/      /'
+    if [ "${REAPER_DELETE_ORPHANS}" = "true" ]; then
+      warn "  REAPER_DELETE_ORPHANS=true — uninstalling orphans..."
+      while IFS= read -r rel; do
+        [ -z "${rel}" ] && continue
+        helm uninstall "${rel}" -n "${NAMESPACE}" 2>&1 | tail -2 || true
+      done <<< "${orphans}"
+    fi
+  fi
+}
+
+# Final reconcile phase. Runs at the END of deploy_all / redeploy.
+# Exits the whole script non-zero if anything's still bad after wait+sweep.
+reconcile_cluster_state() {
+  step "Phase 6 — Reconciling cluster state (sweep + verify clean)"
+
+  log "Reaping always-safe leftovers (Completed/Failed/debug pods)..."
+  _reap_completed_failed_pods
+
+  log "Waiting up to ${RECONCILE_WAIT_SECS:-300}s for pods to settle..."
+  local bad_list
+  bad_list=$(_wait_for_settle)
+
+  _warn_orphan_helm_releases
+  log "Checking configmap ownership..."
+  _warn_unmanaged_configmaps
+  log "Checking Deployment manager labels..."
+  _warn_unmanaged_deployments
+
+  if [ -z "${bad_list}" ]; then
+    echo ""
+    echo -e "  ${GREEN}══════════════════════════════════════════════════════${NC}"
+    echo -e "  ${GREEN}  ALL GREEN ✓  — cluster clean${NC}"
+    echo -e "  ${GREEN}    0 stale pods, 0 stuck helm releases${NC}"
+    echo -e "  ${GREEN}══════════════════════════════════════════════════════${NC}"
+    echo ""
+    return 0
+  fi
+
+  # Classify each remaining bad pod.
+  local stale_image=0 crashloop=0 pending=0 other=0
+  err "Stale pods detected after ${RECONCILE_WAIT_SECS:-300}s settle window:"
+  while IFS= read -r pod; do
+    [ -z "${pod}" ] && continue
+    local cls
+    cls=$(_classify_bad_pod "${pod}" | tail -1)
+    case "${cls}" in
+      stale-image) stale_image=$((stale_image+1)) ;;
+      crashloop)   crashloop=$((crashloop+1)) ;;
+      pending)     pending=$((pending+1)) ;;
+      *)           other=$((other+1)) ;;
+    esac
+  done <<< "${bad_list}"
+
+  local total=$((stale_image + crashloop + pending + other))
+  echo ""
+  err "══════════════════════════════════════════════════════"
+  err "  STALE: ${total} pod(s) — breakdown:"
+  err "    stale-image:  ${stale_image}"
+  err "    crashloop:    ${crashloop}"
+  err "    pending:      ${pending}"
+  err "    other:        ${other}"
+  err "══════════════════════════════════════════════════════"
+  echo ""
+  return 9
+}
+
+# Verify each standalone app's api+web pods are 1/1 Running and the service
+# has at least one endpoint. Surfaces silent breakage (deployment landed but
+# pod didn't come ready, or service selector drifted off the pod labels).
+_check_endpoints_for_svc() {
+  local svc="$1"
+  local count
+  count=$(kubectl get endpoints -n "${NAMESPACE}" "${svc}" \
+    -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null \
+    | tr ' ' '\n' | grep -c '.' || true)
+  echo "${count:-0}"
+}
+
+reconcile_standalone_apps() {
+  step "Phase 6b — Reconciling standalone apps"
+  local apps=(contractiq mideasttourism industrial-iot resolveai wingman claimsiq)
+  local failed=0
+  for app in "${apps[@]}"; do
+    # claimsiq is a single combined deployment (no -api/-web split).
+    local deploys=()
+    if [ "${app}" = "claimsiq" ]; then
+      deploys=(claimsiq)
+    else
+      deploys=("${app}-api" "${app}-web")
+    fi
+    for dep in "${deploys[@]}"; do
+      if ! kubectl get deploy -n "${NAMESPACE}" "${dep}" >/dev/null 2>&1; then
+        warn "  ${dep}: NOT DEPLOYED (deploy_${app//-/_} may have been skipped)"
+        continue
+      fi
+      local ready desired
+      ready=$(kubectl get deploy -n "${NAMESPACE}" "${dep}" \
+        -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+      desired=$(kubectl get deploy -n "${NAMESPACE}" "${dep}" \
+        -o jsonpath='{.spec.replicas}' 2>/dev/null)
+      ready="${ready:-0}"; desired="${desired:-1}"
+      if [ "${ready}" != "${desired}" ]; then
+        err "  ${dep}: ${ready}/${desired} ready — pod isn't healthy"
+        failed=$((failed+1))
+        continue
+      fi
+      local ep_count
+      ep_count=$(_check_endpoints_for_svc "${dep}")
+      if [ "${ep_count}" = "0" ]; then
+        err "  ${dep}: 0 service endpoints — selector mismatch or pods unready"
+        failed=$((failed+1))
+        continue
+      fi
+      ok "  ${dep}: ${ready}/${desired} ready, ${ep_count} endpoint(s)"
+    done
+  done
+  if [ "${failed}" -gt 0 ]; then
+    err "Standalone reconcile: ${failed} deployment(s) unhealthy"
+    return 9
+  fi
+  ok "All standalone apps healthy"
 }
 
 # Wrapper around scripts/seed-standalone-keys.sh — runs the per-app loop

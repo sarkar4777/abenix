@@ -32,6 +32,16 @@ class ExecutionConfig:
     kb_ids: list[str] | None = None
     mcp_connections: list[dict[str, Any]] | None = None
     model_config: dict[str, Any] | None = None
+    # Grounded-response contract: when True the executor must mark the
+    # run as grounding_violation if the agent finishes without ever
+    # invoking the knowledge_search tool. Forwarded by the API layer
+    # from agent.model_config.require_knowledge_search.
+    require_knowledge_search: bool = False
+    # Pre-built moderation gate snapshot from the API layer. The router
+    # forwards it verbatim so the embedded path enforces the same
+    # tenant policy as the inline path. None == no gate.
+    moderation_gate: Any = None
+    user_id: str = ""
 
 
 @dataclass
@@ -110,6 +120,14 @@ async def _execute_embedded(config: ExecutionConfig) -> ExecutionResult:
             model=config.model,
             temperature=config.temperature,
             agent_id=config.agent_id,
+            tenant_id=config.tenant_id,
+            execution_id=config.execution_id,
+            # Forward the grounded-response contract + moderation gate
+            # so the runtime-mode=remote embedded path enforces them
+            # identically to the inline path. Without this the gate
+            # silently no-ops.
+            require_knowledge_search=bool(config.require_knowledge_search),
+            moderation_gate=config.moderation_gate,
         )
 
         result = await executor.invoke(config.message)
@@ -173,6 +191,14 @@ async def _stream_embedded(
             model=config.model,
             temperature=config.temperature,
             agent_id=config.agent_id,
+            tenant_id=config.tenant_id,
+            execution_id=config.execution_id,
+            # Same as _execute_embedded — thread the grounded-response
+            # contract + moderation gate so the streaming runtime-mode
+            # path enforces them. The bug was that this constructor
+            # silently defaulted both to None/False.
+            require_knowledge_search=bool(config.require_knowledge_search),
+            moderation_gate=config.moderation_gate,
         )
 
         async for event in executor.stream(config.message):
@@ -201,10 +227,15 @@ async def _execute_remote(config: ExecutionConfig) -> ExecutionResult:
         "tools": config.tool_names,
         "agent_id": config.agent_id,
         "tenant_id": config.tenant_id,
+        "user_id": config.user_id,
         "execution_id": config.execution_id,
         "agent_name": config.agent_name,
         "db_url": config.db_url,
         "kb_ids": config.kb_ids,
+        # Forward grounding flag + model_config to the runtime pod so
+        # the pod's executor sees the same contract as inline.
+        "require_knowledge_search": bool(config.require_knowledge_search),
+        "model_config": config.model_config or {},
     }
 
     try:
@@ -248,10 +279,14 @@ async def _stream_remote(
         "tools": config.tool_names,
         "agent_id": config.agent_id,
         "tenant_id": config.tenant_id,
+        "user_id": config.user_id,
         "execution_id": config.execution_id,
         "agent_name": config.agent_name,
         "db_url": config.db_url,
         "kb_ids": config.kb_ids,
+        # See _execute_remote — must reach the runtime pod.
+        "require_knowledge_search": bool(config.require_knowledge_search),
+        "model_config": config.model_config or {},
     }
 
     try:

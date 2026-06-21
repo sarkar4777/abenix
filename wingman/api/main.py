@@ -450,6 +450,7 @@ async def _warm_market_brief(_key: str = "snapshot") -> dict[str, Any]:
 
 
 @app.get("/health")
+@app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",

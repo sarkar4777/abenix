@@ -22,6 +22,22 @@ from models.user import User
 router = APIRouter(prefix="/api/me", tags=["me"])
 
 
+@router.get("")
+@router.get("/")
+async def me_root(
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """Alias for GET /api/auth/me — the canonical "who am I" endpoint.
+
+    Older sidebar / SDK callers hit /api/me (with and without a trailing
+    slash); we delegate to the auth.me handler so the body shape stays
+    in lockstep — single source of truth, no drift.
+    """
+    from app.routers.auth import me as _auth_me
+
+    return await _auth_me(user)
+
+
 @router.get("/permissions")
 async def my_permissions(
     user: User = Depends(get_current_user),

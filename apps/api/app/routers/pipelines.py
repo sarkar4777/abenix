@@ -57,12 +57,16 @@ async def execute_pipeline(
 
     # Get tool names from agent config
     model_config = agent.model_config_ or {}
-    tool_names = model_config.get("tools", [])
-    if not tool_names:
+    tool_names = list(model_config.get("tools", []))
+    tool_nodes = [n for n in body.nodes if n.type == "tool"]
+    agent_nodes = [n for n in body.nodes if n.type == "agent"]
+    if not tool_names and tool_nodes:
         return error("Agent has no tools configured", 400)
 
-    # Check that all pipeline nodes reference available tools
-    requested_tools = {n.tool_name for n in body.nodes}
+    # Tool nodes must reference tools available on the agent. Agent nodes
+    # auto-add `agent_step` to the registry below — they don't need it on
+    # the parent agent's tool list.
+    requested_tools = {n.tool_name for n in tool_nodes if n.tool_name}
     available = set(tool_names)
     missing = requested_tools - available
     if missing:
@@ -71,6 +75,44 @@ async def execute_pipeline(
             f"Available: {sorted(available)}",
             400,
         )
+
+    # For type='agent' nodes, validate each referenced sub-agent exists +
+    # caller has access (same tenant_id check as the parent agent lookup).
+    if agent_nodes:
+        sub_ids = [n.agent_id for n in agent_nodes if n.agent_id]
+        sub_slugs = [n.agent_slug for n in agent_nodes if n.agent_slug]
+        clauses = []
+        if sub_ids:
+            clauses.append(Agent.id.in_(sub_ids))
+        if sub_slugs:
+            clauses.append(Agent.slug.in_(sub_slugs))
+        if clauses:
+            sub_res = await db.execute(
+                select(Agent.id, Agent.slug).where(
+                    or_(
+                        Agent.tenant_id == user.tenant_id,
+                        Agent.agent_type == AgentType.OOB,
+                    ),
+                    or_(*clauses),
+                )
+            )
+            found = sub_res.all()
+            found_ids = {str(r[0]) for r in found}
+            found_slugs = {r[1] for r in found if r[1]}
+            for n in agent_nodes:
+                if n.agent_id and str(n.agent_id) not in found_ids:
+                    return error(
+                        f"Sub-agent not found or not accessible: id={n.agent_id}",
+                        400,
+                    )
+                if n.agent_slug and n.agent_slug not in found_slugs:
+                    return error(
+                        f"Sub-agent not found or not accessible: slug={n.agent_slug}",
+                        400,
+                    )
+        # Auto-register agent_step so the executor can dispatch the sub-agent.
+        if "agent_step" not in tool_names:
+            tool_names.append("agent_step")
 
     # Check for duplicate node IDs
     node_ids = [n.id for n in body.nodes]
@@ -115,11 +157,20 @@ async def execute_pipeline(
     try:
         pipeline_result = await executor.execute(pipeline_nodes, body.context)
     except Exception as e:
+        # Don't bubble a 5xx — UI's failure-render code needs status+execution_id
+        # (see feedback_failure_visibility memory). Return 200 with failed body.
         execution.status = ExecutionStatus.FAILED
         execution.error_message = str(e)
         execution.completed_at = datetime.now(timezone.utc)
         await db.commit()
-        return error(f"Pipeline execution failed: {e}", 500)
+        return success(
+            {
+                "execution_id": str(execution.id),
+                "agent_id": agent_id,
+                "status": "failed",
+                "error_message": str(e),
+            }
+        )
 
     # Update execution record
     serialized = serialize_pipeline_result(pipeline_result)
@@ -136,6 +187,13 @@ async def execute_pipeline(
         else None
     )
     execution.node_results = serialized.get("node_results")
+    if pipeline_result.status == "failed":
+        # Surface the first node error so the UI doesn't have to dig through
+        # node_results to learn why the pipeline failed.
+        first_err = next(iter(pipeline_result.node_errors.values()), None)
+        if first_err:
+            execution.error_message = first_err
+            serialized["error_message"] = first_err
     await db.commit()
 
     serialized["execution_id"] = str(execution.id)
@@ -202,12 +260,19 @@ async def execute_saved_pipeline(
         return error("Pipeline configuration has no nodes defined", 400)
 
     # Get tool names from agent config
-    tool_names = model_config.get("tools", [])
-    if not tool_names:
+    tool_names = list(model_config.get("tools", []))
+    # Saved-config nodes are raw dicts — classify by raw["type"]
+    saved_tool_nodes = [
+        n for n in raw_nodes if (n.get("type") or "tool").lower() == "tool"
+    ]
+    saved_agent_nodes = [
+        n for n in raw_nodes if (n.get("type") or "tool").lower() == "agent"
+    ]
+    if not tool_names and saved_tool_nodes:
         return error("Agent has no tools configured", 400)
 
-    # Check that all pipeline nodes reference available tools
-    requested_tools = {n["tool_name"] for n in raw_nodes if "tool_name" in n}
+    # Tool nodes must reference tools available on the agent.
+    requested_tools = {n["tool_name"] for n in saved_tool_nodes if n.get("tool_name")}
     available = set(tool_names)
     missing = requested_tools - available
     if missing:
@@ -216,6 +281,9 @@ async def execute_saved_pipeline(
             f"Available: {sorted(available)}",
             400,
         )
+
+    if saved_agent_nodes and "agent_step" not in tool_names:
+        tool_names.append("agent_step")
 
     # Check for duplicate node IDs
     node_ids = [n.get("id") for n in raw_nodes]
@@ -263,7 +331,14 @@ async def execute_saved_pipeline(
         execution.error_message = str(e)
         execution.completed_at = datetime.now(timezone.utc)
         await db.commit()
-        return error(f"Pipeline execution failed: {e}", 500)
+        return success(
+            {
+                "execution_id": str(execution.id),
+                "agent_id": agent_id,
+                "status": "failed",
+                "error_message": str(e),
+            }
+        )
 
     # Update execution record
     serialized = serialize_pipeline_result(pipeline_result)
@@ -280,6 +355,11 @@ async def execute_saved_pipeline(
         else None
     )
     execution.node_results = serialized.get("node_results")
+    if pipeline_result.status == "failed":
+        first_err = next(iter(pipeline_result.node_errors.values()), None)
+        if first_err:
+            execution.error_message = first_err
+            serialized["error_message"] = first_err
     await db.commit()
 
     serialized["execution_id"] = str(execution.id)
@@ -310,11 +390,13 @@ async def execute_pipeline_stream(
         return error("Agent is not in an executable state", 400)
 
     model_config = agent.model_config_ or {}
-    tool_names = model_config.get("tools", [])
-    if not tool_names:
+    tool_names = list(model_config.get("tools", []))
+    stream_tool_nodes = [n for n in body.nodes if n.type == "tool"]
+    stream_agent_nodes = [n for n in body.nodes if n.type == "agent"]
+    if not tool_names and stream_tool_nodes:
         return error("Agent has no tools configured", 400)
 
-    requested_tools = {n.tool_name for n in body.nodes}
+    requested_tools = {n.tool_name for n in stream_tool_nodes if n.tool_name}
     available_tools = set(tool_names)
     missing = requested_tools - available_tools
     if missing:
@@ -322,6 +404,9 @@ async def execute_pipeline_stream(
             f"Pipeline uses tools not available on this agent: {sorted(missing)}",
             400,
         )
+
+    if stream_agent_nodes and "agent_step" not in tool_names:
+        tool_names.append("agent_step")
 
     node_ids = [n.id for n in body.nodes]
     if len(node_ids) != len(set(node_ids)):
@@ -728,5 +813,104 @@ async def validate_pipeline_smart(
             "tier2": tier2.to_dict(),
             "tier3": tier3_dict,
             "overall": {"valid": valid, "severity": severity, "score": score},
+        }
+    )
+
+
+@router.post("/{agent_id}/validate")
+async def validate_agent_pipeline(
+    agent_id: str,
+    body: ExecutePipelineRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Dry-run validate a pipeline against an agent's config — no side effects.
+
+    Returns {valid, errors, plan} so the UI can surface structural and
+    cross-reference problems before the user hits Execute.
+    """
+    from engine.pipeline import parse_pipeline_nodes
+
+    result = await db.execute(
+        select(Agent).where(
+            Agent.id == agent_id,
+            or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB),
+        )
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return error("Agent not found", 404)
+
+    model_config = agent.model_config_ or {}
+    tool_names = list(model_config.get("tools", []))
+    errors: list[str] = []
+
+    tool_nodes = [n for n in body.nodes if n.type == "tool"]
+    agent_nodes = [n for n in body.nodes if n.type == "agent"]
+
+    requested_tools = {n.tool_name for n in tool_nodes if n.tool_name}
+    missing_tools = requested_tools - set(tool_names)
+    if missing_tools:
+        errors.append(
+            f"missing_tools: {sorted(missing_tools)} (available: {sorted(tool_names)})"
+        )
+
+    if agent_nodes:
+        sub_ids = [n.agent_id for n in agent_nodes if n.agent_id]
+        sub_slugs = [n.agent_slug for n in agent_nodes if n.agent_slug]
+        clauses = []
+        if sub_ids:
+            clauses.append(Agent.id.in_(sub_ids))
+        if sub_slugs:
+            clauses.append(Agent.slug.in_(sub_slugs))
+        found_ids: set[str] = set()
+        found_slugs: set[str] = set()
+        if clauses:
+            sub_res = await db.execute(
+                select(Agent.id, Agent.slug).where(
+                    or_(
+                        Agent.tenant_id == user.tenant_id,
+                        Agent.agent_type == AgentType.OOB,
+                    ),
+                    or_(*clauses),
+                )
+            )
+            for r in sub_res.all():
+                found_ids.add(str(r[0]))
+                if r[1]:
+                    found_slugs.add(r[1])
+        for n in agent_nodes:
+            if n.agent_id and str(n.agent_id) not in found_ids:
+                errors.append(f"unknown_agent_id: {n.agent_id} (node: {n.id})")
+            if n.agent_slug and n.agent_slug not in found_slugs:
+                errors.append(f"unknown_agent_slug: {n.agent_slug} (node: {n.id})")
+
+    # Duplicate IDs + unknown deps
+    node_ids = [n.id for n in body.nodes]
+    if len(node_ids) != len(set(node_ids)):
+        errors.append("duplicate_node_ids")
+    known_ids = set(node_ids)
+    for n in body.nodes:
+        for dep in n.depends_on:
+            if dep not in known_ids:
+                errors.append(f"unknown_dependency: {dep} (node: {n.id})")
+
+    # Build the topological plan so the UI can render execution layers.
+    plan: list[list[str]] = []
+    try:
+        from engine.pipeline import _topological_sort
+
+        raw_nodes = [n.model_dump() for n in body.nodes]
+        parsed = parse_pipeline_nodes(raw_nodes)
+        if not any(e.startswith("unknown_dependency") for e in errors):
+            plan = _topological_sort(parsed)
+    except ValueError as e:
+        errors.append(f"dag_error: {e}")
+
+    return success(
+        {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "plan": plan,
         }
     )

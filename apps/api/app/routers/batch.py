@@ -98,8 +98,11 @@ async def batch_execute(
     }
     await _save_batch(batch_id, batch_state)
 
-    # Launch batch execution in background
-    asyncio.create_task(_run_batch(batch_id, agent, user, inputs, max_concurrency, db))
+    # Launch batch execution in background. Do NOT pass the request's `db`
+    # session — it gets closed when this request returns, and the background
+    # fan-out (asyncio.gather) cannot share a single asyncpg connection across
+    # overlapping awaits anyway. The task opens its own session if it needs one.
+    asyncio.create_task(_run_batch(batch_id, agent, user, inputs, max_concurrency))
 
     return success(
         {
@@ -132,7 +135,6 @@ async def _run_batch(
     user: User,
     inputs: list[dict[str, Any]],
     max_concurrency: int,
-    db: AsyncSession,
 ) -> None:
     """Execute all inputs against the agent with bounded concurrency."""
     from app.core.config import settings

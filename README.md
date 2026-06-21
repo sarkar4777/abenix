@@ -418,7 +418,9 @@ helm install abenix ./infra/helm/abenix -n abenix --create-namespace \
 
 `deploy-azure.sh` handles ACR provisioning, image build + push, AKS credentials, helm install, KEDA install, neo4j password setup, agent + KB seeds, standalone-key reconciliation, and a smoke test. `bash scripts/portforward-azure.sh` brings any AKS deployment to `localhost:*` for firewall-safe local browsing.
 
-To deploy a particular edge runtime variant alongside the platform, set `EDGE_RUNTIME_VARIANT={python|rust|c}` (default `python`) or `EDGE_RUNTIME_ALL_VARIANTS=true` to install all three.
+To deploy a particular edge runtime variant alongside the platform, set `EDGE_RUNTIME_VARIANT={python|rust|c}` (default `python`) or `EDGE_RUNTIME_ALL_VARIANTS=true` to install all three. The edge runtime images are pinned by version in each chart's `values.yaml` (currently `1.1.0`) and are built once per release — the deploy script does NOT rebuild them every run. Set `EDGE_IMAGE_TAG=1.2.0` only when you've manually pushed a new edge image.
+
+Every `deploy-azure.sh deploy` / `redeploy` ends with a **Phase 6 reconcile** step that sweeps the cluster: reaps Completed/Failed and `curl-exec-*` debug pods, waits up to `RECONCILE_WAIT_SECS` (default 300s) for any leftover pods to settle, then classifies and reports anything still bad (stale-image / crashloop / pending). The script exits non-zero if the cluster isn't clean. Orphan helm releases are reported but not deleted by default — pass `REAPER_DELETE_ORPHANS=true` to also uninstall them.
 
 ---
 

@@ -120,6 +120,17 @@ spec:
     metadata:
       labels:
         app: abenix-prometheus
+      # `kubectl apply` only triggers a rollout when something in the
+      # pod template changes — a configmap edit alone is a no-op, so
+      # prom would keep running its cached config until the next manual
+      # restart. The deploy script (scripts/deploy-azure.sh, install_
+      # observability) replaces the placeholder below with a sha256 of
+      # the configmap stanza before `kubectl apply -f`, so any change
+      # to prometheus.yml content forces a fresh pod with the new
+      # scrape config. Leaving the sentinel un-substituted is harmless
+      # — it matches itself across applies.
+      annotations:
+        checksum/config: "__PROMETHEUS_CONFIG_SHA256__"
     spec:
       serviceAccountName: abenix-prometheus
       containers:
