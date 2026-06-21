@@ -48,18 +48,19 @@ jobs:
         with:
           python-version: "3.12"
       - run: |
-          # Core deps for the API + DB layer.
-          pip install pytest pytest-asyncio bcrypt python-jose[cryptography] httpx \
-                      fastapi pydantic pydantic-settings sqlalchemy structlog redis \
-                      asyncpg pyyaml
-          # Transitive module-level imports the unit suite picks up:
-          # - test_embed_url_normalize → worker.tasks.document_processor → worker.celery_app → celery
-          # - test_grounding_guardrail + test_agent_execute_moderation →
-          #     engine.agent_executor → engine.llm_router → anthropic
-          # - hybrid_search.py + document_processor.py call the openai SDK at
-          #   module scope, so openai needs to import even though tests don't
-          #   exercise it directly.
-          pip install celery anthropic openai
+          # Test runner + things the unit suite uses directly.
+          pip install pytest pytest-asyncio
+          # The new unit tests import worker.tasks.document_processor and
+          # engine.agent_executor / engine.knowledge.hybrid_search at module
+          # scope. Both modules pull deep transitive chains (celery, anthropic,
+          # openai, google-genai, neo4j, langchain_text_splitters, PyPDF2, …).
+          # Rather than whack-a-mole one missing package at a time, install
+          # the requirement files for the three apps the tests import from.
+          # This is the canonical list — same one production runs against —
+          # and keeps CI in lockstep with the prod surface.
+          pip install -r apps/api/requirements.txt \
+                      -r apps/agent-runtime/requirements.txt \
+                      -r apps/worker/requirements.txt
       - run: pytest tests/unit/ -v --tb=short
 
   web-lint-typecheck-build:
