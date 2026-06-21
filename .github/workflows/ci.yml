@@ -48,9 +48,18 @@ jobs:
         with:
           python-version: "3.12"
       - run: |
+          # Core deps for the API + DB layer.
           pip install pytest pytest-asyncio bcrypt python-jose[cryptography] httpx \
                       fastapi pydantic pydantic-settings sqlalchemy structlog redis \
                       asyncpg pyyaml
+          # Transitive module-level imports the unit suite picks up:
+          # - test_embed_url_normalize → worker.tasks.document_processor → worker.celery_app → celery
+          # - test_grounding_guardrail + test_agent_execute_moderation →
+          #     engine.agent_executor → engine.llm_router → anthropic
+          # - hybrid_search.py + document_processor.py call the openai SDK at
+          #   module scope, so openai needs to import even though tests don't
+          #   exercise it directly.
+          pip install celery anthropic openai
       - run: pytest tests/unit/ -v --tb=short
 
   web-lint-typecheck-build:
