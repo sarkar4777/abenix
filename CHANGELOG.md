@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.3.4 — 2026-06-21
+
+### Added
+
+- **API key monthly quotas now actually throttle.** `max_monthly_tokens` and `max_monthly_cost` columns existed on `api_keys`, the auth dependency checked them, and the column values persisted. But every queue-routed execution (the default mode under `SCALING_EXEC_REMOTE=true`) skipped the counter update. A key set to $0.01/month could blow past unbounded. Three-part fix.
+- **Threaded `api_key_id` through the queue payload.** `apps/api/app/routers/agents.py` now pulls `api_key_id = getattr(user, '_api_key_id', None)` from the SDK-attached auth context and includes it in the dict shipped to NATS/Redis. The consumer needs it to identify which key billed the call; without it the runtime side could not debit the right row even if it tried.
+- **Runtime-side `_update_usage_counters` helper.** New helper in `apps/agent-runtime/consumer.py` opens a fresh session, runs two parameterised UPDATEs (`api_keys.tokens_used + cost_used`, `users.tokens_used_this_month + cost_used_this_month`) with `COALESCE`-on-NULL for safety, commits, and swallows any failure into `logger.warning` so a usage-write hiccup never breaks the execution itself. Wired into both the agent and pipeline success paths immediately after `_mark_done`.
+- **Distinguishing quota error messages.** `deps.py` no longer returns `None` for blocked-but-valid keys (expired or quota exceeded). Now raises `HTTPException(403)` with detail messages that distinguish `API key expired`, `API key monthly quota exceeded (token quota)`, and `API key monthly quota exceeded (cost quota)`. Customers can tell quota-block from a revoked or bad key from the response.
+
+### Fixed
+
+- **Cost cap rounded to zero silently disabled the quota.** `max_monthly_cost` was stored as `numeric(10, 2)` so a customer asking for a `0.001` USD cap got `0.00` on insert. The enforcement guard then read `0.00` as falsy via `if api_key.max_monthly_cost and ...` and disabled the cap entirely. Sub-cent caps got unbounded keys. Migration `g5c6d7e8f9a0` widens the column to `numeric(10, 4)` to match `cost_used` precision. Both quota guards now compare against `is not None` so 0 means 0. The same shape fix applies to `max_monthly_tokens` (an explicit `tokens=0` cap meaning "spend nothing" was also silently being treated as "no cap").
+
+### Verified
+
+- Mint key with `max_monthly_cost=0.001`. Run one agent execution. DB row reads `cost_used=0.0021 > max_monthly_cost=0.0010`. Next execute call returns **HTTP 403** with body `{"error":{"message":"API key monthly quota exceeded (cost quota)","code":403}}`. Token quota throttling and the unlimited-key accumulator path also verified end-to-end on Azure.
+
 ## v2.3.3 — 2026-06-21
 
 ### Added

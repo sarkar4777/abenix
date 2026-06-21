@@ -1713,11 +1713,16 @@ async def execute_agent(
             from engine.queue_backend import get_queue_backend  # type: ignore
 
             backend = get_queue_backend()
+            # Forward the api key id (if any) so the runtime consumer can
+            # debit api_keys.tokens_used / cost_used and keep customer quotas
+            # enforced for queue-routed runs.
+            api_key_id = getattr(user, "_api_key_id", None)
             payload = {
                 "execution_id": str(execution.id),
                 "agent_id": str(agent.id),
                 "tenant_id": str(user.tenant_id),
                 "user_id": str(user.id),
+                "api_key_id": str(api_key_id) if api_key_id else None,
                 "message": sanitized_message,
                 "context": user_context,
                 "is_pipeline": is_pipeline,

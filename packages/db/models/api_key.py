@@ -39,8 +39,12 @@ class ApiKey(UUIDMixin, TenantMixin, TimestampMixin, Base):
         Integer, nullable=True, default=None
     )
     tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    # numeric(10, 4) to match cost_used precision and let callers set
+    # sub-cent caps. The previous (10, 2) shape silently rounded a
+    # 0.001 input to 0.00, which the deps.py guard then read as falsy
+    # and silently disabled the quota.
     max_monthly_cost: Mapped[float | None] = mapped_column(
-        Numeric(10, 2), nullable=True, default=None
+        Numeric(10, 4), nullable=True, default=None
     )
     cost_used: Mapped[float] = mapped_column(Numeric(10, 4), default=0)
 

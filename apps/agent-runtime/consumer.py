@@ -116,6 +116,51 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
         }
 
 
+async def _update_usage_counters(
+    api_key_id: str | None,
+    user_id: str | None,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    cost: float | None,
+) -> None:
+    """Debit api_keys + users monthly counters after a queue-routed run.
+
+    Mirrors the inline path's app.core.usage.update_user_usage so customer
+    quotas stay enforced when the API hands the execution off to NATS/Redis.
+    Best-effort: a usage-write failure must never break the execution.
+    """
+    if not api_key_id and not user_id:
+        return
+    total_tokens = int((input_tokens or 0) + (output_tokens or 0))
+    cost_delta = float(cost or 0)
+    if total_tokens == 0 and cost_delta == 0:
+        return
+    try:
+        from sqlalchemy import text
+
+        Session = await _get_session_factory()
+        async with Session() as side:
+            if api_key_id:
+                await side.execute(
+                    text(
+                        "UPDATE api_keys SET tokens_used = COALESCE(tokens_used, 0) + :n, "
+                        "cost_used = COALESCE(cost_used, 0) + :c WHERE id = :id"
+                    ),
+                    {"n": total_tokens, "c": cost_delta, "id": uuid.UUID(api_key_id)},
+                )
+            if user_id:
+                await side.execute(
+                    text(
+                        "UPDATE users SET tokens_used_this_month = COALESCE(tokens_used_this_month, 0) + :n, "
+                        "cost_used_this_month = COALESCE(cost_used_this_month, 0) + :c WHERE id = :uid"
+                    ),
+                    {"n": total_tokens, "c": cost_delta, "uid": uuid.UUID(user_id)},
+                )
+            await side.commit()
+    except Exception as _ue:
+        logger.warning("consumer: usage counter update skipped for execution: %s", _ue)
+
+
 async def _mark_started(execution_id: str) -> None:
     """Stamp started_at when the consumer picks up the row. No-op if already set."""
     from datetime import datetime, timezone
@@ -294,6 +339,8 @@ async def _run_one(payload: dict) -> None:
 
     message = payload.get("message", "")
     context = payload.get("context") or {}
+    api_key_id = payload.get("api_key_id") or None
+    user_id = payload.get("user_id") or None
 
     loaded = await _load_execution(execution_id)
     if loaded is None:
@@ -467,6 +514,16 @@ async def _run_one(payload: dict) -> None:
                 execution_trace=serialized,
                 duration_ms=serialized.get("duration_ms"),
             )
+            # Debit api_keys / users so customer quotas stay enforced on
+            # queue-routed pipeline runs. Pipelines aggregate token counts
+            # on the result object the same way agent runs do.
+            if pipeline_status == "completed":
+                _pipe_in = int(getattr(result, "input_tokens", 0) or 0)
+                _pipe_out = int(getattr(result, "output_tokens", 0) or 0)
+                _pipe_cost = float(getattr(result, "cost", 0.0) or 0.0)
+                await _update_usage_counters(
+                    api_key_id, user_id, _pipe_in, _pipe_out, _pipe_cost
+                )
             _emit_outcome(
                 outcome="SUCCESS" if pipeline_status == "completed" else "FAILED",
                 failure_code=(
@@ -691,6 +748,16 @@ async def _run_one(payload: dict) -> None:
                 trace_id=_tid_done,
                 execution_trace=_exec_trace,
                 duration_ms=getattr(result, "duration_ms", None) or None,
+            )
+            # Debit api_keys / users counters — the inline path does this
+            # via app.core.usage.update_user_usage; queue-routed runs need
+            # the same write or customer quotas silently never enforce.
+            await _update_usage_counters(
+                api_key_id,
+                user_id,
+                int(getattr(result, "input_tokens", 0) or 0),
+                int(getattr(result, "output_tokens", 0) or 0),
+                float(getattr(result, "cost", 0.0) or 0.0),
             )
             _emit_outcome(
                 outcome="SUCCESS",

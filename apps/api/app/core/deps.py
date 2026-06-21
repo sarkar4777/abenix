@@ -101,17 +101,33 @@ async def _authenticate_via_api_key(raw_key: str, db: AsyncSession) -> User | No
         return None
 
     if api_key.expires_at and api_key.expires_at < datetime.now(timezone.utc):
-        return None
+        from fastapi import HTTPException
 
+        raise HTTPException(status_code=403, detail="API key expired")
+
+    # `is not None` instead of truthiness — a cap of 0 (or 0.00 after a
+    # numeric column rounded a sub-precision input) is "spend nothing",
+    # NOT "no cap". Using `if X and ...` silently disabled the quota
+    # whenever a customer set a cap that rounded to zero.
     if (
-        api_key.max_monthly_tokens
+        api_key.max_monthly_tokens is not None
         and (api_key.tokens_used or 0) >= api_key.max_monthly_tokens
     ):
-        return None
-    if api_key.max_monthly_cost and float(api_key.cost_used or 0) >= float(
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=403,
+            detail="API key monthly quota exceeded (token quota)",
+        )
+    if api_key.max_monthly_cost is not None and float(api_key.cost_used or 0) >= float(
         api_key.max_monthly_cost
     ):
-        return None
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=403,
+            detail="API key monthly quota exceeded (cost quota)",
+        )
 
     await _touch_api_key_last_used(api_key.id)
 
