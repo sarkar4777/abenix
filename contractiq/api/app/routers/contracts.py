@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db, SessionLocal
 from app.core.responses import error, success
 from app.routers.auth import get_contractiq_user, tenant_id_for
+from app.routers.moderation import vet_or_block
 
 from app.models.contractiq_models import (
     ContractIQContract, ContractIQUser, ContractIQExtractedData,
@@ -166,6 +167,18 @@ async def upload_contract(
         file_text = content.decode("utf-8", errors="replace")
 
     page_count = max(1, len(file_text) // 3000)  # Rough page estimate
+
+    # DLP gate — vet the uploaded contract text against the active policy
+    # before we persist it or fan it out to any agent. Title + counterparties
+    # are appended so disallowed names (e.g. sanctioned entities) trip the
+    # custom_patterns check even when the file body is clean.
+    vet_text = "\n".join(filter(None, [
+        title,
+        counterparty_a or "",
+        counterparty_b or "",
+        file_text,
+    ]))
+    await vet_or_block(vet_text, user, source="ciq_contract_upload")
 
     contract = ContractIQContract(
         id=uuid.uuid4(),

@@ -84,10 +84,16 @@ async def _call_openai(
         return r.json()
 
 
-def _redact(content: str, patterns: list[str], mask: str) -> str:
+def _redact(content: str, patterns: list[Any], mask: str) -> str:
     """Mask offending spans matched by custom regex patterns."""
     out = content
     for pat in patterns:
+        # Back-compat: legacy DB rows may hold `{"pattern": "X", ...}` dicts.
+        # The router now rejects this shape at the edge but rows created
+        # during the bug window must still evaluate cleanly.
+        pat = pat.get("pattern") if isinstance(pat, dict) else pat
+        if not isinstance(pat, str):
+            continue
         try:
             out = re.sub(pat, mask, out, flags=re.IGNORECASE)
         except re.error:
@@ -95,10 +101,16 @@ def _redact(content: str, patterns: list[str], mask: str) -> str:
     return out
 
 
-def _custom_pattern_hit(content: str, patterns: list[str]) -> list[str]:
+def _custom_pattern_hit(content: str, patterns: list[Any]) -> list[str]:
     """Return the list of patterns that matched the content."""
     hits = []
     for pat in patterns:
+        # Back-compat: legacy DB rows may hold `{"pattern": "X", ...}` dicts.
+        # The router now rejects this shape at the edge but rows created
+        # during the bug window must still evaluate cleanly.
+        pat = pat.get("pattern") if isinstance(pat, dict) else pat
+        if not isinstance(pat, str):
+            continue
         try:
             if re.search(pat, content, flags=re.IGNORECASE):
                 hits.append(pat)

@@ -28,30 +28,36 @@ async def _embed_query(query: str) -> list[float] | None:
     azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
         "AZURE_OPENAI_API_BASE", ""
     )
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    openai_model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+
     if azure_key and azure_endpoint:
-        from openai import AsyncAzureOpenAI
+        try:
+            from openai import AsyncAzureOpenAI
 
-        client = AsyncAzureOpenAI(
-            api_key=azure_key,
-            azure_endpoint=azure_endpoint,
-            api_version=os.environ.get(
-                "AZURE_OPENAI_API_VERSION", "2024-10-01-preview"
-            ),
-        )
-        deployment = os.environ.get(
-            "AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"
-        )
-        resp = await client.embeddings.create(input=query, model=deployment)
-        return resp.data[0].embedding
+            client = AsyncAzureOpenAI(
+                api_key=azure_key,
+                azure_endpoint=azure_endpoint,
+                api_version=os.environ.get(
+                    "AZURE_OPENAI_API_VERSION", "2024-10-01-preview"
+                ),
+            )
+            deployment = os.environ.get("AZURE_EMBEDDING_DEPLOYMENT", openai_model)
+            resp = await client.embeddings.create(input=query, model=deployment)
+            return resp.data[0].embedding
+        except Exception:
+            # Azure failed live — fall through to OpenAI if a direct key is
+            # available. Only return None if both providers are unreachable.
+            if not openai_key:
+                raise
 
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
+    if not openai_key:
         return None
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=api_key)
+    client = AsyncOpenAI(api_key=openai_key)
     resp = await client.embeddings.create(
-        model="text-embedding-3-small",
+        model=openai_model,
         input=query,
     )
     return resp.data[0].embedding

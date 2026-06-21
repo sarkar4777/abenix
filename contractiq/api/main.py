@@ -266,6 +266,7 @@ from app.routers import quickwin as ciq_quickwin
 from app.routers import commodities as ciq_commodities
 from app.routers import access_control_templates as ciq_access_control_templates
 from app.routers import portfolio_schema_templates as ciq_portfolio_schema_templates
+from app.routers import moderation as ciq_moderation
 
 app.include_router(ciq_auth.router)
 app.include_router(ciq_contracts.router)
@@ -284,6 +285,7 @@ app.include_router(ciq_quickwin.router)
 app.include_router(ciq_commodities.router)
 app.include_router(ciq_access_control_templates.router)
 app.include_router(ciq_portfolio_schema_templates.router)
+app.include_router(ciq_moderation.router)
 
 
 @app.exception_handler(Exception)

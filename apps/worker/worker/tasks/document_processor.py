@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-EMBEDDING_MODEL = "text-embedding-3-small"
+# Default embedding model name. Both the Azure deployment alias and the
+# OpenAI direct-API model fall back to this. Override per-environment via
+# OPENAI_EMBEDDING_MODEL (OpenAI direct) and AZURE_EMBEDDING_DEPLOYMENT
+# (Azure deployment name). EMBEDDING_DIM must match the model's output
+# (1536 for text-embedding-3-small / text-embedding-ada-002, 3072 for
+# text-embedding-3-large).
+EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIMENSIONS = 1536
 
 
@@ -128,11 +134,22 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
             embeddings = asyncio.run(_run())
             return embeddings, True
         except Exception as exc:
-            logger.warning(
-                "Azure embedding call failed (%s); falling back to zero vectors so doc stays usable",
-                exc,
-            )
-            return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+            # Azure failed live — try OpenAI as a real fallback before giving
+            # up. Mirrors the LLM ladder: provider quota or transport issues
+            # on one side should never silently nuke the whole feature when
+            # the other provider is still reachable.
+            if OPENAI_API_KEY:
+                logger.warning(
+                    "Azure embedding call failed (%s); falling forward to OpenAI",
+                    exc,
+                )
+            else:
+                logger.warning(
+                    "Azure embedding call failed (%s) and no OPENAI_API_KEY fallback "
+                    "is configured; degrading to zero vectors so doc stays usable",
+                    exc,
+                )
+                return [[0.0] * EMBEDDING_DIM for _ in chunks], False
 
     if OPENAI_API_KEY:
         try:
