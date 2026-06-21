@@ -45,13 +45,21 @@ class CreateAgentRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str = ""
     system_prompt: str = ""
-    agent_model_config: ModelConfigSchema = Field(
-        default_factory=ModelConfigSchema, alias="model_config"
+    agent_model_config: ModelConfigSchema | None = Field(
+        default=None, alias="model_config"
     )
     category: str | None = None
     icon_url: str | None = None
     slug: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     agent_type: str | None = Field(default=None, pattern=r"^(custom|oob)$")
+    # Convenience top-level shortcuts mirroring the nested `model_config`.
+    # Earlier the POST handler silently dropped these — SDK callers that
+    # passed `{"tools": [...]}` or `{"model": "..."}` at the top level
+    # ended up with an agent whose model_config was empty. The handler
+    # now merges them into model_config, with a 400 if both forms are
+    # supplied at once (asymmetry with PATCH/PUT).
+    tools: list[str] | None = None
+    model: str | None = Field(default=None, max_length=200)
 
     model_config = {"populate_by_name": True}
 

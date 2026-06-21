@@ -25,6 +25,7 @@ from app.core.ws_manager import ws_manager
 from app.schemas.agents import (
     CreateAgentRequest,
     ExecuteRequest,
+    ModelConfigSchema,
     PublishAgentRequest,
     ReviewAgentRequest,
     UpdateAgentRequest,
@@ -733,6 +734,42 @@ async def create_agent(
     requested_type = (body.agent_type or "custom").lower()
     if requested_type == "oob" and user.role.value != "admin":
         return error("Only admins can create OOB agents", 403)
+
+    # POST used to silently drop top-level `tools` / `model` — SDK
+    # callers and the dev docs passed them flat and ended up with an
+    # empty model_config. Accept either shape, merge top-level into
+    # nested, and reject the duplicate-spec ambiguity with a 400 so
+    # callers can fix the request rather than guess which form won.
+    nested_cfg_present = body.agent_model_config is not None
+    nested_cfg_dump = body.agent_model_config.model_dump() if nested_cfg_present else {}
+    nested_tools_set = nested_cfg_present and "tools" in (
+        body.agent_model_config.model_fields_set or set()
+    )
+    nested_model_set = nested_cfg_present and "model" in (
+        body.agent_model_config.model_fields_set or set()
+    )
+    if body.tools is not None and nested_tools_set:
+        return error(
+            "Provide `tools` either at the top level OR inside model_config, "
+            "not both.",
+            400,
+        )
+    if body.model is not None and nested_model_set:
+        return error(
+            "Provide `model` either at the top level OR inside model_config, "
+            "not both.",
+            400,
+        )
+    # Use the nested form as the base (so extras like temperature,
+    # max_tokens, tool_config, mode, pipeline_config etc. survive) and
+    # overlay the top-level shortcuts when present.
+    if not nested_cfg_present:
+        nested_cfg_dump = ModelConfigSchema().model_dump()
+    if body.tools is not None:
+        nested_cfg_dump["tools"] = list(body.tools)
+    if body.model is not None:
+        nested_cfg_dump["model"] = body.model
+
     agent = Agent(
         tenant_id=user.tenant_id,
         creator_id=user.id,
@@ -740,7 +777,7 @@ async def create_agent(
         slug=slug,
         description=sanitize_input(body.description),
         system_prompt=body.system_prompt,
-        model_config_=body.agent_model_config.model_dump(),
+        model_config_=nested_cfg_dump,
         agent_type=AgentType(requested_type),
         status=AgentStatus.DRAFT,
         category=sanitize_input(body.category) if body.category else body.category,
@@ -2058,6 +2095,7 @@ async def execute_agent(
         max_tokens=agent_max_tokens,
         cache_enabled=agent_cache_enabled,
         tool_config=model_cfg.get("tool_config") or {},
+        require_knowledge_search=bool(model_cfg.get("require_knowledge_search", False)),
     )
 
 
@@ -2812,6 +2850,15 @@ async def _stream_execution(
             # hallucinating code_asset_id / model_id.
             tool_config=_tool_cfg,
             asset_schemas=_asset_schemas,
+            # Grounded-response contract — when the agent declares
+            # require_knowledge_search=True in its model_config and
+            # the run finishes without ever calling knowledge_search,
+            # the executor flags grounding_violation so the caller
+            # can mark the execution FAILED with a distinct failure
+            # code (auditors lean on this for grounding certification).
+            require_knowledge_search=bool(
+                agent_model_config.get("require_knowledge_search", False)
+            ),
         )
         if max_iterations:
             _exec_kwargs["max_iterations"] = int(max_iterations)
@@ -2917,6 +2964,13 @@ async def _stream_execution(
             _mod_blocked = bool(final_data.get("moderation_blocked")) or (
                 final_data.get("error") == "moderation_blocked"
             )
+            # Same shape on the wire as moderation_blocked — the
+            # streaming executor sets error="grounding_required_violation"
+            # plus grounding_violation=True when the agent declared
+            # require_knowledge_search=True but never called the tool.
+            _grounding_violation = bool(final_data.get("grounding_violation")) or (
+                final_data.get("error") == "grounding_required_violation"
+            )
             if _mod_blocked:
                 from app.core.failure_codes import emit_outcome_metric
 
@@ -2936,6 +2990,31 @@ async def _stream_execution(
                     emit_outcome_metric(
                         outcome="FAILED",
                         failure_code="MODERATION_BLOCKED",
+                        agent_type="agent",
+                        tenant_id=str(tenant_id) if tenant_id else "",
+                    )
+                except Exception:
+                    pass
+            elif _grounding_violation:
+                from app.core.failure_codes import emit_outcome_metric
+
+                execution.status = ExecutionStatus.FAILED
+                execution.failure_code = "GROUNDING_REQUIRED_VIOLATION"
+                execution.error_message = (
+                    "Grounded-response agent completed without invoking "
+                    "knowledge_search; output cannot be certified as grounded."
+                )
+                execution.output_message = full_output
+                execution.input_tokens = final_data.get("input_tokens") or 0
+                execution.output_tokens = final_data.get("output_tokens") or 0
+                execution.cost = float(final_data.get("cost") or 0.0)
+                execution.duration_ms = final_data.get("duration_ms")
+                execution.tool_calls = all_tool_calls if all_tool_calls else None
+                _finalize_execution_timing(execution)
+                try:
+                    emit_outcome_metric(
+                        outcome="FAILED",
+                        failure_code="GROUNDING_REQUIRED_VIOLATION",
                         agent_type="agent",
                         tenant_id=str(tenant_id) if tenant_id else "",
                     )
@@ -3112,6 +3191,7 @@ async def _non_stream_execution(
     max_tokens: int = 4096,
     cache_enabled: bool = True,
     tool_config: dict[str, dict[str, Any]] | None = None,
+    require_knowledge_search: bool = False,
 ) -> JSONResponse:
     from engine.llm_router import LLMRouter
     from app.core.config import settings
@@ -3183,6 +3263,10 @@ async def _non_stream_execution(
         # them back at dispatch. Keep the two code paths symmetric.
         tool_config=_tc_nonstream,
         asset_schemas=_asset_schemas_ns,
+        # See _stream_execution: grounded-response contract. Map to
+        # failure_code=GROUNDING_REQUIRED_VIOLATION on the execution
+        # row when the run finishes without invoking knowledge_search.
+        require_knowledge_search=bool(require_knowledge_search),
     )
     if max_iterations:
         _exec_kwargs2["max_iterations"] = int(max_iterations)
@@ -3250,6 +3334,32 @@ async def _non_stream_execution(
             emit_outcome_metric(
                 outcome="FAILED",
                 failure_code="MODERATION_BLOCKED",
+                agent_type="agent",
+                tenant_id=str(tenant_id) if tenant_id else "",
+            )
+        elif getattr(result, "grounding_violation", False):
+            # Grounded-response contract violated: the agent declared
+            # require_knowledge_search=True but the run finished without
+            # invoking it. Mark the execution FAILED with a distinct
+            # failure_code so auditors can identify ungrounded outputs.
+            from app.core.failure_codes import emit_outcome_metric
+
+            execution.status = ExecutionStatus.FAILED
+            execution.failure_code = "GROUNDING_REQUIRED_VIOLATION"
+            execution.error_message = (
+                "Grounded-response agent completed without invoking "
+                "knowledge_search; output cannot be certified as grounded."
+            )
+            execution.output_message = result.output
+            execution.input_tokens = result.input_tokens
+            execution.output_tokens = result.output_tokens
+            execution.cost = float(result.cost)
+            execution.duration_ms = result.duration_ms
+            execution.tool_calls = result.tool_calls if result.tool_calls else None
+            _finalize_execution_timing(execution)
+            emit_outcome_metric(
+                outcome="FAILED",
+                failure_code="GROUNDING_REQUIRED_VIOLATION",
                 agent_type="agent",
                 tenant_id=str(tenant_id) if tenant_id else "",
             )

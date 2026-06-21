@@ -1,4 +1,4 @@
-﻿"""Hybrid Search Engine â€” combines vector similarity with knowledge graph traversal"""
+"""Hybrid Search Engine â€” combines vector similarity with knowledge graph traversal"""
 
 from __future__ import annotations
 
@@ -12,6 +12,49 @@ from engine.knowledge.neo4j_client import get_neo4j_driver, is_neo4j_available
 from engine.knowledge.prompts import SEARCH_ENTITY_EXTRACTION
 
 logger = logging.getLogger(__name__)
+
+
+class EmbeddingProviderError(Exception):
+    """Embedding provider (e.g. OpenAI) failed — distinct from empty-corpus."""
+
+
+async def _embed_query(query: str) -> list[float] | None:
+    """Embed a search query using Azure OpenAI if configured, else direct
+    OpenAI. Returns None when no provider is configured so callers can fall
+    back to other backends instead of treating it as a hard error."""
+    import os
+
+    azure_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+    azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
+        "AZURE_OPENAI_API_BASE", ""
+    )
+    if azure_key and azure_endpoint:
+        from openai import AsyncAzureOpenAI
+
+        client = AsyncAzureOpenAI(
+            api_key=azure_key,
+            azure_endpoint=azure_endpoint,
+            api_version=os.environ.get(
+                "AZURE_OPENAI_API_VERSION", "2024-10-01-preview"
+            ),
+        )
+        deployment = os.environ.get(
+            "AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"
+        )
+        resp = await client.embeddings.create(input=query, model=deployment)
+        return resp.data[0].embedding
+
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        return None
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key)
+    resp = await client.embeddings.create(
+        model="text-embedding-3-small",
+        input=query,
+    )
+    return resp.data[0].embedding
 
 
 class SearchMode(str, Enum):
@@ -204,19 +247,18 @@ async def _vector_search_pgvector(
     """Vector search via Postgres+pgvector for collections opted into it."""
     try:
         import os
-        from openai import AsyncOpenAI
+        import httpx
+        import openai
         from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
         from sqlalchemy import text as _t
 
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        if not api_key:
+        try:
+            emb = await _embed_query(query)
+        except (openai.RateLimitError, openai.APIError, httpx.HTTPStatusError) as e:
+            logger.error("Embedding provider unavailable (pgvector path): %s", e)
+            raise EmbeddingProviderError(str(e)) from e
+        if emb is None:
             return []
-        client = AsyncOpenAI(api_key=api_key)
-        embedding_resp = await client.embeddings.create(
-            model="text-embedding-3-small",
-            input=query,
-        )
-        emb = embedding_resp.data[0].embedding
         emb_str = "[" + ",".join(f"{x:.7f}" for x in emb) + "]"
 
         db_url = (
@@ -261,6 +303,8 @@ async def _vector_search_pgvector(
                 )
             )
         return results
+    except EmbeddingProviderError:
+        raise
     except Exception as e:
         logger.error("pgvector search failed: %s", e)
         return []
@@ -282,24 +326,35 @@ async def _vector_search(
 
     try:
         import os
-        from openai import AsyncOpenAI
+        import httpx
+        import openai
         from pinecone import Pinecone
 
-        api_key = os.environ.get("OPENAI_API_KEY", "")
+        azure_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+        azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
+            "AZURE_OPENAI_API_BASE", ""
+        )
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
         pinecone_key = os.environ.get("PINECONE_API_KEY", "")
         index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
 
-        if not api_key or not pinecone_key:
+        if not pinecone_key:
+            return pgv_results
+        if not ((azure_key and azure_endpoint) or openai_key):
             return pgv_results
         kb_ids = pin_ids  # rest of the function operates on Pinecone-only set
 
-        # Embed query
-        client = AsyncOpenAI(api_key=api_key)
-        embedding_resp = await client.embeddings.create(
-            model="text-embedding-3-small",
-            input=query,
-        )
-        query_vector = embedding_resp.data[0].embedding
+        # Embed query. Embedding-provider failures (rate-limit, 5xx, transport
+        # errors) must NOT degrade to an empty result — that hides a real
+        # outage as "no match". Re-raise as EmbeddingProviderError so the
+        # router can return 503 instead of 200/empty.
+        try:
+            query_vector = await _embed_query(query)
+        except (openai.RateLimitError, openai.APIError, httpx.HTTPStatusError) as e:
+            logger.error("Embedding provider unavailable: %s", e)
+            raise EmbeddingProviderError(str(e)) from e
+        if query_vector is None:
+            return pgv_results
 
         # Search across all KB namespaces (Pinecone v7+ returns structured objects)
         pc = Pinecone(api_key=pinecone_key)
@@ -373,6 +428,9 @@ async def _vector_search(
         results.sort(key=lambda r: r.score, reverse=True)
         return results
 
+    except EmbeddingProviderError:
+        # Bubble up — caller distinguishes provider outage from no-match.
+        raise
     except Exception as e:
         logger.error("Vector search failed: %s", e)
         # Even on Pinecone failure, return whatever pgvector found.

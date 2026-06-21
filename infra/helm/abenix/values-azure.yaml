@@ -31,6 +31,12 @@ secrets:
   pineconeApiKey: ""
   stripeSecretKey: ""
 
+# Azure OpenAI embedding deployment name. Cluster already has
+# AZURE_OPENAI_API_KEY + AZURE_OPENAI_API_BASE wired through abenix-secrets;
+# this is the deployment to call. Override per-tenant if the deployment in
+# the Azure resource isn't named the same as the model.
+azureEmbeddingDeployment: "text-embedding-3-small"
+
 # ── Web (Next.js) ──────────────────────────────────────────────────────────
 web:
   replicaCount: 1

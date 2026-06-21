@@ -124,6 +124,25 @@ def _estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
     return total_chars // CHARS_PER_TOKEN
 
 
+GROUNDING_REQUIRED_TOOL = "knowledge_search"
+GROUNDING_REQUIRED_ERROR = (
+    "Grounded-response agent completed without invoking knowledge_search; "
+    "output cannot be certified as grounded."
+)
+
+
+def _grounding_violated(
+    require_knowledge_search: bool, tool_calls: list[dict[str, Any]]
+) -> bool:
+    """True when the agent required a knowledge_search call and never made one."""
+    if not require_knowledge_search:
+        return False
+    for tc in tool_calls or []:
+        if isinstance(tc, dict) and tc.get("name") == GROUNDING_REQUIRED_TOOL:
+            return False
+    return True
+
+
 class AgentState(dict):
     messages: list[dict[str, Any]]
     tool_calls: list[dict[str, Any]]
@@ -185,6 +204,13 @@ class ExecutionResult:
     # the Execution.failure_code = "MODERATION_BLOCKED" off this.
     moderation_blocked: bool = False
     moderation_block_source: str = ""  # pre_llm | post_llm
+    # Set when the agent is configured with require_knowledge_search=True
+    # but completed the run without ever invoking the knowledge_search
+    # tool. Downstream callers map this to failure_code=
+    # GROUNDING_REQUIRED_VIOLATION so auditors can prove the response
+    # cannot be certified as grounded.
+    grounding_violation: bool = False
+    grounding_block_source: str = ""  # no_knowledge_search_invocation
 
     def get_trace_summary(self) -> list[dict[str, Any]]:
         return [t.to_dict() for t in self.node_traces]
@@ -208,6 +234,7 @@ class AgentExecutor:
         tool_config: dict[str, dict[str, Any]] | None = None,
         asset_schemas: dict[str, dict[str, Any]] | None = None,
         tenant_id: str = "",
+        require_knowledge_search: bool = False,
     ) -> None:
         self.llm_router = llm_router
         self.tool_registry = tool_registry
@@ -228,6 +255,12 @@ class AgentExecutor:
         # GateConfig in the API layer and pass it in.
         self.moderation_gate = moderation_gate
         self.execution_id = execution_id
+        # Grounded-response contract: when True the agent MUST invoke
+        # knowledge_search at least once. If it doesn't, the run is
+        # marked grounding_violation so the caller can emit
+        # failure_code=GROUNDING_REQUIRED_VIOLATION and reject the
+        # output. No auto-retry — the caller decides what to do.
+        self.require_knowledge_search = bool(require_knowledge_search)
         if sandbox is None:
             from engine.sandbox import SandboxPolicy
 
@@ -521,8 +554,13 @@ class AgentExecutor:
                         tenant_id=self.tenant_id,
                     )
 
+                grounding_violation = _grounding_violated(
+                    self.require_knowledge_search, all_tool_calls
+                )
                 return ExecutionResult(
-                    output=output_text,
+                    output=(
+                        GROUNDING_REQUIRED_ERROR if grounding_violation else output_text
+                    ),
                     input_tokens=total_input,
                     output_tokens=total_output,
                     cost=total_cost,
@@ -534,6 +572,10 @@ class AgentExecutor:
                     tool_calls=all_tool_calls,
                     model=resp.model,
                     node_traces=node_traces,
+                    grounding_violation=grounding_violation,
+                    grounding_block_source=(
+                        "no_knowledge_search_invocation" if grounding_violation else ""
+                    ),
                 )
 
             assistant_content: list[dict[str, Any]] = []
@@ -684,8 +726,15 @@ class AgentExecutor:
 
         duration = int((time.monotonic() - start) * 1000)
         agent_execution_duration_seconds.observe(duration / 1000)
+        grounding_violation = _grounding_violated(
+            self.require_knowledge_search, all_tool_calls
+        )
         return ExecutionResult(
-            output="Max iterations reached.",
+            output=(
+                GROUNDING_REQUIRED_ERROR
+                if grounding_violation
+                else "Max iterations reached."
+            ),
             input_tokens=total_input,
             output_tokens=total_output,
             cost=total_cost,
@@ -697,6 +746,10 @@ class AgentExecutor:
             tool_calls=all_tool_calls,
             model=self.model,
             node_traces=node_traces,
+            grounding_violation=grounding_violation,
+            grounding_block_source=(
+                "no_knowledge_search_invocation" if grounding_violation else ""
+            ),
         )
 
     async def stream(self, input_message: str) -> AsyncGenerator[ExecutionEvent, None]:
@@ -881,17 +934,27 @@ class AgentExecutor:
                         tenant_id=self.tenant_id,
                     )
 
-                yield ExecutionEvent(
-                    event="done",
-                    data={
-                        "total_tokens": total_input + total_output,
-                        "input_tokens": total_input,
-                        "output_tokens": total_output,
-                        "cost": round(total_cost, 6),
-                        "duration_ms": duration,
-                        "model": self.model,
-                    },
+                _grounding_failed = _grounding_violated(
+                    self.require_knowledge_search, all_tool_calls
                 )
+                _done_payload: dict[str, Any] = {
+                    "total_tokens": total_input + total_output,
+                    "input_tokens": total_input,
+                    "output_tokens": total_output,
+                    "cost": round(total_cost, 6),
+                    "duration_ms": duration,
+                    "model": self.model,
+                }
+                if _grounding_failed:
+                    _done_payload["error"] = "grounding_required_violation"
+                    _done_payload["grounding_violation"] = True
+                    _done_payload["grounding_block_source"] = (
+                        "no_knowledge_search_invocation"
+                    )
+                    yield ExecutionEvent(
+                        event="token", data=f"\n\n{GROUNDING_REQUIRED_ERROR}"
+                    )
+                yield ExecutionEvent(event="done", data=_done_payload)
                 return
 
             assistant_content: list[dict[str, Any]] = []
@@ -1037,17 +1100,23 @@ class AgentExecutor:
         duration = int((time.monotonic() - start) * 1000)
         agent_execution_duration_seconds.observe(duration / 1000)
         agent_active_streams.dec()
-        yield ExecutionEvent(
-            event="done",
-            data={
-                "total_tokens": total_input + total_output,
-                "input_tokens": total_input,
-                "output_tokens": total_output,
-                "cost": round(total_cost, 6),
-                "duration_ms": duration,
-                "model": self.model,
-            },
+        _grounding_failed = _grounding_violated(
+            self.require_knowledge_search, all_tool_calls
         )
+        _done_payload2: dict[str, Any] = {
+            "total_tokens": total_input + total_output,
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cost": round(total_cost, 6),
+            "duration_ms": duration,
+            "model": self.model,
+        }
+        if _grounding_failed:
+            _done_payload2["error"] = "grounding_required_violation"
+            _done_payload2["grounding_violation"] = True
+            _done_payload2["grounding_block_source"] = "no_knowledge_search_invocation"
+            yield ExecutionEvent(event="token", data=f"\n\n{GROUNDING_REQUIRED_ERROR}")
+        yield ExecutionEvent(event="done", data=_done_payload2)
 
 
 _TOOL_CLASSES_LOADED = False

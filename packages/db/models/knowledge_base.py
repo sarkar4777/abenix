@@ -25,12 +25,22 @@ class KBStatus(str, enum.Enum):
     PROCESSING = "processing"
     READY = "ready"
     FAILED = "failed"
+    # Any document in this KB landed in DEGRADED (text-indexed but no
+    # real embeddings stored). UI surfaces a yellow banner; semantic
+    # search results may be incomplete until the affected docs are
+    # re-embedded.
+    DEGRADED = "degraded"
 
 
 class DocumentStatus(str, enum.Enum):
     PROCESSING = "processing"
     READY = "ready"
     FAILED = "failed"
+    # Text was extracted + chunked, but the embedding provider was
+    # unavailable so no vectors were stored. Document is NOT
+    # semantically searchable until re-embedded. Keyword search may
+    # still work where the backend supports it.
+    DEGRADED = "degraded"
 
 
 class KnowledgeBase(UUIDMixin, TenantMixin, TimestampMixin, Base):
@@ -122,6 +132,10 @@ class Document(UUIDMixin, Base):
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus, name="document_status"), default=DocumentStatus.PROCESSING
     )
+    # Populated when status in (FAILED, DEGRADED) so the UI can show
+    # the operator what actually went wrong (e.g. "embedding provider
+    # unavailable; vectors not stored").
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     storage_url: Mapped[str] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

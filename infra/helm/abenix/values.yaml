@@ -310,6 +310,13 @@ secrets:
   azureOpenaiApiBase: ""
   azureOpenaiApiVersion: "2024-10-01-preview"
 
+# Azure OpenAI embedding deployment name. Worker + agent-runtime prefer
+# Azure when AZURE_OPENAI_API_KEY + endpoint are set; the direct OpenAI
+# path is only used when Azure isn't configured. Matches the deployment
+# created in the customer's Azure OpenAI resource — defaults to the model
+# name itself since most teams name the deployment the same.
+azureEmbeddingDeployment: "text-embedding-3-small"
+
 ingress:
   enabled: true
   className: nginx

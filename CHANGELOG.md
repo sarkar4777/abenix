@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.3.5 — 2026-06-21
+
+### Added
+
+- **Provider-aware embedder.** Both `apps/worker/worker/tasks/document_processor.py` and `apps/agent-runtime/engine/knowledge/hybrid_search.py` now pick the embedding client via a three-tier ladder. When `AZURE_OPENAI_API_KEY` plus `AZURE_OPENAI_ENDPOINT` (or `_API_BASE`) are set, the worker and agent-runtime route to `AsyncAzureOpenAI` with the deployment named by `AZURE_EMBEDDING_DEPLOYMENT` (default `text-embedding-3-small`). Falls back to plain `OpenAI(api_key=OPENAI_API_KEY)` when only the direct key is set. Raises `EmbeddingProviderError` when neither is configured. Azure-only deploys no longer silently hit a quota-exhausted OpenAI key on every ingest and every query. `AZURE_EMBEDDING_DEPLOYMENT` is plumbed through `values.yaml`, `values-azure.yaml`, and the abenix configmap so worker plus agent-runtime pick it up via `envFrom`.
+- **`DEGRADED` document and KB status.** Migration `c9d0e1f2g3h4` adds a `DEGRADED` value to both `kb_status` and `document_status` enums and a `documents.error_message` text column. When the worker cannot embed (provider 429, missing key, transport error, `_store_vectors` throws), the doc lands at `status='degraded'` with the honest reason in `error_message`. The KB rollup goes `DEGRADED` if any of its docs are degraded. The API serializer overrides `READY` to `DEGRADED` when `degraded_doc_count > 0` so the wire response can never claim ready over known-degraded docs even mid-flight. UI gets a yellow warning to render instead of a fake green checkmark.
+- **`POST /api/agents` merges top-level `tools` and `model`.** The create handler accepted top-level `model` and `tools` and silently dropped them into a default model_config (`claude-sonnet`, `tools=[]`). PATCH worked, create didn't — surprise footgun for SDK and external customers using the documented body shape. Both fields are now accepted at the top level and merged into model_config before save. Returns 400 with a helpful message when both top-level and nested are present, so callers cannot accidentally request two different models.
+- **`require_knowledge_search` grounding guardrail.** Optional flag on `Agent`. When `true` and the agent loop finishes without any `knowledge_search` tool call, the execution is marked `failed` with `error_message="Grounded-response agent completed without invoking knowledge_search; output cannot be certified as grounded."` No auto-retry. Closes the class of bug where a customer asks "what is X according to my KB?" and the model fabricates an answer using parametric memory while claiming it came from the KB.
+
+### Fixed
+
+- **`/api/knowledge-engines/{kb_id}/search` no longer silently returns empty 200 on retrieval failure.** When the embeddings call raises `openai.RateLimitError` / `openai.APIError` / `httpx.HTTPStatusError`, `hybrid_search.py` now raises a typed `EmbeddingProviderError` and `knowledge_engine.py` turns it into `HTTPException(503, {"error_code": "embedding_provider_unavailable", "message": "Knowledge search temporarily unavailable: embedding provider did not respond"})`. Customers can now tell "no match" from "retrieval temporarily down".
+
+### Notes for operators
+
+- A cluster running Azure-only must also have an Azure embedding deployment provisioned. Set `AZURE_EMBEDDING_DEPLOYMENT` to its name (typically `text-embedding-3-small` or `text-embedding-ada-002`). The new honest-failure pipeline surfaces a missing deployment as a clear chain: doc `DEGRADED` with `error_message` → KB rollup `DEGRADED` → search returns 503 with `error_code='embedding_provider_unavailable'`. Pre-fix behaviour was to silently store zero-vector chunks and pretend search worked.
+
 ## v2.3.4 — 2026-06-21
 
 ### Added

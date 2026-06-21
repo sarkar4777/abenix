@@ -48,26 +48,44 @@ ALLOWED_TYPES = {
 }
 
 
-def _kb_rollups(kb: KnowledgeBase) -> tuple[int, int]:
+def _kb_rollups(kb: KnowledgeBase) -> tuple[int, int, int]:
+    """Aggregate (chunks, size_bytes, degraded_doc_count) over the KB's docs.
+
+    `degraded_doc_count` is what the UI uses to draw the yellow banner —
+    any non-zero value means at least one document is indexed but not
+    semantically searchable.
+    """
     chunks = 0
     size = 0
+    degraded = 0
     try:
         for d in kb.documents:
             chunks += d.chunk_count or 0
             size += d.file_size or 0
+            doc_status = (
+                d.status.value if isinstance(d.status, DocumentStatus) else d.status
+            )
+            if doc_status == DocumentStatus.DEGRADED.value:
+                degraded += 1
     except Exception:
         pass
-    return chunks, size
+    return chunks, size, degraded
 
 
 def _serialize_kb(kb: KnowledgeBase, include_docs: bool = False) -> dict[str, Any]:
-    chunk_count, total_size = _kb_rollups(kb)
+    chunk_count, total_size, degraded_doc_count = _kb_rollups(kb)
     docs: list[dict[str, Any]] = []
     if include_docs:
         try:
             docs = [_serialize_doc(d) for d in kb.documents]
         except Exception:
             pass
+    raw_status = kb.status.value if isinstance(kb.status, KBStatus) else kb.status
+    # Belt-and-braces: even if the worker rollup missed the DEGRADED flip
+    # (older worker version, race condition), the API answer is the
+    # source of truth and must reflect what the user is actually seeing.
+    if degraded_doc_count > 0 and raw_status == KBStatus.READY.value:
+        raw_status = KBStatus.DEGRADED.value
     return {
         "id": str(kb.id),
         "name": kb.name,
@@ -75,10 +93,11 @@ def _serialize_kb(kb: KnowledgeBase, include_docs: bool = False) -> dict[str, An
         "embedding_model": kb.embedding_model,
         "chunk_size": kb.chunk_size,
         "chunk_overlap": kb.chunk_overlap,
-        "status": kb.status.value if isinstance(kb.status, KBStatus) else kb.status,
+        "status": raw_status,
         "doc_count": kb.doc_count,
         "chunk_count": chunk_count,
         "total_size": total_size,
+        "degraded_doc_count": degraded_doc_count,
         "agent_id": str(kb.agent_id) if kb.agent_id else None,
         "project_id": str(kb.project_id) if kb.project_id else None,
         "default_visibility": (
@@ -112,6 +131,8 @@ def _serialize_kb_summary_lite(kb: KnowledgeBase) -> dict[str, Any]:
         "doc_count": kb.doc_count,
         "chunk_count": 0,
         "total_size": 0,
+        # Filled in by the list endpoint after the GROUP BY rollup.
+        "degraded_doc_count": 0,
         "agent_id": str(kb.agent_id) if kb.agent_id else None,
         "project_id": str(kb.project_id) if kb.project_id else None,
         "default_visibility": (
@@ -134,6 +155,9 @@ def _serialize_doc(d: Document) -> dict[str, Any]:
         "file_size": d.file_size,
         "chunk_count": d.chunk_count,
         "status": d.status.value if isinstance(d.status, DocumentStatus) else d.status,
+        # Populated for FAILED + DEGRADED — UI tooltip on the yellow/red
+        # icon. None for healthy docs.
+        "error_message": getattr(d, "error_message", None),
         "created_at": d.created_at.isoformat() if d.created_at else None,
     }
 
@@ -214,6 +238,7 @@ async def list_knowledge_bases(
     kbs = result.scalars().all()
     kb_ids = [kb.id for kb in kbs]
     rollups: dict[uuid.UUID, tuple[int, int]] = {}
+    degraded_counts: dict[uuid.UUID, int] = {}
     if kb_ids:
         rollup_rows = (
             await db.execute(
@@ -228,12 +253,34 @@ async def list_knowledge_bases(
         ).all()
         for cid, ck, sz in rollup_rows:
             rollups[cid] = (int(ck or 0), int(sz or 0))
+        # Separate pass for degraded counts — cheaper than dragging a
+        # CASE WHEN through the SUM rollup, and keeps the column list
+        # honest if more statuses get surfaced later.
+        degraded_rows = (
+            await db.execute(
+                select(Document.kb_id, func.count())
+                .where(
+                    Document.kb_id.in_(kb_ids),
+                    Document.status == DocumentStatus.DEGRADED,
+                )
+                .group_by(Document.kb_id)
+            )
+        ).all()
+        for cid, cnt in degraded_rows:
+            degraded_counts[cid] = int(cnt or 0)
     data = []
     for kb in kbs:
         d = _serialize_kb_summary_lite(kb)
         ck, sz = rollups.get(kb.id, (0, 0))
         d["chunk_count"] = ck
         d["total_size"] = sz
+        deg = degraded_counts.get(kb.id, 0)
+        d["degraded_doc_count"] = deg
+        # Mirror the same belt-and-braces rule the detail serializer
+        # uses — never let a green "ready" leak out when there are
+        # known degraded docs underneath.
+        if deg > 0 and d["status"] == KBStatus.READY.value:
+            d["status"] = KBStatus.DEGRADED.value
         data.append(d)
     return success(data, meta={"total": total, "limit": limit, "offset": offset})
 

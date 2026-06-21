@@ -18,6 +18,10 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSIONS = 1536
 
 
+class EmbeddingProviderError(Exception):
+    """No usable embedding provider configured (no Azure + no OpenAI key)."""
+
+
 def _strip_file_scheme(p: str) -> str:
     """Normalise a storage URL to a filesystem path."""
     if p is None:
@@ -80,32 +84,80 @@ EMBEDDING_DIM = 1536
 
 
 def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
-    """Returns (embeddings, used_real_model). Falls back to zero-vectors when
-    the upstream provider is unavailable (quota, network, missing key) so KB
-    ingestion never fails on a transient external error — keyword search
-    still works, semantic search degrades for affected docs only."""
-    if not OPENAI_API_KEY:
-        logger.warning("OPENAI_API_KEY unset; storing zero-vector embeddings")
-        return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+    """Returns (embeddings, used_real_model). Provider selection:
+      1. Azure OpenAI if AZURE_OPENAI_API_KEY + endpoint are set (preferred —
+         that's what the production cluster pays for).
+      2. Direct OpenAI if OPENAI_API_KEY is set.
+      3. Otherwise raise EmbeddingProviderError so the caller flags failure
+         loudly instead of silently storing zero vectors.
 
-    try:
-        from openai import OpenAI
+    A live provider call that still errors (quota, transport) degrades to
+    zero vectors so a single bad doc can't take down the whole KB ingest —
+    keyword search keeps working, semantic on that doc only is degraded."""
+    import asyncio
 
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        embeddings: list[list[float]] = []
-        batch_size = 100
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i : i + batch_size]
-            response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
-            for item in response.data:
-                embeddings.append(item.embedding)
-        return embeddings, True
-    except Exception as exc:
-        logger.warning(
-            "embedding call failed (%s); falling back to zero vectors so doc stays usable",
-            exc,
-        )
-        return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+    azure_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+    azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
+        "AZURE_OPENAI_API_BASE", ""
+    )
+    if azure_key and azure_endpoint:
+        try:
+            from openai import AsyncAzureOpenAI
+
+            client = AsyncAzureOpenAI(
+                api_key=azure_key,
+                azure_endpoint=azure_endpoint,
+                api_version=os.environ.get(
+                    "AZURE_OPENAI_API_VERSION", "2024-10-01-preview"
+                ),
+            )
+            deployment = os.environ.get(
+                "AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"
+            )
+
+            async def _run() -> list[list[float]]:
+                out: list[list[float]] = []
+                batch_size = 100
+                for i in range(0, len(chunks), batch_size):
+                    batch = chunks[i : i + batch_size]
+                    resp = await client.embeddings.create(input=batch, model=deployment)
+                    for item in resp.data:
+                        out.append(item.embedding)
+                return out
+
+            embeddings = asyncio.run(_run())
+            return embeddings, True
+        except Exception as exc:
+            logger.warning(
+                "Azure embedding call failed (%s); falling back to zero vectors so doc stays usable",
+                exc,
+            )
+            return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+
+    if OPENAI_API_KEY:
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            embeddings: list[list[float]] = []
+            batch_size = 100
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i : i + batch_size]
+                response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
+                for item in response.data:
+                    embeddings.append(item.embedding)
+            return embeddings, True
+        except Exception as exc:
+            logger.warning(
+                "OpenAI embedding call failed (%s); falling back to zero vectors so doc stays usable",
+                exc,
+            )
+            return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+
+    raise EmbeddingProviderError(
+        "No embedding provider configured — set AZURE_OPENAI_API_KEY + "
+        "AZURE_OPENAI_ENDPOINT or OPENAI_API_KEY"
+    )
 
 
 def _vector_backend_for(kb_id: str) -> str:
@@ -277,7 +329,11 @@ def _store_vectors(
 
 
 def _update_document_status(
-    doc_id: str, kb_id: str, status: str, chunk_count: int = 0
+    doc_id: str,
+    kb_id: str,
+    status: str,
+    chunk_count: int = 0,
+    error_message: str | None = None,
 ) -> None:
     import psycopg2
 
@@ -300,30 +356,32 @@ def _update_document_status(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE documents SET status = %s, chunk_count = %s WHERE id = %s",
-                (db_status, chunk_count, doc_id),
+                "UPDATE documents SET status = %s, chunk_count = %s, error_message = %s WHERE id = %s",
+                (db_status, chunk_count, error_message, doc_id),
             )
-            if status == "ready":
+            # KB rollup: a single DEGRADED doc taints the whole collection —
+            # the operator needs to know vectors are missing somewhere.
+            # Once nothing's still PROCESSING, promote to READY.
+            cur.execute(
+                "SELECT status, COUNT(*) FROM documents WHERE kb_id = %s GROUP BY status",
+                (kb_id,),
+            )
+            counts = {row[0]: row[1] for row in cur.fetchall()}
+            ready_count = counts.get("READY", 0) + counts.get("DEGRADED", 0)
+            cur.execute(
+                "UPDATE knowledge_collections SET doc_count = %s WHERE id = %s",
+                (ready_count, kb_id),
+            )
+            if counts.get("DEGRADED", 0) > 0:
                 cur.execute(
-                    "UPDATE knowledge_collections SET doc_count = ("
-                    "  SELECT COUNT(*) FROM documents WHERE kb_id = %s AND status = 'READY'"
-                    "), status = 'READY' WHERE id = %s",
-                    (kb_id, kb_id),
-                )
-            elif status == "failed":
-                remaining = 0
-                cur.execute(
-                    "SELECT COUNT(*) FROM documents WHERE kb_id = %s AND status = 'PROCESSING'",
+                    "UPDATE knowledge_collections SET status = 'DEGRADED' WHERE id = %s",
                     (kb_id,),
                 )
-                row = cur.fetchone()
-                if row:
-                    remaining = row[0]
-                if remaining == 0:
-                    cur.execute(
-                        "UPDATE knowledge_collections SET status = 'READY' WHERE id = %s",
-                        (kb_id,),
-                    )
+            elif counts.get("PROCESSING", 0) == 0:
+                cur.execute(
+                    "UPDATE knowledge_collections SET status = 'READY' WHERE id = %s",
+                    (kb_id,),
+                )
             conn.commit()
     finally:
         conn.close()
@@ -403,34 +461,57 @@ def process_document(
         if real_vectors:
             try:
                 stored = _store_vectors(kb_id, doc_id, filename, chunks, embeddings)
+                final_status = "ready"
+                error_message = None
             except Exception as ve:
+                # Embeddings are real but the vector store rejected them.
+                # Document is NOT searchable; honest signal beats a green
+                # checkmark over no vectors.
                 logger.warning(
-                    "vector store failed for %s: %s; marking ready text-only",
+                    "vector store failed for %s: %s; marking degraded",
                     doc_id,
                     ve,
                 )
-                stored = len(chunks)
+                stored = 0
+                final_status = "degraded"
+                error_message = (
+                    "vector store unavailable; vectors not stored, "
+                    "document not searchable"
+                )
         else:
-            stored = len(chunks)
-            logger.info(
-                "document %s: no embeddings (provider unavailable); marking ready text-only",
+            # Embedding provider unavailable (quota, network, missing
+            # key) — text + chunks live in DB, but no vectors. Mark
+            # DEGRADED so the KB rollup turns yellow and the operator
+            # can retry / re-embed later.
+            stored = 0
+            final_status = "degraded"
+            error_message = (
+                "embedding provider unavailable; vectors not stored, "
+                "document not searchable"
+            )
+            logger.warning(
+                "document %s: no embeddings (provider unavailable); marking degraded",
                 doc_id,
             )
 
-        _update_document_status(doc_id, kb_id, "ready", stored)
+        _update_document_status(
+            doc_id, kb_id, final_status, stored, error_message=error_message
+        )
 
         logger.info(
-            "Document %s processed: %d chunks, %d vectors stored",
+            "Document %s processed: %d chunks, %d vectors stored, status=%s",
             doc_id,
             len(chunks),
             stored,
+            final_status,
         )
 
         return {
-            "status": "ready",
+            "status": final_status,
             "doc_id": doc_id,
             "chunks": len(chunks),
             "vectors": stored,
+            "error": error_message,
         }
 
     except Exception as exc:

@@ -6,7 +6,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -343,16 +343,34 @@ async def search_knowledge(
         return error("Knowledge base not found", 404)
 
     try:
-        from engine.knowledge.hybrid_search import hybrid_search, SearchMode
-
-        response = await hybrid_search(
-            query=body.query,
-            kb_ids=[str(kb_id)],
-            mode=SearchMode(body.mode),
-            top_k=body.top_k,
-            graph_depth=body.graph_depth,
-            tenant_id=str(user.tenant_id),
+        from engine.knowledge.hybrid_search import (
+            EmbeddingProviderError,
+            hybrid_search,
+            SearchMode,
         )
+
+        try:
+            response = await hybrid_search(
+                query=body.query,
+                kb_ids=[str(kb_id)],
+                mode=SearchMode(body.mode),
+                top_k=body.top_k,
+                graph_depth=body.graph_depth,
+                tenant_id=str(user.tenant_id),
+            )
+        except EmbeddingProviderError as e:
+            # Surface provider outage as 503 so callers can distinguish
+            # "no match" from "retrieval is broken right now".
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error_code": "embedding_provider_unavailable",
+                    "message": (
+                        "Knowledge search temporarily unavailable: "
+                        "embedding provider did not respond"
+                    ),
+                },
+            ) from e
         return success(
             {
                 "results": [
@@ -373,6 +391,8 @@ async def search_knowledge(
                 "latency_ms": response.latency_ms,
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
         return error(f"Search failed: {e}", 500)
 

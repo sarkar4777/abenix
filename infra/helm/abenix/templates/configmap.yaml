@@ -28,6 +28,11 @@ data:
   # documents. The previous default of plain "abenix" 404'd in
   # every real account because nobody's index is named that.
   PINECONE_INDEX_NAME: {{ .Values.pinecone.indexName | default "agentforge-knowledge" | quote }}
+  # Azure OpenAI embedding deployment name — paired with
+  # AZURE_OPENAI_API_KEY + AZURE_OPENAI_API_BASE from abenix-secrets so
+  # the worker / agent-runtime embed via Azure instead of direct OpenAI
+  # (which hits insufficient_quota in this tenant).
+  AZURE_EMBEDDING_DEPLOYMENT: {{ .Values.azureEmbeddingDeployment | default "text-embedding-3-small" | quote }}
   UPLOAD_DIR: {{ .Values.objectStorage.uploadDir | default "/data/uploads" | quote }}
   EXPORT_DIR: {{ .Values.objectStorage.exportDir | default "/data/exports" | quote }}
   STORAGE_BACKEND: {{ .Values.objectStorage.type | default "local" | quote }}
