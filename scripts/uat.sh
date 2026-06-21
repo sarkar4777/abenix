@@ -123,6 +123,7 @@ run_spec "Apps Full"       "e2e/uat_apps_full.spec.ts"
 run_spec "Wingman"         "e2e/uat_wingman.spec.ts"
 run_spec "Multi-User RBAC" "e2e/uat_abenix_multi_user.spec.ts"
 run_spec "ClaimsIQ Deep"   "e2e/uat_claimsiq_deep.spec.ts"
+run_spec "Grafana Panels"  "e2e/uat_grafana_panels.spec.ts"
 
 echo
 echo "════════════════════════════════════════════════════════════════"
