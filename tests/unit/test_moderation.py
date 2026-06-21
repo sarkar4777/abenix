@@ -58,6 +58,90 @@ def test_custom_pattern_hit_skips_invalid_regex_silently():
     assert hits == []
 
 
+def test_custom_pattern_hit_back_compat_with_dict_rows():
+    """Legacy DB rows can hold `{"pattern": "X", "action": "block"}` dicts
+    because the column is JSONB and the router used to accept anything.
+    The gate must tolerate those rows: extract the "pattern" field when
+    it's a string, skip the entry otherwise — never crash with
+    TypeError: unhashable type: 'dict'."""
+    patterns = [
+        {"pattern": r"\bsecret\b", "action": "block"},
+        {"pattern": r"\bnope\b"},
+        {"no_pattern_key": True},
+        {"pattern": 42},  # non-string pattern value
+        r"\bpassword\b",  # plain string entry alongside dicts
+    ]
+    hits = _custom_pattern_hit("the secret password lives here", patterns)
+    assert r"\bsecret\b" in hits
+    assert r"\bpassword\b" in hits
+    # The malformed entries must be silently skipped.
+    assert all(isinstance(h, str) for h in hits)
+
+
+def test_redact_back_compat_with_dict_rows():
+    """Same legacy-row shape, applied to _redact — must not raise."""
+    patterns = [{"pattern": r"\d{3}-\d{4}"}, {"no_pattern_key": True}]
+    out = _redact("call me at 555-1234", patterns, "[REDACTED]")
+    assert "555-1234" not in out
+    assert "[REDACTED]" in out
+
+
+# ── router-level: POST /api/moderation/policies body validation ─────
+
+
+def test_router_rejects_dict_custom_patterns_with_422():
+    """The natural shape `[{"pattern": "X", "action": "block"}]` used to
+    be silently stored, then crash _custom_pattern_hit on every /vet
+    call. The POST/PATCH body normaliser must reject malformed entries
+    with a 422 pointing at the supported shape."""
+    from app.routers.moderation import _normalise_custom_patterns
+
+    # 1. Mixed valid + invalid entries → 422 on the invalid one.
+    body = {
+        "custom_patterns": [
+            r"\bsecret\b",
+            {"action": "block"},  # missing 'pattern'
+        ]
+    }
+    patterns, err = _normalise_custom_patterns(body)
+    assert patterns is None
+    assert err is not None
+    assert err.status_code == 422
+
+    # 2. Bare non-string entry → 422.
+    body2 = {"custom_patterns": [42]}
+    patterns2, err2 = _normalise_custom_patterns(body2)
+    assert patterns2 is None
+    assert err2 is not None and err2.status_code == 422
+
+
+def test_router_extracts_pattern_field_from_dicts():
+    """Dict entries with a string 'pattern' field are normalised into
+    list[str] so the help-doc shape keeps working without a 422."""
+    from app.routers.moderation import _normalise_custom_patterns
+
+    body = {
+        "custom_patterns": [
+            {"pattern": r"\bsecret\b", "action": "block"},
+            r"\bpassword\b",
+        ]
+    }
+    patterns, err = _normalise_custom_patterns(body)
+    assert err is None
+    assert patterns == [r"\bsecret\b", r"\bpassword\b"]
+
+
+def test_router_absent_key_returns_none_sentinel():
+    """A body that simply omits custom_patterns must not be treated as
+    `[]` — the caller decides the default. The normaliser returns
+    (None, None) in that case."""
+    from app.routers.moderation import _normalise_custom_patterns
+
+    patterns, err = _normalise_custom_patterns({})
+    assert patterns is None
+    assert err is None
+
+
 def test_redact_replaces_offending_spans_with_mask():
     out = _redact("call me at 555-1234", [r"\d{3}-\d{4}"], "[REDACTED]")
     assert "555-1234" not in out

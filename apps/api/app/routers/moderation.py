@@ -11,12 +11,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update as sa_update, desc
+from pydantic import BaseModel, ValidationError, field_validator
+from sqlalchemy import func, select, update as sa_update, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
+from app.core.telemetry import moderation_provider_errors_total
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
@@ -36,6 +39,78 @@ from engine.moderation_client import evaluate, content_hash  # noqa: E402
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/moderation", tags=["moderation"])
+
+
+_PATTERN_SHAPE_HINT = (
+    "custom_patterns must be a list of regex strings, e.g. "
+    '["\\\\bsecret\\\\b", "\\\\d{3}-\\\\d{2}-\\\\d{4}"]. '
+    'Dict entries of the form {"pattern": "..."} are also accepted '
+    'and will have the "pattern" field extracted.'
+)
+
+
+class _CustomPatternsField(BaseModel):
+    """Validator-only model used to normalise custom_patterns at the edge.
+
+    Tenants have historically been allowed to POST `custom_patterns` of any
+    shape because the column is JSONB. That let `[{"pattern": "X"}]` land
+    in the DB, which then crashed _custom_pattern_hit() (unhashable dict).
+    We now coerce dict entries into their "pattern" field and reject
+    anything else with a 422.
+    """
+
+    custom_patterns: list[str]
+
+    @field_validator("custom_patterns", mode="before")
+    @classmethod
+    def _coerce(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            raise ValueError(_PATTERN_SHAPE_HINT)
+        out: list[str] = []
+        for i, item in enumerate(v):
+            if isinstance(item, str):
+                out.append(item)
+                continue
+            if isinstance(item, dict):
+                pat = item.get("pattern")
+                if isinstance(pat, str):
+                    out.append(pat)
+                    continue
+                raise ValueError(
+                    f"custom_patterns[{i}]: dict entry missing string "
+                    f"'pattern' field. {_PATTERN_SHAPE_HINT}"
+                )
+            raise ValueError(
+                f"custom_patterns[{i}]: expected string, got "
+                f"{type(item).__name__}. {_PATTERN_SHAPE_HINT}"
+            )
+        return out
+
+
+def _normalise_custom_patterns(
+    body: dict,
+) -> tuple[list[str] | None, JSONResponse | None]:
+    """Return (patterns, None) on success, (None, 422-response) on failure.
+
+    Absent key → returns (None, None) so the caller can keep the existing
+    `body.get("custom_patterns") or []` behaviour without a forced [].
+    """
+    if "custom_patterns" not in body:
+        return None, None
+    try:
+        parsed = _CustomPatternsField(custom_patterns=body.get("custom_patterns"))
+    except ValidationError as ve:
+        # Surface the first useful message; pydantic returns a list of dicts.
+        msg = _PATTERN_SHAPE_HINT
+        errs = ve.errors()
+        if errs:
+            raw = errs[0].get("msg") or ""
+            if raw:
+                msg = raw
+        return None, error(msg, 422)
+    return parsed.custom_patterns, None
 
 
 def _policy_dict(p: ModerationPolicy) -> dict[str, Any]:
@@ -60,6 +135,7 @@ def _policy_dict(p: ModerationPolicy) -> dict[str, Any]:
         ),
         "custom_patterns": p.custom_patterns or [],
         "redaction_mask": p.redaction_mask,
+        "fail_closed": bool(p.fail_closed),
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -126,6 +202,7 @@ async def _seed_default_policy(
         default_action=ModerationAction.BLOCK,
         custom_patterns=[],
         redaction_mask="█████",
+        fail_closed=True,
         created_by=created_by,
     )
     db.add(policy)
@@ -191,6 +268,13 @@ async def vet(
     persisted_provider_response = dict(decision.provider_response or {})
     if decision.error:
         persisted_provider_response["_provider_error"] = decision.error
+        try:
+            moderation_provider_errors_total.labels(
+                provider=(policy.provider if policy else "openai"),
+                model=provider_model,
+            ).inc()
+        except Exception:
+            logger.exception("failed to increment moderation_provider_errors_total")
     event = ModerationEvent(
         id=uuid.uuid4(),
         tenant_id=user.tenant_id,
@@ -292,6 +376,10 @@ async def create_policy(
     except ValueError:
         return error(f"invalid default_action: {default_action_raw}", 400)
 
+    patterns_normalised, err = _normalise_custom_patterns(body)
+    if err is not None:
+        return err
+
     # Respect "only one active at a time" semantics: if the new policy
     # is active, deactivate others.
     is_active = bool(body.get("is_active", True))
@@ -318,12 +406,22 @@ async def create_policy(
         default_threshold=float(body.get("default_threshold") or 0.5),
         category_actions=body.get("category_actions") or {},
         default_action=default_action_enum,
-        custom_patterns=body.get("custom_patterns") or [],
+        custom_patterns=patterns_normalised if patterns_normalised is not None else [],
         redaction_mask=str(body.get("redaction_mask") or "█████"),
+        fail_closed=bool(body.get("fail_closed", False)),
         created_by=user.id,
     )
     db.add(p)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        return error(
+            "Policy create violated a database constraint",
+            409,
+            error_code="policy_constraint_violation",
+            details={"reason": str(getattr(exc, "orig", exc))[:200]},
+        )
     await log_action(
         db,
         user.tenant_id,
@@ -380,6 +478,10 @@ async def update_policy(
     if not p:
         return error("not found", 404)
 
+    patterns_normalised, err = _normalise_custom_patterns(body)
+    if err is not None:
+        return err
+
     # Enforce single-active: if toggling to active, deactivate others.
     if body.get("is_active") is True and not p.is_active:
         await db.execute(
@@ -403,17 +505,32 @@ async def update_policy(
         "category_actions",
         "custom_patterns",
         "redaction_mask",
+        "fail_closed",
     ]
     for k in fields:
         if k in body:
-            setattr(p, k, body[k])
+            if k == "custom_patterns":
+                setattr(p, k, patterns_normalised or [])
+            elif k == "fail_closed":
+                setattr(p, k, bool(body[k]))
+            else:
+                setattr(p, k, body[k])
     if "default_action" in body:
         try:
             p.default_action = ModerationAction(str(body["default_action"]).lower())
         except ValueError:
             return error(f"invalid default_action: {body['default_action']}", 400)
     p.updated_at = datetime.now(timezone.utc)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        return error(
+            "Policy update violated a database constraint",
+            409,
+            error_code="policy_constraint_violation",
+            details={"reason": str(getattr(exc, "orig", exc))[:200]},
+        )
     await log_action(
         db,
         user.tenant_id,
@@ -428,6 +545,8 @@ async def update_policy(
     return success(_policy_dict(p))
 
 
+# TODO: long-term, swap moderation_events.policy_id FK to ON DELETE SET NULL
+# via a new alembic migration so historical events survive policy deletes.
 @router.delete("/policies/{policy_id}")
 async def delete_policy(
     policy_id: str,
@@ -448,7 +567,38 @@ async def delete_policy(
     p = (await db.execute(q)).scalars().first()
     if not p:
         return error("not found", 404)
-    await db.delete(p)
+
+    # Block delete when events still reference this policy; FK is RESTRICT
+    # today (raises IntegrityError on commit). Pre-count so the message can
+    # tell the caller how many events are blocking and suggest the
+    # deactivate-instead workaround.
+    event_count_q = select(func.count(ModerationEvent.id)).where(
+        ModerationEvent.policy_id == pid
+    )
+    event_count = int((await db.execute(event_count_q)).scalar() or 0)
+    if event_count > 0:
+        return error(
+            f"Policy has {event_count} referenced events; "
+            "deactivate instead by setting enabled=false",
+            409,
+            error_code="policy_has_referenced_events",
+            details={"event_count": event_count, "policy_id": str(pid)},
+        )
+
+    try:
+        await db.delete(p)
+        await db.flush()
+    except IntegrityError:
+        # Race: events landed between the count and the delete. Roll back
+        # and return the same 409 the pre-check would have produced.
+        await db.rollback()
+        return error(
+            "Policy has referenced events; deactivate instead by setting enabled=false",
+            409,
+            error_code="policy_has_referenced_events",
+            details={"policy_id": str(pid)},
+        )
+
     await log_action(
         db,
         user.tenant_id,

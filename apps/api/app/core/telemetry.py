@@ -208,6 +208,17 @@ cache_misses_total = _safe_counter(
     ["tenant_id"],
 )
 
+# Moderation provider error counter. Increments every time the
+# upstream provider (OpenAI Moderation API today) returns an error —
+# 429 quota, network blip, key revoked, etc. Operators watch this to
+# catch silent fail-open windows where /vet returns outcome=error and
+# the gate would pass content through without `fail_closed=true`.
+moderation_provider_errors_total = _safe_counter(
+    "moderation_provider_errors_total",
+    "Moderation provider call failures (provider returned error or timed out)",
+    ["provider", "model"],
+)
+
 
 def setup_telemetry(
     app: FastAPI,

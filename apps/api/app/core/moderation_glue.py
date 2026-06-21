@@ -12,6 +12,11 @@ from typing import Any
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+try:
+    from app.core.telemetry import moderation_provider_errors_total
+except Exception:  # pragma: no cover — agent-runtime side import path
+    moderation_provider_errors_total = None  # type: ignore[assignment]
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.moderation_policy import (  # noqa: E402
@@ -69,6 +74,20 @@ async def build_gate_context(
         decision = kw.get("decision")
         if decision is None:
             return
+        # Surface provider failures as a Prometheus signal so operators
+        # spot quota / outage windows immediately — without this, a 429
+        # storm only shows up after a customer complaint.
+        if (
+            getattr(decision, "error", None)
+            and moderation_provider_errors_total is not None
+        ):
+            try:
+                moderation_provider_errors_total.labels(
+                    provider="openai",
+                    model=policy.provider_model,
+                ).inc()
+            except Exception:
+                logger.exception("failed to increment moderation_provider_errors_total")
         ctx.events.append(
             {
                 "source": kw.get("source", ""),
@@ -101,7 +120,7 @@ async def build_gate_context(
         ),
         custom_patterns=list(policy.custom_patterns or []),
         redaction_mask=policy.redaction_mask or "█████",
-        fail_closed=False,
+        fail_closed=bool(getattr(policy, "fail_closed", False)),
         event_sink=_sink,
     )
     return ctx

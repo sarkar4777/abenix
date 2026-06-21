@@ -385,6 +385,7 @@ async def _upsert_user(
         default_action=ModerationAction.BLOCK,
         custom_patterns=[],
         redaction_mask="█████",
+        fail_closed=True,
         created_by=user.id,
     )
     db.add(policy)

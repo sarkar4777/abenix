@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -112,6 +113,14 @@ class ModerationPolicy(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # replaced with this string. Default █ lets humans spot the mask.
     redaction_mask: Mapped[str] = mapped_column(
         String(40), default="█████", server_default="█████"
+    )
+
+    # Fail-closed switch — when the moderation provider returns an error
+    # (quota exhausted, network blip, key revoked), block instead of
+    # silently allowing. Default false preserves legacy fail-open
+    # behaviour; the seeded ABENIX default flips this to true.
+    fail_closed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(

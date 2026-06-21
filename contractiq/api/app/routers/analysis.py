@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db
 from app.core.responses import error, success
 from app.routers.auth import get_contractiq_user, tenant_id_for
+from app.routers.moderation import vet_or_block
 
 from app.models.contractiq_models import (
     ContractIQContract, ContractIQUser, ContractIQClause, ContractIQExtractedData, ContractIQRiskAnalysis, ContractIQComparison,
@@ -190,6 +191,11 @@ async def analyze_contract(
     if not api_key:
         return error("CONTRACTIQ_ABENIX_API_KEY not configured", 503)
 
+    # DLP gate — the summary embeds extracted contract fields (parties,
+    # values, clause text) that may contain PII or CONFIDENTIAL markers.
+    # Vet the prompt before it leaves the perimeter.
+    await vet_or_block(msg[:60000], user, source="ciq_contract_analyze")
+
     from abenix_sdk import Abenix, ActingSubject
 
     subject = ActingSubject(
@@ -363,6 +369,12 @@ async def cross_contract_chat(
     thread_id = body.get("thread_id")
     if not query_text or len(query_text) < 3:
         return error("Query must be at least 3 characters", 400)
+
+    # DLP/PII gate — raises 422 with error_code='moderation_block' when the
+    # platform policy says the query contains disallowed content. The
+    # agent-runtime gate is still a backstop, but blocking here saves the
+    # round-trip and an audit row on a doomed prompt.
+    await vet_or_block(query_text, user, source="ciq_chat")
 
     # Check contract count
     count_result = await db.execute(
