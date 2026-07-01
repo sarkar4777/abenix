@@ -14,7 +14,7 @@ jobs:
   python-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -43,7 +43,7 @@ jobs:
     needs: python-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -68,7 +68,7 @@ jobs:
     env:
       COREPACK_ENABLE_STRICT: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -99,7 +99,7 @@ jobs:
     # only the headline UAT files to keep CI under 8 min while still
     # catching regressions in real user flows.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -147,7 +147,7 @@ jobs:
           - name: worker
             file: apps/worker/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
