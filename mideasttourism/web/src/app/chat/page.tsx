@@ -13,10 +13,10 @@ function getToken() { return localStorage.getItem('st_token') || ''; }
 const SUGGESTIONS = [
   'Which region had the highest visitor count in 2024?',
   'What is the average hotel occupancy rate?',
-  'Compare revenue between Riyadh and Makkah',
+  'Compare revenue between Dubai and Doha',
   'What are the top 5 source countries for international visitors?',
   'How does summer heat affect tourism?',
-  'What does Vision 2030 target for total visits?',
+  'What does Tourism Strategy 2030 target for total visits?',
 ];
 
 export default function ChatPage() {

@@ -35,30 +35,30 @@ SIMULATION_PRESETS = {
         "description": "Simulate impact of adding hotel rooms in specific regions",
         "agent_instructions": "Use scenario_planner for capacity impact and financial_calculator for ROI, payback period, and NPV.",
         "parameters": {
-            "region": {"type": "string", "default": "NEOM", "options": ["NEOM", "Riyadh", "Jeddah", "Al-Ula", "Asir"], "label": "Region"},
+            "region": {"type": "string", "default": "Lusail", "options": ["Lusail", "Dubai", "Abu Dhabi", "Nizwa", "Salalah"], "label": "Region"},
             "new_rooms": {"type": "number", "default": 5000, "min": 100, "max": 50000, "label": "New Rooms"},
             "star_rating": {"type": "number", "default": 5, "min": 3, "max": 5, "label": "Star Rating"},
-            "avg_rate_sar": {"type": "number", "default": 1200, "min": 200, "max": 10000, "label": "Avg Nightly Rate (SAR)"},
+            "avg_rate_usd": {"type": "number", "default": 1200, "min": 200, "max": 10000, "label": "Avg Nightly Rate (USD)"},
         },
     },
     "seasonal_planning": {
         "title": "Seasonal Event Impact",
-        "description": "Simulate visitor impact of Hajj/Umrah, Riyadh Season, Jeddah Season",
+        "description": "Simulate visitor impact of Eid/National Day, Dubai Season, Abu Dhabi Season",
         "agent_instructions": "Use scenario_planner for event modeling and financial_calculator for ROI and economic multiplier analysis.",
         "parameters": {
-            "event": {"type": "string", "default": "Riyadh Season", "options": ["Hajj", "Umrah Season", "Riyadh Season", "Jeddah Season", "AlUla Season"], "label": "Event"},
-            "marketing_budget_sar": {"type": "number", "default": 500000000, "min": 0, "max": 5000000000, "label": "Marketing Budget (SAR)"},
+            "event": {"type": "string", "default": "Dubai Season", "options": ["National Day", "Winter Season", "Dubai Season", "Abu Dhabi Season", "Nizwa Season"], "label": "Event"},
+            "marketing_budget_usd": {"type": "number", "default": 500000000, "min": 0, "max": 5000000000, "label": "Marketing Budget (USD)"},
             "duration_days": {"type": "number", "default": 90, "min": 7, "max": 180, "label": "Duration (days)"},
         },
     },
     "weather_impact": {
         "title": "Weather & Climate Impact",
         "description": "How does summer heat affect non-religious tourism?",
-        "agent_instructions": "Use the weather_simulator tool to model climate conditions in KSA regions and scenario_planner to project tourism impact.",
+        "agent_instructions": "Use the weather_simulator tool to model climate conditions in regions and scenario_planner to project tourism impact.",
         "parameters": {
             "scenario": {"type": "string", "default": "base", "options": ["base", "optimistic", "pessimistic", "extreme"], "label": "Climate Scenario"},
             "season": {"type": "string", "default": "summer", "options": ["spring", "summer", "autumn", "winter"], "label": "Season"},
-            "region": {"type": "string", "default": "Riyadh", "options": ["Riyadh", "Jeddah", "NEOM", "Al-Ula", "Asir"], "label": "Region"},
+            "region": {"type": "string", "default": "Dubai", "options": ["Dubai", "Abu Dhabi", "Lusail", "Nizwa", "Salalah"], "label": "Region"},
         },
     },
     "competitor_analysis": {
@@ -68,7 +68,7 @@ SIMULATION_PRESETS = {
         "parameters": {
             "competitor": {"type": "string", "default": "UAE", "options": ["UAE", "Oman", "Bahrain", "Egypt", "Turkey"], "label": "Competitor"},
             "marketing_increase_pct": {"type": "number", "default": 30, "min": 0, "max": 200, "label": "Their Marketing Increase (%)"},
-            "ksa_response": {"type": "string", "default": "match", "options": ["none", "match", "exceed"], "label": "KSA Response Strategy"},
+            "ksa_response": {"type": "string", "default": "match", "options": ["none", "match", "exceed"], "label": "the region Response Strategy"},
         },
     },
 }

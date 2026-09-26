@@ -35,6 +35,11 @@ contractiq/playwright.config.ts
 contractiq/start.sh
 contractiq/README.md
 !contractiq/aimodels
+pharmavigil/api
+pharmavigil/web
+pharmavigil/k8s
+!pharmavigil/aimodels
+!pharmavigil/code-assets
 mideasttourism
 ppa-analysis
 tpi-analysis

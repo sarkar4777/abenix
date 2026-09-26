@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,7 +10,7 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT_SECONDS = 300
+DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "300"))
 DEFAULT_MAX_TOOL_CALLS = 50
 DEFAULT_MAX_OUTPUT_CHARS = 250_000
 
@@ -39,6 +40,19 @@ class SandboxPolicy:
         default_factory=lambda: list(WHITELISTED_DOMAINS)
     )
     allow_all_domains: bool = False
+    # Set by callers that pick a budget deliberately, so the admin setting
+    # does not overwrite it.
+    timeout_overridden: bool = False
+
+
+async def effective_timeout_seconds() -> int:
+    """Admin-configurable sandbox budget, falling back to the module default."""
+    try:
+        from app.core.platform_settings import get_int_setting
+
+        return await get_int_setting("sandbox.timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+    except Exception:
+        return DEFAULT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -57,6 +71,12 @@ class ExecutionSandbox:
         self.tool_call_count = 0
         self.total_output_chars = 0
         self.violations: list[SandboxViolation] = []
+
+    async def apply_platform_defaults(self) -> None:
+        """Pick up the admin-set budget, unless this policy chose its own."""
+        if self.policy.timeout_overridden:
+            return
+        self.policy.timeout_seconds = await effective_timeout_seconds()
 
     def start(self) -> None:
         self.start_time = time.monotonic()

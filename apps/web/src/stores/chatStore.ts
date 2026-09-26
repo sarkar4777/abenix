@@ -108,6 +108,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const controller = connectToAgentStream(agentId, message, {
       onToken: (text: string) => {
+        // A token event carrying no text used to push content: undefined,
+        // which then crashed the whole chat page when it rendered.
+        if (typeof text !== 'string' || text === '') return;
         const blocks = [...get().streamingBlocks];
         const last = blocks[blocks.length - 1];
         if (last && last.type === 'text') {

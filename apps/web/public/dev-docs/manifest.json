@@ -4,116 +4,328 @@
       "id": "intro",
       "title": "Getting started",
       "docs": [
-        {"slug": "README", "title": "Overview + table of contents"}
+        {
+          "slug": "README",
+          "title": "Overview + table of contents"
+        }
       ]
     },
     {
       "id": "architecture",
       "title": "1. Architecture",
       "docs": [
-        {"slug": "01-architecture/00-overview", "title": "System overview"},
-        {"slug": "01-architecture/01-tenants-rbac", "title": "Tenants, RBAC, actAs delegation chain"},
-        {"slug": "01-architecture/02-request-lifecycle", "title": "Request lifecycle"},
-        {"slug": "01-architecture/03-services", "title": "Service inventory"},
-        {"slug": "01-architecture/04-data-stores", "title": "Data stores"},
-        {"slug": "01-architecture/05-architectural-patterns", "title": "Architectural patterns (45)"},
-        {"slug": "01-architecture/06-atlas-knowledge-engine", "title": "Atlas + Knowledge Engine"}
+        {
+          "slug": "01-architecture/00-overview",
+          "title": "System overview"
+        },
+        {
+          "slug": "01-architecture/01-tenants-rbac",
+          "title": "Tenants, RBAC, actAs delegation chain"
+        },
+        {
+          "slug": "01-architecture/02-request-lifecycle",
+          "title": "Request lifecycle"
+        },
+        {
+          "slug": "01-architecture/03-services",
+          "title": "Service inventory"
+        },
+        {
+          "slug": "01-architecture/04-data-stores",
+          "title": "Data stores"
+        },
+        {
+          "slug": "01-architecture/05-architectural-patterns",
+          "title": "Architectural patterns (45)"
+        },
+        {
+          "slug": "01-architecture/06-atlas-knowledge-engine",
+          "title": "Atlas + Knowledge Engine"
+        }
       ]
     },
     {
       "id": "runtime",
       "title": "2. Runtime",
       "docs": [
-        {"slug": "02-runtime/00-agent-execution", "title": "Agent execution loop"},
-        {"slug": "02-runtime/01-pipelines", "title": "Pipelines (DAG engine)"},
-        {"slug": "02-runtime/02-tools", "title": "Tools framework"},
-        {"slug": "02-runtime/03-mcp", "title": "MCP integration"},
-        {"slug": "02-runtime/04-streaming-tracing", "title": "Streaming + OTel tracing"},
-        {"slug": "02-runtime/05-approvals-hitl", "title": "Approvals + HITL"},
-        {"slug": "02-runtime/06-agent-to-agent", "title": "Agent-to-agent communication"},
-        {"slug": "02-runtime/07-pipeline-data-flow", "title": "Pipeline data flow + scoping"},
-        {"slug": "02-runtime/08-queue-scaling", "title": "Queues, pools, KEDA"},
-        {"slug": "02-runtime/09-state-machines", "title": "State machines"},
-        {"slug": "02-runtime/10-pipeline-healing-drift", "title": "Pipeline self-healing + drift detection"},
-        {"slug": "02-runtime/11-sandboxed-code-execution", "title": "Sandboxed code execution (Code Assets)"},
-        {"slug": "02-runtime/12-ml-models", "title": "ML models — upload, deploy, invoke"},
-        {"slug": "02-runtime/13-moderation-gate", "title": "Moderation gate (pre/post-LLM filtering)"},
-        {"slug": "02-runtime/14-connectors-and-triggers", "title": "Connectors + triggers (SAP / Slack / cron / webhook)"},
-        {"slug": "02-runtime/15-v2-knowledge-enterprise", "title": "v2.0 enterprise knowledge stack (ACL / OCR / temporal graph / GDPR)"}
+        {
+          "slug": "02-runtime/00-agent-execution",
+          "title": "Agent execution loop"
+        },
+        {
+          "slug": "02-runtime/01-pipelines",
+          "title": "Pipelines (DAG engine)"
+        },
+        {
+          "slug": "02-runtime/02-tools",
+          "title": "Tools framework"
+        },
+        {
+          "slug": "02-runtime/03-mcp",
+          "title": "MCP integration"
+        },
+        {
+          "slug": "02-runtime/04-streaming-tracing",
+          "title": "Streaming + OTel tracing"
+        },
+        {
+          "slug": "02-runtime/05-approvals-hitl",
+          "title": "Approvals + HITL"
+        },
+        {
+          "slug": "02-runtime/06-agent-to-agent",
+          "title": "Agent-to-agent communication"
+        },
+        {
+          "slug": "02-runtime/07-pipeline-data-flow",
+          "title": "Pipeline data flow + scoping"
+        },
+        {
+          "slug": "02-runtime/08-queue-scaling",
+          "title": "Queues, pools, KEDA"
+        },
+        {
+          "slug": "02-runtime/09-state-machines",
+          "title": "State machines"
+        },
+        {
+          "slug": "02-runtime/10-pipeline-healing-drift",
+          "title": "Pipeline self-healing + drift detection"
+        },
+        {
+          "slug": "02-runtime/11-sandboxed-code-execution",
+          "title": "Sandboxed code execution (Code Assets)"
+        },
+        {
+          "slug": "02-runtime/12-ml-models",
+          "title": "ML models \u2014 upload, deploy, invoke"
+        },
+        {
+          "slug": "02-runtime/13-moderation-gate",
+          "title": "Moderation gate (pre/post-LLM filtering)"
+        },
+        {
+          "slug": "02-runtime/14-connectors-and-triggers",
+          "title": "Connectors + triggers (SAP / Slack / cron / webhook)"
+        },
+        {
+          "slug": "02-runtime/15-v2-knowledge-enterprise",
+          "title": "v2.0 enterprise knowledge stack (ACL / OCR / temporal graph / GDPR)"
+        }
       ]
     },
     {
       "id": "sdk",
       "title": "3. SDK",
       "docs": [
-        {"slug": "03-sdk/00-overview", "title": "SDK overview + actAs"},
-        {"slug": "03-sdk/01-python", "title": "Python SDK"},
-        {"slug": "03-sdk/02-typescript", "title": "TypeScript SDK"},
-        {"slug": "03-sdk/03-java", "title": "Java SDK"}
+        {
+          "slug": "03-sdk/00-overview",
+          "title": "SDK overview + actAs"
+        },
+        {
+          "slug": "03-sdk/01-python",
+          "title": "Python SDK"
+        },
+        {
+          "slug": "03-sdk/02-typescript",
+          "title": "TypeScript SDK"
+        },
+        {
+          "slug": "03-sdk/03-java",
+          "title": "Java SDK"
+        }
       ]
     },
     {
       "id": "data",
       "title": "4. Data model",
       "docs": [
-        {"slug": "04-data-model/00-overview", "title": "ERD + conventions"},
-        {"slug": "04-data-model/03-knowledge", "title": "Knowledge + Atlas + Cognify (incl. v2 bi-temporal + ACL + GDPR)"},
-        {"slug": "04-data-model/04-resource-shares", "title": "Polymorphic resource_shares"}
+        {
+          "slug": "04-data-model/00-overview",
+          "title": "ERD + conventions"
+        },
+        {
+          "slug": "04-data-model/03-knowledge",
+          "title": "Knowledge + Atlas + Cognify (incl. v2 bi-temporal + ACL + GDPR)"
+        },
+        {
+          "slug": "04-data-model/04-resource-shares",
+          "title": "Polymorphic resource_shares"
+        },
+        {
+          "slug": "04-data-model/01-agents",
+          "title": "Agents table"
+        },
+        {
+          "slug": "04-data-model/02-executions",
+          "title": "Executions table"
+        },
+        {
+          "slug": "document-versioning",
+          "title": "Document versioning"
+        }
       ]
     },
     {
       "id": "ui",
       "title": "5. UI",
       "docs": [
-        {"slug": "05-ui/00-app-shell", "title": "App shell + auth + routing"},
-        {"slug": "05-ui/01-builder-canvas", "title": "Builder canvas"},
-        {"slug": "05-ui/02-api-client", "title": "API client + error envelope"},
-        {"slug": "05-ui/03-page-catalogue", "title": "Page catalogue"}
+        {
+          "slug": "05-ui/00-app-shell",
+          "title": "App shell + auth + routing"
+        },
+        {
+          "slug": "05-ui/01-builder-canvas",
+          "title": "Builder canvas"
+        },
+        {
+          "slug": "05-ui/02-api-client",
+          "title": "API client + error envelope"
+        },
+        {
+          "slug": "05-ui/03-page-catalogue",
+          "title": "Page catalogue"
+        }
       ]
     },
     {
       "id": "deployment",
       "title": "6. Deployment",
       "docs": [
-        {"slug": "06-deployment/00-overview", "title": "Deploy overview"},
-        {"slug": "06-deployment/02-helm", "title": "Helm chart structure"},
-        {"slug": "06-deployment/03-keda", "title": "KEDA autoscaling"},
-        {"slug": "06-deployment/04-observability", "title": "Observability (Prom + Grafana + Tempo)"},
-        {"slug": "06-deployment/05-edge-runtime", "title": "Edge runtime"},
-        {"slug": "06-deployment/06-k8s-specifics", "title": "Kubernetes specifics"}
+        {
+          "slug": "06-deployment/00-overview",
+          "title": "Deploy overview"
+        },
+        {
+          "slug": "06-deployment/02-helm",
+          "title": "Helm chart structure"
+        },
+        {
+          "slug": "06-deployment/03-keda",
+          "title": "KEDA autoscaling"
+        },
+        {
+          "slug": "06-deployment/04-observability",
+          "title": "Observability (Prom + Grafana + Tempo)"
+        },
+        {
+          "slug": "06-deployment/05-edge-runtime",
+          "title": "Edge runtime"
+        },
+        {
+          "slug": "06-deployment/06-k8s-specifics",
+          "title": "Kubernetes specifics"
+        },
+        {
+          "slug": "06-deployment/01-images",
+          "title": "Container images"
+        },
+        {
+          "slug": "06-deployment/disaster-recovery",
+          "title": "Disaster recovery"
+        },
+        {
+          "slug": "06-deployment/load-test-baseline",
+          "title": "Load-test baseline"
+        },
+        {
+          "slug": "06-deployment/deploy-only-trap",
+          "title": "The --only deploy trap"
+        }
       ]
     },
     {
       "id": "standalone",
       "title": "7. Building apps on Abenix",
       "docs": [
-        {"slug": "07-standalone-apps/00-pattern", "title": "Building an app on top of Abenix"},
-        {"slug": "07-standalone-apps/01-wingman", "title": "Wingman (reference)"},
-        {"slug": "07-standalone-apps/02-contractiq", "title": "E&C-Copilot (reference)"},
-        {"slug": "07-standalone-apps/03-others", "title": "Mideast Tourism / ResolveAI / Industrial-IoT / ClaimsIQ (reference)"}
+        {
+          "slug": "07-standalone-apps/00-pattern",
+          "title": "Building an app on top of Abenix"
+        },
+        {
+          "slug": "07-standalone-apps/01-wingman",
+          "title": "Wingman (reference)"
+        },
+        {
+          "slug": "07-standalone-apps/02-contractiq",
+          "title": "E&C-Copilot (reference)"
+        },
+        {
+          "slug": "07-standalone-apps/03-others",
+          "title": "Mideast Tourism / ResolveAI / Industrial-IoT / ClaimsIQ (reference)"
+        },
+        {
+          "slug": "07-standalone-apps/05-pharmavigil",
+          "title": "PharmaVigil \u2014 drug safety"
+        }
       ]
     },
     {
       "id": "howto",
       "title": "8. How-to",
       "docs": [
-        {"slug": "08-howto/00-local-setup", "title": "Local setup"},
-        {"slug": "08-howto/01-add-a-tool", "title": "Add a new tool"},
-        {"slug": "08-howto/02-add-an-agent", "title": "Add a new agent"},
-        {"slug": "08-howto/03-add-a-page", "title": "Add a new UI page"},
-        {"slug": "08-howto/04-debugging", "title": "Debugging"},
-        {"slug": "08-howto/05-testing", "title": "Testing"},
-        {"slug": "08-howto/06-encryption-setup", "title": "Set up at-rest encryption (KEK)"}
+        {
+          "slug": "08-howto/00-local-setup",
+          "title": "Local setup"
+        },
+        {
+          "slug": "08-howto/01-add-a-tool",
+          "title": "Add a new tool"
+        },
+        {
+          "slug": "08-howto/02-add-an-agent",
+          "title": "Add a new agent"
+        },
+        {
+          "slug": "08-howto/03-add-a-page",
+          "title": "Add a new UI page"
+        },
+        {
+          "slug": "08-howto/04-debugging",
+          "title": "Debugging"
+        },
+        {
+          "slug": "08-howto/05-testing",
+          "title": "Testing"
+        },
+        {
+          "slug": "08-howto/06-encryption-setup",
+          "title": "Set up at-rest encryption (KEK)"
+        }
       ]
     },
     {
       "id": "reference",
       "title": "9. Reference",
       "docs": [
-        {"slug": "09-reference/00-rest-api", "title": "REST API"},
-        {"slug": "09-reference/01-env-vars", "title": "Environment variables"},
-        {"slug": "09-reference/03-glossary", "title": "Glossary"},
-        {"slug": "09-reference/05-sso", "title": "SSO / OIDC sign-in"}
+        {
+          "slug": "09-reference/00-rest-api",
+          "title": "REST API"
+        },
+        {
+          "slug": "09-reference/01-env-vars",
+          "title": "Environment variables"
+        },
+        {
+          "slug": "09-reference/03-glossary",
+          "title": "Glossary"
+        },
+        {
+          "slug": "09-reference/05-sso",
+          "title": "SSO / OIDC sign-in"
+        },
+        {
+          "slug": "09-reference/02-cli",
+          "title": "CLI cheatsheet"
+        },
+        {
+          "slug": "09-reference/04-platform-settings",
+          "title": "Platform settings"
+        },
+        {
+          "slug": "sso",
+          "title": "SSO setup"
+        }
       ]
     }
   ]

@@ -152,6 +152,29 @@ public final class Abenix implements AutoCloseable {
     }
 
     /**
+     * Execution budgets the platform will apply, as an admin has them set.
+     * A client that waits synchronously on a run should size its own wait
+     * from these rather than carrying a second, independent number.
+     */
+    public JsonNode platformLimits() {
+        HttpRequest req = authHeaders(HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + "/api/settings/limits"))
+            .timeout(Duration.ofSeconds(10))
+            .GET(), defaultActingSubject)
+            .build();
+        try {
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() >= 400) {
+                throw new AbenixException("platformLimits HTTP " + resp.statusCode());
+            }
+            JsonNode root = parse(resp.body());
+            return root.has("data") ? root.get("data") : root;
+        } catch (IOException | InterruptedException e) {
+            throw new AbenixException("platformLimits failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Raw JSON for the execution row. Returns the {@code data} payload
      * — includes status, node_results, error_message etc. — so callers
      * can build whatever shape they need (the polling DAG view in

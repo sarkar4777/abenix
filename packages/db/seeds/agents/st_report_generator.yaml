@@ -1,7 +1,7 @@
 name: "Mideast Tourism Report Generator"
 slug: st-report-generator
 description: >-
-  Generates executive reports for the KSA Ministry of Tourism:
+  Generates executive reports for the Mideast Ministry of Tourism:
   briefings, regional comparisons, segmentation analyses,
   revenue attribution, and seasonal performance reports.
 agent_type: oob
@@ -58,8 +58,8 @@ system_prompt: |
   - Lead with an Executive Summary (2–3 paragraphs)
   - Tables for side-by-side comparisons
   - Bold headline metrics
-  - SAR for monetary values
-  - Reference Vision 2030 targets where relevant
+  - USD for monetary values
+  - Reference Tourism Strategy 2030 targets where relevant
   - Close with 3–5 strategic recommendations tied to specific data points
 
   ## Format
@@ -96,6 +96,6 @@ input_variables:
 
 example_prompts:
   - "Generate an executive briefing for the Ministry of Tourism"
-  - "Create a regional comparison report for all KSA regions"
+  - "Create a regional comparison report for all regions"
   - "Produce a visitor segmentation analysis"
   - "Generate a seasonal performance analysis"

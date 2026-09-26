@@ -93,10 +93,17 @@ test.describe('Grafana — UI panel walk', () => {
     // The home dashboard renders panel <div role="figure"> elements
     // once their queries succeed. The "No data" placeholder shows up
     // inside `[data-testid="data-testid Panel data error message"]`.
+    // A CSS selector and text= cannot share one locator string — this threw
+    // "Unexpected token =" every run rather than asserting anything.
     const noDataCount = await page
-      .locator('[data-testid*="data error"], text=/No data/i')
+      .locator('[data-testid*="data error"]')
+      .or(page.getByText(/No data/i))
       .count();
-    const panelCount = await page.locator('[data-testid="data-testid Panel header"]').count();
+    // Grafana appends the panel title, so the testid is
+    // "data-testid Panel header Active executions". An exact match never hit.
+    const panelCount = await page
+      .locator('[data-testid^="data-testid Panel header"]')
+      .count();
     // The home dashboard has ~10 panels; we accept at most one panel
     // showing "No data" since the cluster is small and some series may
     // not have ticked yet.

@@ -53,20 +53,24 @@ test.describe.serial('Wingman — full browser UAT', () => {
   });
 
   test('workbench: Run analysis fires an agent and the live DAG drawer appears', async ({ page }) => {
+    // The inner waits below run to 240s, so the default 30s test timeout cut
+    // the run off long before they could pass.
+    test.setTimeout(420_000);
     await gotoOk(page, '/workbench');
-    // The first "Run analysis" button on the page is on the first active
-    // corridor — USGC->NWE per the corridors.json fixture. We don't pin
-    // the locator chain to a specific card label; that was brittle.
-    const runButton = page.getByRole('button', { name: /^Run analysis/i }).first();
+    // The first analysis button on the page is on the first active corridor —
+    // USGC->NWE per the corridors.json fixture. We don't pin the locator chain
+    // to a specific card label; that was brittle.
+    const runButton = page.getByRole('button', { name: /run detailed analysis/i }).first();
     await expect(runButton).toBeVisible({ timeout: 15_000 });
     await runButton.click();
     // The DAG drawer chip / panel lands within ~60s after the agent starts.
     await expect(
       page.locator('[data-testid="dag-drawer-open"], [data-testid="dag-drawer"]').first(),
     ).toBeVisible({ timeout: 90_000 });
-    // Wait for the analysis to populate. The button text flips to "Re-run analysis".
+    // Wait for the analysis to populate. The label flips to "Re-run detailed
+    // analysis" once a result is on the card.
     await expect(
-      page.getByRole('button', { name: /^Re-run analysis/i }).first(),
+      page.getByRole('button', { name: /re-run detailed analysis/i }).first(),
     ).toBeVisible({ timeout: 240_000 });
   });
 
@@ -84,7 +88,13 @@ test.describe.serial('Wingman — full browser UAT', () => {
 
   test('inbox: parse one email -> structured offer renders', async ({ page }) => {
     await gotoOk(page, '/inbox');
-    const parseButton = page.getByRole('button', { name: /Extract structured offer/i }).first();
+    // The paste-your-own panel carries the same label but stays disabled until
+    // its textarea has content, and it comes first in the DOM. Take the first
+    // enabled one, which is on a listed broker email.
+    const parseButton = page
+      .getByRole('button', { name: /Extract structured offer/i })
+      .and(page.locator('button:not([disabled])'))
+      .first();
     await expect(parseButton).toBeVisible({ timeout: 10_000 });
     await parseButton.click();
     // Structured offer card appears (Volume/Grade/Port labels).
@@ -111,7 +121,7 @@ test.describe.serial('Wingman — full browser UAT', () => {
     } else {
       await page.locator('textarea').first().fill('Lock in 10kt USGC->FE for Q1 if spread holds above $30/MT for 5 days.');
     }
-    await page.getByRole('button', { name: /Encode strategy/i }).click();
+    await page.getByRole('button', { name: /Encode \+ save/i }).click();
     await expect(page.getByText('Encoded rule').first()).toBeVisible({ timeout: 180_000 });
   });
 

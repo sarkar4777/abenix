@@ -1,0 +1,62 @@
+name: meddra-coder
+description: >-
+  MedDRA autocoder for adverse-event reaction terms. Takes the reporter's
+  verbatim wording and returns candidate LLT/PT/HLT/SOC rows with a match
+  score, flagging anything a dictionary cannot settle for the agent to
+  adjudicate. Exact match, then a reporter-phrasing synonym table
+  ("heart attack", "throat closing up"), then fuzzy token and edit distance.
+
+input_schema:
+  type: object
+  required: [terms]
+  properties:
+    terms:
+      type: array
+      minItems: 1
+      description: >-
+        Verbatim reaction terms. Accepts bare strings or the intake node's
+        reaction objects, which carry the wording under `verbatim`.
+      items:
+        oneOf:
+          - { type: string }
+          - type: object
+            required: [verbatim]
+            properties:
+              verbatim: { type: string }
+
+output_schema:
+  type: object
+  required: [results, coded, needs_review, ime_hits]
+  properties:
+    results:
+      type: array
+      items:
+        type: object
+        properties:
+          verbatim:     { type: string }
+          match:        { type: string, description: "exact | synonym | synonym_contained | fuzzy | empty" }
+          needs_review: { type: boolean, description: "Below threshold, or two candidates too close to call" }
+          candidates:
+            type: array
+            items:
+              type: object
+              properties:
+                llt:          { type: string }
+                pt:           { type: string }
+                hlt:          { type: string }
+                soc:          { type: string }
+                meddra_code:  { type: string }
+                is_ime:       { type: boolean, description: "On the Important Medical Event list" }
+                score:        { type: number, description: "0..1" }
+    coded:            { type: integer }
+    needs_review:     { type: integer }
+    ime_hits:         { type: array, items: { type: string } }
+    dictionary_size:  { type: integer }
+    review_threshold: { type: number }
+
+example_input:
+  terms:
+    - "heart attack"
+    - "really bad hives"
+    - "naseua"
+    - "throat closing up"

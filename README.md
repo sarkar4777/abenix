@@ -226,17 +226,33 @@ to re-establish every port forward after a pod restart, and
 `bash scripts/deploy.sh reload <service>` to rebuild and restart a single
 service without a full redeploy.
 
-### Demo credentials
+### Where everything lives
 
-| App | URL (local) | Credential |
-|---|---|---|
-| Abenix core | http://localhost:3000 | `admin@abenix.dev` / `Admin123456` |
-| Mideast Tourism | http://localhost:3002 | `test@mideasttourism.gov.sa` / `TestPass123!` |
-| Industrial-IoT | http://localhost:3003 | platform login |
-| ResolveAI | http://localhost:3004 | `agent@resolveai.local` / `agent123` |
-| ClaimsIQ | http://localhost:3005 | platform login |
+Local runs have no ingress, so every surface is a port forward. On AKS each one
+gets a hostname under the ingress load balancer's IP via `nip.io`.
 
-Same accounts work on the AKS UAT cluster.
+| Surface | Local | Azure | Credential |
+|---|---|---|---|
+| Abenix core | http://localhost:3000 | `http://<ip>.nip.io` | `admin@abenix.dev` / `Admin123456` |
+| Abenix API | http://localhost:8000/docs | `http://api.<ip>.nip.io` | same |
+| ContractIQ | http://localhost:3001 | `http://ciq.<ip>.nip.io` | `test@contractiq.com` / `TestPass123!` |
+| Mideast Tourism | http://localhost:3002 | `http://tourism.<ip>.nip.io` | `test@mideasttourism.gov` / `TestPass123!` |
+| Industrial-IoT | http://localhost:3003 | `http://iot.<ip>.nip.io` | platform login |
+| ResolveAI | http://localhost:3004 | `http://care.<ip>.nip.io` | `agent@resolveai.local` / `agent123` |
+| ClaimsIQ | http://localhost:3005 | `http://claims.<ip>.nip.io` | no login — open UI |
+| Wingman | http://localhost:3006 | port-forward only | platform login |
+| PharmaVigil | http://localhost:3007 | `http://safety.<ip>.nip.io` | no login — open UI |
+| Grafana | http://localhost:3030 | `http://grafana.<ip>.nip.io` | `admin` / `abenix-admin` |
+| Prometheus | http://localhost:9090 | `http://prom.<ip>.nip.io` | none |
+
+Wingman deploys to AKS but has no ingress rule yet, so reach it with
+`kubectl -n abenix port-forward svc/wingman-web 3006:3006`.
+
+`<ip>` is the ingress controller's load-balancer address. You do not have to
+look it up — `bash scripts/deploy-azure.sh status` prints every URL, and the
+deploy caches the hostname in `.azure-endpoint`.
+
+Same accounts work on both.
 
 ### Required env vars
 
@@ -247,7 +263,7 @@ At least one LLM key — Anthropic (recommended), OpenAI, or Google. The full li
 <a id="showcase-apps"></a>
 ## 🎯 Showcase apps
 
-Five reference apps ship in this repo. Each one is a real product surface — every line of business logic flows through the platform via the SDK + actAs pattern. All five auto-start with `dev-local.sh` and auto-deploy with `deploy-azure.sh`.
+Seven standalone apps ship in this repo, plus OracleNet which lives inside the core UI. Each one is a real product surface — every line of business logic flows through the platform via the SDK + actAs pattern. They all auto-start with `dev-local.sh` and auto-deploy with `deploy-azure.sh`.
 
 ### OracleNet — strategic decision-analysis
 
@@ -262,7 +278,7 @@ A 7-agent pipeline inside the main web app. Type a strategic decision in plain E
 
 ### Mideast Tourism — Vision-2030 analytics
 
-A standalone analytics app for the Saudi Ministry of Tourism. 5 agents, 7 pages (Dashboard · Regional · Analytics · Chat NLQ · Reports · Simulations · Upload), 5 report templates, 5 simulator presets. Test data is baked into the API image — no manual seed.
+A standalone analytics app for the Gulf Ministry of Tourism. 5 agents, 7 pages (Dashboard · Regional · Analytics · Chat NLQ · Reports · Simulations · Upload), 5 report templates, 5 simulator presets. Test data is baked into the API image — no manual seed.
 
 *Why it's interesting.* Vision-2030 ministries need to track 100M-visitor targets, regional revenue, and seasonal demand against the actual data they already have — without a year-long BI buildout.
 
@@ -312,6 +328,43 @@ Four pipelines on the same case data: Inbound Resolution (6-agent), SLA Sweep (c
 </p>
 
 ---
+
+### ContractIQ — energy contract intelligence
+
+Ingests LNG and power contracts, extracts the terms that matter (volumes,
+indexation, take-or-pay, force majeure), values the book against live curves,
+and benchmarks a clause against comparable deals. 19 agents behind an Insights
+Hub, with a delegation model where every run is stamped with the ContractIQ
+user who triggered it rather than a shared service account.
+
+### PharmaVigil — drug-safety intelligence
+
+Adverse-event intake through to a regulatory narrative: MedDRA coding, CIOMS
+seriousness, WHO-UMC and Naranjo causality, disproportionality signal detection
+and a medical-review gate. Nine nodes, seven agents, two code assets and a
+trained model.
+
+*Why it's interesting.* It is the clearest example of putting each job on the
+right tool. The disproportionality maths is a code asset because it is a
+formula — a first cut that trained a classifier to predict the same threshold
+scored level with the arithmetic and was dropped. What stayed a model is
+predicting which cases a reviewer escalates, which beats a hand-written rule
+over the same features by 7.6 points of accuracy and 0.20 of AUC.
+
+<p align="center">
+  <img src="docs/screenshots/usecases/pharmavigil-case.png" alt="PharmaVigil case detail" width="100%" />
+  <br/><em>PharmaVigil case detail — coded terms, seriousness criteria, causality, disproportionality and the review gate</em>
+</p>
+
+### Wingman — commodities trading desk
+
+A trader workbench over freight arbitrage. Encodes a strategy in plain English,
+replays it on real history, prices the risk through a deployed Go Monte Carlo,
+and routes activation through an approval gate. The Mispricing Lens pairs a
+BayesianRidge fair-value model with an IsolationForest anomaly score and asks an
+LLM for the thesis, then raises a trade card for a human to accept or refuse.
+Nothing on the page is synthesised — when an agent fails the UI says the data is
+unavailable rather than showing a number nobody produced.
 
 ## 🛰 Edge runtimes
 

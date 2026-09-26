@@ -4,7 +4,7 @@
 
 ## What you're enabling
 
-The v2.0 encryption layer at [`apps/api/app/core/crypto.py`](../../apps/api/app/core/crypto.py) wraps sensitive PersonaItem + AgentMemory values with AES-256-GCM. Without a KEK, `encrypt()` short-circuits and stores plaintext; the platform still works, but the at-rest threat model isn't covered. See [`01-architecture/06-atlas-knowledge-engine.md#persona-encryption-v20`](../01-architecture/06-atlas-knowledge-engine.md) for the design.
+The v2.0 encryption layer at [`apps/api/app/core/crypto.py`](../../apps/api/app/core/crypto.py) wraps sensitive PersonaItem + AgentMemory values with AES-256-GCM. Without a KEK, `encrypt()` short-circuits and stores plaintext. The platform still works, but the at-rest threat model isn't covered. See [`01-architecture/06-atlas-knowledge-engine.md#persona-encryption-v20`](../01-architecture/06-atlas-knowledge-engine.md) for the design.
 
 Key derivation chain:
 
@@ -126,7 +126,7 @@ When you rotate the KEK (annually, or after an incident):
 
 1. Bump `KEY_VERSION` in [`crypto.py`](../../apps/api/app/core/crypto.py) from `1` to `2`.
 2. Stash both the old and new KEKs in your KMS, named `abenix-data-kek-v1` and `abenix-data-kek-v2`.
-3. Inject the new key as `ABENIX_DATA_KEY_KEK_BASE64`; the old one as `ABENIX_DATA_KEY_KEK_V1_BASE64` (reader will dispatch by ciphertext prefix).
+3. Inject the new key as `ABENIX_DATA_KEY_KEK_BASE64`, and the old one as `ABENIX_DATA_KEY_KEK_V1_BASE64` (reader will dispatch by ciphertext prefix).
 4. Roll the api pod.
 5. New writes use v2. Old `v1:...` ciphertext still decrypts because the reader sees the `v1:` prefix and grabs the v1 derivation.
 6. Optional: run the backfill again — it rewrites v1 rows as v2.

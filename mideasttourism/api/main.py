@@ -53,11 +53,11 @@ async def lifespan(app: FastAPI):
         import bcrypt
         async with SessionLocal() as db:
             existing = (await db.execute(
-                select(STUser).where(STUser.email == "test@mideasttourism.gov.sa")
+                select(STUser).where(STUser.email == "test@mideasttourism.gov")
             )).scalar_one_or_none()
             if not existing:
                 u = STUser(
-                    email="test@mideasttourism.gov.sa",
+                    email="test@mideasttourism.gov",
                     password_hash=bcrypt.hashpw(b"TestPass123!", bcrypt.gensalt()).decode(),
                     full_name="Ministry Analyst",
                     organization="Ministry of Tourism",
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
                 )
                 db.add(u)
                 await db.commit()
-                logger.info("Seeded default Mideast Tourism test user (test@mideasttourism.gov.sa)")
+                logger.info("Seeded default Mideast Tourism test user (test@mideasttourism.gov)")
             else:
                 logger.info("Mideast Tourism test user already exists")
     except Exception as e:
@@ -120,7 +120,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Mideast Tourism Analytics API",
-    description="KSA Ministry of Tourism Intelligence Platform — uses Abenix SDK for AI features",
+    description="Mideast Ministry of Tourism Intelligence Platform — uses Abenix SDK for AI features",
     version="1.0.0",
     lifespan=lifespan,
 )

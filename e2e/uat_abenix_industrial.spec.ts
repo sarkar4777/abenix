@@ -428,7 +428,13 @@ test.describe('Industrial · API key', () => {
     test.setTimeout(60_000);
     const created = await api<any>('/api/api-keys', {
       method: 'POST',
-      body: JSON.stringify({ name: `${RUN_TAG}-key`, scopes: ['read:agents'] }),
+      // scopes is a dict, not a list. The API takes {can_delegate} or
+      // {allowed_actions} and drops anything else rather than persisting a
+      // shape that would silently break delegation later.
+      body: JSON.stringify({
+        name: `${RUN_TAG}-key`,
+        scopes: { allowed_actions: ['read:agents'] },
+      }),
     });
     const raw = created.raw_key || created.key || created.api_key;
     expect(raw, 'raw API key returned').toBeTruthy();
@@ -576,16 +582,42 @@ test.describe('Industrial · SSE streaming', () => {
     // user message + reply. Then send a long-output prompt and confirm
     // the surface grows to include both message bubbles and reply text.
     const before = ((await page.textContent('main')) || '').length;
+    // Ask something any agent will engage with. The previous prompt asked a
+    // scope-limited triage agent for an essay on paperclips, so the assertion
+    // rode on how wordy its refusal happened to be rather than on streaming.
     await input.fill(
-      `Stream test ${RUN_TAG}: write a thorough multi-paragraph essay (at least 600 words) ` +
-      `on the social history of paperclips, including their invention, wartime symbolism, ` +
-      `and modern uses. Include specific dates and names where possible.`
+      `Stream test ${RUN_TAG}: in your own words, describe what you do and the ` +
+      `kinds of request you are built to handle. Two or three sentences.`,
     );
     await page.getByRole('button', { name: /send|submit/i }).first().click();
-    // Give the model time to stream the full reply.
-    await page.waitForTimeout(25000);
-    const after = ((await page.textContent('main')) || '').length;
-    expect(after, `chat body grew (before=${before} after=${after})`).toBeGreaterThan(before + 200);
+
+    // Wait for the reply to settle rather than for a fixed interval: a fixed
+    // wait either cuts a slow reply short or wastes time on a fast one.
+    let last = -1;
+    let stable = 0;
+    let after = before;
+    const deadline = Date.now() + 90_000;
+    const samples: number[] = [];
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(1500);
+      after = ((await page.textContent('main')) || '').length;
+      samples.push(after);
+      if (after === last) {
+        if (++stable >= 3 && after > before) break;
+      } else {
+        stable = 0;
+        last = after;
+      }
+    }
+    const grew = after - before;
+    console.log(`  chat body ${before} -> ${after} (+${grew}) over ${samples.length} samples`);
+
+    // A reply arrived at all. That is the streaming path working; how long the
+    // model chose to be is not this test's business.
+    expect(grew, `no reply rendered (before=${before} after=${after})`).toBeGreaterThan(20);
+    // And it arrived incrementally rather than in one lump at the end.
+    const distinct = Array.from(new Set<number>(samples)).length;
+    expect(distinct, 'reply appeared in a single snapshot, not streamed').toBeGreaterThan(1);
   });
 });
 

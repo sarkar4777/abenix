@@ -74,6 +74,22 @@ const PAGES_TO_REACH = [
 // One failure shouldn't halt the rest of the UAT — use parallel-safe
 // (we still pin workers=1 from the CLI so the auth/login fetch doesn't
 // race the API).
+
+/** Put the agents page on a tab that actually has agents.
+ *
+ * "My Agents" is the default and is empty for an admin who owns none of the
+ * out-of-box agents, so both tests here skipped on a tenant holding 170 of
+ * them. Selecting "Pre-Built" is what a user does to see the catalogue.
+ */
+async function openPopulatedAgentTab(page: Page) {
+  await gotoOk(page, '/agents', { settle: 1200 });
+  const prebuilt = page.getByRole('button', { name: /pre-?built/i }).first();
+  if (await prebuilt.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await prebuilt.click();
+    await page.waitForTimeout(1200);
+  }
+}
+
 test.beforeEach(async ({ page }) => { await login(page); });
 
 test.describe('Abenix · UAT', () => {
@@ -146,12 +162,13 @@ test.describe('Abenix · UAT', () => {
   test('Executions list opens; click first → flight recorder renders', async ({ page }) => {
     test.setTimeout(90_000);
     await gotoOk(page, '/executions', { settle: 3000 });
-    // Each row is a collapsed <button> whose visible text contains the
-    // agent name + a localized timestamp like "4/26/2026, 2:43:19 PM"
-    // OR an ISO-like substring. We accept either to survive locale
-    // differences across environments.
+    // Each row links to the execution and carries the agent name plus a
+    // localized timestamp like "4/26/2026, 2:43:19 PM" or an ISO-like
+    // substring. Accept either so locale differences don't matter. The row
+    // used to be a <button> and this looked for one long after it became a
+    // link, so the check passed as a skip on a list that had rows in it.
     const rowButton = page
-      .locator('main button')
+      .locator('main a[href^="/executions/"]:not([href$="/executions/"]), main button')
       .filter({ hasText: /\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}/ })
       .first();
     // Fast skip on freshly-seeded tenants. Look for both the empty-state
@@ -164,14 +181,16 @@ test.describe('Abenix · UAT', () => {
     await expect(rowButton).toBeVisible({ timeout: 15_000 });
     await rowButton.click();
     await page.waitForTimeout(700);
-    // The expanded panel contains an anchor to the execution detail page.
-    // Filter for the detail-link shape so the breadcrumb anchor on /executions
-    // (which is `/executions`) does not match.
-    const link = page
-      .locator('a[href^="/executions/"]:not([href$="/executions/"])')
-      .first();
-    await expect(link).toBeVisible({ timeout: 8_000 });
-    await link.click();
+    // A row link goes straight to the detail page. A row button expands a
+    // panel that holds the anchor instead, so only follow it when the click
+    // has not already navigated.
+    if (!/\/executions\/[0-9a-f-]{6,}/i.test(page.url())) {
+      const link = page
+        .locator('a[href^="/executions/"]:not([href$="/executions/"])')
+        .first();
+      await expect(link).toBeVisible({ timeout: 8_000 });
+      await link.click();
+    }
     await page.waitForLoadState('domcontentloaded');
     await expect(page).toHaveURL(/\/executions\/[0-9a-f-]{6,}/i, { timeout: 20_000 });
     // Wait for the Flight Recorder shell to actually render — networkidle
@@ -208,9 +227,10 @@ test.describe('Abenix · UAT', () => {
 
   // ─── Agents queue + detail ──────────────────────────────────────────
   test('Agents list renders + open one → detail tabs render', async ({ page }) => {
-    await gotoOk(page, '/agents', { settle: 800 });
+    await openPopulatedAgentTab(page);
     const link = page.locator('a[href^="/agents/"]').first();
-    if (!(await link.isVisible().catch(() => false))) {
+    const present = await link.isVisible({ timeout: 15_000 }).catch(() => false);
+    if (!present) {
       test.skip(true, 'no agents in this tenant');
     }
     await link.click();
@@ -222,9 +242,11 @@ test.describe('Abenix · UAT', () => {
 
   // ─── Sharing — Agent Info page exposes Share button ─────────────────
   test('Agent Info page shows Share button', async ({ page }) => {
-    await gotoOk(page, '/agents', { settle: 1200 });
+    await openPopulatedAgentTab(page);
     const link = page.locator('a[href^="/agents/"]').first();
-    if (!(await link.isVisible().catch(() => false))) test.skip(true, 'no agents in this tenant');
+    if (!(await link.isVisible({ timeout: 15_000 }).catch(() => false))) {
+      test.skip(true, 'no agents in this tenant');
+    }
     const href = await link.getAttribute('href');
     if (!href) test.skip(true, 'agent link has no href');
     // The list links straight to /agents/{id}/info or /chat — pull the

@@ -17,7 +17,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.platform_settings import DEFAULTS, get_setting, invalidate
+from app.core.platform_settings import (
+    DEFAULTS,
+    get_int_setting,
+    get_setting,
+    invalidate,
+)
 from app.core.responses import error, success
 
 import sys
@@ -90,3 +95,25 @@ async def set_builder_model(
     invalidate(_BUILDER_KEY)
     logger.info("[settings] %s set builder_model=%s", user.email, value)
     return success({"key": _BUILDER_KEY, "value": value})
+
+
+@router.get("/limits")
+async def get_limits(user: User = Depends(get_current_user)) -> JSONResponse:
+    """Execution budgets as the runtime will apply them.
+
+    A client that waits synchronously on a run needs the server's budget, or it
+    picks its own number and gives up first. ClaimsIQ did exactly that: a 240s
+    Java-side wait against a 300s platform budget, so a slow adjudication
+    returned 504 to the app while the pipeline carried on and finished.
+    """
+    return success(
+        {
+            "pipeline_timeout_seconds": await get_int_setting(
+                "pipeline.timeout_seconds", 300
+            ),
+            "agent_max_iterations": await get_int_setting("agent.max_iterations", 10),
+            "sandbox_timeout_seconds": await get_int_setting(
+                "sandbox.timeout_seconds", 300
+            ),
+        }
+    )

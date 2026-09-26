@@ -151,6 +151,57 @@ The deploy script blocks on `sanity` passing before exiting.
 
 ---
 
+## Reaching it once it is up
+
+### Local
+
+No ingress. Everything is a port forward, and `deploy.sh` sets them all up.
+
+```bash
+bash scripts/deploy.sh forwards    # re-establish them all and report what answers
+```
+
+Forwards drop whenever a pod restarts, so this is the command to reach for when
+a page stops loading. A port already taken by something else is named rather
+than skipped, so a clash shows up here instead of as a page that will not load.
+Full table of ports in [08-howto/00-local-setup](../08-howto/00-local-setup.md).
+
+### AKS
+
+Every surface gets a hostname under the ingress controller's load-balancer IP,
+resolved through `nip.io` so nothing has to go in DNS or `/etc/hosts`.
+
+| Surface | Host |
+|---|---|
+| Abenix web | `http://<ip>.nip.io` |
+| Abenix API | `http://api.<ip>.nip.io` |
+| ContractIQ | `http://ciq.<ip>.nip.io` |
+| ContractIQ API | `http://ciq-api.<ip>.nip.io` |
+| Mideast Tourism | `http://tourism.<ip>.nip.io` |
+| Mideast Tourism API | `http://tourism-api.<ip>.nip.io` |
+| Industrial IoT | `http://iot.<ip>.nip.io` |
+| ResolveAI | `http://care.<ip>.nip.io` |
+| ClaimsIQ | `http://claims.<ip>.nip.io` |
+| Grafana | `http://grafana.<ip>.nip.io` |
+| Prometheus | `http://prom.<ip>.nip.io` |
+| Tempo | `http://tempo.<ip>.nip.io` |
+
+```bash
+bash scripts/deploy-azure.sh status   # prints every URL and health-checks them
+```
+
+The deploy writes the hostname to `.azure-endpoint` at the repo root, and
+`status` falls back to reading the load balancer directly if that file is gone.
+
+Wingman is the exception: it deploys to AKS but has no ingress rule, so reach it
+with a port forward.
+
+```bash
+kubectl -n abenix port-forward svc/wingman-web 3006:3006
+```
+
+---
+
 ## Day-2 operations
 
 ### Rolling a single service
@@ -181,37 +232,7 @@ For schema migrations with risk:
 4. Verify backfill is complete.
 5. Deploy the contract (drop old column / make new NOT NULL) — separate release.
 
-See [packages/db/migrations/](../../packages/db/migrations/) for prior examples.
-
----
-
-## Security headers
-
-`SecurityHeadersMiddleware` ([`apps/api/app/core/middleware.py`](../../apps/api/app/core/middleware.py)) sets the following on every API response. They are set with `setdefault` so a tighter value from a more specific handler wins.
-
-| Header | Default value | Notes |
-|---|---|---|
-| `X-Content-Type-Options` | `nosniff` | Stops MIME-sniffing on responses. |
-| `X-Frame-Options` | `DENY` | Blocks framing of the API. |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` | Limits referer on outbound links. |
-| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Enforces HTTPS once the browser has seen it once. |
-| `Content-Security-Policy` | `default-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:` | Skipped on `/docs`, `/redoc`, `/openapi.json` so Swagger UI keeps loading. |
-
-The OpenAPI spec also declares `BearerAuth` (JWT) and `ApiKeyAuth` (`X-API-Key` header) security schemes globally so generated SDKs and `try-it-out` in Swagger UI prompt for credentials.
-
----
-
-## Outbound URL validation
-
-Inbound requests that store an outbound URL (MCP server URL, webhook destination) pass through a shared validator that rejects.
-
-- IP literals in private, loopback, link-local, multicast, or unspecified ranges.
-- Decimal IP encodings like `2130706433` (= `127.0.0.1`).
-- Hostnames `localhost`, `host.docker.internal`, `host.minikube.internal`, `metadata.google.internal`, `kubernetes.default.svc`, plain `metadata`, plain `kubernetes`.
-- Anything ending in `.svc.cluster.local`, `.cluster.local`, `.internal`, `.local`.
-- For MCP only, an operator allowlist via `MCP_ALLOWED_HOSTS` (comma-separated suffixes). When set, only listed hosts are accepted.
-
-Run a candidate URL against `/api/mcp/discover` to test without saving a connection. The same checks fire there.
+See [packages/db/migrations/](../../packages/db/alembic/versions/) for prior examples.
 
 ---
 

@@ -215,7 +215,7 @@ Azure Files is RWX but mounted via SMB. Two operations that succeed silently on 
 
 **Rule:** when writing files to anywhere under `/data`, use `shutil.copyfile` (bytes-only) or direct `open(...).write(...)` calls. Never `copy` or `copy2`. The seed scripts (`seed_ml_models.py`, `seed_code_assets.py`) follow this — keep new code consistent.
 
-If you need to detect SMB at runtime: `os.statvfs("/data").f_fsid` returns the filesystem ID; on SMB this is the network mount identifier and you can branch off it. In practice we just unconditionally avoid the metadata operations.
+If you need to detect SMB at runtime: `os.statvfs("/data").f_fsid` returns the filesystem ID. On SMB this is the network mount identifier and you can branch off it. In practice we just unconditionally avoid the metadata operations.
 
 ### Backup strategy
 

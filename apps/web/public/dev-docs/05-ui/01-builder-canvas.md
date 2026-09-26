@@ -121,7 +121,7 @@ This is what powers the "Use in Agent" buttons on the ML Models and Code Runner 
 
 Every node type has a corresponding React component registered with React Flow via the `nodeTypes` map. They live in:
 
-- [`apps/web/src/components/builder/nodes/`](../../apps/web/src/components/builder/nodes/) — agent canvas nodes (Agent, Tool, MCP)
+- [`apps/web/src/components/builder/`](../../apps/web/src/components/builder/) — agent canvas nodes (Agent, Tool, MCP)
 - [`apps/web/src/components/builder/pipeline/PipelineNodes.tsx`](../../apps/web/src/components/builder/pipeline/PipelineNodes.tsx) — pipeline nodes (Agent, Tool, Switch, ForEach, Parallel, Human)
 
 To add a new node type:
@@ -129,7 +129,7 @@ To add a new node type:
 2. Register in `nodeTypes`.
 3. Add to the palette.
 4. Update the validator.
-5. Update the runtime (in `apps/agent-runtime/engine/pipelines/`) to know how to execute the new type.
+5. Update the runtime (in `apps/agent-runtime/engine/pipeline.py`) to know how to execute the new type.
 
 ---
 

@@ -23,16 +23,16 @@ router = APIRouter(prefix="/api/st/analytics", tags=["st-analytics"])
 
 CACHE_TTL_MINUTES = 60  # 1 hour
 
-KSA_REGIONS = [
-    {"id": "riyadh", "name": "Riyadh", "lat": 24.7136, "lng": 46.6753},
-    {"id": "makkah", "name": "Makkah", "lat": 21.3891, "lng": 39.8579},
-    {"id": "madinah", "name": "Madinah", "lat": 24.5247, "lng": 39.5692},
-    {"id": "eastern", "name": "Eastern Province", "lat": 26.3927, "lng": 49.9777},
-    {"id": "jeddah", "name": "Jeddah", "lat": 21.4858, "lng": 39.1925},
-    {"id": "neom", "name": "NEOM", "lat": 27.9500, "lng": 35.3000},
-    {"id": "alula", "name": "Al-Ula", "lat": 26.6175, "lng": 37.9186},
-    {"id": "asir", "name": "Asir", "lat": 19.0000, "lng": 42.5000},
-    {"id": "tabuk", "name": "Tabuk", "lat": 28.3835, "lng": 36.5662},
+GULF_REGIONS = [
+    {"id": "dubai", "name": "Dubai", "lat": 25.2048, "lng": 55.2708},
+    {"id": "doha", "name": "Doha", "lat": 25.2854, "lng": 51.531},
+    {"id": "muscat", "name": "Muscat", "lat": 23.588, "lng": 58.3829},
+    {"id": "eastern", "name": "Northern Emirates", "lat": 25.7895, "lng": 55.9432},
+    {"id": "abudhabi", "name": "Abu Dhabi", "lat": 24.4539, "lng": 54.3773},
+    {"id": "lusail", "name": "Lusail", "lat": 25.43, "lng": 51.49},
+    {"id": "nizwa", "name": "Nizwa", "lat": 22.9333, "lng": 57.5333},
+    {"id": "salalah", "name": "Salalah", "lat": 17.0151, "lng": 54.0924},
+    {"id": "sharjah", "name": "Sharjah", "lat": 25.3463, "lng": 55.4209},
 ]
 
 
@@ -137,7 +137,7 @@ async def dashboard_kpis(
     data_block = _build_data_csv_block(datasets)
     forge, subject = get_forge(user)
 
-    prompt = f"""Analyze this KSA tourism data and return a JSON dashboard summary.
+    prompt = f"""Analyze this regional tourism data and return a JSON dashboard summary.
 
 {data_block}
 
@@ -145,7 +145,7 @@ Return ONLY a JSON object (no markdown, no explanation) with this exact structur
 {{
   "kpis": {{
     "total_visitors": <number>,
-    "total_revenue_sar": <number>,
+    "total_revenue_usd": <number>,
     "avg_hotel_occupancy": <number 0-100>,
     "avg_satisfaction": <number 0-5>,
     "total_datasets": {len(datasets)},
@@ -192,19 +192,19 @@ async def regional_analytics(
     data_block = _build_data_csv_block(datasets)
     forge, subject = get_forge(user)
 
-    regions_json = json.dumps(KSA_REGIONS)
-    prompt = f"""Analyze this KSA tourism data by region.
+    regions_json = json.dumps(GULF_REGIONS)
+    prompt = f"""Analyze this regional tourism data by region.
 
 {data_block}
 
-KSA regions: {regions_json}
+regions: {regions_json}
 
 Return ONLY JSON:
 {{
   "regions": [
     {{
       "id": "<region_id>", "name": "<Region Name>", "lat": <lat>, "lng": <lng>,
-      "visitors": <total visitors>, "revenue": <total revenue SAR>,
+      "visitors": <total visitors>, "revenue": <total revenue USD>,
       "avg_occupancy": <avg hotel occupancy %>,
       "monthly_trend": [{{"month": "<YYYY-MM>", "visitors": <number>}}],
       "top_attractions": ["<attraction1>"],
@@ -244,7 +244,7 @@ async def deep_analytics(
     data_block = _build_data_csv_block(datasets)
     forge, subject = get_forge(user)
 
-    prompt = f"""Perform deep analytics on this KSA tourism data.
+    prompt = f"""Perform deep analytics on this regional tourism data.
 
 {data_block}
 
@@ -282,4 +282,4 @@ Use financial_calculator for all derived metrics."""
 
 @router.get("/regions")
 async def list_regions():
-    return success(KSA_REGIONS)
+    return success(GULF_REGIONS)

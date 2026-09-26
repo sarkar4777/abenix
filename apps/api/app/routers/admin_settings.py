@@ -216,7 +216,13 @@ async def list_settings(
             "is_default": not current.get("value")
             or current.get("value") == meta["value"],
             "is_secret": key in SECRET_KEYS,
+            # "model" (a model id, rendered as a picker) or "int" (a numeric
+            # limit, rendered as a number input with the bounds below).
+            "kind": meta.get("kind", "model"),
         }
+        if meta.get("kind") == "int":
+            item["min"] = meta.get("min")
+            item["max"] = meta.get("max")
         if key in SECRET_KEYS:
             item["is_set"] = bool((current.get("value") or "").strip())
         out.setdefault(meta["category"], []).append(item)
@@ -269,6 +275,22 @@ async def update_setting(
     # Validate against the model catalogue for *.model settings
     if key.endswith(".model") and value not in {m["id"] for m in AVAILABLE_MODELS}:
         return error(f"Model '{value}' is not in the allowed list", 400)
+
+    # Numeric settings are read on the execution hot path, so reject a bad
+    # value here rather than letting every run silently fall back.
+    if meta_kind := DEFAULTS[key].get("kind"):
+        if meta_kind == "int":
+            try:
+                num = int(value)
+            except ValueError:
+                return error(f"'{key}' must be a whole number", 400)
+            lo = DEFAULTS[key].get("min")
+            hi = DEFAULTS[key].get("max")
+            if isinstance(lo, int) and num < lo:
+                return error(f"'{key}' must be at least {lo}", 400)
+            if isinstance(hi, int) and num > hi:
+                return error(f"'{key}' must be at most {hi}", 400)
+            value = str(num)
 
     if key == "llm.subscription.enabled" and value.lower() in {
         "1",

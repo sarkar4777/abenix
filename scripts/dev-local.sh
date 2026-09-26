@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Which use-case apps to start. APPS env wins, otherwise it prompts.
+# shellcheck source=scripts/lib/select-apps.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/select-apps.sh"
 cd "$ROOT_DIR"
 
 # ── Colors ────────────────────────────────────────────────────
@@ -572,6 +576,12 @@ echo -e "${CYAN}║       Abenix Dev Environment         ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
 echo ""
 
+# ── Ask before doing anything slow ────────────────────────────
+# Up front, so nobody waits through five minutes of infrastructure only to be
+# asked a question at the end. APPS in the environment skips the prompt.
+select_apps
+log "Use-case apps: $(describe_selection)"
+
 # ── Step 1: Kill old processes ────────────────────────────────
 kill_processes
 
@@ -919,6 +929,7 @@ WANT = {
     'RESOLVEAI_ABENIX_API_KEY':    'standalone-resolveai',
     'CLAIMSIQ_ABENIX_API_KEY':     'standalone-claimsiq',
     'WINGMAN_ABENIX_API_KEY':      'standalone-wingman',
+    'PHARMAVIGIL_ABENIX_API_KEY':  'standalone-pharmavigil',
 }
 
 async def run():
@@ -979,60 +990,46 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
     warn "Could not reconcile standalone keys — chat in ContractIQ/Mideast Tourism/etc. may 401"
   fi
 
-  # ── Step 8: Start ContractIQ standalone application ──────────
-  if [ -f "$ROOT_DIR/contractiq/start.sh" ]; then
+  # ── Use-case apps ─────────────────────────────────────────────
+  # One loop over APP_REGISTRY rather than a block per app. The previous
+  # version hand-numbered its steps and the numbering had already drifted
+  # ("Step 11/12" followed by "Step 12/13").
+  if [ "${#SELECTED_APPS[@]}" -eq 0 ]; then
     echo ""
-    log "Step 8/11 — Starting ContractIQ standalone application..."
-    bash "$ROOT_DIR/contractiq/start.sh" || warn "ContractIQ failed to start (non-fatal)"
-  fi
-
-  # ── Step 9: Start Mideast Tourism standalone application ──────
-  if [ -f "$ROOT_DIR/mideasttourism/start.sh" ]; then
-    echo ""
-    log "Step 9/11 — Starting Mideast Tourism standalone application..."
-    bash "$ROOT_DIR/mideasttourism/start.sh" || warn "Mideast Tourism failed to start (non-fatal)"
-  fi
-
-  # ── Step 10: Start Industrial-IoT standalone application ────
-  if [ -f "$ROOT_DIR/industrial-iot/start.sh" ]; then
-    echo ""
-    log "Step 10/11 — Starting Industrial-IoT standalone application..."
-    bash "$ROOT_DIR/industrial-iot/start.sh" || warn "Industrial-IoT failed to start (non-fatal)"
-  fi
-
-  # ── Step 11: Start ResolveAI standalone application ─────────
-  if [ -f "$ROOT_DIR/resolveai/start.sh" ]; then
-    echo ""
-    log "Step 11/12 — Starting ResolveAI standalone application..."
-    bash "$ROOT_DIR/resolveai/start.sh" || warn "ResolveAI failed to start (non-fatal)"
-  fi
-
-  # ── Step 12: Start ClaimsIQ standalone application (Java) ───
-  if [ -f "$ROOT_DIR/claimsiq/start.sh" ]; then
-    echo ""
-    log "Step 12/13 — Starting ClaimsIQ (Spring Boot + Vaadin, Java)…"
-    bash "$ROOT_DIR/claimsiq/start.sh" || warn "ClaimsIQ failed to start (non-fatal — needs Java 21 + Gradle)"
-  fi
-
-  # ── Step 13: Start Wingman standalone application ───────────
-  if [ -f "$ROOT_DIR/wingman/start.sh" ]; then
-    echo ""
-    log "Step 13/13 — Starting Wingman (energy commodity trading)…"
-    bash "$ROOT_DIR/wingman/start.sh" || warn "Wingman failed to start (non-fatal)"
+    log "No use-case apps selected — core platform only."
+  else
+    _pv_total="${#SELECTED_APPS[@]}"
+    _pv_n=0
+    for _app_i in "${!APP_REGISTRY[@]}"; do
+      _key="$(app_key "${_app_i}")"
+      app_selected "${_key}" || continue
+      _dir="$(app_dir "${_app_i}")"
+      _label="$(app_label "${_app_i}")"
+      _pv_n=$((_pv_n + 1))
+      if [ ! -f "$ROOT_DIR/${_dir}/start.sh" ]; then
+        warn "${_label}: no start.sh at ${_dir}/ — skipped"
+        continue
+      fi
+      echo ""
+      log "App ${_pv_n}/${_pv_total} — starting ${_label} ($(app_ports "${_app_i}"))..."
+      bash "$ROOT_DIR/${_dir}/start.sh" || warn "${_label} failed to start (non-fatal)"
+    done
   fi
 
   echo ""
   echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}  All apps running: core + 6 standalones${NC}"
+  echo -e "${GREEN}  Running: core platform + $(describe_selection)${NC}"
   echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
   echo ""
   echo -e "  ${CYAN}Abenix App${NC}     http://localhost:3000"
-  echo -e "  ${CYAN}ContractIQ App${NC}     http://localhost:3001"
-  echo -e "  ${CYAN}Mideast Tourism${NC}      http://localhost:3002"
-  echo -e "  ${CYAN}Industrial IoT${NC}     http://localhost:3003"
-  echo -e "  ${CYAN}ResolveAI${NC}          http://localhost:3004  (customer-service agents)"
-  echo -e "  ${CYAN}ClaimsIQ${NC}           http://localhost:3005  (insurance FNOL, Java + Vaadin)"
-  echo -e "  ${CYAN}Wingman${NC}            http://localhost:3006  (energy commodity trading)"
+  for _app_i in "${!APP_REGISTRY[@]}"; do
+    _key="$(app_key "${_app_i}")"
+    app_selected "${_key}" || continue
+    printf "  \033[0;36m%-18s\033[0m http://localhost:%s  (%s)\n" \
+      "$(app_label "${_app_i}")" \
+      "$(app_ports "${_app_i}" | cut -d/ -f1)" \
+      "$(app_blurb "${_app_i}")"
+  done
   echo -e "  ${CYAN}Abenix API${NC}     http://localhost:8000"
   echo -e "  ${CYAN}ContractIQ API${NC}     http://localhost:8001"
   echo -e "  ${CYAN}Mideast Tourism API${NC}  http://localhost:8002"

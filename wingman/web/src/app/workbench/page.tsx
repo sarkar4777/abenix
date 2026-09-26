@@ -300,7 +300,7 @@ export default function WorkbenchPage() {
 
       <PipelineStrip
         title="Pipeline · 1 agent · 6 real tools"
-        subtitle="Click Run analysis on any corridor to fire the chain — every step lights up live"
+        subtitle="Click Run detailed analysis on any corridor to fire the chain — every step lights up live"
         nodes={ARB_PIPELINE}
         executionId={activeExecution}
         onOpenDrawer={() => activeExecution && setActiveExecution(activeExecution)}
@@ -390,7 +390,7 @@ function CorridorCard({
 
       {!hasResult && !running && !result?.error_message && (
         <div className="border border-dashed border-slate-700 rounded-lg p-4 mb-3 text-center text-[11px] text-slate-500">
-          Click <span className="text-emerald-300 font-semibold">Run analysis</span> for a 12-month forward net-arb curve, conviction call, weather + news drivers, and risk band.
+          Click <span className="text-emerald-300 font-semibold">Run detailed analysis</span> for a 12-month forward net-arb curve, conviction call, weather + news drivers, and risk band.
         </div>
       )}
 

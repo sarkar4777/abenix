@@ -250,8 +250,9 @@ pinecone:
 databaseName: abenix
 
 # 3000 is frequently taken by another dev server on a laptop, so deploy.sh
-# supports WEB_PORT to move the web forward. Both origins are allowed here so
-# either choice works without editing the chart.
+# supports WEB_PORT to move the web forward. It overrides the first entry with
+# the port actually in use, so any port works — these are the fallbacks for a
+# plain `helm install` with no deploy.sh.
 corsOrigins:
   - "http://localhost:3000"
   - "http://localhost:3100"
