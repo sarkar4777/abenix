@@ -268,6 +268,68 @@ sandboxedJob:
 databaseName: abenix
 frontendUrl: "http://localhost:3000"
 
+# v1.1 streaming/TSDB infra. deploy.sh installs these as separate helm
+# releases named <release>-mosquitto and <release>-timescaledb; override the
+# hosts only if you point at a broker or Timescale outside the cluster.
+streaming:
+  mqttHost: ""
+  tsdbHost: ""
+  tsdbUser: abenix
+  tsdbPassword: abenix
+  tsdbDatabase: abenix_tsdb
+
+# Browser origins the API accepts. Override per overlay whenever the UI is
+# served on a different host or port.
+corsOrigins:
+  - "http://localhost:3000"
+
+# Execution posture. "embedded" runs agents inside the API pod, "remote"
+# dispatches to the agent-runtime pods (needs scaling.enabled below).
+runtimeMode: embedded
+
+# Host path backing the shared /data mount on single-node clusters.
+sharedDataHostPath: /var/lib/abenix/data
+
+# Shared volume for uploaded ML model files. Disabled in the base chart so a
+# plain install does not demand a PVC; the local and Azure overlays enable it.
+mlModels:
+  enabled: false
+  storageClass:
+  accessMode: ReadWriteOnce
+  storageSize: 5Gi
+  mountPath: /data/ml-models
+  servingImage: ""
+
+# NATS JetStream, used when scaling.queueBackend is "nats". Off by default so
+# the base chart installs without it.
+nats:
+  enabled: false
+  cluster:
+    enabled: false
+    replicas: 1
+  jetstream:
+    enabled: false
+    fileStorage:
+      size: 1Gi
+
+# Wave-2 scaling. The chart's templates all read .Values.scaling.*, so this
+# block has to exist even when scaling is off — without it a plain
+# `helm install ./infra/helm/abenix` failed on a nil pointer in
+# scaling-alerts.yaml before rendering anything. Off by default so the base
+# chart installs the simple embedded posture; values-local.yaml and
+# values-azure.yaml switch it on.
+scaling:
+  enabled: false
+  execRemote: false
+  queueBackend: celery
+  agentRuntimeImage: {}
+  keda:
+    enabled: false
+  alerts:
+    # PrometheusRule CRD is not present on a vanilla cluster.
+    enabled: false
+  pools: []
+
 # Progress pub/sub namespacing — overridden per tenant/app deployment.
 # Defaults are generic ("progress:", "parent:") so the engine doesn't
 # carry any app-name baggage. Override e.g. to "wingman:progress:" or
@@ -302,6 +364,8 @@ secrets:
   jwtSecret: ""
   stripeSecretKey: ""
   anthropicApiKey: ""
+  # Claude Pro/Max subscription token (`claude setup-token`). Optional.
+  claudeSubscriptionToken: ""
   neo4jPassword: ""
   openaiApiKey: ""
   pineconeApiKey: ""

@@ -79,7 +79,44 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "category": "workflow_shell",
         "description": "Model used by the Talk-to-Workflow shell to translate natural-language verbs and explain failures. Lower latency models work well here.",
     },
+    # ── Claude subscription ──────────────────────────────────────────────
+    # An alternative to per-provider API keys: authenticate with a Claude
+    # Pro/Max subscription OAuth token. When enabled the runtime routes
+    # through it first and falls back to whatever API keys exist.
+    "llm.subscription.enabled": {
+        "value": "false",
+        "category": "claude_subscription",
+        "description": "Route LLM traffic through a Claude Pro/Max subscription instead of per-call API billing.",
+    },
+    "llm.subscription.token": {
+        "value": "",
+        "category": "claude_subscription",
+        "description": "Subscription OAuth token. Generate with `claude setup-token` and paste it here. Stored server-side and never returned to the browser.",
+    },
+    "llm.subscription.default_model": {
+        "value": "claude-opus-5",
+        "category": "claude_subscription",
+        "description": "Claude model the subscription serves, and the target for requests that name a non-Claude model while exclusive mode is on.",
+    },
+    "llm.subscription.exclusive": {
+        "value": "true",
+        "category": "claude_subscription",
+        "description": "Send every feature through the subscription, remapping non-Claude requests onto the model above. Turn off to use it for Claude models only.",
+    },
 }
+
+# Never echoed back to a client or written to a log line.
+SECRET_KEYS: set[str] = {"llm.subscription.token"}
+
+
+def mask(key: str, value: str | None) -> str:
+    """Redact a secret setting for display, keeping a recognisable tail."""
+    if key not in SECRET_KEYS:
+        return value or ""
+    v = (value or "").strip()
+    if not v:
+        return ""
+    return f"{'*' * 8}{v[-4:]}" if len(v) > 4 else "*" * 8
 
 
 async def get_setting(key: str, default: str | None = None) -> str:

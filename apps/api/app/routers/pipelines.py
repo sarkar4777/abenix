@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import asyncio
 import json as json_module
@@ -149,13 +153,27 @@ async def execute_pipeline(
     executor = PipelineExecutor(
         tool_registry=tool_registry,
         timeout_seconds=body.timeout_seconds,
+        # Without db_url, _resolve_agent_by_slug cannot look up a
+        # `type: agent` node and every such node failed with the
+        # misleading "agent_slug 'x' not found in DB". agents.py
+        # already passes this; the pipelines routes did not.
+        # agent_id + tenant_id are REQUIRED for self-healing: pipeline.py
+        # only calls healing.capture_failure when db_url, agent_id and
+        # tenant_id are all set. No call site passed the latter two, so no
+        # pipeline_run_diffs row was ever written and Pipeline Surgeon
+        # always answered "no failure diff found".
+        db_url=os.environ.get("DATABASE_URL", ""),
+        agent_id=str(agent_id),
+        tenant_id=str(user.tenant_id),
     )
 
     raw_nodes = [n.model_dump() for n in body.nodes]
     pipeline_nodes = parse_pipeline_nodes(raw_nodes)
 
     try:
-        pipeline_result = await executor.execute(pipeline_nodes, body.context)
+        _ctx = dict(body.context or {})
+        _ctx.setdefault("__execution_id", str(execution.id))
+        pipeline_result = await executor.execute(pipeline_nodes, _ctx)
     except Exception as e:
         # Don't bubble a 5xx — UI's failure-render code needs status+execution_id
         # (see feedback_failure_visibility memory). Return 200 with failed body.
@@ -320,12 +338,26 @@ async def execute_saved_pipeline(
     executor = PipelineExecutor(
         tool_registry=tool_registry,
         timeout_seconds=body.timeout_seconds,
+        # Without db_url, _resolve_agent_by_slug cannot look up a
+        # `type: agent` node and every such node failed with the
+        # misleading "agent_slug 'x' not found in DB". agents.py
+        # already passes this; the pipelines routes did not.
+        # agent_id + tenant_id are REQUIRED for self-healing: pipeline.py
+        # only calls healing.capture_failure when db_url, agent_id and
+        # tenant_id are all set. No call site passed the latter two, so no
+        # pipeline_run_diffs row was ever written and Pipeline Surgeon
+        # always answered "no failure diff found".
+        db_url=os.environ.get("DATABASE_URL", ""),
+        agent_id=str(agent_id),
+        tenant_id=str(user.tenant_id),
     )
 
     pipeline_nodes = parse_pipeline_nodes(raw_nodes)
 
     try:
-        pipeline_result = await executor.execute(pipeline_nodes, body.context)
+        _ctx = dict(body.context or {})
+        _ctx.setdefault("__execution_id", str(execution.id))
+        pipeline_result = await executor.execute(pipeline_nodes, _ctx)
     except Exception as e:
         execution.status = ExecutionStatus.FAILED
         execution.error_message = str(e)
@@ -469,6 +501,14 @@ async def execute_pipeline_stream(
         timeout_seconds=body.timeout_seconds,
         on_node_start=on_node_start,
         on_node_complete=on_node_complete,
+        # agent_id + tenant_id are REQUIRED for self-healing: pipeline.py
+        # only calls healing.capture_failure when db_url, agent_id and
+        # tenant_id are all set. No call site passed the latter two, so no
+        # pipeline_run_diffs row was ever written and Pipeline Surgeon
+        # always answered "no failure diff found".
+        db_url=os.environ.get("DATABASE_URL", ""),
+        agent_id=str(agent_id),
+        tenant_id=str(user.tenant_id),
     )
 
     raw_nodes = [n.model_dump() for n in body.nodes]
@@ -476,7 +516,9 @@ async def execute_pipeline_stream(
 
     async def run_pipeline() -> None:
         try:
-            pipeline_result = await executor.execute(pipeline_nodes, body.context)
+            _ctx = dict(body.context or {})
+            _ctx.setdefault("__execution_id", str(execution.id))
+            pipeline_result = await executor.execute(pipeline_nodes, _ctx)
             execution.status = (
                 ExecutionStatus.COMPLETED
                 if pipeline_result.status == "completed"
@@ -681,8 +723,27 @@ async def replay_pipeline(
 
     pipeline_nodes = [n for n in pipeline_nodes if n.id in downstream_ids]
 
-    executor = PipelineExecutor(tool_registry=tool_registry, timeout_seconds=120)
-    result = await executor.execute(pipeline_nodes, cached_outputs)
+    executor = PipelineExecutor(
+        tool_registry=tool_registry,
+        timeout_seconds=120,
+        # agent_id + tenant_id are REQUIRED for self-healing: pipeline.py
+        # only calls healing.capture_failure when db_url, agent_id and
+        # tenant_id are all set. No call site passed the latter two, so no
+        # pipeline_run_diffs row was ever written and Pipeline Surgeon
+        # always answered "no failure diff found".
+        db_url=os.environ.get("DATABASE_URL", ""),
+        agent_id=str(agent_id),
+        tenant_id=str(user.tenant_id),
+    )
+    # pipeline.py's healing capture reads the execution id from the
+    # context. Without it capture_failure got the all-zeros UUID and the
+    # insert died on the executions FK, so Pipeline Surgeon never had a
+    # diff to work with.
+    _ctx = dict(cached_outputs or {})
+    # A replay's own execution row is created further down, so anchor the diff
+    # to the execution being replayed.
+    _ctx.setdefault("__execution_id", str(original.id))
+    result = await executor.execute(pipeline_nodes, _ctx)
     serialized = serialize_pipeline_result(result)
 
     # Create new execution record for the replay
@@ -721,6 +782,40 @@ async def replay_pipeline(
     return success(serialized)
 
 
+def _registry_names_for_nodes(
+    nodes: list[dict[str, Any]], caller_tools: list[str]
+) -> list[str]:
+    """Tool names the validator needs in order to judge these nodes.
+
+    The UI sends the *agent's* selected tools, but a pipeline step picks its
+    tool per-step in the designer — `code_asset`, `ml_model`, `llm_call`,
+    `agent_step`, `sub_pipeline`, `approval_gate`, `connector_call` all have
+    their own config panels and are not normally in an agent's tool list.
+    Validating against the agent list alone rejected perfectly good pipelines
+    with a misleading "Unknown tool 'code_asset'", which is the opposite of
+    helpful. Union the caller's list with every tool the nodes actually
+    reference that the runtime can really run, so "Unknown tool" is reserved
+    for names that genuinely do not exist.
+    """
+    names = {t for t in (caller_tools or []) if isinstance(t, str)}
+    referenced: set[str] = set()
+    for n in nodes or []:
+        if not isinstance(n, dict):
+            continue
+        for key in ("tool", "tool_name", "tool_slug"):
+            v = n.get(key)
+            if isinstance(v, str) and v:
+                referenced.add(v)
+    if referenced:
+        try:
+            from engine.agent_executor import list_tool_classes  # type: ignore
+
+            names |= referenced & set(list_tool_classes())
+        except Exception as exc:  # pragma: no cover
+            logger.debug("could not consult runtime tool registry: %s", exc)
+    return sorted(names)
+
+
 @router.post("/validate")
 async def validate_pipeline_endpoint(
     body: dict,
@@ -737,6 +832,8 @@ async def validate_pipeline_endpoint(
     if not isinstance(nodes, list):
         return error("'nodes' must be a list", 400)
 
+    tool_names = _registry_names_for_nodes(nodes, tool_names)
+
     try:
         tool_registry = build_tool_registry(tool_names)
     except Exception as e:
@@ -745,7 +842,36 @@ async def validate_pipeline_endpoint(
     result = validate_pipeline(
         nodes, tool_registry, available_context_keys=context_keys
     )
-    return success(result.to_dict())
+    payload = result.to_dict()
+    # The registry above intentionally includes step tools that aren't on the
+    # agent, so argument checking is accurate instead of collapsing to
+    # "Unknown tool". But execute_pipeline refuses tools the agent hasn't been
+    # granted, so surface that as its own finding — otherwise validation would
+    # pass something execution then rejects.
+    granted = {t for t in (body.get("tools") or []) if isinstance(t, str)}
+    if granted:
+        for n in nodes:
+            if not isinstance(n, dict):
+                continue
+            t = n.get("tool") or n.get("tool_name") or n.get("tool_slug")
+            if isinstance(t, str) and t and t not in granted and t != "agent_step":
+                payload.setdefault("errors", []).append(
+                    {
+                        "node_id": n.get("id", ""),
+                        "field": "tool",
+                        "message": (
+                            f"Tool '{t}' exists but is not enabled on this agent"
+                        ),
+                        "severity": "error",
+                        "suggestion": (
+                            f"Add '{t}' to the agent's tools, or the pipeline will "
+                            f"fail at execution with "
+                            f"'uses tools not available on this agent'."
+                        ),
+                    }
+                )
+                payload["valid"] = False
+    return success(payload)
 
 
 @router.post("/validate-smart")
@@ -761,6 +887,7 @@ async def validate_pipeline_smart(
 
     nodes = body.get("nodes", [])
     tool_names = body.get("tools", [])
+    tool_names = _registry_names_for_nodes(body.get("nodes", []), tool_names)
     context_keys = set(body.get("context_keys", []))
     purpose = body.get("purpose", "")
     deep = bool(body.get("deep", False))

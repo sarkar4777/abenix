@@ -7,7 +7,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-import anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +115,21 @@ async def critique(
     user_prompt = _build_user_prompt(kind, config, purpose)
     start = _time.monotonic()
 
+    # Resolve against subscription mode before branching, else an exclusive
+    # subscription still sent critique to ai_builder.validation.model's provider.
+    try:
+        from engine import claude_subscription as _sub
+
+        _resolved = _sub.effective_model(model)
+        if _resolved and _resolved != model:
+            logger.info(
+                "critic model %s remapped to %s by subscription", model, _resolved
+            )
+            model = _resolved
+            report.model = model
+    except Exception as e:  # noqa: BLE001 — never block critique on this
+        logger.debug("subscription remap unavailable for critic: %s", e)
+
     # Non-Anthropic models (azure/openai/google) route through the unified
     # LLMRouter. Anthropic stays on the direct client so we keep the cheaper
     # path and the existing cost calc.
@@ -123,18 +137,30 @@ async def critique(
     text = ""
     if is_anthropic:
         try:
-            client = anthropic.AsyncAnthropic()
+            from engine import claude_subscription
+
+            # Honour subscription credentials — on a subscription-only
+            # install there is no ANTHROPIC_API_KEY for a bare client.
+            client, _ = claude_subscription.build_async_client()
+            model = claude_subscription.effective_model(model)
         except Exception as e:
             report.error = f"No Anthropic client available: {e}"
             return report
         try:
-            resp = await client.messages.create(
-                model=model,
-                max_tokens=1400,
-                temperature=0.0,
-                system=_CRITIC_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
+            _kwargs: dict[str, Any] = {
+                "model": model,
+                "max_tokens": 1400,
+                "system": _CRITIC_SYSTEM_PROMPT,
+                "messages": [{"role": "user", "content": user_prompt}],
+            }
+            try:
+                from engine.llm_router import _anthropic_accepts_sampling
+
+                if _anthropic_accepts_sampling():
+                    _kwargs["temperature"] = 0.0
+            except Exception:
+                pass
+            resp = await client.messages.create(**_kwargs)
         except Exception as e:
             report.error = f"LLM call failed: {e}"
             return report

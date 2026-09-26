@@ -143,14 +143,18 @@ class ImageAnalyzerTool(BaseTool):
         self, image_url: str, prompt: str, compare_url: str = ""
     ) -> str | None:
         """Analyze image using Anthropic Claude Vision API."""
+        from engine import claude_subscription
+
+        # A Claude subscription is a valid credential here too, so don't
+        # bail just because ANTHROPIC_API_KEY is unset.
         api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
+        if not api_key and not claude_subscription.get_config().usable:
             return None
 
         try:
-            import anthropic
+            import anthropic  # noqa: F401 - surfaced via the helper below
 
-            client = anthropic.AsyncAnthropic(api_key=api_key)
+            client, _ = claude_subscription.build_async_client(api_key)
 
             content: list[dict[str, Any]] = []
 

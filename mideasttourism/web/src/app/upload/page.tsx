@@ -13,6 +13,7 @@ export default function UploadPage() {
   const [seeding, setSeeding] = useState(false);
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [seedError, setSeedError] = useState<string>('');
 
   async function loadDatasets() {
     try {
@@ -48,13 +49,25 @@ export default function UploadPage() {
 
   async function seedData() {
     setSeeding(true);
+    setSeedError('');
     try {
       const res = await fetch(`${API_URL}/api/st/datasets/seed`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
       });
+      if (!res.ok) {
+        setSeedError(`Seed failed (HTTP ${res.status}). Each dataset is extracted by an agent, so this needs the platform reachable.`);
+        return;
+      }
+      const json = await res.json().catch(() => null);
+      const failed = (json?.data?.seeded || []).filter((s: any) => s.status === 'error');
+      if (failed.length) {
+        setSeedError(`${failed.length} of ${json.data.seeded.length} datasets failed to seed.`);
+      }
       await loadDatasets();
-    } catch { } finally { setSeeding(false); }
+    } catch (e: any) {
+      setSeedError(`Seed failed: ${e?.message || 'network error'}`);
+    } finally { setSeeding(false); }
   }
 
   async function deleteDataset(id: string) {
@@ -85,6 +98,17 @@ export default function UploadPage() {
           {seeding ? 'Seeding...' : 'Seed All Test Data'}
         </button>
       </div>
+
+      {seeding && (
+        <p className="text-xs text-green-300/50 mb-4">
+          Extracting each dataset via an Abenix agent — this takes several minutes for the full set.
+        </p>
+      )}
+      {seedError && (
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+          {seedError}
+        </div>
+      )}
 
       {/* Upload Zone */}
       <div

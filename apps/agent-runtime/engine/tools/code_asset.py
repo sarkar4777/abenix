@@ -279,8 +279,12 @@ class CodeAssetTool(BaseTool):
                     "set -e; "
                     "mkdir -p /tmp/app; "
                     'printf "%s" "$_ASSET_TGZ_B64" | base64 -d > /tmp/asset.tgz; '
+                    # The cache tarball was rolled from /tmp and contains
+                    # `app/`, so it extracts to /tmp/app — but the entrypoint
+                    # has to RUN from /tmp/app, not /tmp.
                     "cd /tmp && tar -xzf /tmp/asset.tgz; "
                     'printf "%s" "$_ASSET_INPUT_B64" | base64 -d > /tmp/input.json; '
+                    "cd /tmp/app; "
                     f"{run_wrapped}"
                 )
             else:
@@ -300,9 +304,14 @@ class CodeAssetTool(BaseTool):
                     # failed-read skips bin if it doesn't exist, letting
                     # interpreted assets (Python/Ruby) reuse this path.
                     "echo '___BUILD_CACHE_START___' >&2; "
-                    "cd /tmp && tar -czf - --ignore-failed-read app bin 2>/dev/null | base64 >&2; "
+                    # Snapshot in a subshell. Doing `cd /tmp` inline left the
+                    # shell in /tmp for the entrypoint below, so every run
+                    # died with "python: can't open file '/tmp/main.py'".
+                    "( cd /tmp && tar -czf - --ignore-failed-read app bin 2>/dev/null | base64 ) >&2; "
                     "echo '___BUILD_CACHE_END___' >&2; "
                     'printf "%s" "$_ASSET_INPUT_B64" | base64 -d > /tmp/input.json; '
+                    # Be explicit rather than relying on the cwd surviving.
+                    "cd /tmp/app; "
                     f"{run_wrapped}"
                 )
 

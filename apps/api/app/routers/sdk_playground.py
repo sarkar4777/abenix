@@ -21,6 +21,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 
+
+def _anthropic_client(api_key: str | None = None, sync: bool = False):
+    """Anthropic client honouring a Claude subscription before API keys.
+
+    Keeps this router working on a subscription-only install, where there is
+    no ANTHROPIC_API_KEY to construct a client from.
+    """
+    from pathlib import Path as _Path
+
+    try:
+        sys.path.insert(
+            0, str(_Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+        )
+        from engine import claude_subscription  # type: ignore
+
+        builder = (
+            claude_subscription.build_sync_client
+            if sync
+            else claude_subscription.build_async_client
+        )
+        return builder(api_key)[0]
+    except Exception:
+        import anthropic
+
+        cls = anthropic.Anthropic if sync else anthropic.AsyncAnthropic
+        return cls(api_key=api_key) if api_key else cls()
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.user import User
@@ -724,7 +752,6 @@ async def generate_code(
 
     # Try LLM generation
     try:
-        import anthropic
 
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
@@ -745,7 +772,7 @@ async def generate_code(
                 }
             )
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = _anthropic_client(api_key, sync=True)
         system_prompt = _build_system_prompt(
             body.sdk, body.asset, asset_context, body.use_case
         )

@@ -17,11 +17,31 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
 _AGGREGATIONS = ("none", "avg_5m", "max_1h", "last")
+
+
+def _parse_ts(value: str) -> datetime | None:
+    """ISO-8601 string to an aware datetime.
+
+    asyncpg binds parameters before the `::timestamptz` cast in the SQL runs, so
+    it rejects a plain string outright — every call failed with "expected a
+    datetime.date or datetime.datetime instance, got 'str'".
+    """
+    v = (value or "").strip()
+    if not v:
+        return None
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 class TsdbQueryTool(BaseTool):
@@ -146,10 +166,22 @@ class TsdbQueryTool(BaseTool):
                 "WHERE metric = $1 AND ts >= $2::timestamptz "
             )
 
-        params: list[Any] = [metric, since]
+        since_dt = _parse_ts(since)
+        if since_dt is None:
+            return ToolResult(
+                content=f"since is not a valid ISO-8601 timestamp: {since!r}",
+                is_error=True,
+            )
+        params: list[Any] = [metric, since_dt]
         if until:
+            until_dt = _parse_ts(until)
+            if until_dt is None:
+                return ToolResult(
+                    content=f"until is not a valid ISO-8601 timestamp: {until!r}",
+                    is_error=True,
+                )
             sql += f"AND ts < ${len(params) + 1}::timestamptz "
-            params.append(until)
+            params.append(until_dt)
         if asset_id:
             sql += f"AND asset_id = ${len(params) + 1} "
             params.append(asset_id)

@@ -23,11 +23,38 @@ RECOVERY_THRESHOLD = 1
 PING_TIMEOUT = 12.0
 
 
+def _subscription_helper():
+    """The runtime's credential helper, or None if it isn't importable.
+
+    The api image ships apps/agent-runtime, so this normally resolves; the
+    guard keeps the prober working if it ever doesn't.
+    """
+    try:
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+        )
+        from engine import claude_subscription  # type: ignore
+
+        return claude_subscription
+    except Exception as exc:  # pragma: no cover - import-environment dependent
+        logger.debug("claude_subscription helper unavailable: %s", exc)
+        return None
+
+
 async def _ping_anthropic(model: str) -> tuple[bool, str | None, int | None]:
     try:
         import anthropic
 
-        client = anthropic.AsyncAnthropic()
+        # Probe with the credential the platform will actually use. On a
+        # subscription-only install there is no ANTHROPIC_API_KEY, so a
+        # bare client would fail and the prober would mark every Claude
+        # model unavailable — which then makes model_resolver swap away
+        # from the very models the subscription serves.
+        helper = _subscription_helper()
+        if helper is not None:
+            client, _ = helper.build_async_client()
+        else:
+            client = anthropic.AsyncAnthropic()
         t0 = time.monotonic()
         await asyncio.wait_for(
             client.messages.create(

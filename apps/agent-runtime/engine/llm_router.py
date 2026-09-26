@@ -13,6 +13,7 @@ from google import genai as google_genai
 from google.genai import types as google_types
 import openai
 
+from engine import claude_subscription
 from engine.langfuse_tracer import get_langfuse_tracer
 from engine.metrics import (
     llm_errors_total,
@@ -157,6 +158,66 @@ def _clear_stale_unavailable(model: str, latency_ms: int) -> None:
         logger.debug("self_heal skipped for %s: %s", model, exc)
 
 
+_PRICING_SQL = """
+                    SELECT DISTINCT ON (model)
+                        model,
+                        provider,
+                        input_per_m,
+                        output_per_m,
+                        cached_input_per_m
+                    FROM llm_model_pricing
+                    WHERE is_active = TRUE AND effective_from <= NOW()
+                    ORDER BY model, effective_from DESC
+                    """
+
+
+def _pricing_rows_via_asyncpg(url: str) -> list[tuple] | None:
+    """asyncpg fallback for the pricing read.
+
+    The agent-runtime image ships asyncpg only, so the psycopg2-only path
+    below failed with "No module named 'psycopg2'" on every call. The
+    runtime then silently used the hardcoded PRICING constants and an empty
+    provider map — so admin pricing edits and DB-declared providers never
+    reached agent execution. model_resolver already does two drivers; this
+    brings the pricing read in line.
+    """
+    try:
+        import asyncio as _asyncio
+
+        import asyncpg
+    except Exception:
+        return None
+
+    async def _q():
+        c = await asyncpg.connect(url, timeout=2)
+        try:
+            return await c.fetch(_PRICING_SQL)
+        finally:
+            await c.close()
+
+    try:
+        loop = _asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                rows = ex.submit(lambda: _asyncio.run(_q())).result(timeout=5)
+        else:
+            rows = loop.run_until_complete(_q())
+    except RuntimeError:
+        rows = _asyncio.run(_q())
+    return [
+        (
+            r["model"],
+            r["provider"],
+            r["input_per_m"],
+            r["output_per_m"],
+            r["cached_input_per_m"],
+        )
+        for r in rows
+    ]
+
+
 def _load_db_pricing() -> dict[str, dict[str, float]]:
     """Fetch the current per-model pricing rows from `llm_model_pricing`."""
     global _DB_PRICING_CACHE, _DB_PRICING_CACHE_AT, _DB_PROVIDER_CACHE
@@ -182,29 +243,24 @@ def _load_db_pricing() -> dict[str, dict[str, float]]:
         sync_url = base + (("?" + "&".join(kept)) if kept else "")
 
     try:
-        import psycopg2
-
-        conn = psycopg2.connect(sync_url, connect_timeout=2)
+        rows = None
         try:
-            with conn.cursor() as cur:
-                # Latest effective row per model. DISTINCT ON is a cheap
-                # Postgres-native "latest-per-group" idiom.
-                cur.execute(
-                    """
-                    SELECT DISTINCT ON (model)
-                        model,
-                        provider,
-                        input_per_m,
-                        output_per_m,
-                        cached_input_per_m
-                    FROM llm_model_pricing
-                    WHERE is_active = TRUE AND effective_from <= NOW()
-                    ORDER BY model, effective_from DESC
-                    """
-                )
-                rows = cur.fetchall()
-        finally:
-            conn.close()
+            import psycopg2
+
+            conn = psycopg2.connect(sync_url, connect_timeout=2)
+            try:
+                with conn.cursor() as cur:
+                    # Latest effective row per model. DISTINCT ON is a cheap
+                    # Postgres-native "latest-per-group" idiom.
+                    cur.execute(_PRICING_SQL)
+                    rows = cur.fetchall()
+            finally:
+                conn.close()
+        except ImportError:
+            # agent-runtime has asyncpg only.
+            rows = _pricing_rows_via_asyncpg(sync_url)
+        if rows is None:
+            raise RuntimeError("no usable Postgres driver for pricing read")
         result = {}
         providers: dict[str, str] = {}
         for model, provider, inp, out, cached in rows:
@@ -502,6 +558,11 @@ class AnthropicProvider(LLMProvider):
     def __init__(self) -> None:
         self.client = anthropic.AsyncAnthropic()
 
+    def _cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
+        """Per-call $ cost. Overridden by the subscription provider, where
+        tokens are covered by a flat-rate plan and carry no marginal cost."""
+        return _calc_cost(model, input_tokens, output_tokens)
+
     async def complete(
         self,
         messages: list[dict[str, Any]],
@@ -516,9 +577,16 @@ class AnthropicProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
-            "temperature": temperature,
             "messages": messages,
         }
+        if _anthropic_accepts_sampling():
+            kwargs["temperature"] = temperature
+        elif _supports_effort(model):
+            # Newer models replaced sampling with effort. Keep the caller's
+            # intent (low temperature -> deterministic) rather than dropping
+            # the signal entirely. Models that reject effort get neither
+            # parameter, which is the correct request shape for them.
+            kwargs["output_config"] = {"effort": _effort_for_temperature(temperature)}
         if system:
             system_text = str(system).strip()
             if system_text:
@@ -555,7 +623,7 @@ class AnthropicProvider(LLMProvider):
                     }
                 )
 
-        cost = _calc_cost(model, resp.usage.input_tokens, resp.usage.output_tokens)
+        cost = self._cost(model, resp.usage.input_tokens, resp.usage.output_tokens)
         return LLMResponse(
             content=content,
             model=model,
@@ -628,7 +696,7 @@ class AnthropicProvider(LLMProvider):
             raise
 
         latency = int((time.monotonic() - start) * 1000)
-        cost = _calc_cost(model, input_tokens, output_tokens)
+        cost = self._cost(model, input_tokens, output_tokens)
         yield StreamEvent(
             event="done",
             data={
@@ -639,6 +707,133 @@ class AnthropicProvider(LLMProvider):
                 "latency_ms": latency,
                 "tool_calls": tool_calls,
             },
+        )
+
+
+def _anthropic_accepts_sampling() -> bool:
+    """Whether the installed Anthropic SDK still takes `temperature`.
+
+    Sampling params were removed from the Messages API for current Claude
+    models and dropped from the SDK signature in the 1.x line. Passing
+    `temperature` to anthropic>=1.0 raises
+
+        TypeError: AsyncMessages.stream() got an unexpected keyword argument
+        'temperature'
+
+    which failed every single Anthropic execution. apps/agent-runtime
+    pins `anthropic>=0.25.0`, so either major can be installed — probe the
+    signature once instead of assuming.
+    """
+    global _ANTHROPIC_SAMPLING
+    if _ANTHROPIC_SAMPLING is None:
+        try:
+            import inspect
+
+            from anthropic.resources.messages import AsyncMessages
+
+            _ANTHROPIC_SAMPLING = (
+                "temperature" in inspect.signature(AsyncMessages.stream).parameters
+            )
+        except Exception:
+            _ANTHROPIC_SAMPLING = False
+        if not _ANTHROPIC_SAMPLING:
+            logger.info(
+                "anthropic SDK does not accept sampling params — "
+                "omitting temperature and using effort instead"
+            )
+    return _ANTHROPIC_SAMPLING
+
+
+_ANTHROPIC_SAMPLING: bool | None = None
+
+# Models that accept output_config.effort. It is NOT universal: Haiku 4.5 and
+# Sonnet 4.5 reject it outright with
+#   400 invalid_request_error: This model does not support the effort parameter.
+# so an allowlist is safer than a blocklist as new ids appear.
+_EFFORT_MODEL_PREFIXES = (
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-5",
+    "claude-sonnet-4-6",
+    "claude-fable-",
+    "claude-mythos-",
+)
+
+
+def _supports_effort(model: str) -> bool:
+    return (model or "").lower().startswith(_EFFORT_MODEL_PREFIXES)
+
+
+# Effort standing in for temperature on SDKs/models that dropped sampling.
+# Low temperature means "be deterministic", which maps to lower effort.
+def _effort_for_temperature(temperature: float) -> str:
+    if temperature <= 0.2:
+        return "low"
+    if temperature <= 0.7:
+        return "medium"
+    return "high"
+
+
+class ClaudeSubscriptionProvider(AnthropicProvider):
+    """Anthropic over a Claude Pro/Max subscription.
+
+    Same wire format as the API-key path — the only differences are the
+    credential (OAuth bearer token rather than `x-api-key`, which the SDK
+    sends when given `auth_token`), the required beta header, and billing:
+    a subscription is flat-rate, so calls carry no marginal token cost.
+    """
+
+    OAUTH_BETA = "oauth-2025-04-20"
+
+    def __init__(self) -> None:
+        cfg = claude_subscription.get_config()
+        self._token = cfg.token
+        self.client = anthropic.AsyncAnthropic(
+            auth_token=cfg.token or "placeholder",
+            default_headers={"anthropic-beta": self.OAUTH_BETA},
+        )
+
+    def _refresh_if_rotated(self) -> None:
+        """Rebuild the client when an admin pastes a new token."""
+        token = claude_subscription.get_config().token
+        if token and token != self._token:
+            self._token = token
+            self.client = anthropic.AsyncAnthropic(
+                auth_token=token,
+                default_headers={"anthropic-beta": self.OAUTH_BETA},
+            )
+
+    def _cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
+        # Tokens still feed the usage counters; spend stays at zero because
+        # the plan already paid for them. Emitted explicitly so the
+        # dashboards show throughput rather than a silent gap.
+        _emit_llm_metrics(model, input_tokens, output_tokens, 0.0, 0)
+        return 0.0
+
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float = 0.7,
+        stream: bool = False,
+        max_tokens: int = 4096,
+    ) -> LLMResponse | AsyncGenerator[StreamEvent, None]:
+        self._refresh_if_rotated()
+        cfg = claude_subscription.get_config()
+        if not cfg.usable:
+            raise RuntimeError("claude subscription is not configured")
+        return await super().complete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            model=claude_subscription.map_model(model or "", cfg),
+            temperature=temperature,
+            stream=stream,
+            max_tokens=max_tokens,
         )
 
 
@@ -1080,9 +1275,41 @@ class AzureOpenAIProvider(OpenAIProvider):
 
 PROVIDER_MAP: dict[str, type[LLMProvider]] = {
     "anthropic": AnthropicProvider,
+    "claude_subscription": ClaudeSubscriptionProvider,
     "openai": OpenAIProvider,
     "google": GoogleProvider,
     "azure": AzureOpenAIProvider,
+}
+
+# Env vars that make an API-key provider usable. Mirrors _PROVIDER_ENV in
+# apps/api/app/routers/llm_models.py.
+_PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    "azure": ("AZURE_OPENAI_API_KEY",),
+}
+
+_KEY_PLACEHOLDERS = {"", "placeholder", "dev", "changeme", "none", "null"}
+
+
+def _provider_configured(name: str) -> bool:
+    """Whether a provider has a usable credential right now."""
+    if name == "claude_subscription":
+        return claude_subscription.get_config().usable
+    for env_name in _PROVIDER_ENV_KEYS.get(name, ()):
+        val = _os.environ.get(env_name, "")
+        if val and val.strip().lower() not in _KEY_PLACEHOLDERS:
+            return True
+    return False
+
+
+# Model a provider can serve when we degrade onto it from another provider.
+_PROVIDER_DEFAULT_MODEL: dict[str, str] = {
+    "anthropic": "claude-sonnet-4-5-20250929",
+    "openai": "gpt-4o",
+    "google": "gemini-2.0-flash",
+    "azure": "azure-gpt-4o",
 }
 
 MODEL_TO_PROVIDER: dict[str, str] = {
@@ -1110,20 +1337,59 @@ class LLMRouter:
             self._providers[name] = cls()
         return self._providers[name]
 
-    def route(self, model: str) -> LLMProvider:
+    def _native_provider_name(self, model: str) -> str:
+        """Provider that owns this model id, ignoring subscription mode."""
         _load_db_pricing()
-        provider_name = _DB_PROVIDER_CACHE.get(model) or MODEL_TO_PROVIDER.get(model)
-        if not provider_name:
-            if model.startswith("azure-"):
-                provider_name = "azure"
-            elif model.startswith("claude"):
-                provider_name = "anthropic"
-            elif model.startswith("gpt"):
-                provider_name = "openai"
-            elif model.startswith("gemini"):
-                provider_name = "google"
-            else:
-                provider_name = "anthropic"
+        declared = _DB_PROVIDER_CACHE.get(model) or MODEL_TO_PROVIDER.get(model)
+        if declared and declared != "claude_subscription":
+            return declared
+        if model.startswith("azure-"):
+            return "azure"
+        if model.startswith("gpt"):
+            return "openai"
+        if model.startswith("gemini"):
+            return "google"
+        return "anthropic"
+
+    def candidate_chain(self, model: str) -> list[tuple[str, str]]:
+        """Ordered (provider, model) attempts for a request.
+
+        A configured subscription goes first and, in exclusive mode, absorbs
+        non-Claude requests too. Everything after it is graceful degradation
+        onto whatever credentials this deployment actually has, so an install
+        with only one provider configured still runs.
+        """
+        chain: list[tuple[str, str]] = []
+        cfg = claude_subscription.get_config()
+        native = self._native_provider_name(model)
+
+        if cfg.usable:
+            is_claude = model.lower().startswith("claude")
+            if cfg.exclusive or is_claude:
+                chain.append(
+                    ("claude_subscription", claude_subscription.map_model(model, cfg))
+                )
+
+        if _provider_configured(native):
+            chain.append((native, model))
+
+        # Last resort: any other provider that has a credential.
+        for name in ("anthropic", "azure", "openai", "google"):
+            if name == native:
+                continue
+            if not _provider_configured(name):
+                continue
+            chain.append((name, _PROVIDER_DEFAULT_MODEL[name]))
+
+        if not chain:
+            # Nothing is configured — keep the historical behaviour of
+            # attempting the native provider so the error names the real
+            # cause (missing key) instead of an empty-chain abstraction.
+            chain.append((native, model))
+        return chain
+
+    def route(self, model: str) -> LLMProvider:
+        provider_name, _ = self.candidate_chain(model)[0]
         return self._get_provider(provider_name)
 
     async def complete(
@@ -1155,140 +1421,139 @@ class LLMRouter:
                 fallback_reason = decision.reason
         except Exception as exc:
             logger.debug("model_resolver bypass: %s", exc)
-        provider = self.route(model)
-        _load_db_pricing()
-        provider_name = _DB_PROVIDER_CACHE.get(model) or MODEL_TO_PROVIDER.get(
-            model, "anthropic"
-        )
+        # Walk the credential chain: subscription first when it's configured,
+        # then the model's own provider, then whatever else has a key. The
+        # first candidate keeps the full retry budget; each degradation step
+        # gets one shot so a dead primary doesn't multiply latency.
+        chain = self.candidate_chain(model)
         last_error: Exception | None = None
+        logger.debug(
+            "llm_complete chain for %s: %s",
+            model,
+            " -> ".join(f"{p}:{m}" for p, m in chain),
+        )
 
-        for attempt in range(3):
+        for idx, (provider_name, attempt_model) in enumerate(chain):
             try:
-                result = await provider.complete(
-                    messages=messages,
-                    system=system,
-                    tools=tools,
-                    model=model,
-                    temperature=temperature,
-                    stream=stream,
-                    max_tokens=max_tokens,
-                )
-                if not stream and isinstance(result, LLMResponse):
-                    result.requested_model = requested_model
-                    result.fallback_reason = fallback_reason
-                    llm_tokens_total.labels(model=model, direction="input").inc(
-                        result.input_tokens
-                    )
-                    llm_tokens_total.labels(model=model, direction="output").inc(
-                        result.output_tokens
-                    )
-                    llm_request_duration_seconds.labels(
-                        model=model, provider=provider_name
-                    ).observe(result.latency_ms / 1000)
-                    tracer = get_langfuse_tracer()
-                    if tracer:
-                        tracer.trace_llm_call(
-                            model=model,
-                            messages=messages,
-                            response=result.content,
-                            input_tokens=result.input_tokens,
-                            output_tokens=result.output_tokens,
-                            cost=result.cost,
-                            latency_ms=result.latency_ms,
-                        )
-                    logger.info(
-                        "llm_complete model=%s tokens_in=%d tokens_out=%d cost=%.6f latency_ms=%d",
-                        result.model,
-                        result.input_tokens,
-                        result.output_tokens,
-                        result.cost,
-                        result.latency_ms,
-                    )
-                    # Self-heal: a real call just succeeded — clear any stale
-                    # 'unavailable' row the hourly prober left behind. Runs in
-                    # a thread so the DB hop never blocks the response.
-                    try:
-                        import asyncio as _asyncio_h
-
-                        _asyncio_h.create_task(
-                            _asyncio_h.to_thread(
-                                _clear_stale_unavailable, model, result.latency_ms
-                            )
-                        )
-                    except Exception:
-                        pass
-                return result
-            except Exception as e:
-                last_error = e
-                llm_errors_total.labels(
-                    model=model,
-                    error_type=type(e).__name__,
-                    provider=provider_name,
-                ).inc()
-                wait = 2**attempt
+                provider = self._get_provider(provider_name)
+            except Exception as exc:
+                last_error = exc
                 logger.warning(
-                    "llm_complete attempt=%d/%d failed: %s, retrying in %ds",
-                    attempt + 1,
-                    3,
-                    str(e),
-                    wait,
+                    "llm_complete provider %s unusable: %s", provider_name, exc
                 )
-                if attempt < 2:
-                    await asyncio.sleep(wait)
+                continue
 
-        # Provider failover: try alternate providers before giving up.
-        # The azure entry keeps Azure-only deploys functional when a single
-        # Azure deployment 5xxs — degrades powerful -> least within Azure
-        # before reaching for cross-provider keys.
-        fallback_models = {
-            "anthropic": "azure-gpt-4o",
-            "openai": "azure-gpt-4o",
-            "google": "azure-gpt-4o",
-            "azure": "azure-gpt-4o-mini",
-        }
-        fallback_model = fallback_models.get(provider_name)
-        if fallback_model and fallback_model != model:
-            logger.warning(
-                "llm_complete primary provider %s failed after 3 attempts, falling back to %s",
-                provider_name,
-                fallback_model,
-            )
-            try:
-                fallback_provider = self.route(fallback_model)
-                result = await fallback_provider.complete(
-                    messages=messages,
-                    system=system,
-                    tools=tools,
-                    model=fallback_model,
-                    temperature=temperature,
-                    stream=stream,
-                    max_tokens=max_tokens,
-                )
-                if not stream and isinstance(result, LLMResponse):
-                    result.requested_model = requested_model
-                    result.fallback_reason = fallback_reason or "provider_failover"
-                    _emit_llm_metrics(
-                        fallback_model,
-                        result.input_tokens,
-                        result.output_tokens,
-                        result.cost,
-                        result.latency_ms,
+            step_reason = fallback_reason
+            if provider_name == "claude_subscription":
+                step_reason = step_reason or "claude_subscription"
+            elif idx > 0:
+                step_reason = step_reason or "provider_degraded"
+
+            attempts = 3 if idx == 0 else 1
+            for attempt in range(attempts):
+                try:
+                    result = await provider.complete(
+                        messages=messages,
+                        system=system,
+                        tools=tools,
+                        model=attempt_model,
+                        temperature=temperature,
+                        stream=stream,
+                        max_tokens=max_tokens,
                     )
-                    logger.info(
-                        "llm_complete fallback model=%s tokens_in=%d tokens_out=%d cost=%.6f latency_ms=%d primary=%s",
-                        fallback_model,
-                        result.input_tokens,
-                        result.output_tokens,
-                        result.cost,
-                        result.latency_ms,
-                        model,
+                    if not stream and isinstance(result, LLMResponse):
+                        result.requested_model = requested_model
+                        result.fallback_reason = step_reason
+                        llm_tokens_total.labels(
+                            model=attempt_model, direction="input"
+                        ).inc(result.input_tokens)
+                        llm_tokens_total.labels(
+                            model=attempt_model, direction="output"
+                        ).inc(result.output_tokens)
+                        llm_request_duration_seconds.labels(
+                            model=attempt_model, provider=provider_name
+                        ).observe(result.latency_ms / 1000)
+                        tracer = get_langfuse_tracer()
+                        if tracer:
+                            tracer.trace_llm_call(
+                                model=attempt_model,
+                                messages=messages,
+                                response=result.content,
+                                input_tokens=result.input_tokens,
+                                output_tokens=result.output_tokens,
+                                cost=result.cost,
+                                latency_ms=result.latency_ms,
+                            )
+                        logger.info(
+                            "llm_complete provider=%s model=%s tokens_in=%d tokens_out=%d "
+                            "cost=%.6f latency_ms=%d requested=%s",
+                            provider_name,
+                            result.model,
+                            result.input_tokens,
+                            result.output_tokens,
+                            result.cost,
+                            result.latency_ms,
+                            requested_model,
+                        )
+                        # Self-heal: a real call just succeeded — clear any
+                        # stale 'unavailable' row the hourly prober left
+                        # behind. Runs in a thread so the DB hop never
+                        # blocks the response.
+                        try:
+                            import asyncio as _asyncio_h
+
+                            _asyncio_h.create_task(
+                                _asyncio_h.to_thread(
+                                    _clear_stale_unavailable,
+                                    attempt_model,
+                                    result.latency_ms,
+                                )
+                            )
+                        except Exception:
+                            pass
+                    return result
+                except Exception as e:
+                    last_error = e
+                    llm_errors_total.labels(
+                        model=attempt_model,
+                        error_type=type(e).__name__,
+                        provider=provider_name,
+                    ).inc()
+                    logger.warning(
+                        "llm_complete %s:%s attempt=%d/%d failed: %s",
+                        provider_name,
+                        attempt_model,
+                        attempt + 1,
+                        attempts,
+                        e,
                     )
-                return result
-            except Exception as fallback_error:
-                logger.error(
-                    "llm_complete fallback to %s also failed: %s",
-                    fallback_model,
-                    fallback_error,
+                    if attempt < attempts - 1:
+                        await asyncio.sleep(2**attempt)
+
+            if idx < len(chain) - 1:
+                nxt = chain[idx + 1]
+                logger.warning(
+                    "llm_complete %s exhausted, degrading to %s:%s",
+                    provider_name,
+                    nxt[0],
+                    nxt[1],
                 )
+
+        # If subscription mode is switched on but its token is stale, that is
+        # almost always the real cause and the last provider's error is just
+        # noise from the fallback chain. Say so, because a revoked Claude token
+        # otherwise surfaces as some unrelated provider's "invalid API key".
+        try:
+            from engine import claude_subscription as _sub
+
+            cfg = _sub.get_config()
+            if cfg.enabled and not cfg.usable:
+                raise RuntimeError(
+                    "Claude subscription mode is enabled but its token is not usable "
+                    "(expired or revoked) — re-run scripts/sync-claude-subscription.sh. "
+                    f"Fallback providers also failed: {last_error}"
+                ) from last_error
+        except ImportError:
+            pass
 
         raise last_error  # type: ignore[misc]

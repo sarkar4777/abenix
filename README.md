@@ -212,6 +212,20 @@ bash scripts/dev-local.sh
 
 Open http://localhost:3000 and sign in with `admin@abenix.dev` / `Admin123456`.
 
+**No API key?** If you have a Claude Pro or Max subscription and are signed in
+with Claude Code on the same machine, run `bash scripts/sync-claude-subscription.sh`
+instead of filling in a key. It copies the current credential into the platform,
+switches on subscription mode, and verifies it. Every feature then routes through
+the subscription and records tokens at zero cost. The credential rotates, so
+re-run the script whenever agent runs start failing with
+`OAuth access token has been revoked`.
+
+**Port 3000 already taken?** The minikube path takes `WEB_PORT`, for example
+`WEB_PORT=3100 bash scripts/deploy.sh local`. Use `bash scripts/deploy.sh forwards`
+to re-establish every port forward after a pod restart, and
+`bash scripts/deploy.sh reload <service>` to rebuild and restart a single
+service without a full redeploy.
+
 ### Demo credentials
 
 | App | URL (local) | Credential |
@@ -410,11 +424,22 @@ bash scripts/deploy.sh local
 # Azure AKS — provision + build + deploy + seed + smoke (idempotent, re-run any phase)
 bash scripts/deploy-azure.sh deploy
 
-# Any other cloud — same chart on EKS / GKE / bare metal
+# Any other cloud — same chart on EKS / GKE / bare metal.
+# postgresql and redis come from bitnami, and the rest are local path
+# subcharts, so register the repo and package them once first.
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+helm dependency build ./infra/helm/abenix
 helm install abenix ./infra/helm/abenix -n abenix --create-namespace \
   --set image.tag=latest \
   --set ingress.host=abenix.your-domain.com
 ```
+
+The base chart installs the simple embedded posture — agents run inside the API
+pod, with NATS, KEDA and the ML-model volume switched off. Turn those on with
+`--set scaling.enabled=true --set scaling.execRemote=true --set nats.enabled=true`,
+or start from `values-local.yaml` (minikube) or `values-azure.yaml` (AKS), which
+set them for you.
 
 `deploy-azure.sh` handles ACR provisioning, image build + push, AKS credentials, helm install, KEDA install, neo4j password setup, agent + KB seeds, standalone-key reconciliation, and a smoke test. `bash scripts/portforward-azure.sh` brings any AKS deployment to `localhost:*` for firewall-safe local browsing.
 

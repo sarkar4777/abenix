@@ -6,6 +6,8 @@ import DeskNetworkCanvas from './DeskNetworkCanvas';
 import DeskNarrationFeed from './DeskNarrationFeed';
 import { useNarrationStream } from './useNarrationStream';
 
+import { authFetch } from './authFetch';
+
 /**
  * Live DAG drawer — every page renders this once. When `executionId` is set,
  * the drawer subscribes to /api/contractiq-watch/{id}, a Server-Sent Events
@@ -110,7 +112,7 @@ export default function DagDrawer({
 
     const refresh = async () => {
       try {
-        const r = await fetch(`/api/contractiq-executions/${executionId}`);
+        const r = await authFetch(`/api/contractiq-executions/${executionId}`);
         if (!r.ok) return;
         const j = await r.json();
         const row = j?.data;

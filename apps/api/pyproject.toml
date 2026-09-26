@@ -6,7 +6,12 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.29.0",
-    "sqlalchemy>=2.0.30",
+    # The [asyncio] extra pulls greenlet, which sqlalchemy.ext.asyncio
+    # requires at import time. Without it the api image builds fine but the
+    # db-migrate init container dies on `import create_async_engine`, so the
+    # pod never starts. The root requirements.txt already pins the extra;
+    # this file is what docker/Dockerfile.api actually installs from.
+    "sqlalchemy[asyncio]>=2.0.30",
     "alembic>=1.13.0",
     "asyncpg>=0.29.0",
     "pydantic>=2.7.0",

@@ -204,7 +204,13 @@ async def _seed_default_policy(
         default_action=ModerationAction.BLOCK,
         custom_patterns=list(DEFAULT_PII_PATTERNS),
         redaction_mask="█████",
-        fail_closed=True,
+        # Not fail-closed by default. The seeded provider is OpenAI, and on a
+        # deployment with no OpenAI credential every provider call errors —
+        # fail_closed then escalated that to a hard block, so 100% of agent
+        # requests were refused with no category to explain it. The custom
+        # pattern checks (PII, secrets) need no provider and still apply.
+        # Strict mode stays available as an explicit opt-in at /moderation.
+        fail_closed=False,
         created_by=created_by,
     )
     db.add(policy)

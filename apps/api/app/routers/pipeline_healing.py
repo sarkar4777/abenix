@@ -56,7 +56,7 @@ async def list_diffs(
         )
     ).scalar_one_or_none()
     if not pipeline:
-        return error("Pipeline not found", "not_found", status_code=404)
+        return error("Pipeline not found", 404, "not_found")
 
     rows = (
         (
@@ -114,7 +114,7 @@ async def list_patches(
         )
     ).scalar_one_or_none()
     if not pipeline:
-        return error("Pipeline not found", "not_found", status_code=404)
+        return error("Pipeline not found", 404, "not_found")
 
     q = select(PipelinePatchProposal).where(
         PipelinePatchProposal.pipeline_id == pipeline.id,
@@ -175,12 +175,10 @@ async def diagnose(
         )
     ).scalar_one_or_none()
     if not pipeline:
-        return error("Pipeline not found", "not_found", status_code=404)
+        return error("Pipeline not found", 404, "not_found")
     if not _can_edit_pipeline(user, pipeline):
         return error(
-            "Only admins or the pipeline owner can run the surgeon",
-            "forbidden",
-            status_code=403,
+            "Only admins or the pipeline owner can run the surgeon", 403, "forbidden"
         )
 
     # Find the diff to operate on
@@ -196,9 +194,7 @@ async def diagnose(
         q = q.where(PipelineRunDiff.execution_id == uuid.UUID(body.execution_id))
     diff = (await db.execute(q.limit(1))).scalar_one_or_none()
     if not diff:
-        return error(
-            "No failure diff found for this pipeline yet", "no_diff", status_code=404
-        )
+        return error("No failure diff found for this pipeline yet", 404, "no_diff")
 
     # Pull last 3 successful executions for evidence (just summary fields)
     recent_ok = (
@@ -230,9 +226,7 @@ async def diagnose(
     cfg = (pipeline.model_config_ or {}) if hasattr(pipeline, "model_config_") else {}
     pipeline_cfg = cfg.get("pipeline_config") or {}
     if not pipeline_cfg or "nodes" not in pipeline_cfg:
-        return error(
-            "This agent has no pipeline DSL to patch", "not_a_pipeline", status_code=400
-        )
+        return error("This agent has no pipeline DSL to patch", 400, "not_a_pipeline")
     dsl_before = {"pipeline_config": pipeline_cfg}
 
     # Tool registry — minimal listing so the LLM knows what's available.
@@ -248,7 +242,7 @@ async def diagnose(
         from engine.llm_router import LLMRouter
         from engine.pipeline_surgeon import propose_patch
     except ImportError as e:
-        return error(f"Surgeon module unavailable: {e}", "internal", status_code=500)
+        return error(f"Surgeon module unavailable: {e}", 500, "internal")
 
     failure_payload = {
         "node_id": diff.node_id,
@@ -284,9 +278,7 @@ async def diagnose(
             tool_registry=tool_registry,
         )
     except Exception as e:
-        return error(
-            f"Surgeon could not propose a patch: {e}", "surgeon_failed", status_code=502
-        )
+        return error(f"Surgeon could not propose a patch: {e}", 502, "surgeon_failed")
 
     # Supersede earlier pending proposals targeting the same failure
     pending_for_node = (
@@ -357,12 +349,10 @@ async def apply_patch(
         )
     ).scalar_one_or_none()
     if not pipeline:
-        return error("Pipeline not found", "not_found", status_code=404)
+        return error("Pipeline not found", 404, "not_found")
     if not _can_edit_pipeline(user, pipeline):
         return error(
-            "Only admins or the pipeline owner can apply patches",
-            "forbidden",
-            status_code=403,
+            "Only admins or the pipeline owner can apply patches", 403, "forbidden"
         )
 
     proposal = (
@@ -375,19 +365,17 @@ async def apply_patch(
         )
     ).scalar_one_or_none()
     if not proposal:
-        return error("Patch not found", "not_found", status_code=404)
+        return error("Patch not found", 404, "not_found")
     if proposal.status != PipelinePatchStatus.PENDING:
         return error(
             f"Patch is {proposal.status.value} — only pending patches can be applied",
+            400,
             "bad_state",
-            status_code=400,
         )
 
     new_pipeline_cfg = (proposal.dsl_after or {}).get("pipeline_config")
     if not new_pipeline_cfg:
-        return error(
-            "Patched DSL is malformed (no pipeline_config)", "bad_dsl", status_code=400
-        )
+        return error("Patched DSL is malformed (no pipeline_config)", 400, "bad_dsl")
 
     # Persist into the agent's model_config_
     cfg = dict(pipeline.model_config_ or {})
@@ -422,12 +410,10 @@ async def reject_patch(
         )
     ).scalar_one_or_none()
     if not pipeline:
-        return error("Pipeline not found", "not_found", status_code=404)
+        return error("Pipeline not found", 404, "not_found")
     if not _can_edit_pipeline(user, pipeline):
         return error(
-            "Only admins or the pipeline owner can reject patches",
-            "forbidden",
-            status_code=403,
+            "Only admins or the pipeline owner can reject patches", 403, "forbidden"
         )
 
     proposal = (
@@ -440,12 +426,10 @@ async def reject_patch(
         )
     ).scalar_one_or_none()
     if not proposal:
-        return error("Patch not found", "not_found", status_code=404)
+        return error("Patch not found", 404, "not_found")
     if proposal.status != PipelinePatchStatus.PENDING:
         return error(
-            f"Patch is {proposal.status.value}; cannot reject",
-            "bad_state",
-            status_code=400,
+            f"Patch is {proposal.status.value}; cannot reject", 400, "bad_state"
         )
 
     proposal.status = PipelinePatchStatus.REJECTED
@@ -472,12 +456,10 @@ async def rollback_patch(
         )
     ).scalar_one_or_none()
     if not pipeline:
-        return error("Pipeline not found", "not_found", status_code=404)
+        return error("Pipeline not found", 404, "not_found")
     if not _can_edit_pipeline(user, pipeline):
         return error(
-            "Only admins or the pipeline owner can roll back",
-            "forbidden",
-            status_code=403,
+            "Only admins or the pipeline owner can roll back", 403, "forbidden"
         )
 
     proposal = (
@@ -490,19 +472,15 @@ async def rollback_patch(
         )
     ).scalar_one_or_none()
     if not proposal:
-        return error("Patch not found", "not_found", status_code=404)
+        return error("Patch not found", 404, "not_found")
     if proposal.status != PipelinePatchStatus.ACCEPTED:
-        return error(
-            "Only accepted patches can be rolled back", "bad_state", status_code=400
-        )
+        return error("Only accepted patches can be rolled back", 400, "bad_state")
     if proposal.rolled_back_at:
-        return error("Patch was already rolled back", "bad_state", status_code=400)
+        return error("Patch was already rolled back", 400, "bad_state")
 
     before_cfg = (proposal.dsl_before or {}).get("pipeline_config")
     if not before_cfg:
-        return error(
-            "dsl_before missing — cannot roll back safely", "bad_dsl", status_code=400
-        )
+        return error("dsl_before missing — cannot roll back safely", 400, "bad_dsl")
 
     cfg = dict(pipeline.model_config_ or {})
     cfg["pipeline_config"] = before_cfg

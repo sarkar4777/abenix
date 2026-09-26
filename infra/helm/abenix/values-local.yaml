@@ -169,8 +169,16 @@ neo4j:
 # -- PostgreSQL (Bitnami) — standalone for local ----------------------------
 postgresql:
   architecture: standalone
+  # values.yaml points registry/repository at a private ACR. Overriding only
+  # `tag` here left local deploys trying to pull
+  # `your-acr.azurecr.io/postgresql-pgvector`, which no laptop can reach, so
+  # Postgres never started. Point at the copy scripts/deploy.sh builds into
+  # minikube's daemon from infra/docker/Dockerfile.postgres-pgvector — same
+  # image as prod, so pgvector works locally too.
   image:
-    tag: "latest"
+    registry: localhost:5000
+    repository: abenix/postgresql-pgvector
+    tag: "16"
     pullPolicy: IfNotPresent
   auth:
     existingSecret: abenix-secrets
@@ -221,6 +229,9 @@ secrets:
   jwtSecret: "local-dev-jwt-secret-change-me"
   stripeSecretKey: ""
   anthropicApiKey: ""
+  # Claude Pro/Max subscription token (`claude setup-token`). Optional —
+  # Admin -> LLM Settings is the usual place to set this.
+  claudeSubscriptionToken: ""
   neo4jPassword: "abenix-neo4j-pass"
   openaiApiKey: ""
   pineconeApiKey: ""
@@ -237,6 +248,13 @@ pinecone:
   indexName: abenix-dev
 
 databaseName: abenix
+
+# 3000 is frequently taken by another dev server on a laptop, so deploy.sh
+# supports WEB_PORT to move the web forward. Both origins are allowed here so
+# either choice works without editing the chart.
+corsOrigins:
+  - "http://localhost:3000"
+  - "http://localhost:3100"
 
 # -- Ingress — disabled for local (use port-forward) ------------------------
 ingress:
@@ -258,7 +276,14 @@ backup:
 # -- ML Models — shared storage for model files ─────────────────────────────
 mlModels:
   enabled: true
-  storageClass: ""         # empty = default storage class (minikube: hostpath)
+  # Leave unset to use the cluster's default StorageClass. Do NOT set this to
+  # "" — an explicit empty string tells Kubernetes to skip dynamic
+  # provisioning, which left the PVC Pending and agent-runtime unschedulable.
+  storageClass:
+  # minikube is single-node and its hostpath provisioner is RWO-only, so RWX
+  # here would never bind. Multi-node clusters override this to ReadWriteMany
+  # against an NFS/Azure Files/EFS class.
+  accessMode: ReadWriteOnce
   storageSize: 5Gi
   mountPath: /data/ml-models
 
@@ -279,9 +304,10 @@ scaling:
     tag: latest
     pullPolicy: Never
   keda:
-    # KEDA on minikube is optional; deploy.sh installs it when enabled=true
-    enabled: false
-    prometheusUrl: ""
+    # deploy.sh now really does install KEDA when this is true (ensure_keda).
+    # Queue-depth scaling needs the NATS/Redis queue the tool consumer feeds.
+    enabled: true
+    prometheusUrl: "http://abenix-prometheus.abenix.svc.cluster.local:9090"
   alerts:
     enabled: false              # PrometheusRule CRD not on vanilla minikube
   pools:

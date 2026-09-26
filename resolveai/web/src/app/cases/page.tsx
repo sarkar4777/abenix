@@ -74,7 +74,9 @@ export default function CasesPage() {
           <h1 className="text-2xl font-bold text-white">Cases</h1>
           <p className="text-sm text-slate-400 mt-1">
             Every ticket that entered the resolution pipeline.{' '}
-            <span className="text-slate-500">Tap the green button to run one through end-to-end — it takes ~30s.</span>
+            {SHOW_SAMPLES && (
+              <span className="text-slate-500">Tap the green button to run one through end-to-end — it takes ~30s.</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -116,8 +118,21 @@ export default function CasesPage() {
         <p className="text-slate-500 text-sm">Loading cases…</p>
       ) : cases.length === 0 ? (
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-10 text-center">
+          {/* Don't point at a control that is switched off — SHOW_SAMPLES hides
+              the button in prod, and the old copy told everyone to click it. */}
           <p className="text-slate-400 text-sm">
-            No cases yet. Click <strong>Simulate a ticket</strong> to trigger the Inbound Resolution pipeline — it runs Triage → Policy Research → Resolution Planner end-to-end.
+            {SHOW_SAMPLES ? (
+              <>
+                No cases yet. Click <strong>Simulate a ticket</strong> to trigger the Inbound
+                Resolution pipeline — it runs Triage → Policy Research → Resolution Planner
+                end-to-end.
+              </>
+            ) : (
+              <>
+                No cases yet. Cases appear here once a ticket reaches the Inbound Resolution
+                pipeline — Triage → Policy Research → Resolution Planner.
+              </>
+            )}
           </p>
         </div>
       ) : (

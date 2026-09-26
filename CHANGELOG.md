@@ -1,5 +1,46 @@
 # Changelog
 
+## v2.4.0 — 2026-09-26
+
+### Added
+
+- **Claude Pro/Max subscription as a first-class LLM provider.** `apps/agent-runtime/engine/claude_subscription.py` reads `llm.subscription.*` platform settings (or `CLAUDE_SUBSCRIPTION_TOKEN` from the environment) and builds an Anthropic client that authenticates with `Authorization: Bearer` plus the `anthropic-beta: oauth-2025-04-20` header. A new `ClaudeSubscriptionProvider` in `llm_router.py` sits at the head of the credential chain and reports zero cost while still emitting token metrics. Configure it at Admin -> LLM Settings alongside the API-key providers, or verify the stored token with `POST /api/admin/settings/subscription/verify`.
+- **Exclusive mode, with a smart fallback.** When `llm.subscription.exclusive` is on, `map_model()` pins every request to the configured subscription model regardless of what an agent asks for. When the subscription is absent or unusable the router walks the rest of the credential chain instead of failing, so a half-configured install still runs.
+- **`scripts/sync-claude-subscription.sh`.** Claude Code rotates and revokes its OAuth access token, so a token pasted once into the admin screen goes stale within hours and every agent run then fails with `OAuth access token has been revoked`. The script reads the current credential, stores it, enables subscription mode, and proves the result with a verify call. It never prints the token.
+- **`deploy.sh reload <svc>` and `deploy.sh forwards`.** Rebuild a single service into minikube's daemon and restart just that deployment, or re-establish and verify every local port forward without a full redeploy. Both core services and the standalone apps are supported.
+- **TimescaleDB gets its schema.** The chart shipped a database with no tables, so `tsdb_query` and the pipeline `tsdb_sink` node both failed with `relation "metrics" does not exist`. A post-install and post-upgrade hook now creates the `metrics` hypertable idempotently, which matters because the container entrypoint's init scripts only run on a brand-new volume.
+- **Tool contract test.** `tests/unit/test_tool_contract.py` asserts that every registry tool implements `execute`, is not abstract, and can be constructed the way the tool endpoint actually builds it. Abstract subclasses are deliberately included in discovery so a tool that regresses cannot vanish from the parametrised list and pass by not being tested.
+
+### Fixed
+
+- **Build with AI was completely non-functional.** Models routinely emit a fenced config followed by a prose summary. Three separate parsers sliced from the first `{` to the last `}`, swallowed that trailing text, and died with `Extra data` — discarding a valid config. `_parse_builder_json`, the judge, and the adversarial critic now take the first complete JSON object via `raw_decode`. Covered by `tests/unit/test_llm_json_extraction.py`.
+- **ContractIQ could never start on a fresh database.** Twelve `tenant_id` columns were declared with both `index=True` and an explicit `Index()` of the same auto-generated name, so `create_all` emitted the same `CREATE INDEX` twice and the second aborted the transaction, rolling back all 45 tables. Login returned a 500 for the life of the install.
+- **ContractIQ startup ran table creation and twelve ALTERs in one transaction.** In Postgres the first failing statement aborts the transaction, so the per-statement `try/except` in that loop never worked and no widening statement after the first skip applied. Split into separate transactions in `contractiq/api/app/core/schema_boot.py`, which also reconciles orphan indexes and verifies the users table exists rather than logging and moving on.
+- **ContractIQ signed users out on page load.** All five Next.js proxy routes dropped the `Authorization` header, three client pollers never sent one, and the global fetch interceptor treated any 401 as an expired session. A background poll was enough to bounce the user back to the landing page.
+- **MQTT and TimescaleDB were unreachable in every Kubernetes deploy.** The configmap pointed at `<release>-mqtt-mosquitto` and `<release>-tsdb-timescaledb`, neither of which exists, and published the Timescale DSN as `TSDB_DSN` when the tool reads `TSDB_URL`. Both now resolve to the services `deploy.sh` actually installs.
+- **`tsdb_query` could never execute.** It passed ISO-8601 strings to asyncpg, which binds parameters before the `::timestamptz` cast runs and rejects anything that is not a `datetime`. Timestamps are parsed up front and a bad value is now a clear tool error.
+- **Atlas Cypher tools had never been callable.** `AtlasCypherTool` and `AtlasAsOfTool` subclassed `BaseTool` but implemented `run()` instead of the abstract `execute()`, and called `ToolResult.ok` / `.error` constructors that do not exist, so instantiation raised `TypeError` and the endpoint returned a bare 500 with no JSON body.
+- **Tool construction failures escaped as bare 500s.** `/api/tools/{slug}/execute` caught only `TypeError` around the constructor, so a tool that validates its config and raises `ValueError` produced an unhandled 500. Callers now get a structured 400 naming what was missing.
+- **The default moderation policy blocked every request.** The auto-seeded policy paired `provider=openai` with `fail_closed=true`, so on an install with no OpenAI credential each provider call errored, fail-closed escalated it to a hard block, and every agent run was refused with `Categories: n/a`. Seeded policies are no longer fail-closed, pattern checks still apply, and the user-facing message now distinguishes a provider outage from a real policy hit.
+- **Standalone app API keys were minted and then overwritten.** `deploy.sh` seeded them before deploying the apps, and each app manifest recreates its own secret from the deploy environment. Every app came up with an empty key and answered 401, which surfaced as 500s on endpoints like `/api/wingman/market-brief`. Seeding now runs after the apps are deployed.
+- **Port forwards accumulated without bound.** The teardown killed the `kubectl` child but not the `while true` wrapper that respawns it two seconds later, so every run stacked another generation on the survivors. Wrappers now record their own PID and are stopped deterministically.
+- **Zero cost was stored as NULL.** `_mark_done` in the runtime consumer skipped the cost column unless the value was greater than zero, so a subscription-served run — which genuinely costs nothing — was indistinguishable from one whose cost was never recorded. The streaming executor also never assigned the effective model, so the audit row named the requested model whatever actually ran.
+- **Pipeline critique bypassed the subscription.** The tier-3 critic branched on the raw `ai_builder.validation.model` setting, so an exclusive subscription still sent the call to that setting's provider. It now resolves through `effective_model()` before choosing a branch, and no longer passes `temperature` to an Anthropic SDK that removed it.
+- **Undefined names in two runtime paths.** `apps/api/app/main.py` used `logging` without importing it inside four exception handlers, which replaced the real startup error with a `NameError`. `replay_pipeline` referenced an `execution` variable that does not exist in its scope.
+- **CI was red on main.** `black --check` failed on 62 files, `ruff` reported eleven errors including the two undefined names above, and `pip-audit` blocked on an unfixable advisory. Formatting is applied, the lint errors are fixed rather than suppressed, and the advisory is whitelisted with a written justification.
+
+### Changed
+
+- **Builder UX.** The Publish button was disabled with nothing on screen explaining that a draft must be saved first, so a user who described a problem, had the AI build it, and applied it to the canvas hit a dead end. It now carries a tooltip and an inline hint. The model chip in the builder and the AI dialog showed the configured setting rather than the model that will actually serve the request, which differ under an exclusive subscription.
+- **Tool palette is browsable again.** The palette grouped tools by a hand-maintained frontend map and filed everything else under `Other`, which was 83 of 143 tools. It now falls back to the category the API already returns, giving sixteen real buckets.
+- **ResolveAI empty state.** The Cases page told every user to click a button that is hidden behind `NEXT_PUBLIC_SHOW_SAMPLES`.
+- **Mideast Tourism seed feedback.** `seedData()` swallowed every error, so a failed seed looked identical to a slow one. Failures are surfaced and the multi-minute agent extraction now says so.
+
+### Notes for operators
+
+- Subscription mode stores a copy of a rotating token. When agent runs start failing with an authentication error, run `bash scripts/sync-claude-subscription.sh` rather than debugging the platform. A durable fix would mean holding the refresh token and renewing server-side.
+- `deploy.sh local` now installs KEDA when `scaling.keda.enabled` is true, builds the pgvector Postgres image locally instead of pulling a private ACR placeholder, and runs alembic after bootstrap. Set `WEB_PORT` if something already owns port 3000 on the host.
+
 ## v2.3.7 — 2026-06-21
 
 ### Added
