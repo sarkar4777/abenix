@@ -12,6 +12,14 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## v2.4.0 — 2026-09-26
+
+### Added
+
 - **Claude Pro/Max subscription as a first-class LLM provider.** `apps/agent-runtime/engine/claude_subscription.py` reads `llm.subscription.*` platform settings (or `CLAUDE_SUBSCRIPTION_TOKEN` from the environment) and builds an Anthropic client that authenticates with `Authorization: Bearer` plus the `anthropic-beta: oauth-2025-04-20` header. A new `ClaudeSubscriptionProvider` in `llm_router.py` sits at the head of the credential chain and reports zero cost while still emitting token metrics. Configure it at Admin -> LLM Settings alongside the API-key providers, or verify the stored token with `POST /api/admin/settings/subscription/verify`.
 - **Exclusive mode, with a smart fallback.** When `llm.subscription.exclusive` is on, `map_model()` pins every request to the configured subscription model regardless of what an agent asks for. When the subscription is absent or unusable the router walks the rest of the credential chain instead of failing, so a half-configured install still runs.
 - **`scripts/sync-claude-subscription.sh`.** Claude Code rotates and revokes its OAuth access token, so a token pasted once into the admin screen goes stale within hours and every agent run then fails with `OAuth access token has been revoked`. The script reads the current credential, stores it, enables subscription mode, and proves the result with a verify call. It never prints the token.
