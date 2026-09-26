@@ -240,13 +240,10 @@ gets a hostname under the ingress load balancer's IP via `nip.io`.
 | Industrial-IoT | http://localhost:3003 | `http://iot.<ip>.nip.io` | platform login |
 | ResolveAI | http://localhost:3004 | `http://care.<ip>.nip.io` | `agent@resolveai.local` / `agent123` |
 | ClaimsIQ | http://localhost:3005 | `http://claims.<ip>.nip.io` | no login — open UI |
-| Wingman | http://localhost:3006 | port-forward only | platform login |
+| Wingman | http://localhost:3006 | `http://wm.<ip>.nip.io` | platform login |
 | PharmaVigil | http://localhost:3007 | `http://safety.<ip>.nip.io` | no login — open UI |
 | Grafana | http://localhost:3030 | `http://grafana.<ip>.nip.io` | `admin` / `abenix-admin` |
 | Prometheus | http://localhost:9090 | `http://prom.<ip>.nip.io` | none |
-
-Wingman deploys to AKS but has no ingress rule yet, so reach it with
-`kubectl -n abenix port-forward svc/wingman-web 3006:3006`.
 
 `<ip>` is the ingress controller's load-balancer address. You do not have to
 look it up — `bash scripts/deploy-azure.sh status` prints every URL, and the
