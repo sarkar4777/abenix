@@ -98,7 +98,7 @@ The UI surfaces both. A reviewer can apply a low-confidence patch — the audit 
 
 ### Rollback
 
-`POST /api/pipeline-healing/{pipeline_id}/patches/{patch_id}/rollback` writes `dsl_before` back to the pipeline. The rolled-back patch keeps its `accepted` status; new fields `rolled_back_at` and `rolled_back_by` distinguish "was applied, was rolled back" from "was rejected outright".
+`POST /api/pipeline-healing/{pipeline_id}/patches/{patch_id}/rollback` writes `dsl_before` back to the pipeline. The rolled-back patch keeps its `accepted` status. New fields `rolled_back_at` and `rolled_back_by` distinguish "was applied, was rolled back" from "was rejected outright".
 
 Only the user who originally approved the patch — or a tenant admin — can roll it back. A non-admin user trying to roll back somebody else's accepted patch gets 403.
 

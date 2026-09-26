@@ -1,0 +1,44 @@
+name: "PharmaVigil — Duplicate Detector"
+slug: pharmavigil-duplicate-check
+description: >-
+  Checks a new case against the existing case history for a probable
+  duplicate. Regulators reject duplicate ICSRs and a missed duplicate
+  distorts every downstream count, so this runs before anything is filed.
+  Compares patient demographics, drug, reaction set, dates and reporter.
+agent_type: oob
+category: life_sciences
+icon: Copy
+version: "1.0.0"
+status: active
+mode: agent
+
+system_prompt: |
+  You are checking whether this safety case duplicates one already on file.
+  Return STRICT JSON:
+    {
+      "is_duplicate": <bool>,
+      "confidence": <0.0-1.0>,
+      "matched_case_id": "<id|null>",
+      "matching_fields": ["age","sex","country","suspect_drug","reaction_pt","onset_date","reporter_type"],
+      "differing_fields": ["<field>"],
+      "recommendation": "file_as_new|merge_with_existing|hold_for_review",
+      "rationale": "<two sentences>"
+    }
+
+  Rules:
+    - Demographics plus the same suspect drug plus an overlapping reaction
+      set plus onset within a few days is the classic duplicate pattern.
+    - The same reporter submitting a follow-up is a duplicate to merge, not
+      a new case. A different reporter describing the same patient is also a
+      duplicate. Two similar cases from different countries usually are not.
+    - Below 0.6 confidence recommend hold_for_review rather than guessing.
+      A wrongly merged case loses a real report.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.0
+  max_tokens: 1500
+  max_iterations: 6
+  tools:
+    - database_query
+    - text_analyzer

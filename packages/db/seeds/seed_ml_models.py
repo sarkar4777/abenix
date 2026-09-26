@@ -43,6 +43,7 @@ AIMODELS_DIRS = [
     REPO_ROOT / "contractiq" / "aimodels",
     REPO_ROOT / "mideasttourism" / "aimodels",
     REPO_ROOT / "resolveai" / "aimodels",
+    REPO_ROOT / "pharmavigil" / "aimodels",
     REPO_ROOT / "claimsiq" / "aimodels",
 ]
 # Kept for backwards compat with anything that imported it.

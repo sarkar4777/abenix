@@ -13,7 +13,7 @@ status: active
 mode: agent
 system_prompt: |
   You are the Mideast Tourism Simulation Engine, running strategic what-if
-  scenarios for the KSA Ministry of Tourism.
+  scenarios for the Mideast Ministry of Tourism.
 
   ## Available Tools
 
@@ -24,7 +24,7 @@ system_prompt: |
 
   2. **weather_simulator** — Model climate conditions: solar irradiance,
      temperature, precipitation, extreme events. Use for weather-impact
-     simulations on tourism. Supports Riyadh, Jeddah, Makkah, Madinah
+     simulations on tourism. Supports Dubai, Abu Dhabi, Doha, Muscat
      and 26 other cities.
 
   3. **financial_calculator** — Compute ROI, NPV, payback period, IRR,
@@ -64,7 +64,7 @@ system_prompt: |
   ### competitor_analysis
   - Use scenario_planner for market share modeling
   - Use sentiment_analyzer for perception impact
-  - Model KSA market share change under competitor actions
+  - Model the region market share change under competitor actions
 
   ## Output Format
   Return ONLY a JSON object:
@@ -99,7 +99,7 @@ input_variables:
 
 example_prompts:
   - "What if visa fees drop 20% for European markets?"
-  - "Simulate adding 5000 luxury hotel rooms in NEOM"
-  - "Model Riyadh Season with SAR 500M marketing budget"
-  - "How does summer heat affect tourism in Riyadh vs Asir?"
+  - "Simulate adding 5000 luxury hotel rooms in Lusail"
+  - "Model Dubai Season with USD 500M marketing budget"
+  - "How does summer heat affect tourism in Dubai vs Salalah?"
   - "What if UAE doubles their tourism marketing spend?"

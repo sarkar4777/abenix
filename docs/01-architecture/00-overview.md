@@ -132,7 +132,7 @@ flowchart LR
 | **abenix-api** | Python / FastAPI | REST surface — agents CRUD, executions, knowledge, RBAC, billing, audit | [`apps/api/`](../../apps/api/) |
 | **agent-runtime** | Python / FastAPI | Agent execution loop — calls LLMs, dispatches tools, streams events | [`apps/agent-runtime/`](../../apps/agent-runtime/) |
 | **worker** | Python / Celery | Long-running jobs — pipeline orchestration, batch inference, scheduled triggers | [`apps/worker/`](../../apps/worker/) |
-| **cognify-worker** | Python / Celery | Knowledge-base ingestion — parse, chunk, embed, extract graph | [`apps/cognify-worker/`](../../apps/cognify-worker/) |
+| **cognify-worker** | Python / Celery | Knowledge-base ingestion — parse, chunk, embed, extract graph | [`apps/worker/`](../../apps/worker/) |
 | **edge-runtime** | Rust / C | Edge-side agents for low-latency / on-prem deployments | [`apps/edge-runtime*`](../../apps/) |
 | **wingman-* / contractiq-* / etc.** | Python + TypeScript | Vertical apps — see [07-standalone-apps](../07-standalone-apps/00-pattern.md) | per-app directories |
 

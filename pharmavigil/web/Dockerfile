@@ -1,0 +1,30 @@
+# PharmaVigil Web — Next.js on port 3007.
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json ./
+RUN npm install --legacy-peer-deps --include=optional
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+RUN chmod -R u+rwx node_modules/.bin 2>/dev/null || true
+COPY . .
+RUN mkdir -p public
+ENV NEXT_TELEMETRY_DISABLED=1
+ARG PHARMAVIGIL_API_INTERNAL_URL=http://pharmavigil-api:8007
+ENV PHARMAVIGIL_API_INTERNAL_URL=$PHARMAVIGIL_API_INTERNAL_URL
+RUN npx next build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/next.config.js ./
+EXPOSE 3007
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3007/ || exit 1
+CMD ["npm", "start"]

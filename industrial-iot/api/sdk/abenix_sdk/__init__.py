@@ -748,7 +748,7 @@ class Abenix:
         we poll the execution row until it terminates so the caller never gets
         an empty ``output``. This is the industrial-strength path: a single SDK
         fix repairs every standalone app (ContractIQ insights, ResolveAI,
-        SauditTourism, IndustrialIoT, …) that depends on synchronous output.
+        MideastTourism, IndustrialIoT, …) that depends on synchronous output.
         """
         agent_id = await self._resolve_agent_id(agent_slug_or_id)
 
@@ -855,7 +855,14 @@ class Abenix:
             try:
                 r = await self._http.get(f"/api/executions/{execution_id}")
                 if r.status_code == 200:
-                    last = (r.json() or {}).get("data", {}) or last
+                    row = (r.json() or {}).get("data", {}) or {}
+                    if row:
+                        # The execution row keys its id as `id`, so reading it
+                        # straight dropped execution_id and every run that came
+                        # through here — including every failure — came back
+                        # with nothing to trace it by.
+                        row.setdefault("execution_id", row.get("id") or execution_id)
+                        last = row
                     if (last.get("status") or "").lower() in terminal:
                         return last
             except httpx.HTTPError:

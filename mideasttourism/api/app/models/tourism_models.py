@@ -40,15 +40,15 @@ class DatasetStatus(str, enum.Enum):
 
 
 class Region(str, enum.Enum):
-    RIYADH = "riyadh"
-    MAKKAH = "makkah"
-    MADINAH = "madinah"
-    EASTERN = "eastern"
-    JEDDAH = "jeddah"
-    NEOM = "neom"
-    ALULA = "alula"
-    ASIR = "asir"
-    TABUK = "tabuk"
+    DUBAI = "dubai"
+    DOHA = "doha"
+    MUSCAT = "muscat"
+    NORTHERN = "eastern"
+    ABUDHABI = "abudhabi"
+    LUSAIL = "lusail"
+    NIZWA = "nizwa"
+    SALALAH = "salalah"
+    SHARJAH = "sharjah"
 
 
 class SimulationType(str, enum.Enum):

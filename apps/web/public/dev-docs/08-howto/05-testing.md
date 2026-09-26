@@ -162,34 +162,39 @@ cases:
       - "$.output.verdict | should be 'dislocated'"
 ```
 
-Run nightly via `bash scripts/evals.sh`. Failures don't block deploys (LLM drift is real). they file a GitHub issue.
+> **Not built yet.** There is no `evals/` directory and no `scripts/evals.sh`
+> in the tree. The shape above is the intended design, kept here so whoever
+> picks it up does not have to reinvent it. Today, prompt changes are checked by
+> hand through `/agents -> Test` and by the UAT specs.
 
 ---
 
 ## CI matrix
 
-GitHub Actions runs:
+`.github/workflows/ci.yml` triggers on push and pull request against `main`.
+All jobs run on GitHub-hosted `ubuntu-latest`.
 
-| On | Jobs |
-|---|---|
-| every push | unit (py + ts) — < 3 min |
-| every PR | + integration — < 8 min |
-| merge to main | + UAT sanity + image build — < 15 min |
-| nightly | + UAT deep + evals — ~30 min |
-| weekly | + UAT industrial + perf benchmarks — ~60 min |
+| Job | Runs | What it does |
+|---|---|---|
+| `python-lint` | always | `black --check`, `ruff`, then `pip-audit` against `apps/api/requirements.txt` with `.pip-audit-ignore` applied. A CVE without a whitelist entry fails the build. |
+| `python-test` | after lint | `pytest tests/unit/` with the three apps' requirement files installed. |
+| `web-lint-typecheck-build` | always | ESLint, `tsc --noEmit`, and a full Next build. |
+| `e2e-smoke` | after the three above | Boots Postgres and Redis through docker-compose and installs the Playwright browsers. The API and web are deliberately not booted, because a full boot needs credentials and a populated tenant. |
+| `build-images` | push to `main` only | Builds and pushes the four service images to ghcr.io, then runs Trivy. Both Trivy steps are informational and do not fail the build. |
 
-The CI runners are GitHub-hosted x86 large for unit. self-hosted (an AKS namespace) for UAT.
+There is no nightly or weekly schedule, and the browser UAT does not run in CI.
+Run it yourself against a deployed cluster with `bash scripts/uat.sh`.
+
+Before pushing, `bash scripts/check-before-push.sh` runs the same gates locally.
+It is considerably faster than waiting for CI to go red.
 
 ---
 
 ## Performance benchmarks
 
-`bench/` has scripts that exercise:
-- 100 concurrent agent executions
-- 500 KB document uploads
-- 10k pipeline-step throughput
-
-Reported metrics: p50/p95/p99 latency, sustained rps, peak memory. Compared to the prior release. regressions > 20% file an issue.
+> **Not built yet.** There is no `bench/` directory. Load behaviour is
+> currently exercised through the Load Playground page and the numbers recorded
+> in [06-deployment/load-test-baseline](../06-deployment/load-test-baseline.md).
 
 ---
 

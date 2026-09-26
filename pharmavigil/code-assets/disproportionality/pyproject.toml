@@ -1,0 +1,6 @@
+[project]
+name = "disproportionality"
+version = "1.0.0"
+description = "Disproportionality statistics for a drug-event pair"
+requires-python = ">=3.11"
+dependencies = []

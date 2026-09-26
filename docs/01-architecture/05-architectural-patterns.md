@@ -96,7 +96,7 @@ Both `dev-local.sh` and `deploy-azure.sh` run a post-migration check against `sc
 
 Four agent-runtime deployments (`default`, `chat`, `heavy-reasoning`, `long-running`) isolate workloads. Each scaled by KEDA on its own NATS queue depth. A Monte-Carlo on heavy-reasoning never starves chat.
 
-- Pool picker: [`apps/api/app/services/agent_dispatch.py`](../../apps/api/app/services/agent_dispatch.py) — reads agent metadata (`agent_type`, `model_config.preset`, `max_iterations`).
+- Pool picker: [`apps/api/app/routers/agents.py`](../../apps/api/app/routers/agents.py) — reads agent metadata (`agent_type`, `model_config.preset`, `max_iterations`).
 - Deployment manifests: [`infra/helm/abenix/templates/agent-runtime-*.yaml`](../../infra/helm/abenix/templates/).
 - KEDA ScaledObjects: see [06-deployment/03-keda](../06-deployment/03-keda.md).
 
@@ -257,7 +257,7 @@ The deployed cluster shows "Bodhi" branding (a demo brand) but HEAD source is al
 
 ### 38. The apiFetch + structured error envelope contract
 
-`apiFetch` ([`apps/web/src/lib/api.ts`](../../apps/web/src/lib/api.ts)) parses the structured error envelope, throws `ApiError` with `error_code` on mutating non-2xx, and returns parsed JSON on success. UI components branch on `err.error_code` for stable handling. See [05-ui/02-api-client](../05-ui/02-api-client.md).
+`apiFetch` ([`apps/web/src/lib/api-client.ts`](../../apps/web/src/lib/api-client.ts)) parses the structured error envelope, throws `ApiError` with `error_code` on mutating non-2xx, and returns parsed JSON on success. UI components branch on `err.error_code` for stable handling. See [05-ui/02-api-client](../05-ui/02-api-client.md).
 
 ### 39. React Flow canvas with custom node types
 
@@ -265,7 +265,7 @@ The Agent Builder and Pipeline Builder use one React Flow instance per page with
 
 ### 40. SWR + targeted `mutate` for list pages
 
-Lists are fetched with SWR. After a mutation, only the affected key is invalidated — not the whole cache. This is how the agents-list page can show the new row in < 200ms after create. See [`apps/web/src/lib/swr.ts`](../../apps/web/src/lib/swr.ts).
+Lists are fetched with SWR. After a mutation, only the affected key is invalidated — not the whole cache. This is how the agents-list page can show the new row in < 200ms after create. See [`apps/web/src/hooks/useApi.ts`](../../apps/web/src/hooks/useApi.ts).
 
 ### 41. Resource share dialog as a generic mount
 

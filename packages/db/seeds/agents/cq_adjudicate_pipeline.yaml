@@ -45,10 +45,20 @@ pipeline_config:
       label: "FNOL Intake"
       type: agent
       agent_slug: claimsiq-fnol-intake
-      input: "{{input.message}}"
+      # The caller already knows the policyholder and the policy number from
+      # the FNOL form. Passing only the free-text description made the intake
+      # agent emit policy_number=null, which left the policy matcher with
+      # nothing to look up and collapsed every downstream node.
+      input: |
+        Policy number: {{input.policy_number}}
+        Claimant:      {{input.claimant_id}}
+        Channel:       {{input.channel}}
+
+        {{input.message}}
       context:
         claim_id:       "{{input.claim_id}}"
         claimant_id:    "{{input.claimant_id}}"
+        policy_number:  "{{input.policy_number}}"
         channel:        "{{input.channel}}"
         photo_urls:     "{{input.photo_urls}}"
 
@@ -56,13 +66,14 @@ pipeline_config:
       label: "Policy Match"
       type: agent
       agent_slug: claimsiq-policy-matcher
-      input: >-
+      input: |
         Claim type:   {{fnol.claim_type}}
         Loss date:    {{fnol.loss_date}}
-        Policy #:     {{fnol.policy_number}}
+        Policy #:     {{input.policy_number}}
+        Policy # as extracted from the description: {{fnol.policy_number}}
         Summary:      {{fnol.summary}}
       context:
-        policy_number: "{{fnol.policy_number}}"
+        policy_number: "{{input.policy_number}}"
 
     - id: damage_assess
       label: "Damage Assessment"

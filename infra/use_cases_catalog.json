@@ -2,7 +2,7 @@
   {
     "key": "contractiq",
     "label": "ContractIQ",
-    "description": "Standalone app — PPA & gas contract intelligence.",
+    "description": "Standalone app \u2014 PPA & gas contract intelligence.",
     "icon": "contractiq",
     "color": "emerald",
     "host_subdomain": "ciq",
@@ -12,7 +12,7 @@
   {
     "key": "mideasttourism",
     "label": "Mideast Tourism",
-    "description": "KSA Ministry of Tourism analytics — visitor data, simulations, AI reports.",
+    "description": "Mideast Ministry of Tourism analytics \u2014 visitor data, simulations, AI reports.",
     "icon": "globe",
     "color": "green",
     "host_subdomain": "tourism",
@@ -22,7 +22,7 @@
   {
     "key": "industrial-iot",
     "label": "Industrial IoT",
-    "description": "Standalone app — pump vibration + cold-chain telemetry, live pipelines on streamed sensor data.",
+    "description": "Standalone app \u2014 pump vibration + cold-chain telemetry, live pipelines on streamed sensor data.",
     "icon": "zap",
     "color": "purple",
     "host_subdomain": "iot",
@@ -50,7 +50,7 @@
   {
     "key": "claimsiq",
     "label": "ClaimsIQ",
-    "description": "Insurance FNOL adjudication — multimodal damage assessment, fraud screening, and live pipeline DAG. Java + Vaadin Flow demonstrating the JVM SDK.",
+    "description": "Insurance FNOL adjudication \u2014 multimodal damage assessment, fraud screening, and live pipeline DAG. Java + Vaadin Flow demonstrating the JVM SDK.",
     "icon": "shield",
     "color": "indigo",
     "host_subdomain": "claims",
@@ -60,11 +60,21 @@
   {
     "key": "wingman",
     "label": "Wingman",
-    "description": "Energy / commodity trading desk — Mispricing Lens, Forward Scenarios, Compliance Lens, Ops Watch, Desk Copilot. Bayesian + IsoForest + 18 trader-grade agents.",
+    "description": "Energy / commodity trading desk \u2014 Mispricing Lens, Forward Scenarios, Compliance Lens, Ops Watch, Desk Copilot. Bayesian + IsoForest + 18 trader-grade agents.",
     "icon": "zap",
     "color": "cyan",
     "host_subdomain": "wm",
     "local_port": 3006,
     "env_var": "WINGMAN_PUBLIC_URL"
+  },
+  {
+    "key": "pharmavigil",
+    "label": "PharmaVigil",
+    "description": "Drug-safety intelligence: adverse-event intake, MedDRA coding, causality and signal detection.",
+    "icon": "flask-conical",
+    "color": "teal",
+    "host_subdomain": "safety",
+    "local_port": 3007,
+    "env_var": "PHARMAVIGIL_PUBLIC_URL"
   }
 ]

@@ -1,0 +1,38 @@
+name: disproportionality
+description: >-
+  Disproportionality statistics for a drug-event pair from its 2x2
+  contingency counts. Returns PRR, ROR and an EBGM shrinkage estimate, each
+  with the lower bound a safety committee acts on, plus chi-square and which
+  signalling rule fired. Closed form, so the answer is exact, costs nothing
+  and can be checked by hand.
+
+input_schema:
+  type: object
+  required: [a, b, c, d]
+  properties:
+    a: { type: number, description: "Reports of THIS event for THIS drug" }
+    b: { type: number, description: "Reports of OTHER events for THIS drug" }
+    c: { type: number, description: "Reports of THIS event for ALL OTHER drugs" }
+    d: { type: number, description: "Reports of OTHER events for ALL OTHER drugs" }
+
+output_schema:
+  type: object
+  required: [prr, prr_lower_ci, ror, ror_lower_ci, ebgm, eb05, chi_square, crosses_threshold]
+  properties:
+    counts:           { type: object }
+    prr:              { type: number, description: "Proportional reporting ratio" }
+    prr_lower_ci:     { type: number, description: "95% lower bound" }
+    ror:              { type: number, description: "Reporting odds ratio, Haldane-Anscombe corrected on a zero cell" }
+    ror_lower_ci:     { type: number }
+    ebgm:             { type: number, description: "Observed/expected, shrunk toward the null by how thin the evidence is" }
+    eb05:             { type: number, description: "5th percentile of the shrunk estimate" }
+    chi_square:       { type: number }
+    crosses_threshold: { type: boolean, description: "False whenever a < 3, whatever the ratio" }
+    rule:             { type: string, description: "Which criterion fired, or that none did" }
+    caveat:           { type: string, description: "Reporting, not risk" }
+
+example_input:
+  a: 12
+  b: 3400
+  c: 480
+  d: 295000

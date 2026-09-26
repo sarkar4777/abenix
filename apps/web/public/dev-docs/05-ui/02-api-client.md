@@ -139,7 +139,7 @@ If refresh fails: `localStorage` is cleared and the user is redirected to `/logi
 
 ## SSE streaming
 
-For event streams (`/api/executions/{id}/events`) `apiFetch` is bypassed — we use the native `EventSource` via the `useEventSource` hook ([`apps/web/src/hooks/useEventSource.ts`](../../apps/web/src/hooks/useEventSource.ts)).
+For event streams (`/api/executions/{id}/events`) `apiFetch` is bypassed — we use the native `EventSource` via the `useEventSource` hook ([`apps/web/src/lib/use-event-source.ts`](../../apps/web/src/lib/use-event-source.ts)).
 
 ```tsx
 const { events, terminal, error } = useEventSource(

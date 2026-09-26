@@ -74,7 +74,7 @@ class MyTool(BaseTool):
 
 ## Pre-built Grafana dashboards
 
-Provisioned automatically via the helm chart from JSON in [`infra/grafana/`](../../infra/grafana/):
+Provisioned automatically via the helm chart from JSON in [`infra/observability/`](../../infra/observability/):
 
 | Dashboard | Path | What it shows |
 |---|---|---|

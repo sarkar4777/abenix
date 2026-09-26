@@ -1,0 +1,6 @@
+[project]
+name = "meddra-coder"
+version = "1.0.0"
+description = "MedDRA autocoder for adverse-event reaction terms"
+requires-python = ">=3.11"
+dependencies = []

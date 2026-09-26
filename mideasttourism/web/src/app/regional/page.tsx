@@ -40,7 +40,7 @@ export default function RegionalPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold">Regional Analytics</h1>
-          <p className="text-sm text-green-300/40 mt-1">Performance by KSA region — via Abenix mideast-tourism-analytics agent</p>
+          <p className="text-sm text-green-300/40 mt-1">Performance by region — via Abenix mideast-tourism-analytics agent</p>
         </div>
         <button onClick={loadRegional} disabled={loading}
           className="px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-green-700 text-white text-xs font-semibold hover:shadow-lg hover:shadow-green-600/25 transition-all flex items-center gap-2 disabled:opacity-50">
@@ -62,7 +62,7 @@ export default function RegionalPage() {
       ) : !data ? (
         <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/30 p-12 text-center">
           <MapPin className="w-10 h-10 text-green-600/20 mx-auto mb-4" />
-          <p className="text-green-300/30 mb-2">Click "Run Regional Analysis" to analyze data by KSA region</p>
+          <p className="text-green-300/30 mb-2">Click "Run Regional Analysis" to analyze data by region</p>
           <p className="text-xs text-green-400/20">Uses financial_calculator and csv_analyzer tools to compute per-region metrics</p>
         </div>
       ) : typeof data === 'object' && data?.text ? (
@@ -97,7 +97,7 @@ export default function RegionalPage() {
                   <div>
                     <DollarSign className="w-3.5 h-3.5 text-green-400/50 mx-auto mb-1" />
                     <div className="text-sm font-bold text-green-300">{typeof r.revenue === 'number' ? `${(r.revenue / 1000000000).toFixed(1)}B` : r.revenue || '--'}</div>
-                    <div className="text-[9px] text-green-400/30">Revenue SAR</div>
+                    <div className="text-[9px] text-green-400/30">Revenue USD</div>
                   </div>
                   <div>
                     <Hotel className="w-3.5 h-3.5 text-green-400/50 mx-auto mb-1" />

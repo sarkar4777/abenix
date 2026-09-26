@@ -49,7 +49,7 @@ One row per tenant in `moderation_policies`:
 
 ## The flow inside the runtime
 
-The agent runtime wraps every LLM call with the gate. The pre-LLM step is on the input text; the post-LLM step is on the model's response. Tool outputs go through only if `on_tool_output = true` (off by default — most tool outputs are structured JSON, not free text, and gating them adds cost).
+The agent runtime wraps every LLM call with the gate. The pre-LLM step is on the input text and the post-LLM step is on the model's response. Tool outputs go through only if `on_tool_output = true` (off by default — most tool outputs are structured JSON, not free text, and gating them adds cost).
 
 The gate fans out work:
 

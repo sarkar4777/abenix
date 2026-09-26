@@ -13,12 +13,12 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 type Tab = 'login' | 'register';
 
 const REGIONS = [
-  { name: 'Riyadh', icon: Building2, gradient: 'from-green-500 to-green-700', desc: 'Business hub, entertainment capital, Riyadh Season', visitors: '4.2M' },
-  { name: 'Makkah', icon: Landmark, gradient: 'from-green-600 to-emerald-800', desc: 'Holy city, Hajj & Umrah, spiritual tourism', visitors: '15.8M' },
-  { name: 'Madinah', icon: Star, gradient: 'from-green-500 to-teal-700', desc: 'Prophet\'s Mosque, spiritual peace, cultural heritage', visitors: '8.5M' },
-  { name: 'Jeddah', icon: Waves, gradient: 'from-green-400 to-green-700', desc: 'Red Sea coast, historic district, diving', visitors: '3.8M' },
-  { name: 'NEOM', icon: Zap, gradient: 'from-green-500 to-emerald-600', desc: 'Future mega-city, Trojena ski, The Line', visitors: '0.35M' },
-  { name: 'Al-Ula', icon: Mountain, gradient: 'from-green-600 to-green-800', desc: 'UNESCO Hegra, desert heritage, luxury resorts', visitors: '0.5M' },
+  { name: 'Dubai', icon: Building2, gradient: 'from-green-500 to-green-700', desc: 'Business hub, entertainment capital, Dubai Shopping Festival', visitors: '4.2M' },
+  { name: 'Doha', icon: Landmark, gradient: 'from-green-600 to-emerald-800', desc: 'Corniche, museums, major-event host', visitors: '15.8M' },
+  { name: 'Muscat', icon: Star, gradient: 'from-green-500 to-teal-700', desc: 'Souks, forts, Gulf of Oman coastline', visitors: '8.5M' },
+  { name: 'Abu Dhabi', icon: Waves, gradient: 'from-green-400 to-green-700', desc: 'Cultural district, island resorts, Grand Mosque', visitors: '3.8M' },
+  { name: 'Lusail', icon: Zap, gradient: 'from-green-500 to-emerald-600', desc: 'Waterfront mega-development, marina, stadium district', visitors: '0.35M' },
+  { name: 'Nizwa', icon: Mountain, gradient: 'from-green-600 to-green-800', desc: 'UNESCO fort, date oases, mountain heritage', visitors: '0.5M' },
 ];
 
 const FEATURES = [
@@ -32,7 +32,7 @@ const FEATURES = [
 
 const STATS = [
   { number: '27.4M', label: 'International visitors 2024', sub: 'Target: 70M by 2030' },
-  { number: 'SAR 277B', label: 'Tourism revenue', sub: 'Target: SAR 750B by 2030' },
+  { number: 'USD 277B', label: 'Tourism revenue', sub: 'Target: USD 750B by 2030' },
   { number: '9', label: 'Regions tracked', sub: 'Real-time analytics' },
   { number: '5', label: 'AI agents', sub: 'Powered by Abenix' },
 ];
@@ -72,7 +72,7 @@ export default function LandingPage() {
   }
 
   function fillDemo() {
-    setForm({ ...form, email: 'test@mideasttourism.gov.sa', password: 'TestPass123!' });
+    setForm({ ...form, email: 'test@mideasttourism.gov', password: 'TestPass123!' });
     setTab('login');
   }
 
@@ -102,7 +102,7 @@ export default function LandingPage() {
             </div>
             <div>
               <div className="text-lg font-bold">Mideast Tourism Analytics</div>
-              <div className="text-[10px] text-green-500/60 uppercase tracking-wider">Ministry of Tourism &middot; Vision 2030</div>
+              <div className="text-[10px] text-green-500/60 uppercase tracking-wider">Ministry of Tourism &middot; Tourism Strategy 2030</div>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -126,12 +126,12 @@ export default function LandingPage() {
             </div>
             <h1 className="text-4xl md:text-6xl font-bold leading-tight mb-6">
               Tourism Intelligence<br />
-              <span className="bg-gradient-to-r from-green-400 via-emerald-400 to-green-300 bg-clip-text text-transparent">for the Kingdom.</span>
+              <span className="bg-gradient-to-r from-green-400 via-emerald-400 to-green-300 bg-clip-text text-transparent">for the region.</span>
             </h1>
             <p className="text-lg text-green-100/60 leading-relaxed mb-8 max-w-2xl">
               Upload visitor data, hotel occupancy, revenue reports, and satisfaction surveys.
               AI agents analyze trends, run simulations, and generate executive briefings
-              — helping the Ministry achieve <strong className="text-white">Vision 2030 tourism targets</strong>.
+              — helping the Ministry achieve <strong className="text-white">Tourism Strategy 2030 targets</strong>.
             </p>
             <div className="flex flex-wrap gap-4">
               <button onClick={() => setShowAuth(true)}
@@ -179,8 +179,8 @@ export default function LandingPage() {
             <MapPin className="w-3.5 h-3.5 text-green-400" />
             <span className="text-xs text-green-300 font-medium">9 Regions Tracked</span>
           </div>
-          <h2 className="text-3xl md:text-4xl font-bold mb-3">Every corner of the Kingdom</h2>
-          <p className="text-green-200/40 max-w-2xl mx-auto">From the holy cities to NEOM, from mountain retreats to Red Sea resorts.</p>
+          <h2 className="text-3xl md:text-4xl font-bold mb-3">Every corner of the region</h2>
+          <p className="text-green-200/40 max-w-2xl mx-auto">From the Gulf capitals to Lusail, from mountain retreats to island resorts.</p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {REGIONS.map((r, idx) => (
@@ -227,9 +227,9 @@ export default function LandingPage() {
         <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
           className="rounded-3xl border border-green-600/30 bg-gradient-to-br from-green-600/10 via-green-500/5 to-emerald-500/10 p-12 text-center">
           <Target className="w-10 h-10 text-green-400 mx-auto mb-4" />
-          <h2 className="text-3xl md:text-4xl font-bold mb-3">Accelerate Vision 2030</h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-3">Accelerate Tourism Strategy 2030</h2>
           <p className="text-green-100/50 max-w-2xl mx-auto mb-8">
-            150 million visits. SAR 750 billion revenue. 10% GDP contribution.
+            150 million visits. USD 750 billion revenue. 10% GDP contribution.
             Let AI analytics light the path to these targets.
           </p>
           <button onClick={() => setShowAuth(true)}
@@ -237,7 +237,7 @@ export default function LandingPage() {
             Start Analyzing Now <ArrowRight className="w-4 h-4" />
           </button>
           <p className="text-[11px] text-green-400/30 mt-6">
-            Demo: <code className="text-green-300">test@mideasttourism.gov.sa</code> / <code className="text-green-300">TestPass123!</code>
+            Demo: <code className="text-green-300">test@mideasttourism.gov</code> / <code className="text-green-300">TestPass123!</code>
           </p>
         </motion.div>
       </section>

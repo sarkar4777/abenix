@@ -167,7 +167,7 @@ def to_openai_tool(tool: BaseTool, ctx: ExecutionContext) -> dict:
     }
 ```
 
-The shims live in [`apps/agent-runtime/engine/providers/`](../../apps/agent-runtime/engine/providers/).
+The shims live in [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-runtime/engine/llm_router.py).
 
 ---
 
@@ -262,7 +262,7 @@ The agent picks an **operation** (`by_property`, `by_relationship`, `aggregate`)
   "max_hops": 4 }
 ```
 
-Returns the visited path as an ordered list; the agent can render it as a supply-chain diagram or replay it for a follow-up question.
+Returns the visited path as an ordered list. The agent can render it as a supply-chain diagram or replay it for a follow-up question.
 
 ### `atlas_search_grounded` — hybrid keyword + embedding over node properties
 

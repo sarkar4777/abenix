@@ -142,11 +142,15 @@ export default function ChatMessage({ role, blocks, isStreaming, model, requeste
       >
         {blocks.map((block, i) => {
           if (block.type === 'text') {
+            // A text block with no content used to take the whole page down
+            // through the error boundary, losing the conversation, because
+            // both this and renderRich call .trim() on it.
+            const content = typeof block.content === 'string' ? block.content : '';
             // Dynamic rich rendering — detect FEN chess boards, mermaid,
             // structured JSON with table/image/fen keys, etc. Anything not
             // recognised falls through to the markdown renderer below.
-            const rich = !isUser ? renderRich(block.content) : null;
-            const bodyText = rich ? rich.remainingText : block.content;
+            const rich = !isUser ? renderRich(content) : null;
+            const bodyText = rich ? rich.remainingText : content;
             return (
               <div key={i} className={`prose prose-invert prose-sm max-w-none ${isUser ? 'text-white' : 'text-slate-200'}`}>
                 {rich && rich.widgets.length > 0 && (

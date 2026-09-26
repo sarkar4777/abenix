@@ -88,7 +88,7 @@ Templates are eagerly resolved at step start (no lazy evaluation).
 
 ## Execution model
 
-The engine is in [`apps/agent-runtime/engine/pipelines/`](../../apps/agent-runtime/engine/pipelines/). It runs in the same pod as a single-agent execution — it's just a different path on the runtime.
+The engine is in [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py). It runs in the same pod as a single-agent execution — it's just a different path on the runtime.
 
 ```mermaid
 flowchart TB

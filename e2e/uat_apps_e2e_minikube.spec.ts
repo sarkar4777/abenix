@@ -303,7 +303,7 @@ const APP_SPECS: AppSpec[] = [
     auth: {
       endpoint: '/api/st/auth/login',
       prefix: 'st',
-      email: 'test@mideasttourism.gov.sa',
+      email: 'test@mideasttourism.gov',
       password: 'TestPass123!',
     },
   },
@@ -392,7 +392,7 @@ test('Mideast Tourism: seed test data then the pages actually populate', async (
     base: APPS.mideasttourism,
     endpoint: '/api/st/auth/login',
     prefix: 'st',
-    email: 'test@mideasttourism.gov.sa',
+    email: 'test@mideasttourism.gov',
     password: 'TestPass123!',
   });
 

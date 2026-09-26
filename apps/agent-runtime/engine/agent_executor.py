@@ -296,6 +296,7 @@ class AgentExecutor:
                 policy = SandboxPolicy(
                     timeout_seconds=int(base_timeout * scale),
                     max_tool_calls=int(base_tool_calls * scale),
+                    timeout_overridden=True,
                 )
                 sandbox = ExecutionSandbox(policy=policy)
             else:
@@ -319,6 +320,7 @@ class AgentExecutor:
 
     async def _invoke_impl(self, input_message: str) -> ExecutionResult:
         start = time.monotonic()
+        await self.sandbox.apply_platform_defaults()
         self.sandbox.start()
 
         # Runs once on the user-supplied input_message. On block we bail
@@ -840,6 +842,7 @@ class AgentExecutor:
     ) -> AsyncGenerator[ExecutionEvent, None]:
         start = time.monotonic()
         agent_active_streams.inc()
+        await self.sandbox.apply_platform_defaults()
         self.sandbox.start()
 
         # Pre-LLM moderation gate. On block we emit a synthetic `done`

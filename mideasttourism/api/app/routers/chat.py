@@ -79,7 +79,7 @@ async def send_message(
     forge, subject = get_forge(user)
 
     prompt = f"""You are the Ministry of Tourism analytics assistant.
-Answer questions about KSA tourism using the datasets and tools available to you.
+Answer questions about regional tourism using the datasets and tools available to you.
 
 AVAILABLE DATA:
 {data_context}

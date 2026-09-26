@@ -83,6 +83,34 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     # An alternative to per-provider API keys: authenticate with a Claude
     # Pro/Max subscription OAuth token. When enabled the runtime routes
     # through it first and falls back to whatever API keys exist.
+    # ── Execution limits ────────────────────────────────────────────────
+    # These were hardcoded in the engine. A seven-node LLM pipeline does not
+    # fit in 120s, which is how ClaimsIQ's adjudication kept dying with
+    # "Pipeline timeout exceeded" on its last two nodes.
+    "pipeline.timeout_seconds": {
+        "value": "300",
+        "category": "execution",
+        "description": "Wall-clock budget for a whole pipeline run, in seconds. Raise it for pipelines with many LLM nodes. 60-3600.",
+        "kind": "int",
+        "min": 60,
+        "max": 3600,
+    },
+    "agent.max_iterations": {
+        "value": "10",
+        "category": "execution",
+        "description": "Default tool-calling loop cap for an agent. An agent can ask for more in its own model_config. 1-50.",
+        "kind": "int",
+        "min": 1,
+        "max": 50,
+    },
+    "sandbox.timeout_seconds": {
+        "value": "300",
+        "category": "execution",
+        "description": "Wall-clock budget for one sandboxed code execution, in seconds. 30-1800.",
+        "kind": "int",
+        "min": 30,
+        "max": 1800,
+    },
     "llm.subscription.enabled": {
         "value": "false",
         "category": "claude_subscription",
@@ -94,9 +122,13 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "description": "Subscription OAuth token. Generate with `claude setup-token` and paste it here. Stored server-side and never returned to the browser.",
     },
     "llm.subscription.default_model": {
-        "value": "claude-opus-5",
+        # Haiku, not Opus. Exclusive mode pins every request to this model, and
+        # one pipeline can fan out to a dozen sub-agents, so the tightest-limited
+        # model is the worst default — a fresh install 429s on its first
+        # pipeline. Raise it deliberately once you know your plan's headroom.
+        "value": "claude-haiku-4-5",
         "category": "claude_subscription",
-        "description": "Claude model the subscription serves, and the target for requests that name a non-Claude model while exclusive mode is on.",
+        "description": "Claude model the subscription serves, and the target for requests that name a non-Claude model while exclusive mode is on. Defaults to Haiku for rate-limit headroom under fan-out.",
     },
     "llm.subscription.exclusive": {
         "value": "true",
@@ -155,3 +187,28 @@ def invalidate(key: str | None = None) -> None:
         _CACHE.pop(key, None)
     else:
         _CACHE.clear()
+
+
+async def get_int_setting(key: str, fallback: int) -> int:
+    """Read an int setting, clamped to the bounds declared in DEFAULTS.
+
+    Any bad or missing value falls back rather than raising, because these are
+    read on the execution hot path and a typo in the admin UI must not take
+    agent runs down.
+    """
+    meta = DEFAULTS.get(key) or {}
+    try:
+        raw = await get_setting(key)
+    except Exception as e:  # noqa: BLE001 — never block a run on settings I/O
+        logger.warning("get_int_setting(%s) failed: %s", key, e)
+        return fallback
+    try:
+        val = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return fallback
+    lo, hi = meta.get("min"), meta.get("max")
+    if isinstance(lo, int) and val < lo:
+        return lo
+    if isinstance(hi, int) and val > hi:
+        return hi
+    return val

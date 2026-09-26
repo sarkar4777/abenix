@@ -16,6 +16,10 @@ type Setting = {
   updated_at?: string | null;
   is_secret?: boolean;
   is_set?: boolean;
+  /** "model" renders a picker, "int" a bounded number input. */
+  kind?: 'model' | 'int';
+  min?: number | null;
+  max?: number | null;
 };
 
 type SubscriptionStatus = {
@@ -50,6 +54,7 @@ const CATEGORY_META: Record<string, { label: string; icon: React.ReactNode; hint
   knowledge_engine:{ label: 'Knowledge engine',  icon: <BookOpen className="w-4 h-4" />, hint: 'Model that summarises and indexes documents in Cognify.' },
   sdk_playground:  { label: 'SDK Playground',    icon: <Zap className="w-4 h-4" />,      hint: 'Default model pre-selected when you open the SDK Playground.' },
   triggers:        { label: 'Scheduled triggers',icon: <Clock className="w-4 h-4" />,    hint: 'Default model used by cron-triggered agent runs.' },
+  execution:       { label: 'Execution limits',  icon: <Clock className="w-4 h-4" />,    hint: 'Time and iteration budgets for agent and pipeline runs. Raise the pipeline budget if runs with many LLM steps are cut off mid-way.' },
 };
 
 
@@ -515,6 +520,30 @@ export default function LlmSettingsPage() {
                           </span>
                         )}
                       </div>
+                      {s.kind === 'int' ? (
+                        <div data-testid={`number-${s.key}`}>
+                          <input
+                            type="number"
+                            value={currentValue}
+                            min={s.min ?? undefined}
+                            max={s.max ?? undefined}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setPending((p) => {
+                                const next = { ...p };
+                                if (v === s.value) delete next[s.key]; else next[s.key] = v;
+                                return next;
+                              });
+                            }}
+                            className="w-40 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-cyan-500"
+                          />
+                          {(s.min != null || s.max != null) && (
+                            <span className="ml-2 text-[11px] text-slate-500">
+                              allowed {s.min ?? '—'} to {s.max ?? '—'}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
                       <div data-testid={`select-${s.key}`}>
                         <ModelPicker
                           value={currentValue}
@@ -527,6 +556,7 @@ export default function LlmSettingsPage() {
                           }}
                         />
                       </div>
+                      )}
                       <p className="text-[10px] text-slate-500 mt-1">
                         Platform default: <code className="text-slate-400">{s.default}</code>
                       </p>

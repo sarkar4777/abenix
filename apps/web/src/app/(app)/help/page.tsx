@@ -178,6 +178,46 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         ),
       },
       {
+        id: 'tools-reference',
+        title: 'Tools reference — the tool catalog',
+        icon: <Wrench className="w-4 h-4" />,
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p><strong className="text-white">Tools</strong> is the catalog of everything an agent can call. Each entry shows its name, what it does, and the arguments it takes. An agent only gets the tools named in its own config, so the catalog is the menu, not the grant.</p>
+            <p><strong className="text-white">Rough shape of the catalog:</strong></p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li><strong className="text-white">Retrieval</strong> — knowledge_search, vector_search, graph_explorer, web_search.</li>
+              <li><strong className="text-white">Data</strong> — database_query, csv_analyzer, spreadsheet_analyzer, tsdb_query, market_data.</li>
+              <li><strong className="text-white">Compute</strong> — code_executor, sandboxed_job, code_asset, ml_model, financial_calculator.</li>
+              <li><strong className="text-white">Documents</strong> — document_extractor, image_analyzer, speech_to_text, text_to_speech.</li>
+              <li><strong className="text-white">Actions</strong> — http_client, email_sender, mqtt_publish, opcua_write, github, integration_hub.</li>
+              <li><strong className="text-white">Control</strong> — agent_step, sub_pipeline, human_approval, defer_to_human, memory_store.</li>
+            </ul>
+            <p>Two things catch people out. A tool needing a credential the platform does not have reports &quot;tool not configured&quot; rather than failing the run. And <code className="text-amber-300">knowledge_search</code> is only registered when the agent has a knowledge base granted to it — without a grant the agent will tell you it has no way to look anything up.</p>
+            <p>Add your own with <strong className="text-white">MCP</strong> for an external server, or <strong className="text-white">Code Runner</strong> to turn a repo into a callable tool.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'executions',
+        title: 'Executions & the Flight Recorder',
+        icon: <Activity className="w-4 h-4" />,
+        body: (
+          <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
+            <p><strong className="text-white">Executions</strong> lists every run for your tenant, newest first, with status, duration, cost and token count. Click a row to open the Flight Recorder for that run.</p>
+            <p>The <strong className="text-white">Flight Recorder</strong> is the execution detail page. It replays a run node by node: the input each node received, the output it produced, every tool call with its arguments and result, the model that actually served each call, and a waterfall of where the time went.</p>
+            <p><strong className="text-white">Reading a failed run:</strong></p>
+            <ul className="list-disc pl-5 space-y-1 text-[13px]">
+              <li>The <code className="text-amber-300">failure_code</code> badge on the row says what class of failure it was. <code className="text-amber-300">SANDBOX_TIMEOUT</code> means the run hit its budget — see Platform settings to raise it.</li>
+              <li>A node whose output is <code className="text-amber-300">[not available]</code> did not run or produced nothing its downstream nodes could read. Look at the node above it, not the one that reports the gap.</li>
+              <li>An amber <strong className="text-white">fallback</strong> dot means the requested model was not the one that served the call. Hover it for the reason.</li>
+              <li>A node answering in prose where the pipeline expects JSON usually means a tool it needed was unavailable. The tool-call list shows what it actually had.</li>
+            </ul>
+            <p><strong className="text-white">Executions &rarr; Live</strong> streams the same view for runs in flight, so you can watch a long pipeline progress rather than waiting for it to land.</p>
+          </div>
+        ),
+      },
+      {
         id: 'my-agents',
         title: 'My Agents',
         icon: <Bot className="w-4 h-4" />,

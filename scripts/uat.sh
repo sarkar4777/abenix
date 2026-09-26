@@ -33,6 +33,17 @@ export AF_PASSWORD="${AF_PASSWORD:-Admin123456}"
 # Multi-User RBAC spec. Override per-env if you need a different account.
 export AF_VIEWER_EMAIL="${AF_VIEWER_EMAIL:-viewer@abenix.dev}"
 export AF_VIEWER_PASSWORD="${AF_VIEWER_PASSWORD:-Viewer123456}"
+# The Grafana spec defaults to the Azure host, which is not reachable from
+# a local run. deploy.sh forwards grafana to 3030. Anonymous viewing is off in
+# the chart, so the spec needs credentials — read them off the deployment so
+# they cannot drift from what is actually running.
+export GRAFANA="${GRAFANA:-http://localhost:3030}"
+_gf_admin() {
+  kubectl get deploy -n abenix abenix-grafana \
+    -o "jsonpath={.spec.template.spec.containers[0].env[?(@.name=='$1')].value}" 2>/dev/null || true
+}
+export GRAFANA_USER="${GRAFANA_USER:-$(_gf_admin GF_SECURITY_ADMIN_USER)}"
+export GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-$(_gf_admin GF_SECURITY_ADMIN_PASSWORD)}"
 
 # Ensure binary fixtures exist before anyone drives the spec.
 if [ ! -f "e2e/fixtures/uat_kb_doc.pdf" ] || [ ! -f "e2e/fixtures/uat_python_app.zip" ] \
@@ -98,7 +109,27 @@ if ! kubectl -n abenix get deploy uat-mcp >/dev/null 2>&1; then
   echo "▶ Applying UAT MCP manifest..."
   kubectl apply -f e2e/fixtures/mcp_server/deployment.yaml
 fi
-kubectl -n abenix rollout status deploy/uat-mcp --timeout=120s 2>&1 | tail -1
+
+# The manifest ships a placeholder registry, because publish-public.sh scrubs
+# real ACR names out of the tree. On minikube that can never pull, which
+# aborted the whole gate before a single spec ran. Build it into the minikube
+# daemon and point the deployment at that instead.
+if kubectl config current-context 2>/dev/null | grep -q minikube; then
+  echo "▶ minikube — building uat-mcp locally"
+  eval "$(minikube docker-env)"
+  docker build -q -t localhost:5000/abenix/uat-mcp:latest \
+    -f e2e/fixtures/mcp_server/Dockerfile e2e/fixtures/mcp_server >/dev/null
+  kubectl -n abenix set image deploy/uat-mcp \
+    server=localhost:5000/abenix/uat-mcp:latest >/dev/null
+  kubectl -n abenix patch deploy uat-mcp --type=json \
+    -p '[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null
+fi
+
+if ! kubectl -n abenix rollout status deploy/uat-mcp --timeout=120s; then
+  echo "  ✗ uat-mcp never became ready — the Industrial spec needs it."
+  kubectl -n abenix describe pod -l app=uat-mcp | sed -n '/Events:/,$p' | tail -12
+  exit 1
+fi
 echo "  ✓ uat-mcp ready"
 
 # Run each spec — abort on first failure (set -e).
@@ -122,8 +153,13 @@ run_spec "SDK Playground"  "e2e/uat_abenix_sdk_playground.spec.ts"
 run_spec "Apps Full"       "e2e/uat_apps_full.spec.ts"
 run_spec "Wingman"         "e2e/uat_wingman.spec.ts"
 run_spec "Multi-User RBAC" "e2e/uat_abenix_multi_user.spec.ts"
-run_spec "ClaimsIQ Deep"   "e2e/uat_claimsiq_deep.spec.ts"
+# ClaimsIQ is the Vaadin app on its own port — BASE for every other spec
+# points at the Abenix web UI, which is not what this one drives.
+BASE_URL="${CLAIMSIQ_BASE:-http://localhost:3005}" API_URL="${API}" \
+  run_spec "ClaimsIQ Deep"   "e2e/uat_claimsiq_deep.spec.ts"
 run_spec "Grafana Panels"  "e2e/uat_grafana_panels.spec.ts"
+run_spec "PharmaVigil"     "e2e/uat_pharmavigil.spec.ts"
+run_spec "Help surfaces"   "e2e/uat_help_surfaces.spec.ts"
 
 echo
 echo "════════════════════════════════════════════════════════════════"

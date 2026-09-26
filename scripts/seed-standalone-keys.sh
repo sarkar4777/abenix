@@ -12,7 +12,7 @@
 #   4) Restarts the standalone deployment so the new key is picked up.
 #
 # Usage:
-#   bash scripts/seed-standalone-keys.sh                # seed all 5 apps
+#   bash scripts/seed-standalone-keys.sh                # seed every app
 #   bash scripts/seed-standalone-keys.sh contractiq     # one app only
 #
 # Requirements: kubectl context already targets the cluster, abenix-api pod
@@ -37,6 +37,7 @@ APPS=(
   "industrial-iot|industrial-iot-secrets|INDUSTRIALIOT_ABENIX_API_KEY|standalone-industrial-iot|industrial-iot-api,industrial-iot-web"
   "resolveai|resolveai-secrets|RESOLVEAI_ABENIX_API_KEY|standalone-resolveai|resolveai-api,resolveai-web"
   "wingman|wingman-secrets|WINGMAN_ABENIX_API_KEY|standalone-wingman|wingman-api,wingman-web"
+  "pharmavigil|pharmavigil-secrets|PHARMAVIGIL_ABENIX_API_KEY|standalone-pharmavigil|pharmavigil-api,pharmavigil-web"
   "claimsiq|claimsiq-secrets|CLAIMSIQ_ABENIX_API_KEY|standalone-claimsiq|claimsiq"
 )
 

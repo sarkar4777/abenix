@@ -91,6 +91,7 @@ How a third party builds a vertical app that uses Abenix as a remote platform. I
 - [01 — Wingman (reference: energy trading)](07-standalone-apps/01-wingman.md)
 - [02 — E&C-Copilot (reference: contract intelligence)](07-standalone-apps/02-contractiq.md)
 - [03 — Mideast Tourism, ResolveAI, ClaimsIQ, Industrial-IoT (reference)](07-standalone-apps/03-others.md)
+- [05 — PharmaVigil (reference: drug safety)](07-standalone-apps/05-pharmavigil.md)
 
 ### 8. How-to (walkthroughs)
 Concrete step-by-step guides for the most common developer tasks.
@@ -108,6 +109,7 @@ Catalogues and tables you'll look up rather than read end-to-end.
 - [00 — REST API reference](09-reference/00-rest-api.md)
 - [01 — Environment variables](09-reference/01-env-vars.md)
 - [02 — CLI cheatsheet (`deploy-azure.sh`, etc.)](09-reference/02-cli.md)
+- [04 — Platform settings (runtime knobs in the admin UI)](09-reference/04-platform-settings.md)
 - [03 — Glossary](09-reference/03-glossary.md)
 
 ---

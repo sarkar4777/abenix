@@ -42,19 +42,21 @@ let lastClaimId: string | null = null;
 // browser still routes through the web gateway, so every HTTP call has
 // to be made via in-page `fetch()`. This helper wraps the common shape.
 async function pageFetch(page: Page, url: string, init: any = {}): Promise<{ status: number; bodyText: string }> {
-  // Make sure the page has a same-origin context so `fetch` works.
-  if (page.url() === 'about:blank') {
-    await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  // These are service-account API calls, the same shape ClaimsIQ makes
+  // server-side through the Java SDK. Issuing them as in-page fetch meant the
+  // browser applied CORS between the ClaimsIQ origin and the Abenix API and
+  // every one came back "Failed to fetch". page.request shares the page's
+  // cookie jar but goes out of process, which is what this needs.
+  try {
+    const r = await page.request.fetch(url, {
+      method: (init.method || 'GET') as any,
+      headers: init.headers,
+      data: init.body,
+    });
+    return { status: r.status(), bodyText: await r.text() };
+  } catch (e: any) {
+    return { status: 0, bodyText: String(e?.message || e) };
   }
-  return await page.evaluate(async ({ url, init }) => {
-    try {
-      const r = await fetch(url, init);
-      const t = await r.text();
-      return { status: r.status, bodyText: t };
-    } catch (e: any) {
-      return { status: 0, bodyText: String(e?.message || e) };
-    }
-  }, { url, init });
 }
 
 async function adminToken(page: Page): Promise<string> {
@@ -100,7 +102,8 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
     });
     expect(me.status, '/api/me HTTP').toBe(200);
     const body = JSON.parse(me.bodyText || '{}');
-    const email = body?.data?.email || body?.email;
+    // /api/me nests the user: {data: {user: {...}}}.
+    const email = body?.data?.user?.email || body?.data?.email || body?.email;
     expect(email, '/api/me email').toBeTruthy();
   });
 
@@ -111,7 +114,9 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
     await page.waitForFunction(() => /ClaimsIQ|Dashboard|FNOL/i.test(document.body.innerText || ''),
       null, { timeout: 45_000 });
     const t = (await page.textContent('body')) || '';
-    expect(/NaN/i.test(t), 'no NaN on dashboard').toBeFalsy();
+    // Case-sensitive and word-bounded. /NaN/i matched the "nan" inside
+    // "financial_calculator" in the tool list and failed a clean dashboard.
+    expect(/\bNaN\b/.test(t), 'no NaN on dashboard').toBeFalsy();
     expect(/ClaimsIQ/i.test(t), 'brand visible').toBeTruthy();
     // The dashboard shows queue counters; the text must mention claim/queue copy.
     expect(/claim|queue|FNOL|dashboard/i.test(t), 'queue copy present').toBeTruthy();
@@ -186,7 +191,7 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
 
     // Find or create a KB to upload into.
     let kbId: string | null = null;
-    const kbList = await pageFetch(page, `${API}/api/knowledge-engines?limit=20`, {
+    const kbList = await pageFetch(page, `${API}/api/knowledge-bases?limit=20`, {
       headers: { Authorization: `Bearer ${tok}` },
     });
     if (kbList.status < 400) {
@@ -196,7 +201,7 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
       kbId = found?.id || items[0]?.id || null;
     }
     if (!kbId) {
-      const created = await pageFetch(page, `${API}/api/knowledge-engines`, {
+      const created = await pageFetch(page, `${API}/api/knowledge-bases`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'ClaimsIQ Deep UAT KB', description: 'Deep UAT scratch KB' }),
@@ -210,17 +215,16 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
     const fixture = path.resolve(__dirname, 'fixtures', 'uat_kb_doc.pdf');
     expect(fs.existsSync(fixture), `fixture present at ${fixture}`).toBeTruthy();
     const buf = fs.readFileSync(fixture);
-    const b64 = buf.toString('base64');
 
-    // Multipart upload from inside the page so we go through the
-    // browser's gateway-routed network stack.
-    const up = await page.evaluate(async ({ url, tok, b64, fname }) => {
-      const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-      const fd = new FormData();
-      fd.append('file', new Blob([bin], { type: 'application/pdf' }), fname);
-      const r = await fetch(url, { method: 'POST', body: fd, headers: { Authorization: `Bearer ${tok}` } });
-      return { status: r.status, body: await r.text() };
-    }, { url: `${API}/api/knowledge-engines/${kbId}/documents`, tok, b64, fname: 'uat_kb_doc.pdf' });
+    // Multipart upload through the request context — an in-page fetch is
+    // subject to CORS between the ClaimsIQ origin and the Abenix API.
+    const upResp = await page.request.post(`${API}/api/knowledge-bases/${kbId}/upload`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      multipart: {
+        file: { name: 'uat_kb_doc.pdf', mimeType: 'application/pdf', buffer: buf },
+      },
+    });
+    const up = { status: upResp.status(), body: await upResp.text() };
 
     expect(up.status, 'upload HTTP').toBeLessThan(300);
     const upBody = JSON.parse(up.body || '{}');
@@ -231,12 +235,14 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
     let status: string = '';
     let chunks = 0;
     for (let i = 0; i < 40; i++) {
-      const r = await pageFetch(page, `${API}/api/knowledge-engines/${kbId}/documents/${docId}`, {
+      // The per-document route is DELETE-only, so read state from the list.
+      const r = await pageFetch(page, `${API}/api/knowledge-bases/${kbId}/documents`, {
         headers: { Authorization: `Bearer ${tok}` },
       });
       if (r.status < 400) {
         const body = JSON.parse(r.bodyText || '{}');
-        const d = body?.data;
+        const rows = Array.isArray(body?.data) ? body.data : (body?.data?.items || []);
+        const d = rows.find((x: any) => x?.id === docId);
         status = (d?.status || '').toString().toUpperCase();
         chunks = Number(d?.chunks_count || d?.chunk_count || 0);
         if (status === 'READY' || status === 'DEGRADED' || status === 'FAILED') break;
@@ -247,6 +253,12 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
     expect(['READY', 'DEGRADED']).toContain(status);
     if (status === 'READY') {
       expect(chunks, 'chunks > 0 when READY').toBeGreaterThan(0);
+    } else {
+      console.log(
+        '  NOTE: document DEGRADED — no embedding provider is configured, so ' +
+        'nothing was indexed and knowledge_search will find nothing. Set ' +
+        'OPENAI_API_KEY or AZURE_OPENAI_API_KEY to exercise the full path.',
+      );
     }
   });
 
@@ -287,6 +299,9 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
     const tok = await adminToken(page);
     const piiBody = {
       message: 'SSN 987-12-3456 — claimant info; include phone 415-555-0199',
+      // stream defaults to true on the API, so a JSON caller has to opt out
+      // or it gets an SSE body back and the JSON.parse blows up.
+      stream: false,
       wait: true,
       wait_timeout_seconds: 30,
     };

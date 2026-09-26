@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Which use-case apps to deploy. APPS env wins, otherwise it prompts.
+# shellcheck source=scripts/lib/select-apps.sh
+source "${ROOT_DIR}/scripts/lib/select-apps.sh"
 HELM_DIR="${ROOT_DIR}/infra/helm/abenix"
 NAMESPACE="${NAMESPACE:-abenix}"
 RELEASE_NAME="${RELEASE_NAME:-abenix}"
@@ -71,7 +75,7 @@ usage() {
   echo "  build          Build Docker images only"
   echo "  reload <svc>   Rebuild one service and restart it"
   echo "                 core: api web worker agent-runtime edge-runtime"
-  echo "                 apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism}-{api,web}"
+  echo "                 apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism,pharmavigil}-{api,web}, claimsiq"
   echo "  forwards       Re-establish and verify all local port forwards"
   echo ""
   echo "Flags:"
@@ -342,6 +346,21 @@ build_images() {
     done
   fi
 
+  # Build PharmaVigil standalone images (api + web)
+  if [ -d "${ROOT_DIR}/pharmavigil" ]; then
+    step "Building PharmaVigil standalone images"
+    for part in "api" "web"; do
+      local pv_img="${registry}/pharmavigil-${part}:${IMAGE_TAG}"
+      local pv_df="${ROOT_DIR}/pharmavigil/${part}/Dockerfile"
+      [ ! -f "${pv_df}" ] && { warn "No Dockerfile for pharmavigil/${part}"; continue; }
+      log "Building pharmavigil-${part}..."
+      docker build -t "${pv_img}" -t "${registry}/pharmavigil-${part}:latest" \
+        -f "${pv_df}" "${ROOT_DIR}/pharmavigil/${part}" 2>&1 | tail -3
+      ok "pharmavigil-${part}: built"
+      if [ "${push}" = "true" ]; then docker push "${pv_img}" 2>&1 | tail -1; fi
+    done
+  fi
+
   # Build Mideast Tourism + Wingman standalone images. Both ship k8s
   # manifests already pointing at localhost:5000/abenix/*, and
   # deploy-azure.sh builds them — the local path just never did, which is
@@ -503,6 +522,29 @@ deploy_resolveai() {
     --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "ResolveAI API not ready in 120s"
   kubectl wait --for=condition=ready pod -l app=resolveai-web \
     --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "ResolveAI Web not ready in 120s"
+}
+
+# ── Deploy PharmaVigil standalone ────────────────────────────────────────────
+deploy_pharmavigil() {
+  if [ ! -f "${ROOT_DIR}/pharmavigil/k8s/pharmavigil.yaml" ]; then
+    warn "PharmaVigil k8s manifests not found, skipping"
+    return 0
+  fi
+  step "Deploying PharmaVigil to namespace ${NAMESPACE}"
+  local pv_key="${PHARMAVIGIL_ABENIX_API_KEY:-}"
+  [ -z "${pv_key}" ] && warn "PHARMAVIGIL_ABENIX_API_KEY not set — assessments will 401"
+
+  kubectl apply -f "${ROOT_DIR}/pharmavigil/k8s/pharmavigil.yaml" 2>&1 | tail -10
+  kubectl create secret generic pharmavigil-secrets \
+    --namespace="${NAMESPACE}" \
+    --from-literal=PHARMAVIGIL_ABENIX_API_KEY="${pv_key}" \
+    --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -3
+  ok "PharmaVigil deployed"
+
+  kubectl wait --for=condition=ready pod -l app=pharmavigil-api \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "PharmaVigil API not ready in 120s"
+  kubectl wait --for=condition=ready pod -l app=pharmavigil-web \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "PharmaVigil Web not ready in 120s"
 }
 
 # ── Deploy Mideast Tourism standalone ────────────────────────────────────────
@@ -763,26 +805,60 @@ seed_agents() {
   fi
 
   log "Seeding via pod ${api_pod}..."
-  # Use bash -c to prevent MSYS/Git Bash from mangling /app paths on Windows
-  kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
-    bash -c 'python /app/packages/db/seeds/seed_agents.py' 2>&1 | tail -5 || true
-  kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
-    bash -c 'python /app/packages/db/seeds/seed_users.py' 2>&1 | tail -5 || true
-  # SchemaPortfolioTool reads its schema from the portfolio_schemas table
-  # at runtime — without a row for energy_contracts the CIQ chat agent
-  # replies "portfolio not configured". Seed the energy_contracts schema
-  # for every tenant so chat works out of the box on a fresh deploy.
-  kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
-    bash -c 'python /app/packages/db/seeds/seed_portfolio_schemas.py' 2>&1 | tail -5 || true
-  # Sample ML models (iris/housing/churn) for the OOB ml_prediction_pipeline.
-  kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
-    bash -c 'python /app/packages/db/seeds/seed_ml_models.py' 2>&1 | tail -5 || true
-  # KB seed: policy/persona/SOP for ResolveAI, policies for ClaimsIQ,
-  # equipment refs for Industrial IoT. MUST run AFTER seed_agents because
-  # it grants collections to agents by slug.
-  kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
-    bash -c 'python /app/packages/db/seeds/seed_kb.py' 2>&1 | tail -5 || true
+  local failed_seeds=""
+  # Order matters: seed_kb grants collections to agents by slug, so it has to
+  # follow seed_agents.
+  for seed in seed_agents seed_users seed_portfolio_schemas seed_ml_models seed_kb; do
+    run_seed "${seed}" || failed_seeds="${failed_seeds} ${seed}"
+  done
+
+  if [ -n "${failed_seeds}" ]; then
+    err "Seeding FAILED for:${failed_seeds}"
+    err "The platform will be missing data those seeds provide. seed_users is the"
+    err "one that creates admin@abenix.dev — without it you cannot sign in."
+    err "Re-run with: bash scripts/deploy.sh local"
+    return 1
+  fi
   ok "Seeding complete"
+}
+
+# Run one seed script inside a ready API pod.
+#
+# The pod is resolved per call rather than once for the whole batch. A rollout
+# part-way through the batch used to kill the exec with code 137 and leave every
+# later seed hitting a pod name that no longer existed, all swallowed by
+# `|| true`. One retry covers a restart landing mid-seed.
+run_seed() {
+  local script="$1"
+  local attempt
+  for attempt in 1 2; do
+    local pod=""
+    local i
+    for i in $(seq 1 40); do
+      pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+        --field-selector=status.phase=Running \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+      if [ -n "${pod}" ] && [ "$(kubectl get pod "${pod}" -n "${NAMESPACE}" \
+          -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = "True" ]; then
+        break
+      fi
+      pod=""
+      sleep 3
+    done
+    if [ -z "${pod}" ]; then
+      warn "  ${script}: no ready API pod (attempt ${attempt})"
+      continue
+    fi
+    # bash -c keeps MSYS from mangling /app paths on Windows.
+    if kubectl exec -n "${NAMESPACE}" "${pod}" -- \
+        bash -c "python /app/packages/db/seeds/${script}.py" 2>&1 | tail -5; then
+      ok "  ${script}"
+      return 0
+    fi
+    warn "  ${script}: failed on ${pod} (attempt ${attempt}), re-resolving pod"
+    sleep 5
+  done
+  return 1
 }
 
 deploy_livekit() {
@@ -861,10 +937,30 @@ kill_port_forwards() {
   return 0
 }
 
+# Name whatever already holds a port, so a clash reads as a clash.
+port_squatter() {
+  local port="$1" hit=""
+  hit=$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+    | grep -E ":${port}->" | head -1 | cut -f1)
+  if [ -n "${hit}" ]; then
+    echo "docker container '${hit}'"
+    return 0
+  fi
+  echo "an unknown process"
+}
+
 # Start a self-restarting port forward that reconnects if the connection drops
 start_persistent_forward() {
   local svc="$1" local_port="$2" remote_port="$3"
   local ns="${NAMESPACE}"
+  # A busy port makes kubectl exit immediately and the wrapper spin for ever,
+  # while something else answers on the port. That looked healthy to the
+  # verifier and served a different app's 404s to every test.
+  if curl -s -o /dev/null --max-time 2 "http://localhost:${local_port}/" 2>/dev/null; then
+    err "port ${local_port} is already taken by $(port_squatter "${local_port}") — ${svc} will NOT be forwarded"
+    err "  free it, or re-run with a different port (WEB_PORT / API_PORT)"
+    return 1
+  fi
   nohup bash -c "echo \$\$ >> '${FORWARD_PIDFILE}'; while true; do kubectl port-forward -n ${ns} svc/${svc} ${local_port}:${remote_port} 2>/dev/null; sleep 2; done" &>/dev/null &
 }
 
@@ -876,45 +972,59 @@ setup_port_forwards() {
   kill_port_forwards
 
   # Start persistent (auto-reconnecting) port forwards
-  start_persistent_forward "${RELEASE_NAME}-web" "${WEB_PORT}" 3000
-  start_persistent_forward "${RELEASE_NAME}-api" "${API_PORT}" 8000
-  start_persistent_forward "${RELEASE_NAME}-neo4j" 7474 7474
+  start_persistent_forward "${RELEASE_NAME}-web" "${WEB_PORT}" 3000 || true
+  start_persistent_forward "${RELEASE_NAME}-api" "${API_PORT}" 8000 || true
+  start_persistent_forward "${RELEASE_NAME}-neo4j" 7474 7474 || true
 
   # Standalone apps — each on its own port so the Use Cases dropdown
   # in the core UI can deep-link to them at localhost:<port>.
   if kubectl -n "${NAMESPACE}" get svc contractiq-web &>/dev/null; then
-    start_persistent_forward "contractiq-web" 3001 3001
-    start_persistent_forward "contractiq-api" 8001 8001
+    start_persistent_forward "contractiq-web" 3001 3001 || true
+    start_persistent_forward "contractiq-api" 8001 8001 || true
   fi
   if kubectl -n "${NAMESPACE}" get svc mideasttourism-web &>/dev/null; then
-    start_persistent_forward "mideasttourism-web" 3002 3002
-    start_persistent_forward "mideasttourism-api" 8002 8002
+    start_persistent_forward "mideasttourism-web" 3002 3002 || true
+    start_persistent_forward "mideasttourism-api" 8002 8002 || true
   fi
   if kubectl -n "${NAMESPACE}" get svc industrial-iot-web &>/dev/null; then
-    start_persistent_forward "industrial-iot-web" 3003 3003
-    start_persistent_forward "industrial-iot-api" 8003 8003
+    start_persistent_forward "industrial-iot-web" 3003 3003 || true
+    start_persistent_forward "industrial-iot-api" 8003 8003 || true
   fi
   if kubectl -n "${NAMESPACE}" get svc resolveai-web &>/dev/null; then
-    start_persistent_forward "resolveai-web" 3004 3004
-    start_persistent_forward "resolveai-api" 8004 8004
+    start_persistent_forward "resolveai-web" 3004 3004 || true
+    start_persistent_forward "resolveai-api" 8004 8004 || true
   fi
   if kubectl -n "${NAMESPACE}" get svc wingman-web &>/dev/null; then
-    start_persistent_forward "wingman-web" 3006 3006
-    start_persistent_forward "wingman-api" 8006 8006
+    start_persistent_forward "wingman-web" 3006 3006 || true
+    start_persistent_forward "wingman-api" 8006 8006 || true
+  fi
+  if kubectl -n "${NAMESPACE}" get svc pharmavigil-web &>/dev/null; then
+    start_persistent_forward "pharmavigil-web" 3007 3007 || true
+    start_persistent_forward "pharmavigil-api" 8007 8007 || true
   fi
   # ClaimsIQ is a single Spring Boot + Vaadin container — no api/web split.
   if kubectl -n "${NAMESPACE}" get svc claimsiq &>/dev/null; then
-    start_persistent_forward "claimsiq" 3005 3005
+    start_persistent_forward "claimsiq" 3005 3005 || true
   fi
 
   # LiveKit signaling — enables the browser to connect to in-cluster
   # LiveKit at ws://localhost:7880 (matches LIVEKIT_PUBLIC_URL).
   if kubectl -n "${NAMESPACE}" get svc livekit-server &>/dev/null; then
-    start_persistent_forward "livekit-server" 7880 7880
+    start_persistent_forward "livekit-server" 7880 7880 || true
+  fi
+
+  # Observability. These used to be started only by the observability deploy
+  # step, with a bare nohup outside the managed set, so kill_port_forwards
+  # killed them and nothing ever brought them back.
+  if kubectl -n "${NAMESPACE}" get svc "${RELEASE_NAME}-prometheus" &>/dev/null; then
+    start_persistent_forward "${RELEASE_NAME}-prometheus" 9090 9090 || true
+  fi
+  if kubectl -n "${NAMESPACE}" get svc "${RELEASE_NAME}-grafana" &>/dev/null; then
+    start_persistent_forward "${RELEASE_NAME}-grafana" 3030 3000 || true
   fi
 
   if [ "${with_runtime}" = "true" ]; then
-    start_persistent_forward "${RELEASE_NAME}-agent-runtime" 8001 8001
+    start_persistent_forward "${RELEASE_NAME}-agent-runtime" 8001 8001 || true
   fi
 
   # Wait for services to be reachable
@@ -1000,11 +1110,9 @@ install_observability_stack() {
     && ok "Grafana ready" \
     || warn "Grafana did not become Available within 120s; check logs"
 
-  # Set up port forwards so operators can reach both immediately.
-  pkill -f "kubectl port-forward.*abenix-prometheus" 2>/dev/null || true
-  pkill -f "kubectl port-forward.*abenix-grafana"    2>/dev/null || true
-  nohup kubectl port-forward -n "${NAMESPACE}" svc/abenix-prometheus 9090:9090 > /tmp/pf-prometheus.log 2>&1 &
-  nohup kubectl port-forward -n "${NAMESPACE}" svc/abenix-grafana    3030:3000 > /tmp/pf-grafana.log    2>&1 &
+  # Managed forwards, so `deploy.sh forwards` restores them like every other.
+  start_persistent_forward "${RELEASE_NAME}-prometheus" 9090 9090 || true
+  start_persistent_forward "${RELEASE_NAME}-grafana" 3030 3000 || true
   sleep 1
   ok "Observability port forwards: prometheus→9090, grafana→3030"
 }
@@ -1044,6 +1152,10 @@ deploy_edge_runtime_c() {
 deploy_local() {
   check_prereqs
   check_command minikube
+
+  # Ask before the long build, not after it.
+  select_apps
+  log "Use-case apps: $(describe_selection)"
 
   step "Deploying Abenix to minikube (embedded mode)"
 
@@ -1091,6 +1203,7 @@ deploy_local() {
     --set "postgresql.image.pullPolicy=IfNotPresent" \
     --set "redis.image.pullPolicy=IfNotPresent" \
     --set "scaling.agentRuntimeImage.tag=${IMAGE_TAG}" \
+    --set "corsOrigins[0]=http://localhost:${WEB_PORT}" \
     $(_build_secrets_flags) \
     --timeout 10m \
     --wait=false \
@@ -1134,12 +1247,16 @@ deploy_local() {
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"
 
   # Deploy standalone apps after Abenix is running
-  deploy_contractiq      || warn "ContractIQ deployment failed (non-fatal)"
-  deploy_mideasttourism  || warn "Mideast Tourism deployment failed (non-fatal)"
-  deploy_industrial_iot  || warn "Industrial-IoT deployment failed (non-fatal)"
-  deploy_resolveai       || warn "ResolveAI deployment failed (non-fatal)"
-  deploy_wingman         || warn "Wingman deployment failed (non-fatal)"
-  deploy_claimsiq        || warn "ClaimsIQ deployment failed (non-fatal)"
+  # Only what the operator chose. Same selector dev-local.sh uses, so APPS
+  # means the same thing on both paths.
+  app_selected contractiq     && { deploy_contractiq      || warn "ContractIQ deployment failed (non-fatal)"; }
+  app_selected mideasttourism && { deploy_mideasttourism  || warn "Mideast Tourism deployment failed (non-fatal)"; }
+  app_selected industrial-iot && { deploy_industrial_iot  || warn "Industrial-IoT deployment failed (non-fatal)"; }
+  app_selected resolveai      && { deploy_resolveai       || warn "ResolveAI deployment failed (non-fatal)"; }
+  app_selected wingman        && { deploy_wingman         || warn "Wingman deployment failed (non-fatal)"; }
+  app_selected pharmavigil    && { deploy_pharmavigil     || warn "PharmaVigil deployment failed (non-fatal)"; }
+  app_selected claimsiq       && { deploy_claimsiq        || warn "ClaimsIQ deployment failed (non-fatal)"; }
+  [ "${#SELECTED_APPS[@]}" -eq 0 ] && log "No use-case apps selected — core platform only."
 
   # After the apps deploy, not before: each manifest recreates its own
   # *-secrets from the environment and would overwrite a freshly minted key.
@@ -1229,6 +1346,7 @@ deploy_local_runtime() {
     --set "postgresql.image.pullPolicy=IfNotPresent" \
     --set "redis.image.pullPolicy=IfNotPresent" \
     --set "scaling.agentRuntimeImage.tag=${IMAGE_TAG}" \
+    --set "corsOrigins[0]=http://localhost:${WEB_PORT}" \
     $(_build_secrets_flags) \
     --timeout 10m \
     --wait=false \
@@ -1405,10 +1523,18 @@ deploy_forwards() {
     "resolveai-web:3004" "resolveai-api:8004"
     "claimsiq:3005"
     "wingman-web:3006" "wingman-api:8006"
+    "pharmavigil-web:3007" "pharmavigil-api:8007"
+    "abenix-prometheus:9090" "abenix-grafana:3030"
   )
   local bad=0
   for pair in "${pairs[@]}"; do
     local label="${pair%%:*}" port="${pair##*:}" code=""
+    # An app that was never deployed has no service, and reporting it as
+    # down is noise rather than a finding. Selective deploys made that the
+    # normal case rather than the exception.
+    if ! kubectl -n "${NAMESPACE}" get svc "${label}" &>/dev/null; then
+      continue
+    fi
     # Any HTTP status means the tunnel carried the request; only a connect
     # failure counts, read from curl's exit status (it prints 000 itself).
     for attempt in 1 2 3; do
@@ -1421,9 +1547,20 @@ deploy_forwards() {
     if [ "${code}" = "000" ]; then
       err "${label} :${port} not answering"
       bad=$((bad + 1))
-    else
-      ok "${label} :${port} -> HTTP ${code}"
+      continue
     fi
+    # A 200 only proves something is listening. An unrelated container bound to
+    # 3000 once passed this check and then served its own 404s to every test,
+    # so confirm one of our own forwards actually holds the port.
+    if ! pgrep -f "kubectl port-forward.*svc/${label} ${port}:" >/dev/null 2>&1 \
+       && ! ps -W 2>/dev/null | grep -q "port-forward.*svc/${label} ${port}:"; then
+      if docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${port}->"; then
+        err "${label} :${port} answered HTTP ${code} but the port belongs to $(port_squatter "${port}") — not this cluster"
+        bad=$((bad + 1))
+        continue
+      fi
+    fi
+    ok "${label} :${port} -> HTTP ${code}"
   done
   if [ "${bad}" -eq 0 ]; then
     ok "all forwards up"
@@ -1449,11 +1586,13 @@ deploy_reload() {
     industrial-iot-api|industrial-iot-web) kind="app"; app_dir="industrial-iot"; app_part="${svc#industrial-iot-}" ;;
     resolveai-api|resolveai-web)       kind="app"; app_dir="resolveai";       app_part="${svc#resolveai-}" ;;
     wingman-api|wingman-web)           kind="app"; app_dir="wingman";         app_part="${svc#wingman-}" ;;
+    pharmavigil-api|pharmavigil-web)   kind="app"; app_dir="pharmavigil";     app_part="${svc#pharmavigil-}" ;;
     mideasttourism-api|mideasttourism-web) kind="app"; app_dir="mideasttourism"; app_part="${svc#mideasttourism-}" ;;
+    claimsiq)                          kind="app"; app_dir="claimsiq";         app_part="app" ;;
     *)
       err "reload does not know '${svc}'"
       err "  core: api web worker agent-runtime edge-runtime"
-      err "  apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism}-{api,web}"
+      err "  apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism,pharmavigil}-{api,web}"
       exit 1
       ;;
   esac
@@ -1470,6 +1609,19 @@ deploy_reload() {
   if [ "${kind}" = "core" ]; then
     build_core_service "${svc}" "${registry}" "false"
     step "Restarting ${svc}"
+    # The helm release pins the image to the SHA it was deployed at, so a
+    # rebuild under the current SHA produces a tag the Deployment does not
+    # reference. Restarting alone then silently re-runs the OLD image. Point
+    # the Deployment at what was just built. Standalone apps track :latest and
+    # do not need this.
+    local dep
+    dep=$(kubectl -n "${NAMESPACE}" get deploy -l "app.kubernetes.io/name=${svc}"       -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -n "${dep}" ]; then
+      local container
+      container=$(kubectl -n "${NAMESPACE}" get deploy "${dep}"         -o jsonpath='{.spec.template.spec.containers[0].name}' 2>/dev/null)
+      kubectl -n "${NAMESPACE}" set image "deploy/${dep}"         "${container}=${registry}/${svc}:${IMAGE_TAG}" >/dev/null
+      log "${dep}: image -> ${registry}/${svc}:${IMAGE_TAG}"
+    fi
     kubectl -n "${NAMESPACE}" rollout restart deployment -l "app.kubernetes.io/name=${svc}"
     kubectl -n "${NAMESPACE}" rollout status deployment -l "app.kubernetes.io/name=${svc}" --timeout=240s
   else
@@ -1479,6 +1631,11 @@ deploy_reload() {
     local dockerfile="${ctx}/Dockerfile"
     if [ "${svc}" = "mideasttourism-api" ]; then
       ctx="${ROOT_DIR}/${app_dir}"
+    fi
+    # ClaimsIQ's Dockerfile is under app/ but its Gradle build needs the whole
+    # claimsiq/ tree, because the app depends on the sibling sdk/ project.
+    if [ "${svc}" = "claimsiq" ]; then
+      ctx="${ROOT_DIR}/claimsiq"
     fi
     if [ ! -f "${dockerfile}" ]; then
       err "No Dockerfile at ${dockerfile}"

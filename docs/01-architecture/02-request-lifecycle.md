@@ -222,7 +222,7 @@ These happen in a single Postgres transaction. The NATS publish happens *after* 
 
 ### 16. Stragglers + sweeper
 
-A Celery beat job in [`apps/worker/jobs/executions_reconcile.py`](../../apps/worker/jobs/) runs every 60s and:
+A Celery beat job in [`apps/worker/jobs/executions_reconcile.py`](../../apps/worker/worker/tasks/) runs every 60s and:
 
 1. Finds executions with `status='running'` and `updated_at` older than `agent.timeout`.
 2. Marks them `failed` with `failure_code='runtime_died_or_timeout'`.
