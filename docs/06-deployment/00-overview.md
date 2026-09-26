@@ -184,6 +184,9 @@ resolved through `nip.io` so nothing has to go in DNS or `/etc/hosts`.
 | ClaimsIQ | `http://claims.<ip>.nip.io` |
 | Grafana | `http://grafana.<ip>.nip.io` |
 | Prometheus | `http://prom.<ip>.nip.io` |
+| PharmaVigil | `http://safety.<ip>.nip.io` |
+| PharmaVigil API | `http://safety-api.<ip>.nip.io` |
+| Wingman | `http://wm.<ip>.nip.io` |
 | Tempo | `http://tempo.<ip>.nip.io` |
 
 ```bash
@@ -192,13 +195,6 @@ bash scripts/deploy-azure.sh status   # prints every URL and health-checks them
 
 The deploy writes the hostname to `.azure-endpoint` at the repo root, and
 `status` falls back to reading the load balancer directly if that file is gone.
-
-Wingman is the exception: it deploys to AKS but has no ingress rule, so reach it
-with a port forward.
-
-```bash
-kubectl -n abenix port-forward svc/wingman-web 3006:3006
-```
 
 ---
 
