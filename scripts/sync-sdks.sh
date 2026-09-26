@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-sdks.sh — keep all 6 copies of the Abenix Python SDK aligned.
+# sync-sdks.sh — keep all 7 copies of the Abenix Python SDK aligned.
 #
 # Canonical source:
 #   packages/sdk/python/abenix_sdk/
@@ -10,6 +10,8 @@
 #   industrial-iot/api/sdk/abenix_sdk/
 #   resolveai/api/sdk/abenix_sdk/
 #   mideasttourism/api/sdk/abenix_sdk/
+#   wingman/api/sdk/abenix_sdk/
+#   pharmavigil/api/sdk/abenix_sdk/
 #
 # Why: the SDK is vendored into each standalone app's Docker image so the
 # images don't depend on a published wheel. A sync script + hash-based
@@ -37,6 +39,7 @@ DESTINATIONS=(
   "${ROOT_DIR}/resolveai/api/sdk/abenix_sdk"
   "${ROOT_DIR}/mideasttourism/api/sdk/abenix_sdk"
   "${ROOT_DIR}/wingman/api/sdk/abenix_sdk"
+  "${ROOT_DIR}/pharmavigil/api/sdk/abenix_sdk"
 )
 
 # ── colors ────────────────────────────────────────────────────────────────

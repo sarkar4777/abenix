@@ -170,6 +170,10 @@ async def _grant_agents(
         await db.execute(stmt)
 
 
+# Collection name -> seed documents that never became searchable chunks.
+_PENDING_DOCS: dict[str, int] = {}
+
+
 async def _upsert_documents(
     db: AsyncSession,
     *,
@@ -192,15 +196,20 @@ async def _upsert_documents(
 
     So we accept the seed entries, log a friendly hint, and return 0
     rows written. Collections + agent grants (the valuable rows for
-    runtime tool routing) are already persisted by the caller."""
+    runtime tool routing) are already persisted by the caller.
+
+    The count is returned to the caller so the run can say plainly that the
+    collections are empty. Left unsaid, every agent that calls
+    knowledge_search comes back with nothing and answers that it cannot look
+    anything up, which reads like a platform fault rather than an empty KB."""
     if not documents:
         return 0
     print(
-        f"      ({len(documents)} doc spec(s) noted — use the upload UI "
-        f"or POST /api/knowledge/collections/{collection.id}/documents to "
-        f"ingest content via Cognify)"
+        f"      ({len(documents)} doc spec(s) NOT ingested — POST them to "
+        f"/api/knowledge/collections/{collection.id}/documents, or use the "
+        f"upload UI, to get searchable chunks)"
     )
-    return 0
+    return len(documents)
 
 
 async def seed_kb() -> None:
@@ -252,13 +261,13 @@ async def seed_kb() -> None:
                             permission=c_spec.get("agent_permission", "READ"),
                         )
                         await db.flush()
-                        docs_written = await _upsert_documents(
+                        pending = await _upsert_documents(
                             db,
                             collection=kb,
                             documents=c_spec.get("documents") or [],
                         )
-                        if docs_written:
-                            print(f"      docs: {docs_written}")
+                        if pending:
+                            _PENDING_DOCS[kb.name] = pending
                 await db.commit()
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{yf.name}: {type(exc).__name__}: {exc}"[:300])
@@ -272,6 +281,27 @@ async def seed_kb() -> None:
         # succeeded. KB is best-effort. Future invocations are idempotent.
         return
     print("KB seed complete.")
+    _warn_if_collections_empty()
+
+
+def _warn_if_collections_empty() -> None:
+    """Say it out loud when the collections went in with no content."""
+    if not _PENDING_DOCS:
+        return
+    total = sum(_PENDING_DOCS.values())
+    print("")
+    print(
+        f"  WARNING: {total} seed document(s) across "
+        f"{len(_PENDING_DOCS)} collection(s) were NOT ingested."
+    )
+    print("  Collections and agent grants exist, but there is nothing to search.")
+    print("  Agents that rely on knowledge_search will answer that they cannot")
+    print("  look anything up:")
+    for name in sorted(_PENDING_DOCS):
+        print(f"    - {name}")
+    print("  Ingestion needs an embedding provider — set OPENAI_API_KEY, or")
+    print("  AZURE_OPENAI_API_KEY with AZURE_OPENAI_ENDPOINT — then upload the")
+    print("  documents through the Knowledge UI.")
 
 
 if __name__ == "__main__":

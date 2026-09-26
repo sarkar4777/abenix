@@ -94,16 +94,23 @@ class AgentStepTool(BaseTool):
             # Build a sub-agent with its own sandbox (reduced limits to prevent runaway)
             sub_sandbox = ExecutionSandbox(
                 SandboxPolicy(
-                    timeout_seconds=120,
                     max_tool_calls=20,
                     max_output_chars=50_000,
                 )
             )
 
-            tool_registry = (
-                build_tool_registry(tool_names)
-                if tool_names
-                else build_tool_registry([])
+            # The pipeline passes the sub-agent's execution context under
+            # dunder keys. Without them the registry silently drops
+            # knowledge_search and every db-backed tool, and the agent replies
+            # that it has no way to look anything up.
+            import os as _os
+
+            tool_registry = build_tool_registry(
+                tool_names or [],
+                kb_ids=arguments.get("__kb_ids__") or [],
+                agent_id=str(arguments.get("__agent_id__") or ""),
+                tenant_id=str(arguments.get("__tenant_id__") or ""),
+                db_url=_os.environ.get("DATABASE_URL", ""),
             )
             router = LLMRouter()
 

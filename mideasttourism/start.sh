@@ -161,6 +161,6 @@ echo -e "  ${GREEN}Health Check${NC}          http://localhost:8002/api/health"
 echo -e "  ${GREEN}API Logs${NC}              tail -f $ST_ROOT/logs/api.log"
 echo -e "  ${GREEN}Web Logs${NC}              tail -f $ST_ROOT/logs/web.log"
 echo ""
-echo -e "  Demo credentials: ${CYAN}test@mideasttourism.gov.sa${NC} / ${CYAN}TestPass123!${NC}"
+echo -e "  Demo credentials: ${CYAN}test@mideasttourism.gov${NC} / ${CYAN}TestPass123!${NC}"
 echo ""
 exit 0

@@ -236,6 +236,24 @@ async def _mark_started(execution_id: str) -> None:
         await db.commit()
 
 
+async def _pipeline_timeout() -> int:
+    """Admin-configurable pipeline budget, falling back to the engine default.
+
+    Settings live in the API package, which is present in this image, but the
+    runtime must never fail a run because the settings table is unreachable.
+    """
+    from engine.pipeline import DEFAULT_PIPELINE_TIMEOUT_SECONDS
+
+    try:
+        from app.core.platform_settings import get_int_setting
+
+        return await get_int_setting(
+            "pipeline.timeout_seconds", DEFAULT_PIPELINE_TIMEOUT_SECONDS
+        )
+    except Exception:
+        return DEFAULT_PIPELINE_TIMEOUT_SECONDS
+
+
 async def _mark_done(
     execution_id: str,
     status: str,
@@ -505,7 +523,7 @@ async def _run_one(payload: dict) -> None:
             )
             executor = PipelineExecutor(
                 tool_registry=registry,
-                timeout_seconds=120,
+                timeout_seconds=await _pipeline_timeout(),
                 on_node_start=on_node_start,
                 on_node_complete=on_node_complete,
                 agent_id=loaded["agent_id"],

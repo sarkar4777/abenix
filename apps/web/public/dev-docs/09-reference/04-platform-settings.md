@@ -1,0 +1,122 @@
+# Platform settings
+
+Runtime knobs an admin changes from **Admin -> LLM Settings** without a redeploy.
+They live in the `platform_settings` table, are declared in
+[`apps/api/app/core/platform_settings.py`](../../apps/api/app/core/platform_settings.py),
+and are read through `get_setting()` or `get_int_setting()`.
+
+Values are cached for 30 seconds per API pod, so a change takes effect within
+half a minute. A key that has never been written falls back to the default
+declared in `DEFAULTS`, which is what the UI shows as "Platform default".
+
+---
+
+## Setting kinds
+
+| Kind | Rendered as | Validation |
+|---|---|---|
+| `model` (default) | Model picker | Must be in the model catalogue |
+| `int` | Number input with the declared bounds | Must be a whole number inside `min`/`max` |
+
+Validation happens on the API, not only in the browser, because these values are
+read on the execution hot path and a bad one would otherwise surface as a
+failed run rather than a rejected save.
+
+---
+
+## Execution limits
+
+These were hardcoded in the engine until 2.4.x. A seven-node LLM pipeline does
+not fit in the old 120-second budget, which is how ClaimsIQ's adjudication kept
+dying with `Pipeline timeout exceeded` on its last two nodes while the earlier
+nodes succeeded.
+
+| Key | Default | Range | What it controls |
+|---|---|---|---|
+| `pipeline.timeout_seconds` | 300 | 60-3600 | Wall-clock budget for a whole pipeline run. Raise it for pipelines with many LLM nodes. A node cut off by this limit reports `Pipeline timeout exceeded` and the run ends `failed` with `failure_code=SANDBOX_TIMEOUT`. |
+| `agent.max_iterations` | 10 | 1-50 | Default tool-calling loop cap. An agent can request more in its own `model_config.max_iterations`. |
+| `sandbox.timeout_seconds` | 300 | 30-1800 | Wall-clock budget for one sandboxed code execution. |
+
+**Sizing the pipeline budget.** Count the LLM nodes and allow roughly 20 to 40
+seconds each, more if a node does web research or multimodal work. OracleNet's
+deep mode sets its own 600 in code because seven research agents genuinely need
+it. If runs are being cut off, the execution row names which nodes ran out of
+time in `error_message`.
+
+### Clients that wait on a run
+
+`GET /api/settings/limits` returns the current budgets to any authenticated
+caller, API keys included:
+
+```json
+{"pipeline_timeout_seconds": 900, "agent_max_iterations": 10,
+ "sandbox_timeout_seconds": 300}
+```
+
+A client that blocks on a synchronous run should size its own wait from this
+rather than carrying a second number. ClaimsIQ used to hold an independent 240s
+against a 300s platform budget, so a slow adjudication returned 504 to the app
+while the pipeline carried on and finished. It now reads this endpoint, caches
+for a minute, and waits the platform budget plus 30 seconds, so the server times
+the run out first and reports which nodes ran over.
+
+---
+
+## Model selection
+
+One setting per surface, so a cheaper model can be used for the high-volume
+paths without touching the ones that need the strongest reasoning.
+
+| Key | Used by |
+|---|---|
+| `ai_builder.model` | Generating agents and pipelines from a description |
+| `ai_builder.critic.model` | The builder's critic and adversarial-safety gates |
+| `ai_builder.validation.model` | Tier-3 pipeline critique behind AI Validate |
+| `moderation.model` | The moderation gate's provider model |
+| `knowledge_engine.summarizer.model` | Cognify document summarisation |
+| `sdk_playground.default.model` | Pre-selected model in the SDK Playground |
+| `triggers.default.model` | Cron-triggered agent runs |
+| `pipeline_surgeon.model` | Pipeline Surgeon's diagnose and patch |
+| `workflow_shell.model` | The workflow shell REPL |
+
+Under an exclusive Claude subscription these are all overridden at request time,
+see below.
+
+---
+
+## Claude subscription
+
+| Key | Default | Notes |
+|---|---|---|
+| `llm.subscription.enabled` | `false` | Turns subscription mode on. Refuses to enable without a stored token. |
+| `llm.subscription.token` | empty | Secret. Masked in every response and never returned to the browser. |
+| `llm.subscription.default_model` | `claude-haiku-4-5` | The model the subscription serves. Haiku by default for rate-limit headroom, because exclusive mode pins every request and one pipeline can fan out to a dozen sub-agents. |
+| `llm.subscription.exclusive` | `true` | Pins every request to `default_model`, including ones that already name a Claude model. |
+
+The token rotates. When agent runs start failing with
+`OAuth access token has been revoked`, run
+`bash scripts/sync-claude-subscription.sh` rather than debugging the platform,
+and confirm with `POST /api/admin/settings/subscription/verify`.
+
+---
+
+## Adding a setting
+
+1. Add an entry to `DEFAULTS` in `platform_settings.py` with a `category`, a
+   `description` that reads as a sentence, and for a numeric knob
+   `"kind": "int"` plus `min` and `max`.
+2. Add the category to `CATEGORY_META` in
+   [`admin/llm-settings/page.tsx`](../../apps/web/src/app/(app)/admin/llm-settings/page.tsx)
+   if it is a new one. Existing categories need no UI change.
+3. Read it with `await get_setting(key)` or `await get_int_setting(key, fallback)`.
+   Always pass a fallback. These are read on the execution path and settings I/O
+   must never take a run down.
+4. If a secret, add the key to `SECRET_KEYS` so it is masked.
+
+---
+
+## See also
+
+- [01-env-vars](01-env-vars.md) — deploy-time configuration, which needs a restart
+- [02-runtime/00-agent-execution](../02-runtime/00-agent-execution.md) — subscription mode in the router
+- [02-runtime/13-moderation-gate](../02-runtime/13-moderation-gate.md) — the moderation policy, configured per tenant rather than here

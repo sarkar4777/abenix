@@ -13,10 +13,10 @@ async function loginST(page: any) {
   await page.waitForURL('**/dashboard', { timeout: 15000 });
 }
 
-// ─── SAUDI TOURISM ──────────────────────────────────────────
+// ─── MIDEAST TOURISM ──────────────────────────────────────────
 
 test.describe('Mideast Tourism — Full E2E', () => {
-  test('01 — Landing page loads with Saudi green theme', async ({ page }) => {
+  test('01 — Landing page loads with Gulf green theme', async ({ page }) => {
     await page.goto(ST_URL);
     await expect(page).toHaveTitle(/Mideast Tourism/);
     await expect(page.locator('h1')).toContainText('Tourism Intelligence');

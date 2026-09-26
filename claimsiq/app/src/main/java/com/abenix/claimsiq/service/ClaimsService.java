@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,11 +49,50 @@ public class ClaimsService {
         if (apiKey == null || apiKey.isBlank()) {
             log.warn("CLAIMSIQ_ABENIX_API_KEY not set — pipeline calls will 401 until it is.");
         }
+        // Headroom past the platform's own ceiling (3600s). The per-run wait is
+        // resolved from the platform setting; this only stops the HTTP read
+        // timeout firing before the server has had its say.
         this.forge = Abenix.builder()
             .baseUrl(baseUrl)
             .apiKey(apiKey == null ? "" : apiKey)
-            .timeout(Duration.ofSeconds(waitTimeoutSeconds + 30))
+            .timeout(Duration.ofSeconds(MAX_PLATFORM_BUDGET_SECONDS + 120))
             .build();
+    }
+
+    private static final int MAX_PLATFORM_BUDGET_SECONDS = 3600;
+    private static final long LIMITS_TTL_MS = 60_000;
+
+    private volatile int cachedWaitSeconds = 0;
+    private volatile long cachedWaitAtMs = 0;
+
+    /**
+     * How long to wait on a run, taken from the platform's own budget so one
+     * admin setting governs both sides. ClaimsIQ used to carry an independent
+     * 240s, which meant a slow adjudication returned 504 to the app while the
+     * pipeline went on and finished. Falls back to the configured property
+     * whenever the platform cannot be asked.
+     */
+    private int resolveWaitSeconds() {
+        long now = System.currentTimeMillis();
+        if (cachedWaitSeconds > 0 && now - cachedWaitAtMs < LIMITS_TTL_MS) {
+            return cachedWaitSeconds;
+        }
+        int resolved = waitTimeoutSeconds;
+        try {
+            JsonNode limits = forge.platformLimits();
+            int budget = limits.path("pipeline_timeout_seconds").asInt(0);
+            if (budget > 0) {
+                // Sit just past the server's deadline so it times the run out
+                // and reports which nodes ran over, rather than the client
+                // giving up first and losing the result.
+                resolved = Math.min(budget + 30, MAX_PLATFORM_BUDGET_SECONDS + 60);
+            }
+        } catch (Throwable t) {
+            log.debug("platformLimits unavailable, using configured wait: {}", t.getMessage());
+        }
+        cachedWaitSeconds = resolved;
+        cachedWaitAtMs = now;
+        return resolved;
     }
 
     public Abenix forge() { return forge; }
@@ -133,7 +173,7 @@ public class ClaimsService {
 
             Abenix.ExecuteOptions opts = Abenix.ExecuteOptions
                 .withContext(ctx)
-                .waitTimeout(waitTimeoutSeconds)
+                .waitTimeout(resolveWaitSeconds())
                 .actingAs(new ActingSubject(subjectType, claimId.toString()));
 
             ExecutionResult result = forge.execute(pipelineSlug, message, opts);
@@ -143,6 +183,22 @@ public class ClaimsService {
                 refreshed.setUpdatedAt(Instant.now());
                 repo.save(refreshed);
                 c = refreshed;
+            }
+
+            // The platform answers 200 with status=failed so the caller still gets
+            // an execution id to inspect. Treating that as success left the claim
+            // on "running" for ever, because mapDecisionToStatus(null) is
+            // "running" and a failed run has no decision.
+            if ("failed".equals(result.status()) || "cancelled".equals(result.status())) {
+                c.setCostUsd(result.cost());
+                c.setDurationMs(result.durationMs());
+                c.setStatus("failed");
+                c.setErrorMessage(firstNodeError(result));
+                c.setUpdatedAt(Instant.now());
+                repo.save(c);
+                log.warn("Adjudication {} for claim {}: {}",
+                    result.status(), claimId, c.getErrorMessage());
+                return;
             }
 
             JsonNode output = JSON.valueToTree(result.output());
@@ -160,14 +216,22 @@ public class ClaimsService {
             if (output.has("claim_type")) c.setClaimType(output.get("claim_type").asText(null));
             c.setPipelineOutputJson(output.toString());
             c.setStatus(mapDecisionToStatus(c.getDecision()));
+            c.setErrorMessage(degradedReason(output));
             c.setUpdatedAt(Instant.now());
             repo.save(c);
+            if (c.getErrorMessage() != null) {
+                log.warn("Claim {} completed degraded: {}", claimId, c.getErrorMessage());
+            }
         } catch (Throwable t) {
             log.warn("Pipeline failed for claim {}: {}", claimId, t.getMessage());
-            c.setStatus("failed");
-            c.setErrorMessage(t.getMessage());
-            c.setUpdatedAt(Instant.now());
-            try { repo.save(c); } catch (Throwable ignored) {}
+            // Re-read first. discoverExecutionId writes the id straight to the
+            // row on its own thread, and saving this stale copy wiped it — so a
+            // run the client gave up on left nothing to go and look at.
+            Claim latest = repo.findById(claimId).orElse(c);
+            latest.setStatus("failed");
+            latest.setErrorMessage(t.getMessage());
+            latest.setUpdatedAt(Instant.now());
+            try { repo.save(latest); } catch (Throwable ignored) {}
         }
     }
 
@@ -213,25 +277,87 @@ public class ClaimsService {
         }
     }
 
+    /** First node error from a failed run, so the claim carries a usable reason. */
+    private static String firstNodeError(ExecutionResult result) {
+        Map<String, Object> nodes = result.nodeResults();
+        if (nodes != null) {
+            for (Map.Entry<String, Object> e : nodes.entrySet()) {
+                if (!(e.getValue() instanceof Map<?, ?> node)) continue;
+                Object err = node.get("error");
+                if (err != null && !err.toString().isBlank()) {
+                    return (e.getKey() + ": " + err).substring(0,
+                        Math.min(1000, (e.getKey() + ": " + err).length()));
+                }
+            }
+        }
+        return "Adjudication pipeline reported status=" + result.status()
+            + " with no node error recorded.";
+    }
+
+    /**
+     * A run that finished but produced no decision we recognise goes to an
+     * adjuster, not back to "running". Leaving it in-flight meant a claim whose
+     * pipeline had already completed sat on the queue for ever with no way for
+     * anyone to notice.
+     */
     private static String mapDecisionToStatus(String decision) {
-        if (decision == null) return "running";
+        if (decision == null) return "routed_to_human";
         return switch (decision) {
             case "approve"          -> "approved";
             case "partial"          -> "partial";
             case "deny"             -> "denied";
             case "route_to_human"   -> "routed_to_human";
-            default                 -> "running";
+            default                 -> "routed_to_human";
         };
     }
 
+    /** Engine placeholder for a template that resolved to nothing. */
+    private static final String UNRESOLVED = "[not available]";
+
+    private static boolean isUnresolved(String v) {
+        return v == null || v.isBlank() || UNRESOLVED.equals(v.trim());
+    }
+
+    /**
+     * Names the report fields the pipeline could not fill, so a claim that
+     * completed with a half-empty report says why instead of looking clean.
+     */
+    private static String degradedReason(JsonNode output) {
+        List<String> missing = new ArrayList<>();
+        for (String f : new String[] {
+            "decision", "approved_amount_usd", "draft_letter", "adjuster_notes",
+            "net_settlement_usd", "citations",
+        }) {
+            JsonNode n = output.get(f);
+            if (n == null || n.isNull()) { missing.add(f); continue; }
+            // asText() is null on arrays and objects, so a populated citations
+            // list read as missing until this checked the container first.
+            if (n.isContainerNode()) {
+                if (n.isEmpty()) missing.add(f);
+            } else if (isUnresolved(n.asText(null))) {
+                missing.add(f);
+            }
+        }
+        if (missing.isEmpty()) return null;
+        return "Adjudication completed but produced no value for: "
+            + String.join(", ", missing)
+            + ". An upstream node returned prose instead of its JSON contract.";
+    }
+
+    // "[not available]" is the engine's placeholder for a template that never
+    // resolved, not a value. Storing it verbatim put that text in front of the
+    // adjuster and made a missing decision look like a real one.
     private static String textOrNull(JsonNode n, String f) {
-        return n != null && n.has(f) && !n.get(f).isNull() ? n.get(f).asText(null) : null;
+        if (n == null || !n.has(f) || n.get(f).isNull()) return null;
+        String v = n.get(f).asText(null);
+        return isUnresolved(v) ? null : v;
     }
 
     private static Double doubleOrNull(JsonNode n, String f) {
         if (n == null || !n.has(f) || n.get(f).isNull()) return null;
         JsonNode v = n.get(f);
         if (v.isNumber()) return v.asDouble();
+        if (isUnresolved(v.asText(null))) return null;
         try { return Double.parseDouble(v.asText()); } catch (Exception e) { return null; }
     }
 

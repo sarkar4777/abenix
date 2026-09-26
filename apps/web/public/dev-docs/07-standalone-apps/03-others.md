@@ -6,10 +6,10 @@
 
 ## Mideast Tourism
 
-**Domain**: tourism analytics + planning for Saudi Vision 2030 (hotel occupancy, visa flows, event impact modelling, regional recommendations).
+**Domain**: tourism analytics + planning for Gulf Tourism Strategy 2030 (hotel occupancy, visa flows, event impact modelling, regional recommendations).
 
 **Key features**:
-- Visitor-flow heatmaps (Riyadh, Jeddah, AlUla, NEOM, Diriyah)
+- Visitor-flow heatmaps (Dubai, Abu Dhabi, Nizwa, Lusail, Heritage Quarter)
 - Event-impact simulator
 - Per-region report generator
 - Hotel + airline capacity model

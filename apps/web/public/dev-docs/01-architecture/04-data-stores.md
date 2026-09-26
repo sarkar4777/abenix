@@ -81,7 +81,7 @@ The `executions` table is a hypertable on `created_at`. After 90 days, rows are 
 - We use `psycopg2` (sync) for migrations only.
 
 ### Migrations
-Alembic. [`packages/db/migrations/`](../../packages/db/migrations/). Run on deploy via `kubectl exec` into the api pod:
+Alembic. [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/). Run on deploy via `kubectl exec` into the api pod:
 
 ```bash
 kubectl exec deploy/abenix-api -- alembic upgrade head
@@ -158,7 +158,7 @@ Blob storage for:
 - **Pipeline artifacts** (intermediate outputs that exceed 1MB inline) — `artifacts/{tenant_id}/{exec_id}/{step_id}.json`
 - **Marketplace screenshots** — public bucket
 
-The platform abstracts the storage backend behind [`apps/api/app/core/blob.py`](../../apps/api/app/core/blob.py). Same code works against AWS S3, Azure Blob, MinIO, or a local filesystem (for `npm run dev`).
+The platform abstracts the storage backend behind [`apps/agent-runtime/engine/storage/service.py`](../../apps/agent-runtime/engine/storage/service.py). Same code works against AWS S3, Azure Blob, MinIO, or a local filesystem (for `npm run dev`).
 
 > **Trap on Azure Files SMB** — `shutil.copy2` and `shutil.copy` call `chmod` and `utime` under the hood. Both fail on SMB mounts. The seed scripts use `shutil.copyfile` (bytes-only) for that reason. See [`packages/db/seeds/seed_ml_models.py`](../../packages/db/seeds/seed_ml_models.py).
 
@@ -184,11 +184,11 @@ Tenant export (for self-service backup or migration) is at `POST /api/admin/tena
 |---|---|
 | **SQLAlchemy models** | [`packages/db/models/`](../../packages/db/models/) — one file per table |
 | **Alembic migrations** | [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/) |
-| **Async DB engine config** | [`apps/api/app/core/db.py`](../../apps/api/app/core/db.py) |
-| **Redis client + pool config** | [`apps/api/app/core/redis.py`](../../apps/api/app/core/redis.py) |
+| **Async DB engine config** | [`apps/api/app/core/deps.py`](../../apps/api/app/core/deps.py) |
+| **Redis client + pool config** | [`apps/api/app/core/execution_bus.py`](../../apps/api/app/core/execution_bus.py) |
 | **Neo4j client (Atlas)** | [`apps/api/app/services/atlas/`](../../apps/api/app/services/) — search for `neo4j_client.py` |
 | **NATS JetStream consumer wiring** | [`apps/agent-runtime/consumer.py`](../../apps/agent-runtime/consumer.py) |
-| **Blob storage abstraction (S3 / Azure Files / local /data)** | [`apps/api/app/core/blob.py`](../../apps/api/app/core/blob.py) |
+| **Blob storage abstraction (S3 / Azure Files / local /data)** | [`apps/agent-runtime/engine/storage/service.py`](../../apps/agent-runtime/engine/storage/service.py) |
 | **Backup CronJobs** | [`infra/helm/abenix/templates/`](../../infra/helm/abenix/templates/) — search for `pg-backup`, `data-backup`, `neo4j-backup` |
 | **Disaster-recovery runbook** | [06-deployment/disaster-recovery](../06-deployment/disaster-recovery.md) |
 | **Per-service env vars (DATABASE_URL, REDIS_URL, NATS_URL, NEO4J_URI)** | [09-reference/01-env-vars](../09-reference/01-env-vars.md) |

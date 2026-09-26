@@ -1,0 +1,81 @@
+{
+  "name": "pharmavigil-triage-prioritiser",
+  "version": "1.0.0",
+  "framework": "sklearn",
+  "description": "Predicts the probability a medical reviewer escalates an adverse-event case, so the review queue can be ordered by what needs a human first rather than by arrival time. Trained on case features that interact rather than add: an unlisted reaction in a toddler escalates at a rate a listed one in an adult does not at the same seriousness, confounding from concomitant medication pulls a mild case down but leaves a fatal one alone, and a positive dechallenge counts for more on a thin report than a complete one. A hand-written rule over the same features is reported beside it in the metrics so the gap is measurable. The disproportionality statistics are deliberately NOT learned \u2014 they are closed form and live in the disproportionality code asset.",
+  "input_schema": {
+    "features": [
+      "serious",
+      "criteria_count",
+      "fatal",
+      "ime_term",
+      "unlisted",
+      "age_years",
+      "naranjo",
+      "dechallenge_positive",
+      "rechallenge_positive",
+      "concomitant_count",
+      "days_to_onset",
+      "reporter_is_hcp",
+      "narrative_complete",
+      "prior_pair_cases",
+      "crosses_threshold"
+    ],
+    "types": [
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number"
+    ],
+    "example": [
+      1,
+      2,
+      0,
+      1,
+      1,
+      3.0,
+      7.0,
+      1,
+      0,
+      2,
+      5.0,
+      1,
+      0.72,
+      4,
+      1
+    ]
+  },
+  "output_schema": {
+    "type": "classification",
+    "classes": [
+      "routine",
+      "escalate"
+    ],
+    "also_returns": [
+      "probability \u2014 use this to rank the queue"
+    ]
+  },
+  "metrics": {
+    "holdout_accuracy": 0.8403,
+    "holdout_auc": 0.8991,
+    "hand_rule_accuracy": 0.7639,
+    "hand_rule_auc": 0.7031,
+    "majority_baseline": 0.7061,
+    "precision": 0.7636,
+    "recall": 0.661,
+    "training_rows": 40000,
+    "escalation_rate": 0.2906
+  },
+  "notes": "Trained on 40k synthetic cases whose escalation label is drawn from a latent probability, so the target is noisy the way real reviewer behaviour is and perfect accuracy is not attainable by construction. Retrain on the customer's own reviewer decisions on install \u2014 escalation thresholds are house policy and differ between organisations more than any other input here."
+}

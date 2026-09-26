@@ -1,5 +1,9 @@
 # Environment variables reference
 
+> Environment variables are deploy-time and need a pod restart. Knobs an admin
+> can change at runtime from the UI live in
+> [04-platform-settings](04-platform-settings.md) instead.
+
 > Every env var the platform reads. Grouped by service. Defaults + notes.
 
 ---
@@ -58,6 +62,7 @@
 | `ANTHROPIC_API_KEY` | Claude models | `sk-ant-...` |
 | `OPENAI_API_KEY` | GPT models | `sk-...` |
 | `GOOGLE_API_KEY` | Gemini models | service account JSON or API key |
+| `CLAUDE_SUBSCRIPTION_TOKEN` | A Claude Pro or Max subscription instead of per-call API billing | Mint with `claude setup-token`, or let `scripts/sync-claude-subscription.sh` copy the one Claude Code already holds. A value stored in Admin -> LLM Settings takes precedence over this variable. The token rotates, see [02-runtime/00-agent-execution](../02-runtime/00-agent-execution.md#claude-subscription-mode). |
 
 ### Tool API keys (most tools degrade gracefully if missing)
 

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "sample-hepatic",
+    "label": "Hepatic injury — serious, unlisted",
+    "suspect_drug": "Atorvastatin",
+    "reporter_type": "physician",
+    "country": "GB",
+    "narrative": "62-year-old female started atorvastatin 40mg daily eight weeks ago for hyperlipidaemia. Presented to A&E with yellow eyes, dark urine and right upper quadrant discomfort for five days. ALT 840 U/L, AST 610 U/L, bilirubin 94 umol/L. No alcohol excess, hepatitis serology negative, ultrasound showed no obstruction. Statin stopped on admission; LFTs improving by day six. Admitted for four nights. Concomitant medication: amlodipine 5mg, metformin 1g twice daily. No previous liver disease."
+  },
+  {
+    "id": "sample-anaphylaxis",
+    "label": "Anaphylaxis — fatal outcome",
+    "suspect_drug": "Amoxicillin",
+    "reporter_type": "physician",
+    "country": "IE",
+    "narrative": "34-year-old male given first dose of amoxicillin 500mg for dental infection. Within ten minutes reported throat closing up and difficulty breathing, then collapsed. Widespread urticaria and facial swelling noted. Adrenaline given by paramedics at 18 minutes. Cardiac arrest en route to hospital; resuscitation unsuccessful. No documented penicillin allergy. No concomitant medication. No relevant medical history."
+  },
+  {
+    "id": "sample-rash",
+    "label": "Mild rash — non-serious, listed",
+    "suspect_drug": "Sertraline",
+    "reporter_type": "consumer",
+    "country": "GB",
+    "narrative": "I started sertraline about three weeks ago and got a really itchy rash on my arms and chest. Also feeling a bit sick in the mornings and couldn't sleep for the first few nights. The rash faded after I stopped taking it for a couple of days but came back when I started again. Not been to the doctor about it yet. I take nothing else apart from vitamin D."
+  },
+  {
+    "id": "sample-rhabdo",
+    "label": "Rhabdomyolysis — interaction, confounded",
+    "suspect_drug": "Simvastatin",
+    "reporter_type": "pharmacist",
+    "country": "GB",
+    "narrative": "71-year-old male on simvastatin 40mg for three years, clarithromycin added nine days ago for a chest infection. Presented with severe muscle pain in thighs and shoulders, dark urine and profound weakness. Creatine kinase 42,000 U/L, creatinine risen from 98 to 214 umol/L. Both drugs stopped, admitted for intravenous fluids, six-day stay. CK falling on discharge. Concomitant: ramipril, bisoprolol, aspirin, omeprazole, gliclazide. History of type 2 diabetes and chronic kidney disease stage 2."
+  },
+  {
+    "id": "sample-paediatric",
+    "label": "Paediatric seizure — unlisted, age extreme",
+    "suspect_drug": "Montelukast",
+    "reporter_type": "physician",
+    "country": "NL",
+    "narrative": "3-year-old girl started montelukast 4mg nightly for recurrent wheeze. On night eleven the parents witnessed a generalised convulsion lasting about ninety seconds with post-ictal drowsiness. Taken to hospital, observed overnight, EEG and CT normal, no fever, no electrolyte disturbance. Montelukast discontinued. No further fits in the six weeks since. No family history of epilepsy. No concomitant medication other than salbutamol as required."
+  },
+  {
+    "id": "sample-vague",
+    "label": "Vague consumer report — deliberately thin",
+    "suspect_drug": "Unknown antihypertensive",
+    "reporter_type": "consumer",
+    "country": "GB",
+    "narrative": "My mother has not been herself since the doctor changed her blood pressure tablets a while back. She is tired all the time, a bit muddled, and says the room spins when she stands up. I do not know the name of the tablet or the dose. She is 79. She takes a few other things for her heart but I am not sure what."
+  }
+]

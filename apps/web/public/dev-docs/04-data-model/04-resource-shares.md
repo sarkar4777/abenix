@@ -152,7 +152,7 @@ WHERE resource_type = 'ml_model' AND resource_id = $1
 ORDER BY created_at;
 ```
 
-Combined with `resource_shares` history (we don't delete share rows on revoke. we mark them deleted via a `revoked_at` column on a join table — see [migration 0042](../../packages/db/migrations/)).
+Combined with `resource_shares` history (we don't delete share rows on revoke. we mark them deleted via a `revoked_at` column on a join table — see [migration 0042](../../packages/db/alembic/versions/)).
 
 ---
 

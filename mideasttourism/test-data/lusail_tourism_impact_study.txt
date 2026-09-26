@@ -1,4 +1,4 @@
-NEOM TOURISM IMPACT ASSESSMENT — 2024-2035
+LUSAIL TOURISM IMPACT ASSESSMENT — 2024-2035
 ============================================
 
 Prepared for: Ministry of Tourism, Middle East region
@@ -7,35 +7,35 @@ Classification: Strategic Planning Document
 
 1. EXECUTIVE SUMMARY
 --------------------
-NEOM represents the largest tourism development in human history, with a
-projected investment of SAR 1,875 billion (US$500 billion). This impact
-assessment projects tourism outcomes across three phases of development.
+Lusail is the region's largest single waterfront development, with a
+projected investment of USD 45 billion. This impact assessment projects
+tourism outcomes across three phases of development.
 
 2. DEVELOPMENT PHASES
 ---------------------
 
 Phase 1 (2024-2026): Foundation
-- Sindalah Island luxury resort: 413 rooms, operational Q4 2024
-- Trojena ski resort: 700 rooms, operational Q1 2026
+- Marina Island luxury resort: 413 rooms, operational Q4 2024
+- Boulevard hotel district: 700 rooms, operational Q1 2026
 - Initial marina and yacht facilities
 - Expected visitors: 300,000-500,000 annually
-- Estimated tourism revenue: SAR 2-4 billion
+- Estimated tourism revenue: USD 2-4 billion
 
 Phase 2 (2027-2030): Expansion
-- The Line initial segment: 50km, residential + hospitality (9,000 rooms)
-- Oxagon industrial tourism component
-- Leyja nature reserve eco-tourism
+- Waterfront district phase one: residential + hospitality (9,000 rooms)
+- Port district industrial tourism component
+- Coastal nature reserve eco-tourism
 - Additional resort development: 15,000 rooms total
 - Expected visitors: 2-5 million annually
-- Estimated tourism revenue: SAR 25-60 billion
+- Estimated tourism revenue: USD 25-60 billion
 
 Phase 3 (2031-2035): Maturity
-- The Line full completion: 170km, 35,000 hotel rooms
+- Waterfront district completion: 35,000 hotel rooms
 - Full marine tourism program
 - Desert adventure tourism corridors
 - International airport at full capacity (25 million passengers)
 - Expected visitors: 10-15 million annually
-- Estimated tourism revenue: SAR 100-200 billion
+- Estimated tourism revenue: USD 100-200 billion
 
 3. VISITOR PROJECTIONS
 ----------------------
@@ -61,7 +61,7 @@ Secondary markets (30%):
 - Africa (South Africa, Nigeria, Morocco): 5%
 
 Domestic (10%):
-- Saudi residents (Riyadh, Jeddah, Eastern Province)
+- Gulf residents (Dubai, Abu Dhabi, Northern Emirates)
 
 5. ECONOMIC IMPACT
 ------------------
@@ -71,14 +71,14 @@ Direct employment:
 - Phase 3: 250,000 tourism jobs
 
 GDP contribution:
-- Phase 1: SAR 4 billion (0.1% of national GDP)
-- Phase 2: SAR 55 billion (1.2% of national GDP)
-- Phase 3: SAR 180 billion (3.0% of national GDP)
+- Phase 1: USD 4 billion (0.1% of national GDP)
+- Phase 2: USD 55 billion (1.2% of national GDP)
+- Phase 3: USD 180 billion (3.0% of national GDP)
 
 Supply chain impact (multiplier 2.5x):
-- Phase 1: SAR 10 billion total economic activity
-- Phase 2: SAR 138 billion total economic activity
-- Phase 3: SAR 450 billion total economic activity
+- Phase 1: USD 10 billion total economic activity
+- Phase 2: USD 138 billion total economic activity
+- Phase 3: USD 450 billion total economic activity
 
 6. HOTEL CAPACITY REQUIREMENTS
 -------------------------------
@@ -92,10 +92,10 @@ Supply chain impact (multiplier 2.5x):
 
 7. COMPETITIVE POSITIONING
 ---------------------------
-NEOM is positioned as a direct competitor to:
+Lusail is positioned as a direct competitor to:
 - Dubai (UAE): established luxury tourism hub
 - Maldives: luxury island resort market
-- Swiss Alps: premium ski tourism (Trojena)
+- Monte Carlo: premium marina and events tourism
 - Monaco: ultra-high-net-worth marina tourism
 
 Differentiators:
@@ -110,7 +110,7 @@ Differentiators:
 - Global economic downturn reducing luxury travel (probability: medium)
 - Geopolitical risk affecting source markets (probability: low-medium)
 - Competition from UAE mega-projects (probability: high)
-- Water scarcity in desert region (probability: low, mitigated by desalination)
+- Water scarcity in the region (probability: low, mitigated by desalination)
 - Workforce availability for hospitality sector (probability: medium)
 
 9. RECOMMENDATIONS
@@ -118,8 +118,8 @@ Differentiators:
 1. Phase tourism marketing to match construction milestones
 2. Establish direct flights from top 10 source markets
 3. Create exclusive preview programs for travel trade and media
-4. Develop NEOM as year-round destination (not seasonal)
-5. Integrate with broader KSA tourism circuit (NEOM → Al-Ula → Riyadh)
+4. Develop Lusail as year-round destination (not seasonal)
+5. Integrate with broader regional tourism circuit (Lusail → Nizwa → Dubai)
 6. Establish sustainable tourism certification program
 7. Build workforce training academy for hospitality sector
 8. Create dynamic pricing model to optimize occupancy and revenue

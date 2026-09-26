@@ -1,0 +1,164 @@
+# PharmaVigil — Kubernetes manifests (standalone application).
+#
+# Deploys PharmaVigil API (port 8007) and Web (port 3007) into the same
+# namespace as Abenix so the API can reach abenix-api + Postgres
+# via cluster DNS, and inherit the tenant's agent-forge-managed agents
+# / KBs / pipelines.
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pharmavigil-secrets
+  namespace: abenix
+type: Opaque
+stringData:
+  # Minted by deploy-azure.sh at deploy time if not pre-seeded.
+  PHARMAVIGIL_ABENIX_API_KEY: "REPLACE_AT_DEPLOY_TIME"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pharmavigil-config
+  namespace: abenix
+data:
+  ABENIX_API_URL: "http://abenix-api:8000"
+  DATABASE_URL: "postgresql+asyncpg://postgres:localpass@abenix-postgresql:5432/abenix"
+  PORT: "8007"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pharmavigil-api
+  namespace: abenix
+  labels:
+    app: pharmavigil-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pharmavigil-api
+  template:
+    metadata:
+      labels:
+        app: pharmavigil-api
+    spec:
+      containers:
+        - name: api
+          image: localhost:5000/abenix/pharmavigil-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8007
+              name: http
+          envFrom:
+            - secretRef:
+                name: pharmavigil-secrets
+            - configMapRef:
+                name: pharmavigil-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8007
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8007
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "384Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pharmavigil-api
+  namespace: abenix
+spec:
+  type: ClusterIP
+  selector:
+    app: pharmavigil-api
+  ports:
+    - name: http
+      port: 8007
+      targetPort: 8007
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pharmavigil-web
+  namespace: abenix
+  labels:
+    app: pharmavigil-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pharmavigil-web
+  template:
+    metadata:
+      labels:
+        app: pharmavigil-web
+    spec:
+      containers:
+        - name: web
+          image: localhost:5000/abenix/pharmavigil-web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3007
+              name: http
+          env:
+            # next.config.js rewrite target — browser hits /api/pharmavigil/*,
+            # the server proxies to the cluster-internal pharmavigil-api.
+            - name: PHARMAVIGIL_API_INTERNAL_URL
+              value: "http://pharmavigil-api:8007"
+            - name: NODE_ENV
+              value: "production"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3007
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3007
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pharmavigil-web
+  namespace: abenix
+spec:
+  type: NodePort
+  selector:
+    app: pharmavigil-web
+  ports:
+    - name: http
+      port: 3007
+      targetPort: 3007
+      nodePort: 30307

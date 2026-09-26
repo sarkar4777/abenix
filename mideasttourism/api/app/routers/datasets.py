@@ -30,7 +30,7 @@ TYPE_DETECTION = {
     "strategy": DatasetType.STRATEGY_REPORT,
     "vision": DatasetType.STRATEGY_REPORT,
     "impact": DatasetType.IMPACT_STUDY,
-    "neom": DatasetType.IMPACT_STUDY,
+    "lusail": DatasetType.IMPACT_STUDY,
 }
 
 

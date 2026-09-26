@@ -224,18 +224,6 @@ See [02-runtime/06-agent-to-agent](../02-runtime/06-agent-to-agent.md) for the f
 
 ---
 
-## Logout and refresh-token revocation
-
-`POST /api/auth/logout` records a server-side cutoff for the calling user. The cutoff lives in Redis under `auth:rt_revoke_before:{user_id}` and stores the unix timestamp of the logout call with a 90-day TTL.
-
-`POST /api/auth/refresh` inspects the inbound refresh-token `iat` claim. If `iat` is older than the recorded cutoff, the call is rejected with 401. Access tokens stay valid until they expire on their own short window (default 15 minutes), refresh stops working immediately.
-
-The web app calls logout on the in-app sign-out button and on every detected 401. CLI callers should mirror the same flow when an operator rotates their own credentials.
-
-Forced cluster-wide invalidation (compromised KEK, mass password rotation) is a runbook step. Bump the Redis key for every active user, or flush the `auth:rt_revoke_before:*` keyspace and rely on the access-token short lifetime.
-
----
-
 ## Roles
 
 There are 4 roles on a tenant. Each user has exactly one.

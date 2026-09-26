@@ -165,7 +165,7 @@ export default function DashboardPage() {
         <div className="rounded-2xl border border-green-800/40 bg-[#0A2818]/30 p-12 text-center">
           <Database className="w-10 h-10 text-green-600/20 mx-auto mb-4" />
           <p className="text-green-300/30 mb-2">No datasets uploaded yet</p>
-          <p className="text-xs text-green-400/20 mb-4">Click "Seed Test Data" to load sample KSA tourism datasets</p>
+          <p className="text-xs text-green-400/20 mb-4">Click "Seed Test Data" to load sample regional tourism datasets</p>
         </div>
       )}
 
@@ -188,7 +188,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               {[
                 { label: 'Total Visitors', value: data.kpis.total_visitors ? `${(data.kpis.total_visitors / 1000000).toFixed(1)}M` : '--', icon: Users, color: 'text-green-400' },
-                { label: 'Revenue (SAR)', value: data.kpis.total_revenue_sar ? `${(data.kpis.total_revenue_sar / 1000000000).toFixed(1)}B` : '--', icon: DollarSign, color: 'text-emerald-400' },
+                { label: 'Revenue (USD)', value: data.kpis.total_revenue_usd ? `${(data.kpis.total_revenue_usd / 1000000000).toFixed(1)}B` : '--', icon: DollarSign, color: 'text-emerald-400' },
                 { label: 'Hotel Occupancy', value: data.kpis.avg_hotel_occupancy ? `${data.kpis.avg_hotel_occupancy}%` : '--', icon: Hotel, color: 'text-green-300' },
                 { label: 'Satisfaction', value: data.kpis.avg_satisfaction ? `${data.kpis.avg_satisfaction}/5` : '--', icon: Star, color: 'text-green-400' },
               ].map((kpi, i) => (

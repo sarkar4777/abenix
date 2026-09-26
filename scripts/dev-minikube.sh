@@ -81,7 +81,7 @@ show_status() {
   echo -e "\n${B}Links:${N}"
   echo -e "    Abenix:     ${C}http://localhost:3000${N}"
   echo -e "    ContractIQ:     ${C}http://localhost:3001${N}  (test@contractiq.com / TestPass123!)"
-  echo -e "    Mideast Tourism:  ${C}http://localhost:3002${N}  (test@mideasttourism.gov.sa / TestPass123!)"
+  echo -e "    Mideast Tourism:  ${C}http://localhost:3002${N}  (test@mideasttourism.gov / TestPass123!)"
   echo -e "    Industrial IoT: ${C}http://localhost:3003${N}"
   echo -e "    ResolveAI:      ${C}http://localhost:3004${N}  — Customer-service agents"
   echo -e "    ClaimsIQ:       ${C}http://localhost:3005${N}  — Insurance FNOL (Java + Vaadin)"

@@ -90,7 +90,7 @@ tool_schemas = [
 ]
 ```
 
-`schema_for_llm` produces the per-tool JSONSchema the LLM provider expects. For Anthropic this is the `tools` array on the `messages.create` call. for OpenAI it's `tools` on `chat.completions.create`. The runtime has provider-specific shims in [`apps/agent-runtime/engine/providers/`](../../apps/agent-runtime/engine/providers/).
+`schema_for_llm` produces the per-tool JSONSchema the LLM provider expects. For Anthropic this is the `tools` array on the `messages.create` call. for OpenAI it's `tools` on `chat.completions.create`. The runtime has provider-specific shims in [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-runtime/engine/llm_router.py).
 
 ---
 
@@ -159,7 +159,7 @@ Two safety nets at the end of the loop:
 
 ## LLM provider abstraction
 
-The runtime supports three providers out of the box: Anthropic, OpenAI, Google. Each implementation lives in [`apps/agent-runtime/engine/providers/`](../../apps/agent-runtime/engine/providers/):
+The runtime supports Anthropic, OpenAI, Azure OpenAI and Google out of the box, plus a Claude subscription provider. Every implementation lives in one file, [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-runtime/engine/llm_router.py):
 
 ```python
 class ChatProvider(Protocol):
@@ -181,11 +181,62 @@ The runtime picks a provider by inspecting `model_config.model`:
 - `gemini-*` → Google
 
 To add a new provider:
-1. Implement the `ChatProvider` protocol.
-2. Register in `engine/providers/__init__.py`.
-3. Add pricing entries to `admin_pricing.py` so cost roll-ups work.
+1. Subclass `LLMProvider` in `llm_router.py`. There is no separate providers
+   package, every provider class lives in that file.
+2. Add it to `_PROVIDER_DEFAULT_MODEL` and teach `_provider_configured()` which
+   credential proves it is usable. `candidate_chain()` reads both to build the
+   fallback order.
+3. Add pricing rows so cost roll-ups work. Pricing is seeded by an alembic
+   migration into `llm_model_pricing`, with a hardcoded fallback in the router
+   for when the table has not been seeded yet.
 
 See [02-runtime/02-tools](02-tools.md) for adding tools (similar pattern).
+
+---
+
+## Claude subscription mode
+
+A Claude Pro or Max subscription can serve the platform instead of per-call API
+billing. `ClaudeSubscriptionProvider` subclasses `AnthropicProvider` and swaps
+the credential: it authenticates with `Authorization: Bearer <oauth token>` plus
+the `anthropic-beta: oauth-2025-04-20` header rather than `x-api-key`.
+
+Configure it at Admin -> LLM Settings, or set `CLAUDE_SUBSCRIPTION_TOKEN`. The
+stored setting wins over the environment variable.
+
+**Cost is recorded as zero, not as unknown.** The provider reports `0.0` while
+still emitting token metrics, so a subscription run shows real token counts
+against `cost = 0.000000`. A NULL cost means the value was never captured, which
+is a different condition.
+
+### Exclusive mode
+
+With `llm.subscription.exclusive` on, `map_model()` pins every request to the
+configured subscription model, including requests that already name a Claude
+model. That is the point of the setting: one plan's rate limits are predictable,
+whereas letting each agent pick its own tier makes them impossible to reason
+about.
+
+`effective_model()` is the function to call when you need to know what will
+actually run. Anything that branches on the raw configured model rather than the
+effective one will quietly bypass the subscription.
+
+### The token rotates
+
+The subscription credential is an OAuth access token that expires within hours,
+and whoever minted it may rotate it sooner. The platform stores a copy and
+cannot renew it, so a token that worked yesterday returns:
+
+```
+Error code: 401 - authentication_error: OAuth access token has been revoked.
+```
+
+That is a stale copy, not a platform fault. Run
+`bash scripts/sync-claude-subscription.sh` to refresh it, or check
+`POST /api/admin/settings/subscription/verify` to confirm the stored token is
+still live. When the subscription is enabled but unusable, the router falls
+through to any other configured provider and says so in the final error rather
+than surfacing the downstream provider's message on its own.
 
 ---
 

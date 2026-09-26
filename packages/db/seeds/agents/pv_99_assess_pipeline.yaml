@@ -1,0 +1,198 @@
+name: "PharmaVigil — Assess Case"
+slug: pharmavigil-assess
+description: >-
+  End-to-end ICSR assessment in nine nodes: Intake → MedDRA Coding →
+  Duplicate Check → Seriousness → Causality → Signal Detection →
+  Review Priority → Narrative → Final Report. Every coded term carries its
+  match confidence, every seriousness criterion carries the line of evidence
+  that met it, the disproportionality figures come from closed-form code
+  rather than a model, and the narrative is written only from what the
+  earlier nodes established.
+agent_type: oob
+category: life_sciences
+icon: Workflow
+version: "1.0.0"
+status: active
+mode: pipeline
+
+system_prompt: |
+  Adverse-event assessment pipeline for PharmaVigil. Nodes run in dependency
+  order; each emits structured JSON the next reads via {{node.field}}.
+
+model_config:
+  model: claude-sonnet-4-5-20250929
+  temperature: 0.1
+  max_iterations: 15
+  max_tokens: 4096
+  tools:
+    - agent_step
+    - knowledge_search
+    - code_asset
+    - ml_model
+    - document_extractor
+    - pii_redactor
+    - database_query
+    - date_calculator
+    - human_approval
+
+# pipeline_config is top level — seed_agents.py copies data["pipeline_config"]
+# into model_config at load. Nested under model_config it silently registers
+# as a single-step agent instead.
+pipeline_config:
+  nodes:
+    - id: intake
+      label: "Case Intake"
+      type: agent
+      agent_slug: pharmavigil-case-intake
+      # The caller already holds these from the intake form. Leaving the
+      # agent to re-derive them from prose is how fields end up null.
+      input: |
+        Case id:       {{input.case_id}}
+        Received:      {{input.received_date}}
+        Reporter type: {{input.reporter_type}}
+        Country:       {{input.country}}
+        Suspect drug:  {{input.suspect_drug}}
+
+        {{input.message}}
+      context:
+        case_id:       "{{input.case_id}}"
+        received_date: "{{input.received_date}}"
+        country:       "{{input.country}}"
+        attachment_urls: "{{input.attachment_urls}}"
+
+    - id: code_meddra
+      label: "MedDRA Coding"
+      type: agent
+      agent_slug: pharmavigil-meddra-coder
+      input: |
+        Verbatim reaction terms to code:
+        {{intake.reactions}}
+
+        Patient context (for adjudication only):
+        age {{intake.patient.age}}, sex {{intake.patient.sex}},
+        history {{intake.patient.medical_history}}
+      context:
+        reactions: "{{intake.reactions}}"
+
+    - id: duplicate
+      label: "Duplicate Check"
+      type: agent
+      agent_slug: pharmavigil-duplicate-check
+      input: |
+        New case:
+        patient   {{intake.patient}}
+        drug      {{intake.suspect_drugs}}
+        reactions {{code_meddra.coded_terms}}
+        country   {{input.country}}
+        reporter  {{intake.reporter_type}}
+        received  {{input.received_date}}
+      context:
+        case_id: "{{input.case_id}}"
+
+    - id: seriousness
+      label: "Seriousness"
+      type: agent
+      agent_slug: pharmavigil-seriousness
+      input: |
+        Coded reactions: {{code_meddra.coded_terms}}
+        IME terms:       {{code_meddra.imc_terms}}
+        Outcome:         {{intake.outcome}}
+        Patient:         {{intake.patient}}
+        Suspect drug:    {{intake.suspect_drugs}}
+        Received:        {{input.received_date}}
+        Narrative:       {{intake.narrative_summary}}
+      context:
+        received_date: "{{input.received_date}}"
+
+    - id: causality
+      label: "Causality"
+      type: agent
+      agent_slug: pharmavigil-causality
+      input: |
+        Suspect drug:      {{intake.suspect_drugs}}
+        Concomitant:       {{intake.concomitant_drugs}}
+        Coded reactions:   {{code_meddra.coded_terms}}
+        Medical history:   {{intake.patient.medical_history}}
+        Narrative:         {{intake.narrative_summary}}
+        Serious:           {{seriousness.serious}}
+
+    - id: signal
+      label: "Signal Detection"
+      type: agent
+      agent_slug: pharmavigil-signal-detector
+      input: |
+        Drug: {{input.suspect_drug}}
+        Coded reactions: {{code_meddra.coded_terms}}
+
+        Case counts for the denominator:
+        {{input.case_counts}}
+
+        Build the 2x2 for the primary drug-event pair and run
+        disproportionality on it.
+      context:
+        case_counts: "{{input.case_counts}}"
+
+    - id: triage
+      label: "Review Priority"
+      type: agent
+      agent_slug: pharmavigil-triage
+      input: |
+        Seriousness: {{seriousness}}
+        Causality:   {{causality}}
+        Signal:      {{signal}}
+        Coded:       {{code_meddra.coded_terms}}
+        IME terms:   {{code_meddra.imc_terms}}
+        Patient:     {{intake.patient}}
+        Concomitant: {{intake.concomitant_drugs}}
+        Reporter:    {{intake.reporter_type}}
+
+    - id: narrative
+      label: "Narrative"
+      type: agent
+      agent_slug: pharmavigil-narrative
+      input: |
+        Intake:      {{intake}}
+        Coded:       {{code_meddra}}
+        Seriousness: {{seriousness}}
+        Causality:   {{causality}}
+        Signal:      {{signal}}
+        Duplicate:   {{duplicate}}
+        Priority:    {{triage}}
+
+    - id: final_report
+      label: "Final Report"
+      type: structured
+      output:
+        case_id:              "{{input.case_id}}"
+        serious:              "{{seriousness.serious}}"
+        seriousness_criteria: "{{seriousness.criteria_met}}"
+        expedited:            "{{seriousness.expedited}}"
+        reporting_clock_days: "{{seriousness.reporting_clock_days}}"
+        due_date:             "{{seriousness.due_date}}"
+        listedness:           "{{seriousness.listedness}}"
+        who_umc:              "{{causality.who_umc}}"
+        naranjo_score:        "{{causality.naranjo.total}}"
+        naranjo_category:     "{{causality.naranjo.category}}"
+        primary_pt:           "{{signal.pair.pt}}"
+        signal:               "{{signal.signal}}"
+        prr:                  "{{signal.prr}}"
+        eb05:                 "{{signal.eb05}}"
+        signal_recommendation: "{{signal.recommendation}}"
+        priority:             "{{triage.priority}}"
+        escalation_probability: "{{triage.escalation_probability}}"
+        sla_hours:            "{{triage.sla_hours}}"
+        priority_drivers:     "{{triage.drivers}}"
+        recommended_reviewer: "{{triage.recommended_reviewer}}"
+        is_duplicate:         "{{duplicate.is_duplicate}}"
+        duplicate_of:         "{{duplicate.matched_case_id}}"
+        coded_terms:          "{{code_meddra.coded_terms}}"
+        uncoded_terms:        "{{code_meddra.uncoded}}"
+        narrative:            "{{narrative.narrative}}"
+        e2b:                  "{{narrative.e2b}}"
+        reviewer_questions:   "{{narrative.reviewer_questions}}"
+        missing_information:  "{{narrative.missing_information}}"
+        ready_to_submit:      "{{narrative.ready_to_submit}}"
+        intake:               "{{intake}}"
+        causality_detail:     "{{causality}}"
+        signal_detail:        "{{signal}}"
+        triage_detail:        "{{triage}}"

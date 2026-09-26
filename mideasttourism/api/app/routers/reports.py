@@ -43,12 +43,12 @@ REPORT_TYPES = {
     "executive_briefing": {
         "title": "Executive Briefing",
         "description": "High-level summary of tourism performance with key metrics and trends",
-        "agent_prompt": "Generate a comprehensive executive briefing for the KSA Ministry of Tourism. Include KPIs, regional performance, visitor trends, revenue analysis, and strategic recommendations. Use financial_calculator for all derived metrics.",
+        "agent_prompt": "Generate a comprehensive executive briefing for the Mideast Ministry of Tourism. Include KPIs, regional performance, visitor trends, revenue analysis, and strategic recommendations. Use financial_calculator for all derived metrics.",
     },
     "regional_comparison": {
         "title": "Regional Comparison Report",
-        "description": "Side-by-side comparison of all KSA tourism regions",
-        "agent_prompt": "Create a detailed comparison of all KSA tourism regions including visitors, revenue, occupancy, and growth rates. Use financial_calculator to compute growth rates and rankings.",
+        "description": "Side-by-side comparison of all regional tourism regions",
+        "agent_prompt": "Create a detailed comparison of all regional tourism regions including visitors, revenue, occupancy, and growth rates. Use financial_calculator to compute growth rates and rankings.",
     },
     "visitor_segmentation": {
         "title": "Visitor Segmentation Analysis",
@@ -63,7 +63,7 @@ REPORT_TYPES = {
     "seasonal_analysis": {
         "title": "Seasonal Performance Analysis",
         "description": "Monthly/quarterly trends with seasonality patterns",
-        "agent_prompt": "Analyze seasonal patterns in KSA tourism: monthly trends, peak/trough identification, Hajj/Umrah impact, seasonal pricing opportunities. Use financial_calculator for trend decomposition.",
+        "agent_prompt": "Analyze seasonal patterns in regional tourism: monthly trends, peak/trough identification, Eid/National Day impact, seasonal pricing opportunities. Use financial_calculator for trend decomposition.",
     },
 }
 

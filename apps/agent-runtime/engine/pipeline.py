@@ -343,54 +343,56 @@ def _resolve_templates(
     arguments: dict[str, Any],
     node_outputs: dict[str, Any],
 ) -> dict[str, Any]:
-    """Replace {{node_id.field}} template variables in string arguments."""
+    """Replace {{node_id.field}} template variables in arguments.
+
+    Walks nested dicts and lists. A node's `context:` block arrives as a dict,
+    so a string-only pass shipped every `{{input.x}}` inside it to the agent
+    verbatim.
+    """
     import re as _re
 
     pattern = _re.compile(r"\{\{(\w+(?:\.\w+)*)\}\}")
-    resolved = {}
 
-    for key, value in arguments.items():
-        if isinstance(value, str) and "{{" in value:
-            # Whole-value template ({{plan.actions}}) — keep the extracted
-            # object as-is so downstream nodes / structured outputs get a
-            # list/dict, not its Python repr. Embedded templates in a
-            # longer string fall back to str() coercion.
-            whole = pattern.fullmatch(value)
-            if whole is not None:
-                path = whole.group(1)
-                parts = path.split(".", 1)
-                node_id = parts[0]
-                field = parts[1] if len(parts) > 1 else "__all__"
-                source = node_outputs.get(node_id)
-                extracted = None if source is None else _extract_field(source, field)
-                resolved[key] = "[not available]" if extracted is None else extracted
-                continue
+    def _lookup(path: str) -> Any:
+        parts = path.split(".", 1)
+        source = node_outputs.get(parts[0])
+        if source is None:
+            return None
+        return _extract_field(source, parts[1] if len(parts) > 1 else "__all__")
 
-            def _replacer(match: _re.Match) -> str:
-                path = match.group(1)
-                parts = path.split(".", 1)
-                node_id = parts[0]
-                field = parts[1] if len(parts) > 1 else "__all__"
-                source = node_outputs.get(node_id)
-                if source is None:
-                    return "[not available]"  # Node was skipped or hasn't run
-                extracted = _extract_field(source, field)
-                if extracted is None:
-                    return "[not available]"
-                # Inline inside a larger string: use JSON so lists/dicts
-                # don't show up as Python repr (single-quoted keys).
-                if isinstance(extracted, (dict, list)):
-                    try:
-                        return json.dumps(extracted, default=str)
-                    except (TypeError, ValueError):
-                        return str(extracted)
-                return str(extracted)
+    def _resolve(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: _resolve(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_resolve(v) for v in value]
+        if not isinstance(value, str) or "{{" not in value:
+            return value
 
-            resolved[key] = pattern.sub(_replacer, value)
-        else:
-            resolved[key] = value
+        # Whole-value template ({{plan.actions}}) — keep the extracted object
+        # as-is so downstream nodes / structured outputs get a list/dict, not
+        # its Python repr. Embedded templates in a longer string fall back to
+        # str() coercion.
+        whole = pattern.fullmatch(value)
+        if whole is not None:
+            extracted = _lookup(whole.group(1))
+            return "[not available]" if extracted is None else extracted
 
-    return resolved
+        def _replacer(match: _re.Match) -> str:
+            extracted = _lookup(match.group(1))
+            if extracted is None:
+                return "[not available]"  # skipped, not run, or no such field
+            # Inline inside a larger string: use JSON so lists/dicts don't show
+            # up as Python repr (single-quoted keys).
+            if isinstance(extracted, (dict, list)):
+                try:
+                    return json.dumps(extracted, default=str)
+                except (TypeError, ValueError):
+                    return str(extracted)
+            return str(extracted)
+
+        return pattern.sub(_replacer, value)
+
+    return {key: _resolve(value) for key, value in arguments.items()}
 
 
 def _resolve_from_node_args(
@@ -468,13 +470,23 @@ async def _get_pipeline_engine(db_url: str) -> Any:
         return engine
 
 
+# Whole-pipeline wall-clock budget. 120s was hardcoded at every call site and
+# is not enough for a multi-node LLM pipeline: ClaimsIQ's seven nodes were cut
+# off at 134s with "Pipeline timeout exceeded" on the last two. OracleNet had
+# already worked around it with its own 600s. Override with
+# PIPELINE_TIMEOUT_SECONDS.
+DEFAULT_PIPELINE_TIMEOUT_SECONDS = int(
+    os.environ.get("PIPELINE_TIMEOUT_SECONDS", "300")
+)
+
+
 class PipelineExecutor:
     """Execute a DAG of tool calls with conditions and data piping."""
 
     def __init__(
         self,
         tool_registry: ToolRegistry,
-        timeout_seconds: int = 120,
+        timeout_seconds: int | None = None,
         on_node_start: Callable[..., Any] | None = None,
         on_node_complete: Callable[..., Any] | None = None,
         cost_limit: float | None = None,
@@ -483,7 +495,7 @@ class PipelineExecutor:
         tenant_id: str = "",
     ) -> None:
         self.tool_registry = tool_registry
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = timeout_seconds or DEFAULT_PIPELINE_TIMEOUT_SECONDS
         self.on_node_start = on_node_start
         self.on_node_complete = on_node_complete
         self.cost_limit = cost_limit
@@ -985,6 +997,13 @@ class PipelineExecutor:
             )
             if mcfg.get("tools") and "tools" not in resolved_args:
                 resolved_args["tools"] = mcfg["tools"]
+            # Execution context the sub-agent's tool registry needs. Without
+            # these its knowledge_search and every db-backed tool go missing.
+            # No db_url here — it carries a password and these arguments are
+            # recorded on the node result. agent_step reads DATABASE_URL itself.
+            resolved_args.setdefault("__kb_ids__", agent_row.get("kb_ids") or [])
+            resolved_args.setdefault("__agent_id__", agent_row.get("agent_id") or "")
+            resolved_args.setdefault("__tenant_id__", self._tenant_id or "")
             if (
                 mcfg.get("max_iterations") is not None
                 and "max_iterations" not in resolved_args
@@ -1242,20 +1261,35 @@ class PipelineExecutor:
             async with AsyncSession(engine) as session:
                 res = await session.execute(
                     _t(
-                        "SELECT system_prompt, model_config FROM agents WHERE slug = :slug LIMIT 1"
+                        "SELECT id, system_prompt, model_config FROM agents WHERE slug = :slug LIMIT 1"
                     ).bindparams(slug=slug)
                 )
                 row = res.first()
                 if row is None:
                     cache[slug] = None
                     return None
-                sp, mcfg = row[0], row[1]
+                aid, sp, mcfg = row[0], row[1], row[2]
                 if isinstance(mcfg, str):
                     try:
                         mcfg = json.loads(mcfg)
                     except Exception:
                         mcfg = {}
-                cache[slug] = {"system_prompt": sp or "", "model_config": mcfg or {}}
+                # Without its granted collections the sub-agent's registry has
+                # no knowledge_search, and the agent answers that it cannot
+                # look anything up. Direct invocation resolves these in the
+                # API layer, so a pipeline node has to do it here.
+                kb = await session.execute(
+                    _t(
+                        "SELECT collection_id FROM agent_collection_grants "
+                        "WHERE agent_id = :aid"
+                    ).bindparams(aid=aid)
+                )
+                cache[slug] = {
+                    "agent_id": str(aid),
+                    "system_prompt": sp or "",
+                    "model_config": mcfg or {},
+                    "kb_ids": [str(r[0]) for r in kb.fetchall()],
+                }
                 return cache[slug]
         except Exception as e:
             logger.warning("_resolve_agent_by_slug(%s) failed: %s", slug, e)

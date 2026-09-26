@@ -190,46 +190,6 @@ See [`02-runtime/15-v2-knowledge-enterprise.md`](../02-runtime/15-v2-knowledge-e
 | `GET` / `POST` | `/api/admin/dlq` | Dead-letter queue |
 | `GET` / `POST` / `PUT` / `DELETE` | `/api/connectors` | Integrations |
 | `GET` / `POST` / `PUT` | `/api/admin/moderation` | Policies |
-| `POST` | `/api/admin/notification-channels/{channel}/test` | Send a synthetic test event through Slack or email so admins can prove delivery without waiting for a real incident. `channel` is `slack` or `email`. Admin only. |
-
----
-
-## Notifications
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/notifications` | List for the current user |
-| `GET` | `/api/notifications/unread-count` | Badge counter |
-| `POST` | `/api/notifications/{id}/read` | Mark one read |
-| `POST` | `/api/notifications/read-all` | Mark all read |
-| `GET` | `/api/notifications/stream` | SSE feed, filtered by `?types=` |
-| `WS` | `/api/ws/{user_id}` | WebSocket variant of the SSE feed |
-
----
-
-## ML model invocations
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/ml-models/invocations` | Cross-model aggregate for the caller's tenant, paginated. Use this for the dashboard widget instead of looping over each model. |
-| `GET` | `/api/ml-models/{id}/invocations` | Per-model history |
-| `GET` | `/api/ml-models/{id}/invocations/stream` | SSE feed of new invocations |
-| `GET` | `/api/ml-models/{id}/stats` | 24h rollups |
-
----
-
-## MCP
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` / `POST` | `/api/mcp/connections` | List or create. `auth_config` secrets are encrypted with the per-tenant DEK on write and redacted on read. Server URL is checked against the SSRF allowlist before the connection is stored. |
-| `GET` / `PUT` / `DELETE` | `/api/mcp/connections/{id}` | Detail, update, delete |
-| `POST` | `/api/mcp/connections/{id}/discover` | Refresh tool catalogue from the remote server |
-| `POST` | `/api/mcp/discover` | One-shot discover for a candidate URL without saving. SSRF allowlist applies. |
-| `POST` | `/api/mcp/connections/{id}/health` | Liveness check |
-| `GET` / `POST` | `/api/mcp/connections/{id}/resources` | List or read |
-| `POST` | `/api/mcp/connections/{id}/tools/{tool}/invoke` | Invoke a tool against the remote server |
-| `GET` | `/api/mcp/connections/{id}/oauth/authorize` | Start the OAuth2 dance |
 
 ---
 

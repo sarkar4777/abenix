@@ -1225,7 +1225,7 @@ deploy_mideasttourism() {
   local st_key="${MIDEASTTOURISM_ABENIX_API_KEY:-}"
   if [ -z "${st_key}" ]; then
     # Reuse the ContractIQ key if it was just minted (same tenant, same Abenix),
-    # otherwise mint a fresh one for SauditTourism.
+    # otherwise mint a fresh one for MideastTourism.
     st_key=$(kubectl get secret contractiq-secrets -n "${NAMESPACE}" \
       -o jsonpath='{.data.CONTRACTIQ_ABENIX_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null)
     if [ -z "${st_key}" ] || [ "${st_key}" = "PLACEHOLDER_CHANGE_ME" ]; then
@@ -1981,14 +1981,23 @@ deploy_status() {
   fi
 
   echo -e "\n${BOLD}Public URLs:${NC}"
-  echo -e "  ${CYAN}Abenix Web${NC}    http://${host}"
-  echo -e "  ${CYAN}ContractIQ Web${NC}    http://ciq.${host}"
-  echo -e "  ${CYAN}Mideast Tourism${NC}     http://tourism.${host}"
-  echo -e "  ${CYAN}ClaimsIQ${NC}          http://claims.${host}"
-  echo -e "  ${CYAN}Abenix API${NC}    http://api.${host}/api/health"
-  echo -e "  ${CYAN}ContractIQ API${NC}    http://ciq-api.${host}/api/health"
-  echo -e "  ${CYAN}Mideast Tourism API${NC} http://tourism-api.${host}/api/health"
-  echo -e "  ${CYAN}ClaimsIQ Health${NC}   http://claims.${host}/actuator/health"
+  printf "  ${CYAN}%-22s${NC} %s\n" \
+    "Abenix Web"          "http://${host}" \
+    "Abenix API"          "http://api.${host}/api/health" \
+    "ContractIQ"          "http://ciq.${host}" \
+    "ContractIQ API"      "http://ciq-api.${host}/api/health" \
+    "Mideast Tourism"     "http://tourism.${host}" \
+    "Mideast Tourism API" "http://tourism-api.${host}/api/health" \
+    "Industrial IoT"      "http://iot.${host}" \
+    "ResolveAI"           "http://care.${host}" \
+    "ClaimsIQ"            "http://claims.${host}" \
+    "ClaimsIQ health"     "http://claims.${host}/actuator/health" \
+    "Grafana"             "http://grafana.${host}" \
+    "Prometheus"          "http://prom.${host}" \
+    "Tempo"               "http://tempo.${host}"
+  # Wingman has no ingress rule yet — say so rather than leave it unexplained.
+  printf "  ${CYAN}%-22s${NC} %s\n" \
+    "Wingman" "kubectl -n ${NAMESPACE} port-forward svc/wingman-web 3006:3006"
 
   echo -e "\n${BOLD}Health checks:${NC}"
   for u in "http://${host}" "http://ciq.${host}" "http://tourism.${host}" "http://claims.${host}/actuator/health/liveness" \

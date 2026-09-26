@@ -30,13 +30,13 @@ Cache: per-(subject, kb_id) Redis entry, 60s TTL. Invalidated automatically on g
 
 ## Document versioning
 
-Replace a contract amendment by `POST /api/knowledge/{kb}/documents/{doc}/replace`. The old row is marked `is_current=false, superseded_by=<new_id>`. Search defaults to `is_current=true`; pass `?include_superseded=true` to query history. Cognify only processes current versions, so superseded contracts stop influencing the graph the moment they're replaced.
+Replace a contract amendment by `POST /api/knowledge/{kb}/documents/{doc}/replace`. The old row is marked `is_current=false, superseded_by=<new_id>`. Search defaults to `is_current=true`. Pass `?include_superseded=true` to query history. Cognify only processes current versions, so superseded contracts stop influencing the graph the moment they're replaced.
 
 ### How queries resolve after a replace
 
 Three paths fan out from a single `replace` call. All happen automatically — no agent or caller change required.
 
-**KB vector search.** [`hybrid_search.py`](../../apps/api/app/services/knowledge/hybrid_search.py) filters by `documents.is_current = true` before similarity scoring, so the new version's chunks are the only candidates returned. The old chunks remain in Pinecone for auditability — pass `include_superseded=true` to surface them — but the default agent retrieval path never sees them.
+**KB vector search.** [`hybrid_search.py`](../../apps/agent-runtime/engine/knowledge/hybrid_search.py) filters by `documents.is_current = true` before similarity scoring, so the new version's chunks are the only candidates returned. The old chunks remain in Pinecone for auditability — pass `include_superseded=true` to surface them — but the default agent retrieval path never sees them.
 
 **Atlas graph queries.** New edges derived from the replacement document carry `valid_from = now, valid_to = NULL` (the bi-temporal columns added in v2.0). Edges from the superseded document get `valid_to = supersede_time` so they become historical facts. The default Cypher templates use `WHERE r.valid_to IS NULL`, so routine traversal returns only the new state. Forensic agents use `atlas_as_of(timestamp)` to query the historical graph explicitly.
 
@@ -188,7 +188,7 @@ Single migration `b8c9d0e1f2g3_v2_knowledge_atlas_persona.py`:
 - agent_memories: deleted_at, deleted_by
 - new tables: document_grants, cognify_configs, cognify_conflicts, gdpr_purge_log
 
-Backwards-compatible: every new column nullable or server-defaulted. No data movement; the migration is idempotent.
+Backwards-compatible: every new column nullable or server-defaulted. No data movement, and the migration is idempotent.
 
 ## Source map
 

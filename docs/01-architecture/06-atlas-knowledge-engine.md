@@ -103,7 +103,7 @@ Stages:
 4. **Schema validator** — every proposal must conform to the active `ontology_schema`. A proposal that claims an unsupported edge type gets rejected at this gate, not at human review.
 5. **Auto-accept gate (v2.0)** — proposals at or above the tenant's `auto_accept_threshold` (default `0.85`, see `cognify_configs`) land directly in `atlas_nodes` / `atlas_edges`. Lower-confidence proposals queue for review in the UI.
 6. **Conflict surface (v2.0)** — when an accepted proposal disagrees with an existing node on the same property, a `cognify_conflicts` row is created. The `conflict_action` config (`flag` / `split` / `lower_conf_wins` / `higher_conf_wins`) chooses the resolution policy.
-7. **Job modes (v2.0)** — `incremental` (default; new + updated docs only), `full` (every doc — use when ontology changes), `selective` (explicit `document_ids`). Incremental drops re-indexing cost ~100× for steady-state archives.
+7. **Job modes (v2.0)** — `incremental` (default, new and updated docs only), `full` (every doc — use when ontology changes), `selective` (explicit `document_ids`). Incremental drops re-indexing cost ~100× for steady-state archives.
 
 The whole pipeline is observable: every Cognify job emits a `CognifyReport` with the breakdown of entities-by-type, top entities by mention count, and the relationship-type histogram. Daily spend can be hard-capped via `daily_budget_usd` on the config.
 
@@ -136,7 +136,7 @@ The Cognify pipeline reads from [`apps/api/app/services/extractors/`](../../apps
 
 ## Document-level ACL (v2.0)
 
-`document_grants(document_id, subject_type, subject_id, permission)` makes a single KB safe to share across teams without losing graph traversal. The pre-filter runs **before similarity search** — a forbidden doc never enters the candidate pool, so the top-K returned to the agent is honest. The check is cached per-(subject, kb_id) in Redis with a 60s TTL; grant / revoke invalidates the cache automatically.
+`document_grants(document_id, subject_type, subject_id, permission)` makes a single KB safe to share across teams without losing graph traversal. The pre-filter runs **before similarity search** — a forbidden doc never enters the candidate pool, so the top-K returned to the agent is honest. The check is cached per-(subject, kb_id) in Redis with a 60s TTL. Grant and revoke invalidate the cache automatically.
 
 Pair this with `atlas_search_grounded` and you get team-partitioned knowledge that still gives the agent a coherent cross-team graph view via `atlas_describe` / `atlas_traverse` on the nodes themselves.
 

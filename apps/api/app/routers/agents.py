@@ -1667,10 +1667,14 @@ async def execute_agent(
     model = model_cfg.get("model", "claude-sonnet-4-5-20250929")
     temperature = model_cfg.get("temperature", 0.7)
     tool_names = model_cfg.get("tools", [])
-    # Allow agent yamls to override the executor's default iteration cap.
-    # Important for tool-heavy agents (hedge advisor, renewal copilot, stress
-    # test) where the default cap of 10 is too small.
-    agent_max_iterations = model_cfg.get("max_iterations")
+    # An agent yaml can override the cap, otherwise take the platform setting.
+    # Tool-heavy agents (hedge advisor, renewal copilot, stress test) need more
+    # than the default.
+    from app.core.platform_settings import get_int_setting
+
+    agent_max_iterations = model_cfg.get("max_iterations") or await get_int_setting(
+        "agent.max_iterations", 10
+    )
     agent_max_tokens = model_cfg.get("max_tokens", 4096)
 
     agent_cache_enabled = model_cfg.get("cache", True) is not False
@@ -1772,9 +1776,30 @@ async def execute_agent(
                 from app.core.execution_bus import subscribe_events
 
                 async def _remote_stream() -> AsyncIterator[bytes]:
+                    # The bus carries the runtime's own event shape: a string
+                    # token arrives as {"event":"token","data":"..."} and an
+                    # error as {"error":...}. The browser reads data.text and
+                    # data.message, the shape the inline path emits. Dumping
+                    # the bus event verbatim meant every token read as
+                    # undefined, so a pool-routed agent streamed a reply the
+                    # chat never showed. Translate to the one contract.
                     async for evt in subscribe_events(str(execution.id)):
-                        data = json.dumps(evt, default=str)
                         ev_name = evt.get("event") or "message"
+                        payload: dict[str, Any]
+                        if ev_name == "token":
+                            raw = evt.get("data")
+                            if not isinstance(raw, str):
+                                raw = evt.get("text") or evt.get("content") or ""
+                            payload = {"text": raw}
+                        elif ev_name == "error":
+                            payload = {
+                                "message": str(
+                                    evt.get("error") or evt.get("message") or ""
+                                )
+                            }
+                        else:
+                            payload = {k: v for k, v in evt.items() if k != "event"}
+                        data = json.dumps(payload, default=str)
                         yield f"event: {ev_name}\ndata: {data}\n\n".encode()
 
                 return StreamingResponse(
@@ -1897,6 +1922,7 @@ async def execute_agent(
                         "status"
                     ):
                         _failed_summary["status"] = "failed"
+                    _fs = _failed_summary if isinstance(_failed_summary, dict) else {}
                     return success(
                         {
                             "execution_id": str(execution.id),
@@ -1906,19 +1932,42 @@ async def execute_agent(
                             "status": "failed",
                             "error": errored,
                             "output": output_text,
+                            "output_text": output_text,
+                            "cost": float(execution.cost or 0.0),
+                            "duration_ms": int(
+                                _fs.get("total_duration_ms")
+                                or execution.duration_ms
+                                or 0
+                            ),
+                            "node_results": _fs.get("node_results") or {},
+                            "failed_nodes": _fs.get("failed_nodes") or [],
                             "summary": _failed_summary,
                         }
                     )
                 # Surface pipeline status from the consumer's done event so
                 # callers see status=completed/failed without a follow-up GET.
                 _qstatus = summary.get("status") if isinstance(summary, dict) else None
+                # Queue mode used to return only a stringified `output` and no
+                # cost or duration, while the inline path returned the structured
+                # final_output plus both. SDK clients that worked inline then read
+                # null out of every field — ClaimsIQ left claims on "running" for
+                # ever because `decision` was unreachable inside a JSON string.
+                # Everything needed is already in `summary`, just not surfaced.
+                _summary = summary if isinstance(summary, dict) else {}
+                _final = _summary.get("final_output")
                 _resp_payload = {
                     "execution_id": str(execution.id),
                     "task_id": task_id,
                     "pool": agent_pool,
                     "mode": "sync_via_queue",
                     "status": _qstatus or "completed",
-                    "output": output_text,
+                    "output": _final if _final is not None else output_text,
+                    "output_text": output_text,
+                    "cost": float(execution.cost or 0.0),
+                    "duration_ms": int(
+                        _summary.get("total_duration_ms") or execution.duration_ms or 0
+                    ),
+                    "node_results": _summary.get("node_results") or {},
                     "summary": summary,
                 }
                 if idempotency_key:
@@ -2496,10 +2545,12 @@ async def _non_stream_pipeline_execution(
             metadata={"mode": "pipeline"},
         )
 
+        from app.core.platform_settings import get_int_setting
+
         tool_registry = build_tool_registry(tool_names)
         executor = PipelineExecutor(
             tool_registry=tool_registry,
-            timeout_seconds=120,
+            timeout_seconds=await get_int_setting("pipeline.timeout_seconds", 300),
             db_url=os.environ.get("DATABASE_URL", ""),
             # Required for self-healing capture.
             agent_id=str(execution.agent_id),
