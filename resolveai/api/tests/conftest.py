@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+import asyncio
 import httpx
 import pytest
 import pytest_asyncio
@@ -157,11 +158,40 @@ def app(monkeypatch: pytest.MonkeyPatch, mock_sdk: _MockSDK):
             pass
 
 
+class _SettlingClient(httpx.AsyncClient):
+    """An AsyncClient that lets the app's background work finish.
+
+    POST /cases returns 201 immediately and fires the pipeline with
+    asyncio.create_task, so a test asserting straight after the response sees
+    the case still at "ingested". Every test here then failed on a working
+    app. Draining the loop after each request models what a caller observes a
+    moment later, without putting a sleep in eleven tests.
+    """
+
+    async def request(self, *args, **kwargs):  # type: ignore[override]
+        resp = await super().request(*args, **kwargs)
+        await _drain_tasks()
+        return resp
+
+
+async def _drain_tasks(rounds: int = 50) -> None:
+    """Yield until the app's spawned tasks have run, or we give up."""
+    current = asyncio.current_task()
+    for _ in range(rounds):
+        pending = [
+            t for t in asyncio.all_tasks()
+            if t is not current and not t.done()
+        ]
+        if not pending:
+            return
+        await asyncio.wait(pending, timeout=2.0)
+
+
 @pytest_asyncio.fixture
 async def client(app):
     """httpx.AsyncClient wired to the FastAPI app in-memory."""
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(
+    async with _SettlingClient(
         transport=transport,
         base_url="http://testserver",
     ) as c:

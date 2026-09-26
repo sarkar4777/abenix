@@ -62,6 +62,17 @@ run_python() {
   python -m pytest tests/unit/ -q --tb=short
   ok "pytest"
 
+  # Each standalone app keeps its own suite under <app>/api/tests. Nothing ran
+  # them — not CI, not this script — so they could rot unnoticed. They are
+  # cheap (no cluster, under a second each) so there is no reason to skip them.
+  for _app in contractiq resolveai wingman industrial-iot mideasttourism pharmavigil; do
+    if compgen -G "${_app}/api/tests/test_*.py" > /dev/null 2>&1; then
+      say "Python: ${_app}/api tests"
+      ( cd "${_app}/api" && python -m pytest tests/ -q --tb=short )
+      ok "${_app} tests"
+    fi
+  done
+
   if [ -f apps/api/requirements.txt ]; then
     say "Python: pip-audit (with .pip-audit-ignore)"
     python -m pip install --quiet pip-audit
