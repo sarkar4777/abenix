@@ -126,7 +126,7 @@ async def execute_command(
         )
     ).scalar_one_or_none()
     if not pipeline:
-        return error("Pipeline not found", "not_found", status_code=404)
+        return error("Pipeline not found", 404, "not_found")
 
     text = body.text.strip()
     if body.nl and not GRAMMAR.get(text.split(" ", 1)[0].lower(), None):
@@ -163,15 +163,11 @@ async def execute_command(
     if verb in MUTATING_VERBS:
         if not _can_mutate(user, pipeline):
             return error(
-                "Only admins or the pipeline owner can mutate",
-                "forbidden",
-                status_code=403,
+                "Only admins or the pipeline owner can mutate", 403, "forbidden"
             )
         cfg = pipeline.model_config_ or {}
         if not cfg.get("pipeline_config"):
-            return error(
-                "This agent has no pipeline DSL", "not_a_pipeline", status_code=400
-            )
+            return error("This agent has no pipeline DSL", 400, "not_a_pipeline")
         dsl = {"pipeline_config": cfg["pipeline_config"]}
         try:
             proposal = build_mutation_patch(verb, args, dsl)

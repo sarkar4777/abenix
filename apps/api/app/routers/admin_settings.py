@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.platform_settings import DEFAULTS, invalidate
+from app.core.platform_settings import DEFAULTS, SECRET_KEYS, invalidate, mask
 from app.core.responses import error, success
 
 import sys
@@ -25,6 +25,32 @@ router = APIRouter(prefix="/api/admin/settings", tags=["admin-settings"])
 
 
 AVAILABLE_MODELS: list[dict[str, Any]] = [
+    # Anthropic — current generation. Served either by an ANTHROPIC_API_KEY
+    # or by a Claude Pro/Max subscription, depending on what is configured.
+    {
+        "id": "claude-opus-5",
+        "provider": "anthropic",
+        "label": "Claude Opus 5",
+        "family": "claude-5",
+        "capabilities": ["text", "vision", "tools", "reasoning"],
+        "subscription_eligible": True,
+    },
+    {
+        "id": "claude-sonnet-5",
+        "provider": "anthropic",
+        "label": "Claude Sonnet 5",
+        "family": "claude-5",
+        "capabilities": ["text", "vision", "tools", "reasoning"],
+        "subscription_eligible": True,
+    },
+    {
+        "id": "claude-haiku-4-5",
+        "provider": "anthropic",
+        "label": "Claude Haiku 4.5",
+        "family": "claude-4",
+        "capabilities": ["text", "vision", "tools"],
+        "subscription_eligible": True,
+    },
     # Anthropic
     {
         "id": "claude-sonnet-4-5-20250929",
@@ -118,6 +144,31 @@ AVAILABLE_MODELS: list[dict[str, Any]] = [
 ]
 
 
+_SUBSCRIPTION_ENV = ("CLAUDE_SUBSCRIPTION_TOKEN", "ANTHROPIC_AUTH_TOKEN")
+_TOKEN_PLACEHOLDERS = {"", "placeholder", "dev", "changeme", "none", "null"}
+
+
+def _env_subscription_token() -> str:
+    """Subscription token supplied by the environment (headless installs)."""
+    import os
+
+    for name in _SUBSCRIPTION_ENV:
+        val = (os.environ.get(name) or "").strip()
+        if val and val.lower() not in _TOKEN_PLACEHOLDERS:
+            return val
+    return ""
+
+
+async def _subscription_token(db: AsyncSession) -> str:
+    stored = (
+        await db.execute(
+            text("SELECT value FROM platform_settings WHERE key = :k"),
+            {"k": "llm.subscription.token"},
+        )
+    ).scalar_one_or_none()
+    return (stored or "").strip() or _env_subscription_token()
+
+
 def _ensure_admin(user: User) -> None:
     role = getattr(user, "role", None)
     r = role.value if hasattr(role, "value") else str(role or "")
@@ -154,16 +205,20 @@ async def list_settings(
     out: dict[str, list[dict]] = {}
     for key, meta in DEFAULTS.items():
         current = stored.get(key, {})
+        raw = current.get("value") or meta["value"]
         item = {
             "key": key,
-            "value": current.get("value") or meta["value"],
-            "default": meta["value"],
+            "value": mask(key, raw),
+            "default": "" if key in SECRET_KEYS else meta["value"],
             "category": meta["category"],
             "description": meta["description"],
             "updated_at": current.get("updated_at"),
             "is_default": not current.get("value")
             or current.get("value") == meta["value"],
+            "is_secret": key in SECRET_KEYS,
         }
+        if key in SECRET_KEYS:
+            item["is_set"] = bool((current.get("value") or "").strip())
         out.setdefault(meta["category"], []).append(item)
     return success({"categories": out, "models": AVAILABLE_MODELS})
 
@@ -204,12 +259,33 @@ async def update_setting(
     if key not in DEFAULTS:
         return error(f"Unknown setting '{key}'", 400)
     value = body.get("value")
-    if value is None or not isinstance(value, str) or not value.strip():
+    if value is None or not isinstance(value, str):
+        return error("'value' is required and must be a string", 400)
+    # A secret may be cleared; every other setting needs a real value.
+    if not value.strip() and key not in SECRET_KEYS:
         return error("'value' is required and must be a non-empty string", 400)
+    value = value.strip()
 
     # Validate against the model catalogue for *.model settings
     if key.endswith(".model") and value not in {m["id"] for m in AVAILABLE_MODELS}:
         return error(f"Model '{value}' is not in the allowed list", 400)
+
+    if key == "llm.subscription.enabled" and value.lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        stored_token = (
+            await db.execute(
+                text("SELECT value FROM platform_settings WHERE key = :k"),
+                {"k": "llm.subscription.token"},
+            )
+        ).scalar_one_or_none()
+        if not (stored_token or "").strip() and not _env_subscription_token():
+            return error(
+                "Paste a subscription token before enabling subscription mode", 400
+            )
 
     meta = DEFAULTS[key]
     await db.execute(
@@ -233,8 +309,122 @@ async def update_setting(
     await db.commit()
     invalidate(key)
 
-    logger.info("[admin.settings] %s set %s=%s", user.email, key, value[:80])
-    return success({"key": key, "value": value, "updated_by": str(user.id)})
+    # Never log a secret's value — only that it changed.
+    logger.info(
+        "[admin.settings] %s set %s=%s",
+        user.email,
+        key,
+        "<redacted>" if key in SECRET_KEYS else value[:80],
+    )
+    return success({"key": key, "value": mask(key, value), "updated_by": str(user.id)})
+
+
+@router.get("/subscription")
+async def subscription_status(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Whether subscription mode is on, and what it will serve."""
+    _ensure_admin(user)
+    rows = (
+        await db.execute(
+            text(
+                "SELECT key, value FROM platform_settings "
+                "WHERE key LIKE 'llm.subscription.%'"
+            )
+        )
+    ).fetchall()
+    stored = {str(k): (v or "") for k, v in rows}
+    token = await _subscription_token(db)
+    enabled = str(stored.get("llm.subscription.enabled", "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    exclusive = str(
+        stored.get("llm.subscription.exclusive", "true")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    return success(
+        {
+            "enabled": enabled,
+            "token_set": bool(token),
+            "token_source": (
+                "settings"
+                if (stored.get("llm.subscription.token") or "").strip()
+                else ("environment" if token else None)
+            ),
+            "token_masked": mask("llm.subscription.token", token),
+            "default_model": (
+                stored.get("llm.subscription.default_model") or ""
+            ).strip()
+            or DEFAULTS["llm.subscription.default_model"]["value"],
+            "exclusive": exclusive,
+            "active": enabled and bool(token),
+            "billing": "flat-rate subscription — LLM calls record tokens at $0 marginal cost",
+        }
+    )
+
+
+@router.post("/subscription/verify")
+async def verify_subscription(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Make one real, minimal call with the stored token to prove it works."""
+    _ensure_admin(user)
+    token = await _subscription_token(db)
+    if not token:
+        return error("No subscription token configured", 400)
+
+    model = (
+        (
+            await db.execute(
+                text("SELECT value FROM platform_settings WHERE key = :k"),
+                {"k": "llm.subscription.default_model"},
+            )
+        ).scalar_one_or_none()
+        or DEFAULTS["llm.subscription.default_model"]["value"]
+    ).strip()
+
+    import anthropic
+
+    client = anthropic.AsyncAnthropic(
+        auth_token=token,
+        default_headers={"anthropic-beta": "oauth-2025-04-20"},
+    )
+    try:
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=16,
+            messages=[{"role": "user", "content": "Reply with the word ok."}],
+        )
+        text_out = "".join(
+            b.text for b in resp.content if getattr(b, "type", "") == "text"
+        )
+        return success(
+            {
+                "ok": True,
+                "model": resp.model,
+                "reply": text_out.strip()[:64],
+                "input_tokens": resp.usage.input_tokens,
+                "output_tokens": resp.usage.output_tokens,
+            }
+        )
+    except anthropic.AuthenticationError as exc:
+        return error(f"Token rejected: {exc.message}", 400)
+    except anthropic.PermissionDeniedError as exc:
+        return error(f"Token lacks access to {model}: {exc.message}", 400)
+    except anthropic.NotFoundError:
+        return error(f"Model '{model}' not available on this subscription", 400)
+    except anthropic.RateLimitError:
+        return error("Subscription rate limit reached — try again shortly", 429)
+    except anthropic.APIStatusError as exc:
+        return error(f"Anthropic returned {exc.status_code}: {exc.message}", 502)
+    except anthropic.APIConnectionError:
+        return error("Could not reach the Anthropic API from this cluster", 502)
+    finally:
+        await client.close()
 
 
 @router.post("/reset")

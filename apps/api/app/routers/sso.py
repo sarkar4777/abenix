@@ -385,7 +385,13 @@ async def _upsert_user(
         default_action=ModerationAction.BLOCK,
         custom_patterns=[],
         redaction_mask="█████",
-        fail_closed=True,
+        # Not fail-closed by default. The seeded provider is OpenAI, and on a
+        # deployment with no OpenAI credential every provider call errors —
+        # fail_closed then escalated that to a hard block, so 100% of agent
+        # requests were refused with no category to explain it. The custom
+        # pattern checks (PII, secrets) need no provider and still apply.
+        # Strict mode stays available as an explicit opt-in at /moderation.
+        fail_closed=False,
         created_by=user.id,
     )
     db.add(policy)

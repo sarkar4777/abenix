@@ -12,6 +12,10 @@ logs
 e2e
 **/e2e
 infra
+# ...but the Use Cases catalogue must ship: the api resolves it at
+# runtime and an empty catalogue renders "No use cases available"
+# in the top bar for every containerised deploy.
+!infra/use_cases_catalog.json
 *.md
 .env*
 __pycache__

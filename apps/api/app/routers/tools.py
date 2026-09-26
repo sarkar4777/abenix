@@ -29,6 +29,58 @@ router = APIRouter(prefix="/api/tools", tags=["tools"])
 _RUNTIME_SCHEMAS: dict[str, dict[str, Any]] | None = None
 
 
+def _runtime_tool_slugs() -> list[str]:
+    """Every tool slug the executor can actually run."""
+    try:
+        from engine.agent_executor import list_tool_classes  # type: ignore
+
+        return list(list_tool_classes())
+    except Exception as e:  # pragma: no cover — import-environment dependent
+        logger.warning("could not enumerate runtime tools: %s", e)
+        return []
+
+
+def _runtime_tool_description(slug: str) -> str | None:
+    """First line of the tool class's own description/docstring, if any."""
+    try:
+        from engine.agent_executor import get_tool_class  # type: ignore
+
+        cls = get_tool_class(slug)
+        if cls is None:
+            return None
+        desc = getattr(cls, "description", None)
+        if isinstance(desc, str) and desc.strip():
+            return desc.strip().split("\n")[0][:400]
+        doc = (cls.__doc__ or "").strip()
+        return doc.split("\n")[0][:400] or None
+    except Exception:
+        return None
+
+
+# Slug-prefix hints for bucketing an uncatalogued tool into a palette group.
+_CATEGORY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("atlas_", "graph_", "vector_", "knowledge_", "semantic_"), "data"),
+    (
+        ("mqtt_", "tsdb_", "windowed_", "subscribed_", "kafka_", "redis_stream"),
+        "integration",
+    ),
+    (("moodys", "spg_", "fitch", "edgar", "ferc", "bundesanzeiger", "eex_"), "finance"),
+    (("crypto_", "realized_vol", "monte_carlo", "notional_", "credit_risk"), "finance"),
+    (("fred_", "world_bank", "country_cpi", "gov_data", "eia_"), "data"),
+    (("companies_house", "moodys_orbis", "address_", "geocod"), "kyc"),
+    (("twilio", "zapier", "connector_", "browser_"), "integration"),
+    (("plotly_", "mermaid_", "translation", "narrate"), "multimodal"),
+    (("approval_gate", "sub_pipeline", "invoke_agent"), "pipeline"),
+)
+
+
+def _guess_category(slug: str) -> str:
+    for prefixes, category in _CATEGORY_HINTS:
+        if slug.startswith(prefixes):
+            return category
+    return "core"
+
+
 def _load_runtime_schemas() -> dict[str, dict[str, Any]]:
     """Return {tool_name: input_schema} pulled from the runtime registry."""
     global _RUNTIME_SCHEMAS
@@ -927,6 +979,32 @@ async def list_tools(
             if schema:
                 merged["input_schema"] = schema
         out.append(merged)
+
+    # TOOL_CATALOG above is hand-maintained, so it drifts behind the runtime
+    # every time a tool ships without a catalogue entry — and a tool absent
+    # here is invisible in the agent AND pipeline designers even though the
+    # executor can run it. An audit found 42 such tools (the whole v1.1
+    # streaming set, vector_search, browser_automation, plotly_chart, the
+    # ratings/filings block, approval_gate/connector_call/sub_pipeline...).
+    # Append anything the runtime registers that the catalogue missed, so the
+    # designer is complete by construction rather than by diligence.
+    known = {e["id"] for e in out}
+    for slug in _runtime_tool_slugs():
+        if slug in known:
+            continue
+        out.append(
+            {
+                "id": slug,
+                "name": slug.replace("_", " ").title(),
+                "description": (
+                    _runtime_tool_description(slug)
+                    or f"Runtime tool `{slug}` (no catalogue entry yet)."
+                ),
+                "category": _guess_category(slug),
+                "input_schema": runtime_schemas.get(slug) or {},
+                "uncatalogued": True,
+            }
+        )
     return success(out, meta={"count": len(out)})
 
 
@@ -1095,13 +1173,36 @@ async def execute_tool(
         {k: v for k, v in (config or {}).items() if not accepted or k in accepted}
     )
 
-    try:
-        tool = cls(**init_kwargs)
-    except TypeError:
+    # Some tools raise ValueError from __init__, not TypeError; catching only
+    # TypeError let those escape as a bare 500.
+    tool = None
+    construct_error: Exception | None = None
+    for attempt_kwargs in (init_kwargs, {"tenant_id": tenant_id}, {}):
         try:
-            tool = cls(tenant_id=tenant_id)
-        except TypeError:
-            tool = cls()
+            tool = cls(**attempt_kwargs)
+            break
+        except (TypeError, ValueError) as e:
+            if construct_error is None:
+                construct_error = e
+    if tool is None:
+        await tool_gate.release(decision, tool_slug, tenant_id, ok=False)
+        await _log_invocation(
+            db,
+            user,
+            tool_slug,
+            body,
+            None,
+            started,
+            status="error",
+            error_message=str(construct_error),
+        )
+        # A tool that cannot be built from this request is a bad request, not a
+        # server fault.
+        return error(
+            f"tool {tool_slug} could not be initialised: {construct_error}",
+            400,
+            "tool_not_configurable",
+        )
 
     tool_started_at = time.time()
     try:

@@ -227,3 +227,6 @@ contractiq/e2e/fixtures/uat_run_*.pdf
 
 # (contractiq/__init__.py is REQUIRED by apps/agent-runtime/Dockerfile to make
 # `contractiq.runtime.post_processors` importable — do NOT ignore it.)
+
+# TypeScript incremental build cache — regenerated on every build
+*.tsbuildinfo

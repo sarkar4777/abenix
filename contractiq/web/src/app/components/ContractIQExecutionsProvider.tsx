@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 
+import { authFetch } from './authFetch';
+
 export interface ActiveExecution {
   executionId: string;
   agentSlug?: string;
@@ -89,7 +91,7 @@ export function ContractIQExecutionsProvider({ children }: { children: ReactNode
     if (inFlightRef.current.has(exec.executionId)) return;
     inFlightRef.current.add(exec.executionId);
     try {
-      const r = await fetch(`/api/contractiq-executions/${exec.executionId}`, { cache: 'no-store' });
+      const r = await authFetch(`/api/contractiq-executions/${exec.executionId}`, { cache: 'no-store' });
       if (!r.ok) return;
       const j = await r.json();
       const data = j?.data || {};

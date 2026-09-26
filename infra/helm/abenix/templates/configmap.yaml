@@ -56,6 +56,10 @@ data:
   DATABASE_PORT: "5432"
   DATABASE_NAME: {{ .Values.databaseName | default "abenix" | quote }}
   FRONTEND_URL: {{ .Values.frontendUrl | default "http://localhost:3000" | quote }}
+  # Browser origins allowed to call the API. The web UI's host port is not
+  # always 3000 — deploy.sh takes WEB_PORT — so every origin the browser may
+  # use has to be listed here or the UI gets CORS-blocked.
+  CORS_ORIGINS: {{ .Values.corsOrigins | default (list "http://localhost:3000") | toJson | quote }}
   # Sandboxed-job runner — on by default in every deploy. Override the
   # allow-list via .Values.sandboxedJob.allowedImages.
   SANDBOXED_JOB_ENABLED: {{ .Values.sandboxedJob.enabled | default "true" | quote }}
@@ -75,9 +79,11 @@ data:
   {{- if .Values.sandboxedJob.namespace }}
   SANDBOXED_JOB_NAMESPACE: {{ .Values.sandboxedJob.namespace | quote }}
   {{- end }}
-  # v1.1 production tooling — MQTT broker + TimescaleDB
-  MQTT_URL: "mqtt://{{ .Release.Name }}-mqtt-mosquitto.{{ .Release.Namespace }}.svc.cluster.local:1883"
-  TSDB_DSN: "postgresql://abenix:abenix@{{ .Release.Name }}-tsdb-timescaledb.{{ .Release.Namespace }}.svc.cluster.local:5432/abenix_tsdb"
+  # Hosts are the release names deploy.sh installs these charts under; an extra
+  # "-mqtt-"/"-tsdb-" segment used to make both resolve to nothing.
+  MQTT_URL: "mqtt://{{ .Values.streaming.mqttHost | default (printf "%s-mosquitto" .Release.Name) }}.{{ .Release.Namespace }}.svc.cluster.local:1883"
+  # TSDB_URL is the name tsdb_query reads; it was published as TSDB_DSN.
+  TSDB_URL: "postgresql://{{ .Values.streaming.tsdbUser | default "abenix" }}:{{ .Values.streaming.tsdbPassword | default "abenix" }}@{{ .Values.streaming.tsdbHost | default (printf "%s-timescaledb" .Release.Name) }}.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.streaming.tsdbDatabase | default "abenix_tsdb" }}"
   # Meeting Representative — LiveKit config. Secrets live in abenix-secrets.
   {{- if .Values.meeting }}
   LIVEKIT_URL: {{ .Values.meeting.livekit.url | default "" | quote }}

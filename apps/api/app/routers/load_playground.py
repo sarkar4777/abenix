@@ -20,6 +20,35 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+
+
+def _anthropic_client(api_key: str | None = None, sync: bool = False):
+    """Anthropic client honouring a Claude subscription before API keys.
+
+    Keeps this router working on a subscription-only install, where there is
+    no ANTHROPIC_API_KEY to construct a client from.
+    """
+    from pathlib import Path as _Path
+
+    try:
+        sys.path.insert(
+            0, str(_Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+        )
+        from engine import claude_subscription  # type: ignore
+
+        builder = (
+            claude_subscription.build_sync_client
+            if sync
+            else claude_subscription.build_async_client
+        )
+        return builder(api_key)[0]
+    except Exception:
+        import anthropic
+
+        cls = anthropic.Anthropic if sync else anthropic.AsyncAnthropic
+        return cls(api_key=api_key) if api_key else cls()
+
+
 from app.core.responses import success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -101,9 +130,8 @@ async def _llm_generate(system_prompt: str, user_prompt: str) -> tuple[str, str]
     if not api_key:
         return "", "none"
     try:
-        import anthropic
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = _anthropic_client(api_key, sync=True)
         resp = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=6000,

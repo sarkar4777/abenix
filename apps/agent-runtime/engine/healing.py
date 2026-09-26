@@ -152,9 +152,20 @@ async def capture_failure(
               error_class, error_message, error_traceback,
               expected_shape, observed_shape,
               expected_sample, observed_sample, upstream_inputs,
-              recent_success_count, recent_failure_count
+              recent_success_count, recent_failure_count,
+              -- created_at is NOT NULL. The alembic migration gives it
+              -- DEFAULT now(), but a schema built by
+              -- Base.metadata.create_all() does not, so omitting it made
+              -- every insert fail with "null value in column created_at".
+              -- fire_and_forget swallowed it, so Pipeline Surgeon silently
+              -- never had a diff to diagnose. `id` is the same story: this
+              -- is a raw asyncpg insert, so the ORM's UUID default never
+              -- runs and create_all left the column without a server
+              -- default. Set both explicitly.
+              created_at, id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                    NOW(), gen_random_uuid())
             RETURNING id::text
             """,
             UUID(tenant_id),
@@ -206,6 +217,13 @@ def safe_traceback(exc: BaseException | None) -> str | None:
         return None
 
 
+# Strong references to in-flight fire-and-forget tasks. asyncio keeps only a
+# weak reference to a Task, so a bare `loop.create_task(coro)` whose result is
+# discarded can be garbage-collected before it ever runs — which is why
+# healing capture silently never wrote a row. Hold the task until it finishes.
+_INFLIGHT: set[asyncio.Task[Any]] = set()
+
+
 def fire_and_forget(coro: Any) -> None:
     """Schedule an awaitable on the running loop without blocking.
 
@@ -213,10 +231,23 @@ def fire_and_forget(coro: Any) -> None:
     """
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(coro)
     except RuntimeError:
         # No running loop — best-effort drop on the floor.
         try:
             coro.close()
         except Exception:
             pass
+        return
+
+    task = loop.create_task(coro)
+    _INFLIGHT.add(task)
+
+    def _done(t: asyncio.Task[Any]) -> None:
+        _INFLIGHT.discard(t)
+        # Surface failures instead of letting them vanish into a dropped task.
+        if not t.cancelled():
+            exc = t.exception()
+            if exc is not None:
+                logger.warning("fire_and_forget task failed: %s", exc)
+
+    task.add_done_callback(_done)

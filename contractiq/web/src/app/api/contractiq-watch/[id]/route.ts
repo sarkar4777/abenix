@@ -1,15 +1,17 @@
 import { NextRequest } from 'next/server';
 
+import { forwardHeaders } from '../../_forward';
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const INTERNAL = process.env.CONTRACTIQ_API_INTERNAL_URL || 'http://localhost:8001';
 
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   try {
     const upstream = await fetch(`${INTERNAL}/api/contractiq/executions/${id}/watch`, {
-      headers: { Accept: 'text/event-stream' },
+      headers: { Accept: 'text/event-stream', ...forwardHeaders(req) },
       cache: 'no-store',
     });
     return new Response(upstream.body, {

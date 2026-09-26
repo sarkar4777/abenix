@@ -9,8 +9,16 @@ metadata:
     app.kubernetes.io/part-of: abenix
 spec:
   accessModes:
-    - ReadWriteMany
-  storageClassName: {{ .Values.mlModels.storageClass | default "" | quote }}
+    - {{ .Values.mlModels.accessMode | default "ReadWriteMany" }}
+  {{- /* An explicit `storageClassName: ""` means "disable dynamic
+        provisioning" in Kubernetes — it does NOT select the default class.
+        Emitting it unconditionally left this PVC Pending forever on any
+        cluster that relies on a default StorageClass (minikube included),
+        which in turn kept agent-runtime unschedulable. Omit the field
+        entirely unless an operator named a class. */}}
+  {{- with .Values.mlModels.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
   resources:
     requests:
       storage: {{ .Values.mlModels.storageSize | default "5Gi" }}

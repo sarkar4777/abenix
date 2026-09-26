@@ -13,3 +13,4 @@
 #   GHSA-xxxx-yyyy-zzzz  # not exposed via our API surface; tracked in #123
 
 MAL-2026-4750  # OSV malicious-packages feed flag against fastapi 0.136.3 — no fix version published, the legitimate fastapi release is in use, advisory tracks a typosquatting incident not the upstream package. Re-evaluate when OSV publishes a fix or withdraws the advisory.
+PYSEC-2026-1325  # Minerva timing attack on ECDSA P-256 signing in the `ecdsa` package. Not reachable here: `ecdsa` is an unused transitive dependency of python-jose, and this platform signs with RS256 (settings.jwt_algorithm) and HS256 (SSO state) — never ECDSA — so SigningKey.sign_digest() is never called. Verification is unaffected per the advisory, and upstream has declined to fix ("side channel attacks out of scope, no planned fix"). Revisit if we ever adopt ES256 or drop python-jose for PyJWT.

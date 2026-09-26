@@ -271,7 +271,9 @@ async def _mark_done(
         values["input_tokens"] = input_tokens
     if output_tokens is not None:
         values["output_tokens"] = output_tokens
-    if cost is not None and cost > 0:
+    # Write a known cost even when zero — skipping 0.0 left the column NULL,
+    # which reads as "never recorded" rather than "free".
+    if cost is not None:
         values["cost"] = round(float(cost), 6)
     if tool_calls is not None:
         values["tool_calls"] = tool_calls

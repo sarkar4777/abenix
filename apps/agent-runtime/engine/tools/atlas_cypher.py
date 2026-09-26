@@ -11,6 +11,7 @@ and execution at 10 seconds.
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from typing import Any
@@ -90,7 +91,18 @@ class AtlasCypherTool(BaseTool):
         "required": ["cypher", "graph_id"],
     }
 
-    async def run(self, **kwargs: Any) -> ToolResult:
+    def __init__(
+        self,
+        tenant_id: str,
+        agent_id: str = "",
+        allowed_graph_ids: list[str] | None = None,
+    ) -> None:
+        self.tenant_id = tenant_id
+        self.agent_id = agent_id
+        self.allowed_graph_ids = allowed_graph_ids or []
+
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        kwargs = arguments or {}
         cypher = str(kwargs.get("cypher", "")).strip()
         graph_id_raw = str(kwargs.get("graph_id", "")).strip()
         params = dict(kwargs.get("params") or {})
@@ -98,15 +110,15 @@ class AtlasCypherTool(BaseTool):
 
         ok, why = _is_read_only(cypher)
         if not ok:
-            return ToolResult.error(f"cypher rejected: {why}")
+            return ToolResult(content=f"cypher rejected: {why}", is_error=True)
         try:
             graph_id = uuid.UUID(graph_id_raw)
         except Exception:
-            return ToolResult.error("graph_id must be a UUID")
+            return ToolResult(content="graph_id must be a UUID", is_error=True)
 
-        tenant_id = self.context.tenant_id if self.context else None
-        if tenant_id is None:
-            return ToolResult.error("missing tenant context")
+        tenant_id = self.tenant_id
+        if not tenant_id:
+            return ToolResult(content="missing tenant context", is_error=True)
 
         params[TENANT_PARAM] = str(tenant_id)
         params[GRAPH_PARAM] = str(graph_id)
@@ -116,20 +128,22 @@ class AtlasCypherTool(BaseTool):
         try:
             from app.services.atlas.neo4j_client import run_cypher
         except Exception:
-            return ToolResult.error("atlas backend not available")
+            return ToolResult(content="atlas backend not available", is_error=True)
 
         try:
             rows = await run_cypher(cypher, params, timeout_s=MAX_SECONDS)
         except Exception as e:
-            return ToolResult.error(f"cypher execution failed: {e}")
+            return ToolResult(content=f"cypher execution failed: {e}", is_error=True)
         rows = rows[:MAX_ROWS]
-        return ToolResult.ok(
-            {
-                "rows": rows,
-                "row_count": len(rows),
-                "graph_id": str(graph_id),
-                "cypher": cypher,
-            }
+        return ToolResult(
+            content=json.dumps(
+                {
+                    "rows": rows,
+                    "row_count": len(rows),
+                    "graph_id": str(graph_id),
+                    "cypher": cypher,
+                }
+            )
         )
 
 
@@ -164,7 +178,18 @@ class AtlasAsOfTool(BaseTool):
         "required": ["graph_id"],
     }
 
-    async def run(self, **kwargs: Any) -> ToolResult:
+    def __init__(
+        self,
+        tenant_id: str,
+        agent_id: str = "",
+        allowed_graph_ids: list[str] | None = None,
+    ) -> None:
+        self.tenant_id = tenant_id
+        self.agent_id = agent_id
+        self.allowed_graph_ids = allowed_graph_ids or []
+
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        kwargs = arguments or {}
         graph_id_raw = str(kwargs.get("graph_id", "")).strip()
         as_of = str(kwargs.get("as_of") or "").strip() or None
         match_clause = str(kwargs.get("match_clause") or "(n)-[r]-(m)")
@@ -173,11 +198,11 @@ class AtlasAsOfTool(BaseTool):
         try:
             graph_id = uuid.UUID(graph_id_raw)
         except Exception:
-            return ToolResult.error("graph_id must be a UUID")
+            return ToolResult(content="graph_id must be a UUID", is_error=True)
 
-        tenant_id = self.context.tenant_id if self.context else None
-        if tenant_id is None:
-            return ToolResult.error("missing tenant context")
+        tenant_id = self.tenant_id
+        if not tenant_id:
+            return ToolResult(content="missing tenant context", is_error=True)
 
         if as_of is None:
             from datetime import datetime, timezone
@@ -200,14 +225,16 @@ class AtlasAsOfTool(BaseTool):
                 timeout_s=MAX_SECONDS,
             )
         except Exception as e:
-            return ToolResult.error(f"as-of query failed: {e}")
-        return ToolResult.ok(
-            {
-                "graph_id": str(graph_id),
-                "as_of": as_of,
-                "rows": rows,
-                "row_count": len(rows),
-            }
+            return ToolResult(content=f"as-of query failed: {e}", is_error=True)
+        return ToolResult(
+            content=json.dumps(
+                {
+                    "graph_id": str(graph_id),
+                    "as_of": as_of,
+                    "rows": rows,
+                    "row_count": len(rows),
+                }
+            )
         )
 
 

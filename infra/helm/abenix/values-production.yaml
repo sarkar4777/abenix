@@ -242,6 +242,8 @@ secrets:
   jwtSecret: ""
   stripeSecretKey: ""
   anthropicApiKey: ""
+  # Claude Pro/Max subscription token (`claude setup-token`). Optional.
+  claudeSubscriptionToken: ""
   neo4jPassword: ""
   openaiApiKey: ""
   pineconeApiKey: ""

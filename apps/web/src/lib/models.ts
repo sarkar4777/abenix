@@ -18,6 +18,20 @@ export interface ModelOption {
   status: 'available' | 'unavailable' | 'degraded' | string;
   last_checked_at: string | null;
   last_error: string | null;
+  /** Provider that will actually serve this model right now. */
+  served_by?: string;
+  /** True when a Claude subscription serves it instead of an API key. */
+  subscription_served?: boolean;
+  /** Set when exclusive subscription mode remaps this model onto another. */
+  subscription_remapped_to?: string | null;
+}
+
+export interface SubscriptionState {
+  enabled: boolean;
+  token_set: boolean;
+  active: boolean;
+  exclusive: boolean;
+  default_model: string;
 }
 
 export const FALLBACK_MODELS: ModelOption[] = [
@@ -30,6 +44,7 @@ export const FALLBACK_MODELS: ModelOption[] = [
 ];
 
 let _cache: ModelOption[] | null = null;
+let _subCache: SubscriptionState | null = null;
 let _cacheAt = 0;
 const TTL_MS = 60_000;
 let _inflight: Promise<ModelOption[]> | null = null;
@@ -48,6 +63,7 @@ async function fetchModels(): Promise<ModelOption[]> {
       const body = await resp.json();
       const models = (body?.data?.models || body?.models) as ModelOption[];
       if (!Array.isArray(models) || models.length === 0) throw new Error('empty model list');
+      _subCache = (body?.data?.subscription || body?.subscription) ?? null;
       _cache = models;
       _cacheAt = now;
       return models;
@@ -60,8 +76,13 @@ async function fetchModels(): Promise<ModelOption[]> {
   return _inflight;
 }
 
-export function useModels(): { models: ModelOption[]; loading: boolean } {
+export function useModels(): {
+  models: ModelOption[];
+  loading: boolean;
+  subscription: SubscriptionState | null;
+} {
   const [models, setModels] = useState<ModelOption[]>(_cache || FALLBACK_MODELS);
+  const [subscription, setSubscription] = useState<SubscriptionState | null>(_subCache);
   const [loading, setLoading] = useState(!_cache);
   const mounted = useRef(true);
   useEffect(() => {
@@ -69,12 +90,13 @@ export function useModels(): { models: ModelOption[]; loading: boolean } {
     fetchModels().then((m) => {
       if (mounted.current) {
         setModels(m);
+        setSubscription(_subCache);
         setLoading(false);
       }
     });
     return () => { mounted.current = false; };
   }, []);
-  return { models, loading };
+  return { models, loading, subscription };
 }
 
 export function useSelectableModels(includeDeprecated = false): ModelOption[] {

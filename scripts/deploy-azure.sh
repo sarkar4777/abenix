@@ -344,6 +344,7 @@ _warn_unmanaged_deployments() {
 _build_secrets_flags() {
   local flags=""
   [ -n "${ANTHROPIC_API_KEY:-}" ]        && flags="${flags} --set secrets.anthropicApiKey=${ANTHROPIC_API_KEY}"
+  [ -n "${CLAUDE_SUBSCRIPTION_TOKEN:-}" ] && flags="${flags} --set secrets.claudeSubscriptionToken=${CLAUDE_SUBSCRIPTION_TOKEN}"
   [ -n "${OPENAI_API_KEY:-}" ]           && flags="${flags} --set secrets.openaiApiKey=${OPENAI_API_KEY}"
   [ -n "${GOOGLE_API_KEY:-}" ]           && flags="${flags} --set secrets.googleApiKey=${GOOGLE_API_KEY}"
   [ -n "${AZURE_OPENAI_API_KEY:-}" ]     && flags="${flags} --set secrets.azureOpenaiApiKey=${AZURE_OPENAI_API_KEY}"

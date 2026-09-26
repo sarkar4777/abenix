@@ -122,8 +122,14 @@ spec:
               value: "/data/code-assets"
             - name: CODE_ASSET_BUILD_CACHE
               value: "/data/code-asset-cache"
-            - name: REDIS_URL
-              value: "redis://{{ $release }}-redis-master.{{ $ns }}.svc.cluster.local:6379/0"
+            {{- /* REDIS_URL deliberately NOT set here. An explicit `env`
+                   entry wins over `envFrom`, so hardcoding a credential-free
+                   URL here silently overrode the authenticated REDIS_URL in
+                   abenix-secrets. With Redis auth enabled the tool_consumer
+                   loop then failed every second with "HELLO must be called
+                   with the client already authenticated", leaving the tool
+                   queue dead — and queue depth is exactly what KEDA scales
+                   on. Let the secret supply it. */}}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://{{ $release }}-tempo.{{ $ns }}.svc.cluster.local:4317"
             - name: OTEL_TRACES_SAMPLER_ARG

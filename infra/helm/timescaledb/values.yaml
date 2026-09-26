@@ -30,3 +30,9 @@ resources:
   limits:
     cpu: "2"
     memory: 2Gi
+
+# Creates the `metrics` hypertable that tsdb_query and the pipeline tsdb_sink
+# node read and write. Without it both fail with relation "metrics" not existing.
+schema:
+  enabled: true
+  table: metrics

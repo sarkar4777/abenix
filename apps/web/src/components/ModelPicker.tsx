@@ -14,6 +14,17 @@ interface RawModel {
   status?: string;
   provider_available?: boolean;
   provider_unavailable_reason?: string | null;
+  served_by?: string;
+  subscription_served?: boolean;
+  subscription_remapped_to?: string | null;
+}
+
+interface SubscriptionState {
+  enabled: boolean;
+  token_set: boolean;
+  active: boolean;
+  exclusive: boolean;
+  default_model: string;
 }
 
 interface ProviderInfo {
@@ -37,6 +48,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   azure: 'Azure OpenAI',
   google: 'Google Gemini',
   openai: 'OpenAI',
+  claude_subscription: 'Claude subscription',
 };
 const PROVIDER_ORDER = ['anthropic', 'azure', 'google', 'openai'];
 
@@ -77,6 +89,7 @@ export function ModelPicker({
 }: ModelPickerProps) {
   const [models, setModels] = useState<RawModel[] | null>(null);
   const [providers, setProviders] = useState<ProviderMap | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -84,11 +97,14 @@ export function ModelPicker({
     setLoading(true);
     Promise.all([
       fetchJSON<ProviderMap>('/api/llm/available-providers'),
-      fetchJSON<{ models: RawModel[] } | RawModel[]>('/api/llm-models'),
+      fetchJSON<{ models: RawModel[]; subscription?: SubscriptionState } | RawModel[]>(
+        '/api/llm-models',
+      ),
     ]).then(([prov, mods]) => {
       if (!alive) return;
       setProviders(prov || {});
       const list = Array.isArray(mods) ? mods : (mods?.models || []);
+      setSubscription(Array.isArray(mods) ? null : (mods?.subscription ?? null));
       setModels(list);
       setLoading(false);
     });
@@ -200,9 +216,16 @@ export function ModelPicker({
     const p = normalizeProvider(m);
     const provOk = providers ? providers[p]?.configured !== false : true;
     const dep = m.is_deprecated;
-    const unavailable = !provOk;
+    // A model the subscription serves is reachable even when its own
+    // provider has no API key configured.
+    const unavailable = !provOk && !m.subscription_served;
     let suffix = '';
     if (dep) suffix += ' (deprecated)';
+    if (m.subscription_served) {
+      suffix += m.subscription_remapped_to
+        ? ` — via subscription as ${m.subscription_remapped_to}`
+        : ' — via subscription';
+    }
     if (unavailable) suffix += ' — unavailable';
     return (
       <option key={m.value} value={m.value} disabled={unavailable}>
@@ -242,6 +265,17 @@ export function ModelPicker({
         </select>
         <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
       </div>
+      {subscription?.active && (
+        <p
+          className="text-[10px] text-emerald-400 mt-1"
+          data-testid="model-picker-subscription"
+        >
+          Claude subscription active
+          {subscription.exclusive
+            ? ` — every model runs on ${subscription.default_model} at no per-token cost`
+            : ' — Claude models run on the subscription at no per-token cost'}
+        </p>
+      )}
       {infoText && (
         <p className="text-[10px] text-slate-500 mt-1" data-testid="model-picker-info">
           {infoText}

@@ -2209,6 +2209,9 @@ async def _stream_pipeline_execution(
         on_node_start=on_node_start,
         on_node_complete=on_node_complete,
         db_url=str(settings.database_url),
+        # Required for self-healing capture (see pipeline.py guard).
+        agent_id=str(agent_id),
+        tenant_id=str(tenant_id),
     )
 
     # Parse pipeline nodes and inject user message as query for search nodes
@@ -2439,7 +2442,8 @@ async def _stream_pipeline_execution(
 
             execution.input_tokens = total_input_tokens or None
             execution.output_tokens = total_output_tokens or None
-            execution.cost = round(total_cost, 6) if total_cost > 0 else None
+            # Zero is a real cost; NULL would read as "never recorded".
+            execution.cost = round(total_cost, 6)
             execution.tool_calls = (
                 {"total": total_tool_calls} if total_tool_calls > 0 else None
             )
@@ -2497,6 +2501,9 @@ async def _non_stream_pipeline_execution(
             tool_registry=tool_registry,
             timeout_seconds=120,
             db_url=os.environ.get("DATABASE_URL", ""),
+            # Required for self-healing capture.
+            agent_id=str(execution.agent_id),
+            tenant_id=str(tenant_id),
         )
 
         raw_nodes = pipeline_config.get("nodes", [])
@@ -3050,18 +3057,22 @@ async def _stream_execution(
                 execution.output_message = full_output
                 execution.input_tokens = final_data.get("input_tokens")
                 execution.output_tokens = final_data.get("output_tokens")
-                execution.cost = final_data.get("cost")
+                # Coerce explicitly: a zero cost is a real value, not a missing one.
+                _c = final_data.get("cost")
+                execution.cost = float(_c) if _c is not None else None
                 execution.duration_ms = final_data.get("duration_ms")
                 execution.tool_calls = all_tool_calls if all_tool_calls else None
                 _finalize_execution_timing(execution)
                 actual_model = final_data.get("effective_model") or final_data.get(
                     "model"
                 )
-                if actual_model and actual_model != execution.model_requested:
+                if actual_model:
+                    # Record what ran every time, not only on a swap.
                     execution.model_used = actual_model
-                    execution.model_fallback_reason = (
-                        final_data.get("fallback_reason") or "resolver_swap"
-                    )
+                    if actual_model != execution.model_requested:
+                        execution.model_fallback_reason = (
+                            final_data.get("fallback_reason") or "resolver_swap"
+                        )
                 try:
                     emit_outcome_metric(
                         outcome="SUCCESS",

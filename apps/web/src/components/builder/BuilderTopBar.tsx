@@ -79,6 +79,15 @@ export default function BuilderTopBar({
           '/api/settings/builder_model',
         );
         if (!cancelled && r.data?.value) setValidationModel(r.data.value);
+        // An exclusive subscription serves every request whatever this setting
+        // says, so showing the setting alone named a model that never runs.
+        const sub = await apiFetch<{ subscription?: Record<string, unknown> }>('/api/llm-models');
+        const s = sub.data?.subscription as
+          | { active?: boolean; exclusive?: boolean; default_model?: string }
+          | undefined;
+        if (!cancelled && s?.active && s?.exclusive && s?.default_model) {
+          setValidationModel(s.default_model);
+        }
       } catch {
         // Fall back to the default; the badge stays usable.
       }
@@ -313,11 +322,25 @@ export default function BuilderTopBar({
         <button
           onClick={() => setShowPublish(true)}
           disabled={saving || !agentId}
+          // Publishing needs a saved draft to publish. Without this the button
+          // is just greyed out and there is nothing on screen saying why.
+          title={
+            saving
+              ? 'Saving…'
+              : !agentId
+                ? 'Save Draft first — publishing needs a saved agent'
+                : 'Publish this agent'
+          }
           className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-xs font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
           <Rocket className="w-3.5 h-3.5" />
           Publish
         </button>
+        {!agentId && !saving && (
+          <span className="text-[10px] text-slate-500 self-center whitespace-nowrap">
+            Save the draft to enable Publish
+          </span>
+        )}
       </div>
       {agentId && (
         <PublishDialog

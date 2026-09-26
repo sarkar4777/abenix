@@ -17,8 +17,13 @@ metadata:
     app.kubernetes.io/part-of: abenix
 spec:
   accessModes:
-    - ReadWriteMany
-  storageClassName: {{ .Values.sharedData.storageClass | default "" | quote }}
+    - {{ .Values.sharedData.accessMode | default "ReadWriteMany" }}
+  {{- /* See ml-models-pvc.yaml: `storageClassName: ""` disables dynamic
+        provisioning rather than selecting the default class, so only emit
+        it when an operator actually named one. */}}
+  {{- with .Values.sharedData.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
   resources:
     requests:
       storage: {{ .Values.sharedData.storageSize | default "20Gi" }}

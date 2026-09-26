@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path as _Path
 from typing import Any
 
@@ -413,13 +414,53 @@ async def on_startup():
             "ALTER TABLE executions ADD COLUMN IF NOT EXISTS trace_id VARCHAR(32)",
             "CREATE INDEX IF NOT EXISTS ix_executions_trace_id ON executions (trace_id) WHERE trace_id IS NOT NULL",
         ]
-        for ddl in scaling_ddls:
-            try:
-                await conn.execute(_t(ddl))
-            except Exception as _e:
-                import logging
+        import logging as _logging
 
-                logging.getLogger("startup").debug("skip ddl %r: %s", ddl, _e)
+        _slog = _logging.getLogger("startup")
+
+        # ADD COLUMN IF NOT EXISTS still takes an ACCESS EXCLUSIVE lock, so one
+        # pod does the work and settled columns are skipped — else rollouts hang.
+        got_lock = bool(
+            (await conn.execute(_t("SELECT pg_try_advisory_lock(776601)"))).scalar()
+        )
+        if not got_lock:
+            _slog.info("startup ddl: another pod holds the lock — skipping")
+        else:
+            try:
+                existing = {
+                    (r[0], r[1])
+                    for r in (
+                        await conn.execute(
+                            _t(
+                                "SELECT table_name, column_name FROM "
+                                "information_schema.columns WHERE table_schema "
+                                "= current_schema()"
+                            )
+                        )
+                    ).all()
+                }
+
+                import re as _re
+
+                _add_col = _re.compile(
+                    r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)", _re.I
+                )
+                applied = skipped = 0
+                for ddl in scaling_ddls:
+                    m = _add_col.match(ddl.strip())
+                    if m and (m.group(1), m.group(2)) in existing:
+                        skipped += 1
+                        continue
+                    try:
+                        await conn.execute(_t(ddl))
+                        applied += 1
+                    except Exception as _e:
+                        _slog.debug("skip ddl %r: %s", ddl, _e)
+                _slog.info(
+                    "startup ddl: %d applied, %d already present", applied, skipped
+                )
+            finally:
+                await conn.execute(_t("SELECT pg_advisory_unlock(776601)"))
 
     # Seed system tool presets for every tenant. Idempotent; preserves
     # user edits to existing rows (only flips is_system back on).

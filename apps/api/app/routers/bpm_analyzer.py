@@ -26,6 +26,36 @@ from models.conversation import Conversation, Message  # type: ignore
 from models.user import User  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+
+def _anthropic_client(api_key: str | None = None, sync: bool = False):
+    """Anthropic client honouring a Claude subscription before API keys.
+
+    Keeps this router working on a subscription-only install, where there is
+    no ANTHROPIC_API_KEY to construct a client from.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    try:
+        _sys.path.insert(
+            0, str(_Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+        )
+        from engine import claude_subscription  # type: ignore
+
+        builder = (
+            claude_subscription.build_sync_client
+            if sync
+            else claude_subscription.build_async_client
+        )
+        return builder(api_key)[0]
+    except Exception:
+        import anthropic
+
+        cls = anthropic.Anthropic if sync else anthropic.AsyncAnthropic
+        return cls(api_key=api_key) if api_key else cls()
+
+
 router = APIRouter(prefix="/api/bpm-analyzer", tags=["bpm-analyzer"])
 
 APP_SLUG = "bpm-analyzer"
@@ -586,7 +616,6 @@ async def _run_anthropic(
     force_json: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Call Anthropic Messages API."""
-    import anthropic
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
@@ -600,7 +629,7 @@ async def _run_anthropic(
     if force_json:
         safe.append({"role": "assistant", "content": "{"})
     started = datetime.now(timezone.utc)
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+    client = _anthropic_client(api_key)
     resp = await client.messages.create(
         model=model,
         max_tokens=8000,

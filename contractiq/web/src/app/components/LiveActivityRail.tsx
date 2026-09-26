@@ -5,6 +5,8 @@ import { usePathname } from 'next/navigation';
 import { Activity, BrainCircuit, Cpu, ChevronRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useContractIQExecutions } from './ContractIQExecutionsProvider';
 
+import { authFetch } from './authFetch';
+
 // Routes that benefit from the rail narrating progress — auto-open here.
 // Anywhere else, default to collapsed to reduce visual noise.
 const AUTO_OPEN_PREFIXES = ['/recommendations', '/commodities/forward', '/insights/stress-test'];
@@ -71,8 +73,8 @@ export default function LiveActivityRail() {
     const fetchAll = async () => {
       try {
         const [a, m] = await Promise.all([
-          fetch('/api/contractiq-executions?status=running&limit=20', { cache: 'no-store' }).then(r => r.ok ? r.json() : { data: [] }),
-          fetch('/api/contractiq-executions/ml-models?status=running&limit=10', { cache: 'no-store' }).then(r => r.ok ? r.json() : { data: [] }),
+          authFetch('/api/contractiq-executions?status=running&limit=20', { cache: 'no-store' }).then(r => r.ok ? r.json() : { data: [] }),
+          authFetch('/api/contractiq-executions/ml-models?status=running&limit=10', { cache: 'no-store' }).then(r => r.ok ? r.json() : { data: [] }),
         ]);
         if (cancelled) return;
         const rawA = Array.isArray(a?.data) ? a.data : [];

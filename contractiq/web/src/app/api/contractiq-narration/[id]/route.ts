@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server';
 
+import { forwardHeaders } from '../../_forward';
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
@@ -14,7 +16,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     : `/api/contractiq/narration/${id}`;
   try {
     const upstream = await fetch(`${INTERNAL}${path}`, {
-      headers: { Accept: 'text/event-stream' },
+      headers: { Accept: 'text/event-stream', ...forwardHeaders(req) },
       cache: 'no-store',
     });
     return new Response(upstream.body, {
