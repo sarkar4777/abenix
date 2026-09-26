@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from engine.llm_router import (
+    DEFAULT_PRICING,
     LLMResponse,
     LLMRouter,
     MODEL_TO_PROVIDER,
@@ -22,8 +23,12 @@ def test_calc_cost_known_model():
 
 
 def test_calc_cost_unknown_model():
+    # An unmapped model bills at DEFAULT_PRICING rather than zero — a model
+    # missing from the catalogue must not look free on the spend dashboards.
     cost = _calc_cost("unknown-model", 1000, 500)
-    assert cost == 0.0
+    expected = 1000 * DEFAULT_PRICING["input"] + 500 * DEFAULT_PRICING["output"]
+    assert cost == pytest.approx(expected)
+    assert cost > 0
 
 
 def test_model_to_provider_mapping():

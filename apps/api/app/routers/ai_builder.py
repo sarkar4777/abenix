@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -576,21 +577,54 @@ async def _get_saved_tools_context(db: Any, tenant_id: str) -> str:
     return ""
 
 
+_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _first_json_object(s: str) -> dict[str, Any] | None:
+    """First complete JSON object in the string, ignoring anything after it.
+
+    raw_decode stops at the end of one value, so trailing commentary cannot
+    corrupt the parse the way a first-brace-to-last-brace slice did.
+    """
+    decoder = json.JSONDecoder()
+    start = 0
+    while True:
+        i = s.find("{", start)
+        if i < 0:
+            return None
+        try:
+            obj, _end = decoder.raw_decode(s, i)
+        except json.JSONDecodeError:
+            start = i + 1
+            continue
+        if isinstance(obj, dict):
+            return obj
+        start = i + 1
+
+
 def _parse_builder_json(text: str, stop_reason: str | None = None) -> dict[str, Any]:
-    """Robustly extract a JSON config from an LLM response."""
+    """Extract a JSON config from an LLM response.
+
+    Models routinely fence the config then add a prose summary after it. The old
+    first-brace-to-last-brace slice swallowed that text and json.loads failed
+    with "Extra data", discarding a perfectly good config.
+    """
     s = text.strip()
-    # Strip leading markdown fence if present.
-    if s.startswith("```"):
-        s = s.lstrip("`")
-        # Drop optional "json" language tag on the first line.
-        first_nl = s.find("\n")
-        if first_nl != -1 and s[:first_nl].strip().lower() in {"json", ""}:
-            s = s[first_nl + 1 :]
-        # Strip trailing fence if any.
-        if s.rstrip().endswith("```"):
-            s = s.rstrip().rstrip("`")
+
+    # A fenced block is the strongest signal — take the first one that parses.
+    for block in _FENCE_RE.findall(s):
+        obj = _first_json_object(block)
+        if obj is not None:
+            return obj
+
     if "{" not in s:
         raise ValueError("LLM did not return JSON — response was all prose.")
+
+    obj = _first_json_object(s)
+    if obj is not None:
+        return obj
+
+    # Nothing parsed — fall through to the original diagnostics.
     s = s[s.index("{") : s.rindex("}") + 1]
     try:
         return json.loads(s)

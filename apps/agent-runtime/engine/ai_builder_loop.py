@@ -12,6 +12,29 @@ from engine.pipeline_validator import BUILTIN_TOOLS
 logger = logging.getLogger(__name__)
 
 
+def _first_json_object(text: str) -> dict[str, Any] | None:
+    """First complete JSON object in the text, ignoring trailing commentary.
+
+    The judge and critic both used text[index("{"):rindex("}")+1], which
+    swallows any prose after the object that happens to contain a brace and
+    then fails with "Extra data" — wasting a whole build iteration.
+    """
+    decoder = json.JSONDecoder()
+    start = 0
+    while True:
+        i = text.find("{", start)
+        if i < 0:
+            return None
+        try:
+            obj, _end = decoder.raw_decode(text, i)
+        except json.JSONDecodeError:
+            start = i + 1
+            continue
+        if isinstance(obj, dict):
+            return obj
+        start = i + 1
+
+
 def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
     """Make the generated config internally consistent."""
     if not isinstance(config, dict):
@@ -143,7 +166,10 @@ async def _judge(
             "summary": f"judge returned no JSON: {text[:200]}",
         }
     try:
-        data = json.loads(text[text.index("{") : text.rindex("}") + 1])
+        _obj = _first_json_object(text)
+        if _obj is None:
+            raise ValueError("no JSON object in response")
+        data = _obj
     except Exception as e:
         return {
             "passed": False,
@@ -271,7 +297,10 @@ async def _critic(
             "verdict": "critic returned no JSON",
         }
     try:
-        data = json.loads(text[text.index("{") : text.rindex("}") + 1])
+        _obj = _first_json_object(text)
+        if _obj is None:
+            raise ValueError("no JSON object in response")
+        data = _obj
     except Exception as e:
         return {"severity": "minor", "concerns": [], "verdict": f"critic bad JSON: {e}"}
     data.setdefault("severity", "minor")

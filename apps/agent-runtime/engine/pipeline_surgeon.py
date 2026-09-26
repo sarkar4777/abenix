@@ -174,17 +174,24 @@ async def propose_patch(
         tool_registry=json.dumps(tool_registry, default=str)[:6_000],
     )
 
+    # NB: LLMRouter.complete() takes no `force_json` and returns an
+    # LLMResponse, not a {"text": ...} dict. This was written against a
+    # different helper's signature, so every surgeon run died with
+    # "complete() got an unexpected keyword argument 'force_json'" and the
+    # feature never produced a proposal. JSON is enforced by _SYSTEM_PROMPT
+    # plus the fence/prose tolerant parsing below.
     raw = await llm_router.complete(
         model=model,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
         temperature=0.1,
         max_tokens=2_000,
-        force_json=True,
     )
-    text = (
-        (raw.get("text") or "").strip() if isinstance(raw, dict) else str(raw).strip()
-    )
+    if isinstance(raw, dict):
+        text = (raw.get("text") or raw.get("content") or "").strip()
+    else:
+        # LLMResponse (or anything else exposing .content)
+        text = str(getattr(raw, "content", raw) or "").strip()
 
     # Cope with code fences and trailing prose.
     text = text.strip("` \n\t")

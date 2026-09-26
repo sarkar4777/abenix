@@ -37,6 +37,29 @@ def _provider_key(model: str) -> str:
     return "other"
 
 
+def _moderation_block_text(mb: Any, subject: str) -> str:
+    """Explain a moderation block without inventing a policy hit.
+
+    A provider error escalated by fail_closed has no triggered categories, and
+    the old wording still claimed the content breached the policy — printing
+    "Categories: n/a." and leaving no way to tell an outage from a real refusal.
+    """
+    decision = getattr(mb, "decision", None)
+    cats = list(getattr(decision, "triggered_categories", None) or [])
+    if cats:
+        return f"{subject} blocked by moderation policy. Categories: {', '.join(cats[:5])}."
+    reason = getattr(decision, "reason", "") or ""
+    err = getattr(decision, "error", "") or ""
+    if reason == "provider_error_fail_closed" or err:
+        detail = f" ({err[:160]})" if err else ""
+        return (
+            f"{subject} blocked because the moderation provider could not be reached "
+            f"and this policy is set to fail closed{detail}. "
+            "Configure the provider credential or turn off fail-closed at /moderation."
+        )
+    return f"{subject} blocked by moderation policy."
+
+
 MAX_ITERATIONS = 10
 
 
@@ -198,6 +221,8 @@ class ExecutionResult:
     duration_ms: int = 0
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     model: str = ""
+    # Why `model` differs from the requested one, when it does.
+    fallback_reason: str = ""
     cache_hit: str = ""
     node_traces: list[NodeTrace] = field(default_factory=list)
     # Set when the moderation gate blocked the run. Downstream code sets
@@ -318,10 +343,7 @@ class AgentExecutor:
                 ).inc()
                 duration = int((time.monotonic() - start) * 1000)
                 return ExecutionResult(
-                    output=(
-                        "Request blocked by moderation policy. "
-                        f"Categories: {', '.join(mb.decision.triggered_categories[:5]) or 'n/a'}."
-                    ),
+                    output=(_moderation_block_text(mb, "Request")),
                     duration_ms=duration,
                     model=self.model,
                     moderation_blocked=True,
@@ -335,6 +357,8 @@ class AgentExecutor:
         total_input = 0
         total_output = 0
         total_cost = 0.0
+        effective_model: str | None = None
+        effective_fallback_reason: str | None = None
         # Per-provider subtotals for the executions row split.
         provider_costs: dict[str, float] = {
             "anthropic": 0.0,
@@ -472,8 +496,13 @@ class AgentExecutor:
                     elif ev.event == "done":
                         done_meta = ev.data
                 resp = LLMResponse(
-                    content=full_text,
-                    model=self.model,
+                    # The router reports which model actually served the
+                    # call, which can differ from the agent's configured one
+                    # (subscription mode pins to the plan's model, and the
+                    # degradation chain may land on another provider).
+                    # Substituting self.model here hid that, so audit rows
+                    # recorded the requested model as if it had run.
+                    model=done_meta.get("model") or self.model,
                     input_tokens=done_meta.get("input_tokens", 0),
                     output_tokens=done_meta.get("output_tokens", 0),
                     cost=done_meta.get("cost", 0.0),
@@ -491,6 +520,12 @@ class AgentExecutor:
             total_input += resp.input_tokens
             total_output += resp.output_tokens
             total_cost += resp.cost
+            # Remember which model actually served this turn so the done
+            # payload (and therefore the executions row) reflects reality.
+            if resp.model:
+                effective_model = resp.model
+            if getattr(resp, "fallback_reason", None):
+                effective_fallback_reason = resp.fallback_reason
             # Split by provider so the executions row can show a
             # per-provider breakdown (critical when a call fell back
             # from Anthropic to OpenAI).
@@ -546,10 +581,7 @@ class AgentExecutor:
                             outcome="blocked",
                         ).inc()
                         return ExecutionResult(
-                            output=(
-                                "Response blocked by moderation policy. "
-                                f"Categories: {', '.join(mb.decision.triggered_categories[:5]) or 'n/a'}."
-                            ),
+                            output=(_moderation_block_text(mb, "Response")),
                             input_tokens=total_input,
                             output_tokens=total_output,
                             cost=total_cost,
@@ -597,7 +629,8 @@ class AgentExecutor:
                     other_cost=provider_costs.get("other", 0.0),
                     duration_ms=duration,
                     tool_calls=all_tool_calls,
-                    model=resp.model,
+                    model=effective_model or resp.model,
+                    fallback_reason=effective_fallback_reason or "",
                     node_traces=node_traces,
                     grounding_violation=grounding_violation,
                     grounding_block_source=(
@@ -771,7 +804,8 @@ class AgentExecutor:
             other_cost=provider_costs.get("other", 0.0),
             duration_ms=duration,
             tool_calls=all_tool_calls,
-            model=self.model,
+            model=effective_model or self.model,
+            fallback_reason=effective_fallback_reason or "",
             node_traces=node_traces,
             grounding_violation=grounding_violation,
             grounding_block_source=(
@@ -832,10 +866,7 @@ class AgentExecutor:
                 agent_active_streams.dec()
                 yield ExecutionEvent(
                     event="token",
-                    data=(
-                        "Request blocked by moderation policy. "
-                        f"Categories: {', '.join(mb.decision.triggered_categories[:5]) or 'n/a'}."
-                    ),
+                    data=(_moderation_block_text(mb, "Request")),
                 )
                 yield ExecutionEvent(
                     event="done",
@@ -859,6 +890,8 @@ class AgentExecutor:
         total_input = 0
         total_output = 0
         total_cost = 0.0
+        effective_model: str | None = None
+        effective_fallback_reason: str | None = None
 
         if self.cache:
             cache_result = await self.cache.check(
@@ -937,6 +970,15 @@ class AgentExecutor:
             total_output += done_data.get("output_tokens", 0)
             total_cost += done_data.get("cost", 0.0)
 
+            # Remember which model actually served this turn. Without this the
+            # streaming path reported self.model no matter what the router
+            # chose, so an executions row for a subscription-served run still
+            # named the requested model.
+            if done_data.get("model"):
+                effective_model = done_data["model"]
+            if done_data.get("fallback_reason"):
+                effective_fallback_reason = done_data["fallback_reason"]
+
             stream_tool_calls = done_data.get("tool_calls", [])
 
             if not stream_tool_calls:
@@ -971,6 +1013,10 @@ class AgentExecutor:
                     "cost": round(total_cost, 6),
                     "duration_ms": duration,
                     "model": self.model,
+                    # What actually ran, so the API can persist model_used
+                    # and the reason it differed from the request.
+                    "effective_model": effective_model or self.model,
+                    "fallback_reason": effective_fallback_reason,
                 }
                 if _grounding_failed:
                     _done_payload["error"] = "grounding_required_violation"
@@ -1137,6 +1183,10 @@ class AgentExecutor:
             "cost": round(total_cost, 6),
             "duration_ms": duration,
             "model": self.model,
+            # Same contract as the early-return payload above, so the API
+            # persists model_used on both streaming exits rather than only one.
+            "effective_model": effective_model or self.model,
+            "fallback_reason": effective_fallback_reason,
         }
         if _grounding_failed:
             _done_payload2["error"] = "grounding_required_violation"

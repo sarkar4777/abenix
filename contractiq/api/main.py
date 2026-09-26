@@ -33,8 +33,15 @@ async def lifespan(app: FastAPI):
         from app.core.deps import engine
         from app.models.base import Base
         from app.models import contractiq_models  # noqa: F401 — register models
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        from app.core.schema_boot import ensure_schema
+
+        # Table creation, orphan-index reconciliation and the widening ALTERs
+        # each get their own transaction. See schema_boot for why sharing one
+        # transaction left fresh databases with no ContractIQ tables at all.
+        if not await ensure_schema(engine, Base):
+            logger.error(
+                "ContractIQ schema bootstrap did not produce contractiq_users — login will fail"
+            )
         try:
             import sys as _sys
             from pathlib import Path as _Path
@@ -47,29 +54,6 @@ async def lifespan(app: FastAPI):
                 logger.info("ContractIQ schema_sync: added %d missing columns", _added)
         except Exception as _e:
             logger.warning("ContractIQ schema_sync skipped: %s", _e)
-        async with engine.begin() as conn:
-            # Light-touch ALTERs for columns that widened since initial create.
-            # Idempotent — Postgres ALTER TYPE VARCHAR(n) is a no-op if already wider.
-            from sqlalchemy import text as _t
-            for ddl in [
-                "ALTER TABLE contractiq_credit_risks ALTER COLUMN risk_level TYPE VARCHAR(40)",
-                "ALTER TABLE contractiq_credit_risks ALTER COLUMN z_score_zone TYPE VARCHAR(40)",
-                "ALTER TABLE contractiq_credit_risks ALTER COLUMN credit_rating TYPE VARCHAR(80)",
-                "ALTER TABLE contractiq_credit_risks ALTER COLUMN sector TYPE VARCHAR(255)",
-                "ALTER TABLE contractiq_credit_risks ALTER COLUMN ticker TYPE VARCHAR(40)",
-                "ALTER TYPE contract_type ADD VALUE IF NOT EXISTS 'metals'",
-                "ALTER TABLE contractiq_contracts ADD COLUMN IF NOT EXISTS asset_class VARCHAR(40)",
-                "ALTER TABLE contractiq_contracts ADD COLUMN IF NOT EXISTS pricing_pattern VARCHAR(40)",
-                "ALTER TABLE contractiq_contracts ADD COLUMN IF NOT EXISTS quantity JSONB",
-                # KYC widenings and lookup indexes
-                "ALTER TABLE contractiq_kyc_checks ALTER COLUMN outcome_of_check TYPE VARCHAR(40)",
-                "CREATE INDEX IF NOT EXISTS ix_contractiq_kyc_name_country ON contractiq_kyc_checks (counterparty_name, country_iso2)",
-                "CREATE INDEX IF NOT EXISTS ix_contractiq_kyc_next_review ON contractiq_kyc_checks (next_review_due)",
-            ]:
-                try:
-                    await conn.execute(_t(ddl))
-                except Exception as _e:
-                    logger.debug("skip ddl %r: %s", ddl, _e)
         logger.info("ContractIQ tables ensured")
 
         # Seed default test user if missing

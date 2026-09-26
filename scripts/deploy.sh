@@ -7,6 +7,13 @@ NAMESPACE="${NAMESPACE:-abenix}"
 RELEASE_NAME="${RELEASE_NAME:-abenix}"
 IMAGE_TAG="${IMAGE_TAG:-$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || echo latest)}"
 FRESH="${FRESH:-false}"
+# Local ports the browser uses. Override when something else already owns
+# 3000/8000 on the host.
+WEB_PORT="${WEB_PORT:-3000}"
+API_PORT="${API_PORT:-8000}"
+# Where the self-restarting port-forward wrappers record their PIDs, so
+# they can be stopped without relying on pattern matching.
+FORWARD_PIDFILE="${FORWARD_PIDFILE:-${TMPDIR:-/tmp}/abenix-forwards-${NAMESPACE}.pids}"
 
 # ── Load .env for API keys (LLM providers need these for agent execution) ───
 if [ -f "${ROOT_DIR}/.env" ]; then
@@ -19,6 +26,7 @@ fi
 _build_secrets_flags() {
   local flags=""
   [ -n "${ANTHROPIC_API_KEY:-}" ]  && flags="${flags} --set secrets.anthropicApiKey=${ANTHROPIC_API_KEY}"
+  [ -n "${CLAUDE_SUBSCRIPTION_TOKEN:-}" ] && flags="${flags} --set secrets.claudeSubscriptionToken=${CLAUDE_SUBSCRIPTION_TOKEN}"
   [ -n "${OPENAI_API_KEY:-}" ]     && flags="${flags} --set secrets.openaiApiKey=${OPENAI_API_KEY}"
   [ -n "${GOOGLE_API_KEY:-}" ]     && flags="${flags} --set secrets.googleApiKey=${GOOGLE_API_KEY}"
   [ -n "${PINECONE_API_KEY:-}" ]   && flags="${flags} --set secrets.pineconeApiKey=${PINECONE_API_KEY}"
@@ -52,7 +60,7 @@ err()  { echo -e "${RED}  [err]${NC} $1"; }
 step() { echo -e "\n${BOLD}${CYAN}>> $1${NC}"; }
 
 usage() {
-  echo "Usage: $0 {local|local-runtime|cloud|status|destroy|build}"
+  echo "Usage: $0 {local|local-runtime|cloud|status|destroy|build|reload <svc>|forwards}"
   echo ""
   echo "Commands:"
   echo "  local          Deploy to minikube — embedded execution (no runtime pod)"
@@ -61,9 +69,14 @@ usage() {
   echo "  status         Check deployment health"
   echo "  destroy        Tear down the deployment"
   echo "  build          Build Docker images only"
+  echo "  reload <svc>   Rebuild one service and restart it"
+  echo "                 core: api web worker agent-runtime edge-runtime"
+  echo "                 apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism}-{api,web}"
+  echo "  forwards       Re-establish and verify all local port forwards"
   echo ""
   echo "Flags:"
   echo "  FRESH=true     Force destroy + recreate minikube from scratch"
+  echo "  WEB_PORT=3100  Host port for the web UI (default 3000)"
   echo ""
   echo "The script is incremental — reuses running minikube, only rebuilds changed images."
   exit 1
@@ -146,29 +159,121 @@ ensure_minikube() {
   minikube addons enable storage-provisioner &>/dev/null || true
 }
 
+# ── KEDA ─────────────────────────────────────────────────────────────────────
+# values-local.yaml's `scaling.keda.enabled` comment has always claimed
+# "deploy.sh installs it when enabled=true", but no such code existed — so
+# flipping that flag produced ScaledObjects with no CRD to satisfy them.
+# Mirrors ensure_keda() in scripts/deploy-azure.sh.
+ensure_keda() {
+  if kubectl get crd scaledobjects.keda.sh &>/dev/null; then
+    ok "KEDA CRDs already installed"
+    return 0
+  fi
+  log "Installing KEDA (event-driven autoscaler)..."
+  helm repo add kedacore https://kedacore.github.io/charts &>/dev/null || true
+  helm repo update &>/dev/null || true
+  if helm install keda kedacore/keda \
+      --namespace keda --create-namespace \
+      --timeout 5m --wait 2>&1 | tail -3; then
+    ok "KEDA installed"
+  else
+    warn "KEDA install failed — ScaledObjects will not be created"
+    return 0
+  fi
+}
+
+# Whether the chart wants KEDA for this deploy.
+_keda_requested() {
+  local v
+  v=$(grep -A3 '^\s*keda:' "${HELM_DIR}/values-local.yaml" 2>/dev/null \
+      | grep -m1 'enabled:' | awk '{print $2}' | tr -d '"')
+  [ "${KEDA_ENABLED:-${v:-false}}" = "true" ]
+}
+
 # ── Pull + tag Bitnami images if not already present ─────────────────────────
 ensure_infra_images() {
   eval "$(minikube docker-env)"
 
   # Only pull if not already present
-  if ! docker image inspect bitnami/postgresql:16 &>/dev/null; then
-    log "Pulling PostgreSQL image..."
-    docker pull bitnami/postgresql:latest 2>/dev/null | tail -1
-    docker tag bitnami/postgresql:latest bitnami/postgresql:16
-  fi
+  # `docker pull ... 2>/dev/null` used to hide auth/not-found failures and the
+  # unconditional "ready" below then lied about it. Report per-image instead.
   if ! docker image inspect bitnami/redis:7.2 &>/dev/null; then
     log "Pulling Redis image..."
-    docker pull bitnami/redis:latest 2>/dev/null | tail -1
-    docker tag bitnami/redis:latest bitnami/redis:7.2
+    if docker pull bitnami/redis:latest 2>&1 | tail -1; then
+      docker tag bitnami/redis:latest bitnami/redis:7.2
+    else
+      warn "bitnami/redis pull failed — Redis will not start"
+    fi
   fi
   if ! docker image inspect neo4j:5-community &>/dev/null; then
     log "Pulling Neo4j image..."
-    docker pull neo4j:5-community 2>/dev/null | tail -1
+    docker pull neo4j:5-community 2>&1 | tail -1 \
+      || warn "neo4j:5-community pull failed — Atlas/graph features will be down"
+  fi
+
+  # Postgres + pgvector. values.yaml points this at a private ACR, which a
+  # laptop cannot pull — local deploys used to sit in ContainerCreating on
+  # `your-acr.azurecr.io/postgresql-pgvector` forever. Build the same image
+  # locally from the same Dockerfile so minikube gets pgvector too, instead
+  # of silently dropping to a vanilla postgres without the extension.
+  local pgv="localhost:5000/abenix/postgresql-pgvector:16"
+  if ! docker image inspect "${pgv}" &>/dev/null; then
+    if [ -f "${ROOT_DIR}/infra/docker/Dockerfile.postgres-pgvector" ]; then
+      log "Building postgres+pgvector image (first run only, a few minutes)..."
+      # Every COPY in that Dockerfile is --from another stage, so the build
+      # context is unused — point it at the small infra/docker dir rather
+      # than shipping the whole repo to the daemon.
+      if docker build -t "${pgv}" \
+          -f "${ROOT_DIR}/infra/docker/Dockerfile.postgres-pgvector" \
+          "${ROOT_DIR}/infra/docker" 2>&1 | tail -3; then
+        ok "postgresql-pgvector built"
+      else
+        warn "postgresql-pgvector build failed — KB collections cannot use pgvector locally"
+      fi
+    else
+      warn "infra/docker/Dockerfile.postgres-pgvector missing — skipping pgvector build"
+    fi
   fi
   ok "Infrastructure images ready"
 }
 
 # ── Build app images (only if code changed) ──────────────────────────────────
+# Build one core service image. Shared by build_images and `reload`, so a
+# single-service rebuild resolves its Dockerfile and build context exactly
+# the same way a full build does.
+build_core_service() {
+  local svc="$1"
+  local registry="${2:-localhost:5000/abenix}"
+  local push="${3:-false}"
+
+  local image="${registry}/${svc}:${IMAGE_TAG}"
+  local dockerfile="docker/Dockerfile.${svc}"
+
+  [ ! -f "${ROOT_DIR}/${dockerfile}" ] && dockerfile="apps/${svc}/Dockerfile"
+  if [ ! -f "${ROOT_DIR}/${dockerfile}" ]; then
+    warn "No Dockerfile for ${svc}, skipping"
+    return 0
+  fi
+
+  # Core images COPY from the repo root. The edge runtimes ship a
+  # self-contained Dockerfile that COPYs from its own directory.
+  local ctx="${ROOT_DIR}"
+  case "${svc}" in
+    edge-runtime|edge-runtime-rust|edge-runtime-c) ctx="${ROOT_DIR}/apps/${svc}" ;;
+  esac
+
+  log "Building ${svc}..."
+  docker build -t "${image}" -t "${registry}/${svc}:latest" \
+    -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -3
+  ok "${svc}: built"
+
+  if [ "${push}" = "true" ]; then
+    docker push "${image}" 2>&1 | tail -1
+    ok "${svc}: pushed"
+  fi
+  return 0
+}
+
 build_images() {
   local registry="${1:-localhost:5000/abenix}"
   local push="${2:-false}"
@@ -178,23 +283,14 @@ build_images() {
 
   # NOTE: We always rebuild — Docker layer cache makes incremental builds fast,
   # and "skip if exists" caused stale images to ship without new seed YAMLs etc.
-  local services=("api" "web" "worker" "agent-runtime")
+  # edge-runtime is included because deploy_local installs its helm chart by
+  # default (EDGE_RUNTIME_ENABLED=true). Without building it the chart pulls
+  # `agentforge/edge-runtime` from Docker Hub, which does not exist, leaving a
+  # permanent ImagePullBackOff pod that also makes wait_for_pods burn its full
+  # timeout on every deploy. The loop below falls back to apps/<svc>/Dockerfile.
+  local services=("api" "web" "worker" "agent-runtime" "edge-runtime")
   for svc in "${services[@]}"; do
-    local image="${registry}/${svc}:${IMAGE_TAG}"
-    local dockerfile="docker/Dockerfile.${svc}"
-
-    [ ! -f "${ROOT_DIR}/${dockerfile}" ] && dockerfile="apps/${svc}/Dockerfile"
-    [ ! -f "${ROOT_DIR}/${dockerfile}" ] && { warn "No Dockerfile for ${svc}, skipping"; continue; }
-
-    log "Building ${svc}..."
-    docker build -t "${image}" -t "${registry}/${svc}:latest" \
-      -f "${ROOT_DIR}/${dockerfile}" "${ROOT_DIR}" 2>&1 | tail -3
-    ok "${svc}: built"
-
-    if [ "${push}" = "true" ]; then
-      docker push "${image}" 2>&1 | tail -1
-      ok "${svc}: pushed"
-    fi
+    build_core_service "${svc}" "${registry}" "${push}" || return 1
   done
 
   # Build ContractIQ standalone images (api + web)
@@ -227,7 +323,7 @@ build_images() {
       docker build -t "${img}" -t "${registry}/industrial-iot-${part}:latest" \
         -f "${df}" "${ROOT_DIR}/industrial-iot/${part}" 2>&1 | tail -3
       ok "industrial-iot-${part}: built"
-      [ "${push}" = "true" ] && docker push "${img}" 2>&1 | tail -1
+      if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
     done
   fi
 
@@ -242,9 +338,45 @@ build_images() {
       docker build -t "${img}" -t "${registry}/resolveai-${part}:latest" \
         -f "${df}" "${ROOT_DIR}/resolveai/${part}" 2>&1 | tail -3
       ok "resolveai-${part}: built"
-      [ "${push}" = "true" ] && docker push "${img}" 2>&1 | tail -1
+      if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
     done
   fi
+
+  # Build Mideast Tourism + Wingman standalone images. Both ship k8s
+  # manifests already pointing at localhost:5000/abenix/*, and
+  # deploy-azure.sh builds them — the local path just never did, which is
+  # why :3002 and :3006 were dead on minikube while working on AKS.
+  for app in "mideasttourism" "wingman"; do
+    if [ -d "${ROOT_DIR}/${app}" ]; then
+      step "Building ${app} standalone images"
+      for part in "api" "web"; do
+        local simg="${registry}/${app}-${part}:${IMAGE_TAG}"
+        local sdf="${ROOT_DIR}/${app}/${part}/Dockerfile"
+        [ ! -f "${sdf}" ] && { warn "No Dockerfile for ${app}/${part}"; continue; }
+        # Context is usually the part dir, but mideasttourism-api's
+        # Dockerfile COPYs `api/...` and `test-data/`, so it needs the app
+        # root. Mirrors BUILD_CONTEXTS in scripts/deploy-azure.sh — keep the
+        # two in step.
+        local sctx="${ROOT_DIR}/${app}/${part}"
+        if [ "${app}-${part}" = "mideasttourism-api" ]; then
+          sctx="${ROOT_DIR}/${app}"
+        fi
+        log "Building ${app}-${part}..."
+        # Keep the full log: `| tail -3` on a failure shows the tail of a
+        # buildkit stack trace rather than the actual cause.
+        local slog="${ROOT_DIR}/logs/build-${app}-${part}.log"
+        mkdir -p "${ROOT_DIR}/logs"
+        if ! docker build -t "${simg}" -t "${registry}/${app}-${part}:latest" \
+            -f "${sdf}" "${sctx}" >"${slog}" 2>&1; then
+          err "${app}-${part}: build FAILED — last 25 lines:"
+          tail -25 "${slog}" | sed 's/^/      /'
+          return 1
+        fi
+        ok "${app}-${part}: built"
+        if [ "${push}" = "true" ]; then docker push "${simg}" 2>&1 | tail -1; fi
+      done
+    fi
+  done
 
   # Build ClaimsIQ single-container image (Spring Boot + Vaadin Flow).
   # One Dockerfile under app/ but the build context must be the claimsiq
@@ -260,9 +392,15 @@ build_images() {
       docker build -t "${img}" -t "${registry}/claimsiq:latest" \
         -f "${df}" "${ROOT_DIR}/claimsiq" 2>&1 | tail -3
       ok "claimsiq: built"
-      [ "${push}" = "true" ] && docker push "${img}" 2>&1 | tail -1
+      if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
     fi
   fi
+
+  # Explicit success. Under `set -e` a falsy trailing test (e.g. the
+  # push guard above when push=false) would otherwise become this
+  # function's return status and abort the whole deploy after the images
+  # were built but before helm ran.
+  return 0
 }
 
 # ── Deploy ContractIQ as k8s manifests (after Abenix is running) ─────────
@@ -367,6 +505,62 @@ deploy_resolveai() {
     --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "ResolveAI Web not ready in 120s"
 }
 
+# ── Deploy Mideast Tourism standalone ────────────────────────────────────────
+deploy_mideasttourism() {
+  if [ ! -f "${ROOT_DIR}/mideasttourism/k8s/mideasttourism.yaml" ]; then
+    warn "Mideast Tourism k8s manifests not found, skipping"
+    return 0
+  fi
+  step "Deploying Mideast Tourism to namespace ${NAMESPACE}"
+  local st_key="${MIDEASTTOURISM_ABENIX_API_KEY:-}"
+  [ -z "${st_key}" ] && warn "MIDEASTTOURISM_ABENIX_API_KEY not set — agent calls will 401"
+
+  kubectl apply -f "${ROOT_DIR}/mideasttourism/k8s/mideasttourism.yaml" 2>&1 | tail -10
+  kubectl create secret generic mideasttourism-secrets \
+    --namespace="${NAMESPACE}" \
+    --from-literal=MIDEASTTOURISM_ABENIX_API_KEY="${st_key}" \
+    --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -3
+  # envFrom secrets are only read at pod start, so a freshly patched key
+  # needs a restart or the pod keeps the manifest placeholder.
+  kubectl -n "${NAMESPACE}" rollout restart deploy/mideasttourism-api &>/dev/null || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/mideasttourism-web &>/dev/null || true
+  ok "Mideast Tourism deployed"
+
+  kubectl wait --for=condition=ready pod -l app=mideasttourism-api \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "Mideast Tourism API not ready in 120s"
+  kubectl wait --for=condition=ready pod -l app=mideasttourism-web \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "Mideast Tourism Web not ready in 120s"
+}
+
+# ── Deploy Wingman standalone ────────────────────────────────────────────────
+deploy_wingman() {
+  if [ ! -f "${ROOT_DIR}/wingman/k8s/wingman.yaml" ]; then
+    warn "Wingman k8s manifests not found, skipping"
+    return 0
+  fi
+  step "Deploying Wingman to namespace ${NAMESPACE}"
+  local wm_key="${WINGMAN_ABENIX_API_KEY:-}"
+  [ -z "${wm_key}" ] && warn "WINGMAN_ABENIX_API_KEY not set — agent calls will 401"
+  # Live AIS is optional; the rest of Wingman runs without it.
+  local ais_key="${AISSTREAM_API_KEY:-}"
+  [ -z "${ais_key}" ] && warn "AISSTREAM_API_KEY not set — Operations Watch live-AIS disabled"
+
+  kubectl apply -f "${ROOT_DIR}/wingman/k8s/wingman.yaml" 2>&1 | tail -10
+  kubectl create secret generic wingman-secrets \
+    --namespace="${NAMESPACE}" \
+    --from-literal=WINGMAN_ABENIX_API_KEY="${wm_key}" \
+    --from-literal=AISSTREAM_API_KEY="${ais_key}" \
+    --dry-run=client -o yaml | kubectl apply -f - 2>&1 | tail -3
+  kubectl -n "${NAMESPACE}" rollout restart deploy/wingman-api &>/dev/null || true
+  kubectl -n "${NAMESPACE}" rollout restart deploy/wingman-web &>/dev/null || true
+  ok "Wingman deployed"
+
+  kubectl wait --for=condition=ready pod -l app=wingman-api \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "Wingman API not ready in 120s"
+  kubectl wait --for=condition=ready pod -l app=wingman-web \
+    --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "Wingman Web not ready in 120s"
+}
+
 # ── Deploy ClaimsIQ standalone (Spring Boot + Vaadin, single container) ──────
 deploy_claimsiq() {
   if [ ! -f "${ROOT_DIR}/claimsiq/k8s/claimsiq.yaml" ]; then
@@ -394,6 +588,15 @@ deploy_claimsiq() {
 # ── Helm dependency update ───────────────────────────────────────────────────
 helm_deps() {
   step "Updating Helm dependencies"
+  # postgresql and redis come from bitnami. Without the repo registered,
+  # `helm dependency update` fails with "no repository definition for
+  # https://charts.bitnami.com/bitnami" — which only shows up on a machine
+  # that has never added it, so it never bit anyone who had run helm before.
+  if ! helm repo list 2>/dev/null | awk '{print $2}' | grep -q "charts.bitnami.com/bitnami"; then
+    log "Registering the bitnami chart repo (postgresql + redis)"
+    helm repo add bitnami https://charts.bitnami.com/bitnami &>/dev/null || true
+  fi
+  helm repo update &>/dev/null || true
   helm dependency update "${HELM_DIR}" 2>&1 | tail -2
   ok "Helm dependencies ready"
 }
@@ -469,9 +672,20 @@ run_migrations() {
   local pg_pod
   pg_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=postgresql" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
   if [ -n "${pg_pod}" ]; then
-    kubectl exec -n "${NAMESPACE}" "${pg_pod}" -- \
-      bash -c 'PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = '"'"'abenix'"'"'" | grep -q 1 || PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -c "CREATE DATABASE abenix"' 2>/dev/null
-    ok "Database ready"
+    # `kubectl get` returns a pod NAME even when that pod is Pending or in
+    # ImagePullBackOff, so don't announce success on the strength of the
+    # lookup — report what the exec actually did. This previously printed
+    # "Database ready" while Postgres had never started.
+    if kubectl exec -n "${NAMESPACE}" "${pg_pod}" -- \
+        bash -c 'PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = '"'"'abenix'"'"'" | grep -q 1 || PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -c "CREATE DATABASE abenix"' &>/dev/null; then
+      ok "Database ready"
+    else
+      warn "Could not reach Postgres in ${pg_pod} — schema steps below will be skipped"
+      return 0
+    fi
+  else
+    warn "No Postgres pod found — skipping schema steps"
+    return 0
   fi
 
   # Restart API to trigger table auto-creation
@@ -479,6 +693,48 @@ run_migrations() {
   log "Waiting for API pod to be ready after restart..."
   kubectl -n "${NAMESPACE}" rollout status deployment -l "app.kubernetes.io/name=api" --timeout=120s 2>/dev/null || true
   ok "Tables created via API startup"
+
+  # Alembic. `create_all` at API startup only adds MISSING TABLES — it never
+  # alters an existing one and it never inserts the seed rows migrations
+  # carry (the llm_model_pricing catalogue that feeds every model picker is
+  # migration-seeded, so without this the dropdowns fall back to a hardcoded
+  # list). deploy-azure.sh has always run this; the local path had not,
+  # which is how minikube drifted from prod.
+  local api_pod=""
+  for _ in $(seq 1 30); do
+    api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+      --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    [ -n "${api_pod}" ] && break
+    sleep 3
+  done
+  if [ -z "${api_pod}" ]; then
+    warn "No running API pod — skipping alembic"
+    return 0
+  fi
+
+  log "Bootstrapping schema (no-op if alembic_version exists)..."
+  kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
+    bash -c 'cd /app/packages/db && python -m bootstrap' 2>&1 | tail -3 || true
+
+  # `heads` (plural): this repo has independent migration branches, and
+  # singular `head` errors with "Multiple head revisions are present".
+  log "Running alembic upgrade heads..."
+  kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
+    bash -c 'cd /app/packages/db && python -m alembic upgrade heads' 2>&1 | tail -5 || true
+
+  # Don't trust the swallowed exit code above — assert the catalogue landed.
+  # Counted straight from Postgres so no Python quoting is involved.
+  local catalogue=""
+  if [ -n "${pg_pod}" ]; then
+    catalogue=$(kubectl exec -n "${NAMESPACE}" "${pg_pod}" -- bash -c \
+      'PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -d abenix -tAc "SELECT count(*) FROM llm_model_pricing WHERE is_active"' \
+      2>/dev/null | tr -d '[:space:]')
+  fi
+  if [ -n "${catalogue}" ] && [ "${catalogue}" -gt 0 ] 2>/dev/null; then
+    ok "Migrations applied — ${catalogue} models in the pricing catalogue"
+  else
+    warn "Model pricing catalogue is empty after alembic — every model picker will fall back to its hardcoded list"
+  fi
 }
 
 # ── Seed agents ──────────────────────────────────────────────────────────────
@@ -567,24 +823,61 @@ deploy_livekit() {
 }
 
 # ── Port forwarding ──────────────────────────────────────────────────────────
+# Kill every port forward for this namespace, wrapper loops included, and
+# verify they are gone. `pkill` on the kubectl child alone is not enough: the
+# `while true` wrapper simply starts another one.
+kill_port_forwards() {
+  local killed=0
+
+  # Wrapper loops first, by recorded PID. Killing the kubectl child alone is
+  # useless: the wrapper restarts it two seconds later.
+  if [ -f "${FORWARD_PIDFILE}" ]; then
+    while read -r pid; do
+      [ -z "${pid}" ] && continue
+      if kill "${pid}" 2>/dev/null; then
+        killed=$((killed + 1))
+      fi
+    done < "${FORWARD_PIDFILE}"
+    : > "${FORWARD_PIDFILE}"
+  fi
+
+  # Then the kubectl children those wrappers spawned, and anything a previous
+  # run left behind. MSYS pkill/pgrep cannot see these detached processes at
+  # all, so on Windows ask PowerShell, which can read their command lines.
+  local orphan
+  for orphan in $(ps -ef 2>/dev/null | awk '/kubectl/ && /port-forward/ {print $2}'); do
+    kill "${orphan}" 2>/dev/null || true
+  done
+  pkill -f "kubectl port-forward.*${NAMESPACE}" 2>/dev/null || true
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -Command "
+      Get-CimInstance Win32_Process -Filter \"Name='bash.exe' OR Name='kubectl.exe'\" |
+        Where-Object { \$_.CommandLine -like '*port-forward*' -and \$_.CommandLine -like '*${NAMESPACE}*' } |
+        ForEach-Object { try { Stop-Process -Id \$_.ProcessId -Force -ErrorAction Stop } catch {} }
+    " >/dev/null 2>&1 || true
+  fi
+  sleep 2
+  [ "${killed}" -gt 0 ] && log "stopped ${killed} port-forward wrapper(s)"
+  return 0
+}
+
 # Start a self-restarting port forward that reconnects if the connection drops
 start_persistent_forward() {
   local svc="$1" local_port="$2" remote_port="$3"
   local ns="${NAMESPACE}"
-  nohup bash -c "while true; do kubectl port-forward -n ${ns} svc/${svc} ${local_port}:${remote_port} 2>/dev/null; sleep 2; done" &>/dev/null &
+  nohup bash -c "echo \$\$ >> '${FORWARD_PIDFILE}'; while true; do kubectl port-forward -n ${ns} svc/${svc} ${local_port}:${remote_port} 2>/dev/null; sleep 2; done" &>/dev/null &
 }
 
 setup_port_forwards() {
   local with_runtime="${1:-false}"
   step "Setting up port forwarding"
 
-  # Kill any existing port forwards from previous runs
-  pkill -f "kubectl port-forward.*${NAMESPACE}" 2>/dev/null || true
-  sleep 2
+  # Kill any existing port forwards from previous runs, wrappers included.
+  kill_port_forwards
 
   # Start persistent (auto-reconnecting) port forwards
-  start_persistent_forward "${RELEASE_NAME}-web" 3000 3000
-  start_persistent_forward "${RELEASE_NAME}-api" 8000 8000
+  start_persistent_forward "${RELEASE_NAME}-web" "${WEB_PORT}" 3000
+  start_persistent_forward "${RELEASE_NAME}-api" "${API_PORT}" 8000
   start_persistent_forward "${RELEASE_NAME}-neo4j" 7474 7474
 
   # Standalone apps — each on its own port so the Use Cases dropdown
@@ -604,6 +897,10 @@ setup_port_forwards() {
   if kubectl -n "${NAMESPACE}" get svc resolveai-web &>/dev/null; then
     start_persistent_forward "resolveai-web" 3004 3004
     start_persistent_forward "resolveai-api" 8004 8004
+  fi
+  if kubectl -n "${NAMESPACE}" get svc wingman-web &>/dev/null; then
+    start_persistent_forward "wingman-web" 3006 3006
+    start_persistent_forward "wingman-api" 8006 8006
   fi
   # ClaimsIQ is a single Spring Boot + Vaadin container — no api/web split.
   if kubectl -n "${NAMESPACE}" get svc claimsiq &>/dev/null; then
@@ -637,9 +934,9 @@ setup_port_forwards() {
 
   if [ "${ready}" = true ]; then
     if [ "${with_runtime}" = "true" ]; then
-      ok "All services reachable — ports: 3000 (web), 8000 (api), 8001 (runtime), 7474 (neo4j)"
+      ok "All services reachable — ports: ${WEB_PORT} (web), ${API_PORT} (api), 8001 (runtime), 7474 (neo4j)"
     else
-      ok "All services reachable — ports: 3000 (web), 8000 (api), 7474 (neo4j)"
+      ok "All services reachable — ports: ${WEB_PORT} (web), ${API_PORT} (api), 7474 (neo4j)"
     fi
   else
     warn "Some services may not be reachable yet — port forwards are running in background"
@@ -765,6 +1062,10 @@ deploy_local() {
 
   # Create namespace (idempotent)
   kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - &>/dev/null
+  # KEDA must exist before helm renders ScaledObjects.
+  if _keda_requested; then
+    ensure_keda
+  fi
   helm_deps
 
   # MQTT broker + TimescaleDB — required by v1.1 production tooling
@@ -811,6 +1112,8 @@ deploy_local() {
       helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
         --namespace "${NAMESPACE}" \
         --set image.tag="${IMAGE_TAG}" \
+        --set image.repository="localhost:5000/abenix/edge-runtime" \
+        --set image.pullPolicy=IfNotPresent \
         --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
         --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
         --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
@@ -831,10 +1134,19 @@ deploy_local() {
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"
 
   # Deploy standalone apps after Abenix is running
-  deploy_contractiq     || warn "ContractIQ deployment failed (non-fatal)"
-  deploy_industrial_iot || warn "Industrial-IoT deployment failed (non-fatal)"
-  deploy_resolveai      || warn "ResolveAI deployment failed (non-fatal)"
-  deploy_claimsiq       || warn "ClaimsIQ deployment failed (non-fatal)"
+  deploy_contractiq      || warn "ContractIQ deployment failed (non-fatal)"
+  deploy_mideasttourism  || warn "Mideast Tourism deployment failed (non-fatal)"
+  deploy_industrial_iot  || warn "Industrial-IoT deployment failed (non-fatal)"
+  deploy_resolveai       || warn "ResolveAI deployment failed (non-fatal)"
+  deploy_wingman         || warn "Wingman deployment failed (non-fatal)"
+  deploy_claimsiq        || warn "ClaimsIQ deployment failed (non-fatal)"
+
+  # After the apps deploy, not before: each manifest recreates its own
+  # *-secrets from the environment and would overwrite a freshly minted key.
+  if [ -x "${ROOT_DIR}/scripts/seed-standalone-keys.sh" ]; then
+    step "Seeding standalone app API keys"
+    NAMESPACE="${NAMESPACE}" bash "${ROOT_DIR}/scripts/seed-standalone-keys.sh" 2>&1 | tail -14       || warn "standalone key seed failed — apps will 401 against the platform"
+  fi
 
   setup_port_forwards "false"
 
@@ -846,25 +1158,20 @@ deploy_local() {
     install_observability_stack
   fi
 
-  # Forward ContractIQ ports too
-  if kubectl get svc contractiq-web -n "${NAMESPACE}" &>/dev/null; then
-    log "Setting up ContractIQ port forwards..."
-    pkill -f "kubectl port-forward.*contractiq" 2>/dev/null || true
-    nohup kubectl port-forward -n "${NAMESPACE}" svc/contractiq-web 3001:3001 > /tmp/pf-ciq-web.log 2>&1 &
-    nohup kubectl port-forward -n "${NAMESPACE}" svc/contractiq-api 8001:8001 > /tmp/pf-ciq-api.log 2>&1 &
-    sleep 2
-    ok "ContractIQ port forwards: web→3001, api→8001"
-  fi
 
   echo ""
   echo -e "${GREEN}================================================================${NC}"
   echo -e "${GREEN}  Abenix + ContractIQ on minikube${NC}"
   echo -e "${GREEN}================================================================${NC}"
   echo ""
-  echo -e "  ${CYAN}Abenix Web${NC}    http://localhost:3000"
+  echo -e "  ${CYAN}Abenix Web${NC}    http://localhost:${WEB_PORT}"
   echo -e "  ${CYAN}ContractIQ Web${NC}    http://localhost:3001"
+  echo -e "  ${CYAN}Mideast Tourism${NC}  http://localhost:3002"
+  echo -e "  ${CYAN}Industrial IoT${NC}   http://localhost:3003"
+  echo -e "  ${CYAN}ResolveAI${NC}        http://localhost:3004"
   echo -e "  ${CYAN}ClaimsIQ${NC}         http://localhost:3005"
-  echo -e "  ${CYAN}Abenix API${NC}    http://localhost:8000/docs"
+  echo -e "  ${CYAN}Wingman${NC}          http://localhost:3006"
+  echo -e "  ${CYAN}Abenix API${NC}    http://localhost:${API_PORT}/docs"
   echo -e "  ${CYAN}ContractIQ API${NC}    http://localhost:8001/api/health"
   echo -e "  ${CYAN}Neo4j Browser${NC}    http://localhost:7474"
   if [[ "${OBSERVABILITY:-true}" == "true" ]]; then
@@ -881,7 +1188,7 @@ deploy_local() {
   echo -e "  ${YELLOW}Status:${NC}          bash scripts/deploy.sh status"
   echo -e "  ${YELLOW}Destroy:${NC}         bash scripts/deploy.sh destroy"
   echo -e "  ${YELLOW}E2E Tests:${NC}       bash scripts/run-e2e.sh --k8s knowledge"
-  echo -e "  ${YELLOW}Stop forwards:${NC}   pkill -f 'kubectl port-forward.*abenix'"
+  echo -e "  ${YELLOW}Stop forwards:${NC}   bash scripts/deploy.sh destroy (or restart them: bash scripts/deploy.sh forwards)"
   echo ""
 }
 
@@ -954,7 +1261,7 @@ deploy_local_runtime() {
   echo -e "  ${YELLOW}Status:${NC}          bash scripts/deploy.sh status"
   echo -e "  ${YELLOW}Destroy:${NC}         bash scripts/deploy.sh destroy"
   echo -e "  ${YELLOW}E2E Tests:${NC}       bash scripts/run-e2e.sh --k8s knowledge"
-  echo -e "  ${YELLOW}Stop forwards:${NC}   pkill -f 'kubectl port-forward.*abenix'"
+  echo -e "  ${YELLOW}Stop forwards:${NC}   bash scripts/deploy.sh destroy (or restart them: bash scripts/deploy.sh forwards)"
   echo ""
 }
 
@@ -1043,7 +1350,7 @@ deploy_destroy() {
   step "Destroying Abenix deployment"
 
   # Kill persistent port forward loops and kubectl port-forwards
-  pkill -f "kubectl port-forward.*${NAMESPACE}" 2>/dev/null || true
+  kill_port_forwards
   pkill -f "port-forward.*${RELEASE_NAME}" 2>/dev/null || true
 
   if helm status "${RELEASE_NAME}" -n "${NAMESPACE}" &>/dev/null; then
@@ -1078,6 +1385,121 @@ deploy_build() {
   ok "All images built"
 }
 
+# Re-establish every local port forward and report which ones answer.
+# Forwards go stale whenever a pod restarts, so this is the supported way to
+# get them all back without a full redeploy.
+deploy_forwards() {
+  check_prereqs
+  if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then
+    err "minikube is not running — use '$0 local' first"
+    exit 1
+  fi
+  setup_port_forwards "false"
+
+  step "Verifying forwards"
+  local pairs=(
+    "abenix-web:${WEB_PORT}" "abenix-api:${API_PORT}"
+    "contractiq-web:3001" "contractiq-api:8001"
+    "mideasttourism-web:3002" "mideasttourism-api:8002"
+    "industrial-iot-web:3003" "industrial-iot-api:8003"
+    "resolveai-web:3004" "resolveai-api:8004"
+    "claimsiq:3005"
+    "wingman-web:3006" "wingman-api:8006"
+  )
+  local bad=0
+  for pair in "${pairs[@]}"; do
+    local label="${pair%%:*}" port="${pair##*:}" code=""
+    # Any HTTP status means the tunnel carried the request; only a connect
+    # failure counts, read from curl's exit status (it prints 000 itself).
+    for attempt in 1 2 3; do
+      if code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "http://localhost:${port}/" 2>/dev/null)"; then
+        break
+      fi
+      code="000"
+      [ "${attempt}" -lt 3 ] && sleep 3
+    done
+    if [ "${code}" = "000" ]; then
+      err "${label} :${port} not answering"
+      bad=$((bad + 1))
+    else
+      ok "${label} :${port} -> HTTP ${code}"
+    fi
+  done
+  if [ "${bad}" -eq 0 ]; then
+    ok "all forwards up"
+  else
+    warn "${bad} forward(s) down"
+  fi
+  return 0
+}
+
+# Rebuild one core service into minikube's daemon and restart just its
+# deployment. Helm is deliberately not involved: images are tagged with the
+# git SHA and pulled with pullPolicy: Never, so re-running helm would rewrite
+# the tag on every pod for no gain. Use this to pick up a code edit without
+# a full deploy.
+deploy_reload() {
+  local svc="${1:-}"
+  # Core services are built from the repo root; each standalone app ships its
+  # own Dockerfile beside its source, so it needs its own directory as context.
+  local kind="core" app_dir="" app_part=""
+  case "${svc}" in
+    api|web|worker|agent-runtime|edge-runtime) kind="core" ;;
+    contractiq-api|contractiq-web)     kind="app"; app_dir="contractiq";     app_part="${svc#contractiq-}" ;;
+    industrial-iot-api|industrial-iot-web) kind="app"; app_dir="industrial-iot"; app_part="${svc#industrial-iot-}" ;;
+    resolveai-api|resolveai-web)       kind="app"; app_dir="resolveai";       app_part="${svc#resolveai-}" ;;
+    wingman-api|wingman-web)           kind="app"; app_dir="wingman";         app_part="${svc#wingman-}" ;;
+    mideasttourism-api|mideasttourism-web) kind="app"; app_dir="mideasttourism"; app_part="${svc#mideasttourism-}" ;;
+    *)
+      err "reload does not know '${svc}'"
+      err "  core: api web worker agent-runtime edge-runtime"
+      err "  apps: {contractiq,industrial-iot,resolveai,wingman,mideasttourism}-{api,web}"
+      exit 1
+      ;;
+  esac
+
+  check_prereqs
+  wait_for_docker
+  if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then
+    err "minikube is not running — use '$0 local' first"
+    exit 1
+  fi
+  eval "$(minikube docker-env)"
+
+  local registry="localhost:5000/abenix"
+  if [ "${kind}" = "core" ]; then
+    build_core_service "${svc}" "${registry}" "false"
+    step "Restarting ${svc}"
+    kubectl -n "${NAMESPACE}" rollout restart deployment -l "app.kubernetes.io/name=${svc}"
+    kubectl -n "${NAMESPACE}" rollout status deployment -l "app.kubernetes.io/name=${svc}" --timeout=240s
+  else
+    # mideasttourism-api is the one app whose Dockerfile COPYs from the app
+    # root rather than from the api/ subdirectory.
+    local ctx="${ROOT_DIR}/${app_dir}/${app_part}"
+    local dockerfile="${ctx}/Dockerfile"
+    if [ "${svc}" = "mideasttourism-api" ]; then
+      ctx="${ROOT_DIR}/${app_dir}"
+    fi
+    if [ ! -f "${dockerfile}" ]; then
+      err "No Dockerfile at ${dockerfile}"
+      exit 1
+    fi
+    log "Building ${svc}..."
+    docker build -t "${registry}/${svc}:${IMAGE_TAG}" -t "${registry}/${svc}:latest" \
+      -f "${dockerfile}" "${ctx}" 2>&1 | tail -3
+    ok "${svc}: built"
+    step "Restarting ${svc}"
+    kubectl -n "${NAMESPACE}" rollout restart "deploy/${svc}"
+    kubectl -n "${NAMESPACE}" rollout status "deploy/${svc}" --timeout=240s
+  fi
+  ok "${svc} reloaded at tag ${IMAGE_TAG}"
+
+  # The rollout drops this service's forward, so put it back rather than
+  # leaving the caller with a dead tunnel.
+  warn "forward for ${svc} was dropped by the rollout — run '$0 forwards' to restore"
+  return 0
+}
+
 # MAIN
 case "${1:-}" in
   local)          deploy_local         ;;
@@ -1086,5 +1508,7 @@ case "${1:-}" in
   status)         deploy_status        ;;
   destroy)        deploy_destroy       ;;
   build)          deploy_build         ;;
+  reload)         deploy_reload "${2:-}" ;;
+  forwards)       deploy_forwards      ;;
   *)              usage                ;;
 esac

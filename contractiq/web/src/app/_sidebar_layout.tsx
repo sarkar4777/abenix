@@ -159,7 +159,10 @@ function ContractIQLayoutInner({ children }: { children: React.ReactNode }) {
       const r = await orig(input, init);
       if (r.status === 401 && !bouncing) {
         const url = typeof input === 'string' ? input : (input as Request).url || '';
-        if (!/\/auth\/(login|register|refresh)/.test(url)) {
+        // Only the app's own API says anything about the session — a 401 from a
+        // background poller used to sign the user out on dashboard load.
+        const sessionScoped = /\/api\/contractiq\//.test(url);
+        if (sessionScoped && !/\/auth\/(login|register|refresh)/.test(url)) {
           bouncing = true;
           localStorage.removeItem('contractiq_token');
           localStorage.removeItem('contractiq_refresh_token');

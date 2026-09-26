@@ -61,13 +61,25 @@ export default function AIBuilderDialog({ open, onClose, onApply }: Props) {
     const token = typeof window !== 'undefined'
       ? window.localStorage.getItem('access_token')
       : null;
-    fetch(`${API_URL}/api/settings/builder_model`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
+    const auth = token ? { Authorization: `Bearer ${token}` } : {};
+    fetch(`${API_URL}/api/settings/builder_model`, { headers: auth })
       .then((r) => r.json())
       .then((body) => {
         const v = body?.data?.value;
         if (typeof v === 'string' && v) setBuilderModel(v);
+      })
+      .catch(() => {});
+
+    // An exclusive subscription serves every request regardless of this
+    // setting, so showing the setting alone told the user a model that was
+    // never going to run.
+    fetch(`${API_URL}/api/llm-models`, { headers: auth })
+      .then((r) => r.json())
+      .then((body) => {
+        const sub = body?.data?.subscription;
+        if (sub?.active && sub?.exclusive && sub?.default_model) {
+          setBuilderModel(`${sub.default_model} (Claude subscription)`);
+        }
       })
       .catch(() => {});
   }, [open]);

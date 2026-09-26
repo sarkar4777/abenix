@@ -26,6 +26,8 @@ secrets:
   jwtSecret: "azure-dev-jwt-secret-change-me"
   neo4jPassword: "abenix-neo4j-pass"
   anthropicApiKey: ""
+  # Claude Pro/Max subscription token (`claude setup-token`). Optional.
+  claudeSubscriptionToken: ""
   openaiApiKey: ""
   googleApiKey: ""
   pineconeApiKey: ""

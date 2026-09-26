@@ -206,6 +206,54 @@ def _heal_alembic_version_sync(conn) -> int:
     return deleted
 
 
+def _create_missing_enums_sync(conn) -> int:
+    """Create Postgres ENUM types that `create_all` will not create itself.
+
+    A couple of models declare their enum with `create_type=False` (e.g.
+    `Enum(MemoryType, name="memory_type", create_type=False)`) because an
+    alembic migration owns the CREATE TYPE. That is fine on the migration
+    path, but this module's fresh-install fast path uses
+    `Base.metadata.create_all`, which then emits a table referencing a type
+    that does not exist yet and fails with:
+
+        asyncpg.exceptions.UndefinedObjectError: type "memory_type" does not exist
+
+    Because the api pod runs this as an init container, that single failure
+    kept the whole API from ever starting on a brand-new database. Walk the
+    metadata, find every named enum, and create the ones Postgres is missing
+    before create_all runs. Idempotent, and a no-op on an existing DB.
+    """
+    from sqlalchemy import text as _text
+    from sqlalchemy import Enum as _Enum
+
+    from models.base import Base
+
+    created = 0
+    seen: set[str] = set()
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            enum_type = column.type
+            name = getattr(enum_type, "name", None)
+            if not isinstance(enum_type, _Enum) or not name or name in seen:
+                continue
+            seen.add(name)
+            labels = list(getattr(enum_type, "enums", []) or [])
+            if not labels:
+                continue
+            exists = conn.execute(
+                _text("SELECT 1 FROM pg_type WHERE typname = :n"), {"n": name}
+            ).first()
+            if exists is not None:
+                continue
+            values = ", ".join("'" + str(v).replace("'", "''") + "'" for v in labels)
+            # CREATE TYPE has no IF NOT EXISTS; the pg_type check above plus
+            # this transaction is enough, and a racing creator is tolerated.
+            conn.execute(_text(f"CREATE TYPE {name} AS ENUM ({values})"))
+            print(f"[bootstrap] created missing enum type {name}")
+            created += 1
+    return created
+
+
 def _patch_missing_columns_sync(conn) -> int:
     """Compare ORM Base.metadata to live schema, ALTER ADD any column the
     ORM declares that the live DB lacks. Idempotent, additive only —
@@ -287,6 +335,7 @@ def _bootstrap_sync(url: str) -> int:
             print(
                 "[bootstrap] Fresh DB detected — creating schema from ORM (sync driver)."
             )
+            _create_missing_enums_sync(conn)
             Base.metadata.create_all(bind=conn)
     return 2  # caller stamps after this returns
 
@@ -328,12 +377,14 @@ async def _bootstrap_async(url: str) -> int:
                 print(
                     "[bootstrap] Drift recovery — tables exist but alembic untracked."
                 )
+                await conn.run_sync(_create_missing_enums_sync)
                 await conn.run_sync(Base.metadata.create_all)
                 await conn.run_sync(_patch_missing_columns_sync)
             else:
                 print(
                     "[bootstrap] Fresh DB detected — creating schema from ORM (async driver)."
                 )
+                await conn.run_sync(_create_missing_enums_sync)
                 await conn.run_sync(Base.metadata.create_all)
     finally:
         await engine.dispose()

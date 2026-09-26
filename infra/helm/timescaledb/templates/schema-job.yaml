@@ -1,0 +1,98 @@
+{{- if .Values.schema.enabled }}
+{{/*
+Creates the `metrics` hypertable the tsdb_query tool and the pipeline tsdb_sink
+node expect. The chart shipped a database with no schema, so both failed with
+relation "metrics" does not exist. Runs as a hook on install AND upgrade
+because the entrypoint's initdb scripts only fire on a brand-new volume.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "timescaledb.fullname" . }}-schema
+  labels:
+    {{- include "timescaledb.labels" . | nindent 4 }}
+data:
+  schema.sql: |
+    CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+    -- Column names are the convention tsdb_query documents and queries.
+    CREATE TABLE IF NOT EXISTS {{ .Values.schema.table }} (
+      ts       timestamptz      NOT NULL,
+      asset_id text             NOT NULL,
+      metric   text             NOT NULL,
+      value    double precision NOT NULL
+    );
+
+    -- if_not_exists keeps this safe to re-run; migrate_data handles a table
+    -- that already holds rows from before it was a hypertable.
+    SELECT create_hypertable(
+      '{{ .Values.schema.table }}', 'ts',
+      if_not_exists => TRUE, migrate_data => TRUE
+    );
+
+    CREATE INDEX IF NOT EXISTS ix_{{ .Values.schema.table }}_metric_ts
+      ON {{ .Values.schema.table }} (metric, ts DESC);
+    CREATE INDEX IF NOT EXISTS ix_{{ .Values.schema.table }}_asset_metric_ts
+      ON {{ .Values.schema.table }} (asset_id, metric, ts DESC);
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "timescaledb.fullname" . }}-schema
+  labels:
+    {{- include "timescaledb.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "timescaledb.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: schema
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          env:
+            - name: PGHOST
+              value: {{ include "timescaledb.fullname" . | quote }}
+            - name: PGPORT
+              value: {{ .Values.service.port | default 5432 | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.auth.database | default "abenix_tsdb" | quote }}
+            - name: PGUSER
+              value: {{ .Values.auth.username | default "abenix" | quote }}
+            - name: PGPASSWORD
+              {{- if .Values.auth.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: {{ .Values.auth.existingSecretPasswordKey | default "tsdb-password" }}
+              {{- else }}
+              value: {{ .Values.auth.password | default "abenix" | quote }}
+              {{- end }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              # The StatefulSet may still be starting when the hook fires.
+              for i in $(seq 1 60); do
+                pg_isready -q && break
+                echo "waiting for timescaledb ($i)..."
+                sleep 2
+              done
+              psql -v ON_ERROR_STOP=1 -f /schema/schema.sql
+              echo "timescaledb schema applied"
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+      volumes:
+        - name: schema
+          configMap:
+            name: {{ include "timescaledb.fullname" . }}-schema
+{{- end }}

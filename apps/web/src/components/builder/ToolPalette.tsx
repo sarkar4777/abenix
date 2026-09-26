@@ -35,6 +35,8 @@ interface ToolItem {
   badge?: 'read-only' | 'destructive' | null;
   source?: 'builtin' | 'mcp';
   connectionId?: string;
+  /** Category slug straight from /api/tools, used when TOOL_DOCS has no entry. */
+  apiCategory?: string;
 }
 
 const BUILT_IN_TOOLS: ToolItem[] = [
@@ -322,6 +324,7 @@ export default function ToolPalette({ selectedTools, onToggleTool }: ToolPalette
           description: t.description || '',
           icon: overrides[t.id] || _iconFor(t.id, t.category),
           source: 'builtin',
+          apiCategory: t.category,
         }));
         setLiveTools(mapped);
       })
@@ -392,11 +395,34 @@ export default function ToolPalette({ selectedTools, onToggleTool }: ToolPalette
       .map(({ tool }) => tool);
   };
 
+  // Display names for the category slugs /api/tools returns. TOOL_DOCS is
+  // hand-maintained and covers a minority of the catalogue, so without this
+  // fallback most tools were filed under "Other" and became unbrowsable.
+  const API_CATEGORY_LABELS: Record<string, string> = {
+    core: 'Core',
+    code: 'Code & Transform',
+    data: 'Data & Search',
+    finance: 'Financial',
+    integration: 'Integrations',
+    enterprise: 'Enterprise',
+    kyc: 'Compliance & KYC',
+    pipeline: 'Pipeline',
+    meeting: 'Meetings',
+    multimodal: 'Multi-Modal',
+    ml: 'ML Models',
+    knowledge: 'Knowledge Graph',
+    privacy: 'Privacy & Safety',
+  };
+
   // Group tools by category
   const groupToolsByCategory = (tools: ToolItem[]) => {
     const groups: Record<string, ToolItem[]> = {};
     for (const t of tools) {
-      const cat = TOOL_DOCS[t.id]?.category || 'Other';
+      const slug = (t.apiCategory || '').toLowerCase();
+      const cat =
+        TOOL_DOCS[t.id]?.category ||
+        API_CATEGORY_LABELS[slug] ||
+        (slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : 'Other');
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push(t);
     }

@@ -33,7 +33,50 @@ _PROVIDER_ENV: dict[str, tuple[str, ...]] = {
     "openai": ("OPENAI_API_KEY",),
     "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
     "azure": ("AZURE_OPENAI_API_KEY",),
+    # A Claude subscription is credentialled by an OAuth token rather than
+    # an API key, and can also be set from Admin -> LLM Settings.
+    "claude_subscription": ("CLAUDE_SUBSCRIPTION_TOKEN", "ANTHROPIC_AUTH_TOKEN"),
 }
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+async def _subscription_state(db: AsyncSession) -> dict[str, Any]:
+    """Subscription mode as the pickers need to see it."""
+    try:
+        rows = (
+            await db.execute(
+                text(
+                    "SELECT key, value FROM platform_settings "
+                    "WHERE key LIKE 'llm.subscription.%'"
+                )
+            )
+        ).all()
+        stored = {str(k): str(v or "") for k, v in rows}
+    except Exception as exc:
+        logger.debug("subscription state probe skipped: %s", exc)
+        stored = {}
+
+    token = stored.get("llm.subscription.token", "").strip()
+    if not token:
+        for name in _PROVIDER_ENV["claude_subscription"]:
+            val = os.environ.get(name, "")
+            if _is_real_key(val):
+                token = val.strip()
+                break
+    enabled = stored.get("llm.subscription.enabled", "false").strip().lower() in _TRUTHY
+    exclusive = (
+        stored.get("llm.subscription.exclusive", "true").strip().lower() in _TRUTHY
+    )
+    return {
+        "enabled": enabled,
+        "token_set": bool(token),
+        "active": enabled and bool(token),
+        "exclusive": exclusive,
+        "default_model": stored.get("llm.subscription.default_model", "").strip()
+        or "claude-opus-5",
+    }
+
 
 _PROVIDER_CACHE: dict[str, dict[str, Any]] = {}
 _PROVIDER_CACHE_AT: float = 0.0
@@ -73,6 +116,24 @@ async def _probe_providers(db: AsyncSession) -> dict[str, dict[str, Any]]:
     except Exception as exc:
         logger.debug("platform_settings probe skipped: %s", exc)
 
+    # The subscription token lives under its own settings key, not the
+    # `provider.<name>.api_key` convention the API-key providers use.
+    sub_token = ""
+    try:
+        sub_token = str(
+            (
+                await db.execute(
+                    text(
+                        "SELECT value FROM platform_settings "
+                        "WHERE key = 'llm.subscription.token'"
+                    )
+                )
+            ).scalar_one_or_none()
+            or ""
+        ).strip()
+    except Exception as exc:
+        logger.debug("subscription token probe skipped: %s", exc)
+
     result: dict[str, dict[str, Any]] = {}
     for provider, env_names in _PROVIDER_ENV.items():
         env_val = ""
@@ -83,13 +144,18 @@ async def _probe_providers(db: AsyncSession) -> dict[str, dict[str, Any]]:
                 env_val = v
                 chosen_env = name
                 break
-        db_val = db_keys.get(f"provider.{provider}.api_key", "")
+        if provider == "claude_subscription":
+            db_val = sub_token
+            missing_reason = "no subscription token — paste one in Admin → LLM Settings"
+        else:
+            db_val = db_keys.get(f"provider.{provider}.api_key", "")
+            missing_reason = f"{chosen_env} not set"
         if _is_real_key(env_val) or _is_real_key(db_val):
             result[provider] = {"configured": True, "reason": None}
         else:
             result[provider] = {
                 "configured": False,
-                "reason": f"{chosen_env} not set",
+                "reason": missing_reason,
             }
 
     _PROVIDER_CACHE = result
@@ -116,6 +182,7 @@ def _display(
     row: LLMModelPricing,
     avail: ModelAvailability | None,
     providers: dict[str, dict[str, Any]] | None = None,
+    subscription: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     label = row.display_name
     if not label:
@@ -136,10 +203,29 @@ def _display(
     prov_name = _provider_from_model(row.model, row.provider)
     prov_info = (providers or {}).get(prov_name) or {}
     provider_available = bool(prov_info.get("configured", True))
+
+    # When subscription mode is live, say so per-model: Claude models run on
+    # it directly, and in exclusive mode everything else is remapped onto the
+    # configured Claude model. Either way the call costs nothing extra.
+    sub = subscription or {}
+    served_by_subscription = False
+    remapped_to: str | None = None
+    if sub.get("active"):
+        if row.model.lower().startswith("claude"):
+            served_by_subscription = True
+        elif sub.get("exclusive"):
+            served_by_subscription = True
+            remapped_to = sub.get("default_model")
+    if served_by_subscription:
+        provider_available = True
+
     return {
         "value": row.model,
         "label": label,
         "provider": row.provider,
+        "served_by": "claude_subscription" if served_by_subscription else prov_name,
+        "subscription_served": served_by_subscription,
+        "subscription_remapped_to": remapped_to,
         "is_deprecated": bool(row.is_deprecated),
         "deprecated_at": row.deprecated_at.isoformat() if row.deprecated_at else None,
         "migration_hint": row.migration_hint,
@@ -194,6 +280,7 @@ async def list_models(
     avail_rows = (await db.execute(select(ModelAvailability))).scalars().all()
     by_model = {a.model: a for a in avail_rows}
     providers = await _probe_providers(db)
+    subscription = await _subscription_state(db)
 
     items: list[dict[str, Any]] = []
     for row in pricing_rows:
@@ -202,9 +289,9 @@ async def list_models(
         avail = by_model.get(row.model)
         if not include_unavailable and avail and avail.status != "available":
             continue
-        items.append(_display(row, avail, providers))
+        items.append(_display(row, avail, providers, subscription))
 
-    return success({"models": items})
+    return success({"models": items, "subscription": subscription})
 
 
 @provider_router.get("/available-providers")
