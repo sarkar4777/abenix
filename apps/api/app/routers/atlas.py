@@ -25,6 +25,7 @@ from models.user import User  # type: ignore
 # Reuses the BPM analyser's hardened multimodal pipeline.
 from app.routers.bpm_analyzer import (  # type: ignore
     _build_anthropic_messages,
+    default_vision_model,
     _parse_agent_specs,
     _process_upload,
     _provider_for,
@@ -589,7 +590,7 @@ async def parse_nl(
     text = (body.get("text") or "").strip()
     if not text:
         return error("text is required", 400)
-    model = (body.get("model") or "gemini-2.5-pro").strip()
+    model = (body.get("model") or default_vision_model()).strip()
 
     # Reuse the BPM analyser's message builder + dispatcher. We pass an
     # empty attachments list — this is text-only — and the user's
@@ -691,9 +692,9 @@ async def extract_from_upload(
     else:
         return error("Provide either a file or text", 400)
 
-    chosen_model = (model or "").strip() or "gemini-2.5-pro"
+    chosen_model = (model or "").strip() or default_vision_model()
     if required_provider and _provider_for(chosen_model) != required_provider:
-        chosen_model = "gemini-2.5-pro"
+        chosen_model = default_vision_model()
 
     seed = "Read the attached artefact and propose an ontology fragment."
     msgs = _build_anthropic_messages(

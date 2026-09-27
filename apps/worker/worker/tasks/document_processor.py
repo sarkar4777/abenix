@@ -103,6 +103,42 @@ def _chunk_text(
 EMBEDDING_DIM = 1536
 
 
+def _degraded_or_local(chunks: list[str]) -> tuple[list[list[float]], bool]:
+    """What to store when the configured provider failed.
+
+    Zero vectors match nothing, so a document stored that way is present in
+    the UI and invisible to search — the worst of both. If the local embedder
+    is available, use it: lexical retrieval beats no retrieval, and the loud
+    warning plus the recorded embedder id keep it honest.
+    """
+    try:
+        from local_embeddings import embed_many, embedder_id
+
+        logger.warning(
+            "Embedding provider failed — falling back to %s (lexical, not "
+            "semantic). Fix the provider and re-ingest for semantic search; "
+            "vectors from the two schemes are not comparable.",
+            embedder_id(),
+        )
+        return embed_many(chunks), True
+    except Exception:  # noqa: BLE001
+        logger.error(
+            "Embedding provider failed and no local fallback is available — "
+            "storing zero vectors and marking the document DEGRADED."
+        )
+        return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+
+
+def _local_embeddings_enabled() -> bool:
+    """Whether to fall back to the offline embedder. Never raises."""
+    try:
+        from local_embeddings import is_enabled
+
+        return is_enabled()
+    except Exception:  # noqa: BLE001 — a missing module must not break ingest
+        return False
+
+
 def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
     """Returns (embeddings, used_real_model). Provider selection:
       1. Azure OpenAI if AZURE_OPENAI_API_KEY + endpoint are set (preferred —
@@ -176,7 +212,7 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
                     "honest reason so search returns 503 instead of an empty 200",
                     exc,
                 )
-                return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+                return _degraded_or_local(chunks)
 
     if OPENAI_API_KEY:
         try:
@@ -197,11 +233,27 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
                 "doc will be marked DEGRADED with the honest provider error",
                 exc,
             )
-            return [[0.0] * EMBEDDING_DIM for _ in chunks], False
+            return _degraded_or_local(chunks)
+
+    # Nothing paid is configured. Rather than leave every collection empty on
+    # a fresh clone, fall back to the local hashing embedder. It is lexical
+    # rather than semantic and says so, but it makes knowledge_search return
+    # the chunk that contains the words you typed instead of nothing at all.
+    if _local_embeddings_enabled():
+        from local_embeddings import embed_many
+
+        logger.warning(
+            "No embedding provider configured — using the local hashing "
+            "embedder (lexical, not semantic). Set OPENAI_API_KEY or "
+            "AZURE_OPENAI_API_KEY for real semantic search, and re-ingest: "
+            "vectors from the two schemes are not comparable."
+        )
+        return embed_many(chunks), True
 
     raise EmbeddingProviderError(
         "No embedding provider configured — set AZURE_OPENAI_API_KEY + "
-        "AZURE_OPENAI_ENDPOINT or OPENAI_API_KEY"
+        "AZURE_OPENAI_ENDPOINT or OPENAI_API_KEY, or set "
+        "ABENIX_LOCAL_EMBEDDINGS=1 to use the offline hashing embedder"
     )
 
 

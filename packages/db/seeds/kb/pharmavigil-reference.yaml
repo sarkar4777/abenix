@@ -1,0 +1,246 @@
+# PharmaVigil — the reference corpus a safety team actually works from.
+#
+# Four agents in the assessment pipeline declare `knowledge_search` and, until
+# this file existed, had no collection granted. They said so honestly when
+# asked, which is the right failure, but it left the pipeline judging
+# seriousness, causality and expectedness entirely from prompt text.
+#
+# What belongs here is the written rule a reviewer would cite in an audit, not
+# a restatement of what the model already knows. Every document is scoped to a
+# decision one of the agents has to make, and carries the identifier that
+# decision has to be defensible against.
+#
+# Contents are illustrative reference text for a demonstration system. They
+# follow the shape of published pharmacovigilance guidance but are not a
+# substitute for it, and nothing here is a regulatory submission.
+
+project:
+  slug: pharmavigil
+  name: "PharmaVigil"
+  description: "Drug safety reference — seriousness, causality, expectedness, submission."
+
+collections:
+  - slug: pharmavigil-reference
+    name: "PharmaVigil Safety Reference"
+    description: >
+      Seriousness criteria, the important-medical-event rationale, causality
+      scales, expectedness rules and the submission field contract.
+    default_visibility: project
+    vector_backend: pgvector
+    agent_slugs:
+      - pharmavigil-seriousness
+      - pharmavigil-causality
+      - pharmavigil-narrative
+      - pharmavigil-meddra-coder
+    agent_permission: READ
+    documents:
+      - id: pv-ref-serious
+        title: "Seriousness criteria and the reporting clock"
+        version: 1
+        metadata: { doc_id: "PV-SERIOUS", category: "seriousness", authority: "CIOMS" }
+        content: |
+          SERIOUSNESS CRITERIA
+
+          A case is serious when the event meets at least one of six criteria.
+          Seriousness is a regulatory classification, not a judgement about how
+          unwell the patient looked.
+
+            1. Death. The event contributed to the death, not merely preceded it.
+            2. Life-threatening. The patient was at risk of death at the time of
+               the event. Not an event that might have become fatal had it
+               progressed.
+            3. Hospitalisation, initial or prolonged. An admission for
+               observation counts. A pre-planned elective admission does not,
+               unless the condition worsened and extended the stay.
+            4. Persistent or significant disability or incapacity. A substantial
+               disruption of the ability to conduct normal life functions.
+            5. Congenital anomaly or birth defect in the offspring.
+            6. Other medically important condition. See PV-IME.
+
+          THE CLOCK
+
+          Day zero is the day any employee first received the minimum four
+          elements: an identifiable patient, an identifiable reporter, a suspect
+          product, and an event. The clock starts on receipt, not on the day the
+          case was entered, and not on the day the case was coded.
+
+            * Serious and unexpected: 7 calendar days for fatal or
+              life-threatening, otherwise 15 calendar days.
+            * Serious and expected: periodic reporting, not expedited.
+            * Non-serious: periodic reporting.
+
+          A case that becomes serious on follow-up starts a new clock from the
+          date the information making it serious was received. The original
+          receipt date does not reset and both are recorded.
+
+      - id: pv-ref-ime
+        title: "Important medical events and why the list exists"
+        version: 1
+        metadata: { doc_id: "PV-IME", category: "seriousness", authority: "EMA IME list" }
+        content: |
+          IMPORTANT MEDICAL EVENTS
+
+          The sixth seriousness criterion exists because the first five are
+          about outcomes, and some events are grave enough to be serious before
+          any outcome is known. Anaphylaxis treated promptly in a clinic ends in
+          neither death nor admission, and is still serious.
+
+          Treat an event as an IME when it may jeopardise the patient or require
+          intervention to prevent one of the other five outcomes. Worked
+          examples that recur in this system:
+
+            * Anaphylactic reaction. Serious on the term alone.
+            * Agranulocytosis, aplastic anaemia, pancytopenia.
+            * Hepatotoxicity, hepatic failure, jaundice with raised
+              transaminases.
+            * Rhabdomyolysis. Also serious on the term alone, given the renal
+              risk.
+            * Stevens-Johnson syndrome, toxic epidermal necrolysis.
+            * Torsade de pointes, ventricular fibrillation.
+            * Seizure in a patient with no seizure history.
+
+          A term absent from the list is not thereby non-serious. The list is a
+          floor, and the reviewer's judgement sits above it. Record the reason
+          whenever the judgement departs from the list in either direction.
+
+      - id: pv-ref-causality
+        title: "WHO-UMC categories and the Naranjo items"
+        version: 1
+        metadata: { doc_id: "PV-CAUSAL", category: "causality", authority: "WHO-UMC, Naranjo" }
+        content: |
+          WHO-UMC CATEGORIES
+
+            Certain      Plausible time relationship, cannot be explained by
+                         disease or other drugs, response to withdrawal is
+                         plausible, and rechallenge is positive.
+            Probable     Reasonable time relationship, unlikely to be
+                         attributable to disease or other drugs, reasonable
+                         response to withdrawal. Rechallenge not required.
+            Possible     Reasonable time relationship, but disease or other
+                         drugs could also explain it. Withdrawal information
+                         may be lacking or unclear.
+            Unlikely     Time relationship makes a causal connection improbable,
+                         and other explanations are plausible.
+            Conditional  More data are needed before the case can be assessed.
+            Unassessable A report that cannot be judged because the information
+                         is insufficient or contradictory, and cannot be
+                         supplemented.
+
+          NARANJO
+
+          Ten items. Score, then band: 9 or more certain (often reported as
+          definite), 5 to 8 probable, 1 to 4 possible, 0 or below doubtful.
+
+            +1  Previous conclusive reports of this reaction
+            +2  Event appeared after the suspected drug was given
+            +1  Improved when the drug was stopped or an antagonist given
+            +2  Reappeared when the drug was re-administered
+            -1  Alternative causes could on their own have caused the event
+            -1  Reappeared when a placebo was given
+            +1  Drug detected in blood at a toxic concentration
+            +1  More severe when the dose increased, less severe when reduced
+            +1  Patient had a similar reaction to the same or a similar drug
+            +1  Event confirmed by objective evidence
+
+          The two scales disagree, routinely and legitimately. Naranjo counts
+          items, WHO-UMC weighs them. When they part, record both and say which
+          item drove the difference.
+
+          DECHALLENGE AND RECHALLENGE
+
+          A positive dechallenge is improvement after withdrawal. It is weak
+          evidence on its own for an event that resolves by itself. A positive
+          rechallenge is the strongest single item available, and is almost
+          never deliberate.
+
+      - id: pv-ref-expected
+        title: "Expectedness and the reference safety information"
+        version: 1
+        metadata: { doc_id: "PV-EXPECT", category: "expectedness", authority: "RSI" }
+        content: |
+          EXPECTEDNESS
+
+          Expectedness is decided against one named document, the reference
+          safety information, and against nothing else. Not the literature, not
+          a clinician's recollection, not what the model knows about the class.
+          Record the document and its version with the decision.
+
+          An event is unexpected when its nature, severity or specificity is not
+          consistent with the reference. Three traps:
+
+            * Greater severity. The reference lists hepatitis, the case reports
+              fulminant hepatic failure. Unexpected.
+            * Greater specificity. The reference lists cardiac disorders, the
+              case reports torsade de pointes. Unexpected.
+            * A class effect that the reference does not carry. Unexpected for
+              this product, whatever the class does.
+
+          Expectedness combines with seriousness, and only the serious and
+          unexpected combination is expedited. A serious but expected case is
+          still serious, still recorded, still counted in the periodic report.
+
+      - id: pv-ref-e2b
+        title: "Submission fields and the narrative contract"
+        version: 1
+        metadata: { doc_id: "PV-E2B", category: "submission", authority: "ICH E2B(R3), CIOMS I" }
+        content: |
+          MINIMUM CRITERIA
+
+          Four elements make a valid case: an identifiable patient, an
+          identifiable reporter, a suspect product, and an event. Missing any
+          one of them and there is no case to report, only a record to follow
+          up. Identifiable does not mean named. An age band and a sex are enough
+          to identify a patient.
+
+          THE NARRATIVE
+
+          Chronological, and confined to what the case establishes. It states
+          the patient, the suspect product with dose, route and dates, the event
+          with onset, the treatment given, dechallenge and rechallenge where
+          known, the outcome, and the reporter's own causality assessment where
+          one was offered.
+
+          It does not contain a conclusion the coded fields do not support, and
+          it does not fill a gap with a likelihood. Where the reporter did not
+          say, the narrative says the reporter did not say.
+
+          FIELD NOTES THAT CATCH PEOPLE OUT
+
+            * Outcome is the outcome of the event, not of the patient. "Recovered
+              with sequelae" and "fatal" are distinct, and a patient may die of
+              something else after recovering from the event.
+            * Onset is the date the event began, not the date it was reported.
+            * A suspect product and a concomitant product are different roles.
+              Moving a product between them changes the case.
+            * An unknown date is left unknown. A partial date is permitted, and
+              is better than a guessed one.
+
+      - id: pv-ref-coding
+        title: "Coding conventions for verbatim terms"
+        version: 1
+        metadata: { doc_id: "PV-CODE", category: "coding", authority: "MedDRA points to consider" }
+        content: |
+          CODING VERBATIM TERMS
+
+          Code what the reporter said, at the level they said it. The dictionary
+          maps a lowest-level term to one preferred term, and that mapping is
+          not the place to add clinical interpretation.
+
+            * Code the event, not the diagnosis the reporter speculated about.
+              "Chest pain, query MI" codes to chest pain unless a myocardial
+              infarction was confirmed.
+            * Split a compound term. "Nausea and vomiting" is two terms.
+            * A provisional diagnosis with supporting signs codes to the
+              diagnosis. Signs alone code as signs.
+            * Death is an outcome, not an event. Code what the patient died of.
+              "Died" with no cause codes to a death term only when nothing else
+              is available, and the gap is recorded.
+
+          WHEN TO FLAG FOR REVIEW
+
+          A fuzzy match is a suggestion, never a decision. Flag rather than code
+          when the best candidate is below the confidence threshold, when two
+          candidates sit within a hair of each other, or when the verbatim term
+          is a phrase whose clinical meaning turns on context the case does not
+          supply. A coded case that a reviewer disagrees with costs less than an
+          uncoded one, but a silently wrong code costs most of all.

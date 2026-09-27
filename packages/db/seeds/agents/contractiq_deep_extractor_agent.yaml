@@ -53,5 +53,8 @@ model_config:
   max_iterations: 6
   max_tokens: 16384
   cache: false
-  tools:
-    - knowledge_search
+  # No tools. Every pass is handed its own text slice and field list in the
+  # prompt, so there is nothing for the agent to go and fetch. It carried
+  # knowledge_search with no collection behind it, which only ever produced a
+  # tool the runtime then declined to register.
+  tools: []

@@ -82,21 +82,42 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
         if agent is None:
             return None
         model_cfg = agent.model_config_ or {}
+        # Two bugs lived here and each hid the other. The module is
+        # models.collection_grant, not models.agent_collection_grant, so the
+        # import raised and the bare except set kb_ids empty — and the filter
+        # asked for lowercase "read" while the column stores "READ". The
+        # result was that no queue-routed agent ever received a collection:
+        # knowledge_search was left out of the registry, the model narrated a
+        # tool call as prose, and the answer was that it could not look
+        # anything up. Nothing logged it.
         kb_ids: list[str] = []
         try:
             from sqlalchemy import select as _select
 
-            from models.agent_collection_grant import AgentCollectionGrant  # type: ignore
+            from models.collection_grant import (  # type: ignore
+                AgentCollectionGrant,
+                CollectionPermission,
+            )
 
-            allowed = {"read", "write", "admin"}
             grants = await db.execute(
                 _select(AgentCollectionGrant.collection_id).where(
                     AgentCollectionGrant.agent_id == agent.id,
-                    AgentCollectionGrant.permission.in_(allowed),
+                    AgentCollectionGrant.permission.in_(
+                        [
+                            CollectionPermission.READ,
+                            CollectionPermission.WRITE,
+                            CollectionPermission.ADMIN,
+                        ]
+                    ),
                 )
             )
             kb_ids = [str(row[0]) for row in grants.all()]
         except Exception:
+            logger.exception(
+                "Could not resolve collection grants for agent %s — "
+                "knowledge_search will not be available to this run",
+                agent.id,
+            )
             kb_ids = []
         return {
             "execution": execution,

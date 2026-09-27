@@ -67,7 +67,6 @@ model_config:
   max_iterations: 12
   tools:
     - database_query
-    - knowledge_search
     - web_search
 
 input_variables:

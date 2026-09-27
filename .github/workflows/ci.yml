@@ -62,6 +62,11 @@ jobs:
                       -r apps/agent-runtime/requirements.txt \
                       -r apps/worker/requirements.txt
       - run: pytest tests/unit/ -v --tb=short
+      # Validates every agent seed, and checks that an agent declaring
+      # knowledge_search has a collection granted somewhere. Nothing ran this
+      # before, which is how twenty-three agents came to advertise a tool the
+      # runtime then declined to give them.
+      - run: python scripts/lint-agent-seeds.py
 
   web-lint-typecheck-build:
     runs-on: ubuntu-latest

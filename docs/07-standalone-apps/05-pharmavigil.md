@@ -142,6 +142,31 @@ before reading anything into the numbers.
 
 ---
 
+## The reference corpus
+
+Four of the agents — coder, seriousness, causality, narrative — call
+`knowledge_search` against a collection seeded from
+[`pharmavigil-reference.yaml`](../../packages/db/seeds/kb/pharmavigil-reference.yaml).
+Six documents, one per decision the pipeline has to defend:
+
+| Document | Covers |
+|---|---|
+| `PV-SERIOUS` | The six seriousness criteria, and when day zero of the clock starts |
+| `PV-IME` | Why the important-medical-event criterion exists, with worked terms |
+| `PV-CAUSAL` | WHO-UMC categories, the ten Naranjo items, dechallenge and rechallenge |
+| `PV-EXPECT` | Expectedness against the reference safety information, and the three traps |
+| `PV-E2B` | Minimum criteria, the narrative contract, the fields that catch people out |
+| `PV-CODE` | Coding conventions, and when to flag rather than code |
+
+The point is that the rule a reviewer would cite in an audit lives somewhere
+citable, rather than inside a prompt. Ask the seriousness agent when the clock
+starts and it quotes `PV-SERIOUS` instead of recalling it.
+
+The content is illustrative reference text for a demonstration system. It
+follows the shape of published guidance and is not a substitute for it.
+
+---
+
 ## Talking to Abenix
 
 Through the SDK, always. There is no direct HTTP to the platform anywhere in
