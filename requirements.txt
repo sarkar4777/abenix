@@ -38,7 +38,7 @@ google-genai>=1.0.0
 
 # ── Agent Frameworks ─────────────────────────────────────
 langgraph>=0.2.0
-langchain-core>=0.2.0
+langchain-core>=1.6.4
 langchain-text-splitters>=0.2.0
 
 # ── Task Queue & Scheduling ──────────────────────────────
