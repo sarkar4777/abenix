@@ -57,7 +57,7 @@ openpyxl>=3.1.0
 
 # ── Data Processing (enterprise tools) ───────────────────
 pandas>=2.2.0
-numpy>=1.26.0
+numpy>=2.5.3
 
 # ── Search & Web ─────────────────────────────────────────
 duckduckgo-search>=6.0.0
