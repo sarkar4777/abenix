@@ -4,6 +4,26 @@
 
 ### Added
 
+- Screenshots for the ContractIQ and Wingman sections of the README, and a capture spec that takes them. It logs in where the app needs it and asserts the page it landed on, because an unauthenticated run bounces to a marketing page and produces a perfectly large screenshot of the wrong thing.
+- `scripts/check-readme-images.py`, in CI and before push. Every local image the README embeds must exist and be tracked by git.
+
+### Changed
+
+- `.gitignore` no longer ignores `docs/screenshots/`. The `**/screenshots/` rule was meant for playwright debug captures and also swallowed the folder the README embeds.
+- Dependency ranges across all seven web trees, and `cryptography` in the edge runtime. All seven npm trees and both requirements files report zero known vulnerabilities.
+
+### Fixed
+
+- Code assets could not run from the agent runtime. Two faults, stacked. The sandbox bootstrap joined the next command onto the heredoc terminator line, so the shell never closed the heredoc and handed python a shell script — every asset on the HTTP path died on a syntax error. Underneath, the runtime mounted `/data` from a different host path than the api, worker and cognify-worker, so it listed an empty directory and a 7.6KB asset that should load inline fell through to a download that answers 401.
+- The three PharmaVigil screenshots the README embeds are committed. They were written, ignored, and rendered as a broken image on the public repo.
+- `eslint-config-next` now moves with `next` in every app. A bump of one without the other leaves the config unable to resolve its parser out of `next`, which is what failed CI on the dependency pull requests.
+- `npm run lint` completes in the six standalone apps. They ran the deprecated `next lint`, which found no config on disk and opened an interactive prompt, so the command had never finished in CI or on a desk.
+- The web unit tests run in CI. They ran in no gate at all, so a test asserting behaviour `apiFetch` has never had had been failing silently.
+
+## v2.4.0 — 2026-09-27
+
+### Added
+
 - Knowledge collections ship with content. `seed_kb` chunks and embeds the documents in each `kb/*.yaml` instead of registering the collection and stopping, so 64 documents across 11 collections are searchable on a fresh deploy. Re-running writes nothing.
 - A metals standards reference for ContractIQ. Eight documents covering what LBMA, LPPM, OECD, RJC, Dodd-Frank and EU 2017/821 each govern, what makes them apply to a contract, and what a clause has to demonstrate. They do not reproduce the standards and name the body that publishes each one.
 - A safety reference for PharmaVigil. Seriousness criteria and the reporting clock, the important-medical-event rationale, the two causality scales, expectedness, the submission field contract, and coding conventions.

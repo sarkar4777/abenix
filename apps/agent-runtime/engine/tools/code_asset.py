@@ -373,7 +373,12 @@ class CodeAssetTool(BaseTool):
                     'if auth: req.add_header("Authorization", auth)\n'
                     "data = urllib.request.urlopen(req, timeout=60).read()\n"
                     'zipfile.ZipFile(io.BytesIO(data)).extractall("/tmp/app")\n'
-                    "PYEOF"
+                    # The terminator has to be alone on its line. Joining the
+                    # next command on with "; " left the shell reading
+                    # `PYEOF; cd /tmp/app; ...` as more heredoc body, so python
+                    # got handed shell script and every HTTP-path asset died on
+                    # `SyntaxError: invalid syntax`.
+                    "PYEOF\n"
                 )
             elif image.startswith(("node:", "node")):
                 boot = (
@@ -408,10 +413,13 @@ class CodeAssetTool(BaseTool):
             run_env["_DL_URL"] = download_url
             run_env["_DL_AUTH"] = auth_header
 
+            # A bootstrap that ends in a newline closed a heredoc, so the next
+            # command starts on a fresh line rather than after a semicolon.
+            boot_sep = "" if boot.endswith("\n") else "; "
             bash = (
                 "set -e; "
                 "mkdir -p /tmp/app; "
-                f"{boot}; "
+                f"{boot}{boot_sep}"
                 "cd /tmp/app; "
                 f"echo {shlex.quote(input_b64)} | base64 -d > /tmp/input.json; "
                 f"{{ {build_cmd}; }} 1>&2; "
