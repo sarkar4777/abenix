@@ -1,0 +1,261 @@
+# Mideast Tourism — the strategy documents st-chat was told it could search.
+#
+# The agent's own prompt says knowledge_search is for finding "specific
+# information in strategy documents and reports". The app bootstraps a `public`
+# and an `operator` collection at startup and never put anything in either, so
+# the promise was empty. These are the two reports the app already ships as
+# sample uploads, seeded so the collection is useful on a fresh deploy.
+#
+# Generated from mideasttourism/test-data/ — edit the source files and
+# regenerate rather than editing the prose here.
+
+project:
+  slug: mideasttourism
+  name: "Mideast Tourism Knowledge"
+  description: "Tourism intelligence corpora used by the st-chat agent."
+
+collections:
+  - slug: mideasttourism-public
+    name: "Mideast Tourism Public Reference"
+    description: >
+      Published strategy and destination impact reporting. Public reference
+      material, safe for any authenticated user of the app to see.
+    default_visibility: tenant
+    vector_backend: pgvector
+    agent_slugs:
+      - st-chat
+    agent_permission: READ
+    documents:
+      - id: mt-strategy-2030
+        title: "Regional Tourism Strategy 2030"
+        version: 1
+        metadata: { doc_type: "strategy", horizon: "2030", scope: "regional", source_file: "regional_tourism_strategy_2030.txt" }
+        content: |
+          THE GULF REGION — REGIONAL TOURISM STRATEGY 2030
+          =========================================================
+
+          EXECUTIVE SUMMARY
+          -----------------
+          Tourism Strategy 2030 positions tourism as a key pillar of economic
+          diversification across the region, targeting 150 million annual visits by 2030
+          and a tourism sector contribution of 10% to GDP (up from 3.5% in 2023).
+
+          The strategy outlines five pillars:
+
+          1. MAJOR EVENTS & SPORTS TOURISM
+             - Stadium and arena capacity for 30 million event visitors annually by 2030
+             - Year-round calendar anchored on Formula 1, football and esports
+             - Investment: USD 250 billion in event and transport infrastructure
+             - Target: 50 million event-driven visitors annually
+
+          2. LEISURE & ENTERTAINMENT DESTINATIONS
+             - Flagship developments: Lusail, Yas Island, Saadiyat, Palm Jebel Ali
+             - Seasonal festivals: Dubai Shopping Festival, Abu Dhabi Season, Muscat Nights
+             - Target: 70 million leisure visitors annually
+             - Hotel capacity expansion: 500,000 new rooms by 2030
+
+          3. CULTURAL & HERITAGE TOURISM
+             - UNESCO World Heritage Sites: Bahla Fort, Al Ain Cultural Sites,
+               Bat archaeological complex, Qalhat, Land of Frankincense
+             - New museum network: national museum expansion, regional museums
+             - Investment: USD 50 billion in cultural infrastructure
+             - Target: 15 million cultural tourists annually
+
+          4. BUSINESS & MICE TOURISM
+             - Dubai as a global business hub (F1, boxing, esports, conferences)
+             - New convention centres and expo facilities across the region
+             - Target: 10 million business visitors annually
+             - Investment: USD 80 billion in MICE infrastructure
+
+          5. ECO-TOURISM & ADVENTURE
+             - Salalah monsoon-season park development
+             - Coral reef preservation and diving tourism on the Gulf coast
+             - Mountain tourism in the Hajar range and the Dhofar highlands
+             - Desert safari experiences in the Empty Quarter
+             - Target: 5 million eco-tourists annually
+
+          KEY PERFORMANCE TARGETS
+          -----------------------
+          | Metric                    | 2023 Actual | 2026 Target | 2030 Target |
+          |---------------------------|-------------|-------------|-------------|
+          | Total visits (millions)   | 100.3       | 120         | 150         |
+          | International visitors    | 27.4        | 40          | 70          |
+          | Tourism GDP contribution  | 3.5%        | 5.5%        | 10%         |
+          | Tourism revenue (USD B)   | 277         | 400         | 750         |
+          | Hotel rooms (thousands)   | 285         | 400         | 785         |
+          | Tourism jobs              | 850,000     | 1,100,000   | 1,600,000   |
+          | Tourist satisfaction      | 4.1/5       | 4.3/5       | 4.7/5       |
+
+          INVESTMENT PIPELINE
+          -------------------
+          Total committed investment: USD 320 billion
+
+          Major projects:
+          - Lusail waterfront city: USD 45 billion — mixed-use marina and stadium district
+          - Coastal Resorts Programme: USD 28 billion — luxury coastal resorts
+          - Saadiyat Cultural District: USD 12 billion — museums and wellness tourism
+          - Entertainment City: USD 30 billion — entertainment district near Dubai
+          - Heritage Quarter: USD 75 billion — restored old-town cultural destination
+          - Nizwa Development: USD 50 billion — heritage and desert tourism
+
+          REGIONAL DEVELOPMENT PRIORITIES
+          -------------------------------
+          1. Dubai: Business hub, entertainment capital (Shopping Festival, Expo, F1)
+          2. Doha: Major-event host, museum quarter, corniche regeneration
+          3. Muscat: Cultural heritage, souks and forts, green city development
+          4. Abu Dhabi: Coastal leisure, island resorts, cultural district
+          5. Northern Emirates: Industrial tourism, cultural centres, island resorts
+          6. Lusail: Future city, marina district, stadium legacy venues
+          7. Nizwa: UNESCO heritage, desert resorts, cultural experiences
+          8. Salalah: Monsoon tourism, eco-tourism, summer escape destination
+          9. Sharjah: Archaeological sites, Gulf coast, adventure tourism
+
+          VISA & ACCESS STRATEGY
+          -----------------------
+          - E-visa expansion to 75+ countries (from 49 in 2023)
+          - Visa-on-arrival for GCC residents of any nationality
+          - Transit visa (96-hour stopover programme)
+          - Special event visas (F1, National Day, Eid, regional seasons)
+          - Target: reduce visa processing to under 5 minutes by 2026
+
+          SUSTAINABILITY COMMITMENT
+          --------------------------
+          - 50% renewable energy for tourism facilities by 2030
+          - Zero-waste resorts (Coastal Resorts Programme, Saadiyat)
+          - Coral reef restoration programme (100,000 coral fragments)
+          - Carbon-neutral tourism operations in Lusail
+          - Biodiversity preservation: Arabian leopard, marine reserves
+
+          This strategy document is issued by the Ministry of Tourism,
+          Middle East region, under the guidance of Tourism Strategy 2030.
+
+      - id: mt-lusail-impact
+        title: "Lusail Tourism Impact Study"
+        version: 1
+        metadata: { doc_type: "impact_study", destination: "Lusail", scope: "destination", source_file: "lusail_tourism_impact_study.txt" }
+        content: |
+          LUSAIL TOURISM IMPACT ASSESSMENT — 2024-2035
+          ============================================
+
+          Prepared for: Ministry of Tourism, Middle East region
+          Date: January 2024
+          Classification: Strategic Planning Document
+
+          1. EXECUTIVE SUMMARY
+          --------------------
+          Lusail is the region's largest single waterfront development, with a
+          projected investment of USD 45 billion. This impact assessment projects
+          tourism outcomes across three phases of development.
+
+          2. DEVELOPMENT PHASES
+          ---------------------
+
+          Phase 1 (2024-2026): Foundation
+          - Marina Island luxury resort: 413 rooms, operational Q4 2024
+          - Boulevard hotel district: 700 rooms, operational Q1 2026
+          - Initial marina and yacht facilities
+          - Expected visitors: 300,000-500,000 annually
+          - Estimated tourism revenue: USD 2-4 billion
+
+          Phase 2 (2027-2030): Expansion
+          - Waterfront district phase one: residential + hospitality (9,000 rooms)
+          - Port district industrial tourism component
+          - Coastal nature reserve eco-tourism
+          - Additional resort development: 15,000 rooms total
+          - Expected visitors: 2-5 million annually
+          - Estimated tourism revenue: USD 25-60 billion
+
+          Phase 3 (2031-2035): Maturity
+          - Waterfront district completion: 35,000 hotel rooms
+          - Full marine tourism program
+          - Desert adventure tourism corridors
+          - International airport at full capacity (25 million passengers)
+          - Expected visitors: 10-15 million annually
+          - Estimated tourism revenue: USD 100-200 billion
+
+          3. VISITOR PROJECTIONS
+          ----------------------
+          | Year | Low Estimate | Base Case | High Estimate |
+          |------|-------------|-----------|---------------|
+          | 2025 | 200,000     | 350,000   | 500,000       |
+          | 2026 | 400,000     | 750,000   | 1,100,000     |
+          | 2027 | 800,000     | 1,500,000 | 2,200,000     |
+          | 2028 | 1,200,000   | 2,500,000 | 3,800,000     |
+          | 2029 | 1,800,000   | 3,500,000 | 5,200,000     |
+          | 2030 | 2,500,000   | 5,000,000 | 7,500,000     |
+          | 2035 | 7,000,000   | 12,000,000| 18,000,000    |
+
+          4. SOURCE MARKET ANALYSIS
+          -------------------------
+          Primary markets (60% of visitors):
+          - Europe (UK, Germany, France, Switzerland, Italy): 35%
+          - GCC (UAE, Kuwait, Bahrain, Qatar, Oman): 25%
+
+          Secondary markets (30%):
+          - Asia Pacific (China, Japan, South Korea, India): 15%
+          - Americas (USA, Canada, Brazil): 10%
+          - Africa (South Africa, Nigeria, Morocco): 5%
+
+          Domestic (10%):
+          - Gulf residents (Dubai, Abu Dhabi, Northern Emirates)
+
+          5. ECONOMIC IMPACT
+          ------------------
+          Direct employment:
+          - Phase 1: 15,000 tourism jobs
+          - Phase 2: 75,000 tourism jobs
+          - Phase 3: 250,000 tourism jobs
+
+          GDP contribution:
+          - Phase 1: USD 4 billion (0.1% of national GDP)
+          - Phase 2: USD 55 billion (1.2% of national GDP)
+          - Phase 3: USD 180 billion (3.0% of national GDP)
+
+          Supply chain impact (multiplier 2.5x):
+          - Phase 1: USD 10 billion total economic activity
+          - Phase 2: USD 138 billion total economic activity
+          - Phase 3: USD 450 billion total economic activity
+
+          6. HOTEL CAPACITY REQUIREMENTS
+          -------------------------------
+          | Year | Luxury (5*) | Premium (4*) | Mid-range (3*) | Budget | Total  |
+          |------|-------------|-------------|----------------|--------|--------|
+          | 2025 | 1,113       | 0           | 0              | 0      | 1,113  |
+          | 2026 | 1,813       | 500         | 0              | 0      | 2,313  |
+          | 2028 | 5,000       | 3,000       | 2,000          | 500    | 10,500 |
+          | 2030 | 12,000      | 8,000       | 5,000          | 2,000  | 27,000 |
+          | 2035 | 15,000      | 12,000      | 8,000          | 5,000  | 40,000 |
+
+          7. COMPETITIVE POSITIONING
+          ---------------------------
+          Lusail is positioned as a direct competitor to:
+          - Dubai (UAE): established luxury tourism hub
+          - Maldives: luxury island resort market
+          - Monte Carlo: premium marina and events tourism
+          - Monaco: ultra-high-net-worth marina tourism
+
+          Differentiators:
+          - Scale: nothing comparable exists globally
+          - Technology: AI-integrated guest services, autonomous transport
+          - Sustainability: 100% renewable energy, carbon-neutral operations
+          - Exclusivity: controlled access creates premium positioning
+
+          8. RISK FACTORS
+          ---------------
+          - Construction delays (probability: medium, impact: high)
+          - Global economic downturn reducing luxury travel (probability: medium)
+          - Geopolitical risk affecting source markets (probability: low-medium)
+          - Competition from UAE mega-projects (probability: high)
+          - Water scarcity in the region (probability: low, mitigated by desalination)
+          - Workforce availability for hospitality sector (probability: medium)
+
+          9. RECOMMENDATIONS
+          ------------------
+          1. Phase tourism marketing to match construction milestones
+          2. Establish direct flights from top 10 source markets
+          3. Create exclusive preview programs for travel trade and media
+          4. Develop Lusail as year-round destination (not seasonal)
+          5. Integrate with broader regional tourism circuit (Lusail → Nizwa → Dubai)
+          6. Establish sustainable tourism certification program
+          7. Build workforce training academy for hospitality sector
+          8. Create dynamic pricing model to optimize occupancy and revenue

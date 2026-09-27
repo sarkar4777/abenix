@@ -18,7 +18,7 @@ def upgrade() -> None:
         """
         CREATE TABLE IF NOT EXISTS chunks (
             id UUID PRIMARY KEY,
-            collection_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+            collection_id UUID NOT NULL REFERENCES knowledge_collections(id) ON DELETE CASCADE,
             document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
             chunk_index INTEGER NOT NULL,
             content TEXT NOT NULL,

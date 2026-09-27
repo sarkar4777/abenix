@@ -38,9 +38,8 @@ system_prompt: |
   labels (Yes / No / branch conditions). Cross-check against any
   extracted text. The diagram is the source of truth for the process.
 
-  Use tools (web_search, knowledge_search) for orthogonal context
-  (vendor / framework lookups, code examples) — never to invent missing
-  process steps.
+  Use web_search for orthogonal context (vendor / framework lookups, code
+  examples) — never to invent missing process steps.
 
   ## On the FIRST turn (no prior assistant turn)
 
@@ -148,7 +147,6 @@ model_config:
     - document_parser
     - text_analyzer
     - web_search
-    - knowledge_search
   # NOTE: the model picker in the BPM Analyzer UI reads from the
   # PLATFORM MASTER LIST (admin_settings.AVAILABLE_MODELS, filtered by
   # capability=vision) — NOT from a local list here. Anything you add

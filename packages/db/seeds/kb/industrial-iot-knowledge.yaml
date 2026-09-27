@@ -20,6 +20,11 @@ collections:
       - iot-excursion-adjudicator
       - iot-maintenance-planner
       - iot-claims-dispatcher
+      # The pipeline searches this collection directly from an inline
+      # node agent, so it needs the grant in its own right — a sub-agent's
+      # grant does not reach a node that never names a sub-agent.
+      - iot-pump-pipeline
+      - iot-coldchain-pipeline
     agent_permission: READ
     documents:
       - id: iot-knw-001
@@ -84,6 +89,10 @@ collections:
       - iot-valueedge-compliance-checker
       - iot-valueedge-ve-optimizer
       - iot-valueedge-rfi-drafter
+      # The pipeline searches this collection directly from an inline
+      # node agent, so it needs the grant in its own right — a sub-agent's
+      # grant does not reach a node that never names a sub-agent.
+      - iot-valueedge-pipeline
     agent_permission: READ
     documents:
       - id: ve-knw-001
@@ -380,6 +389,10 @@ collections:
       - iot-fieldedge-fleet-history-searcher
       - iot-fieldedge-schedule-optimizer
       - iot-fieldedge-closeout-documenter
+      # The pipeline searches this collection directly from an inline
+      # node agent, so it needs the grant in its own right — a sub-agent's
+      # grant does not reach a node that never names a sub-agent.
+      - iot-fieldedge-pipeline
     agent_permission: READ
     documents:
       - id: fe-manual-001
@@ -765,6 +778,10 @@ collections:
       - iot-bedrocc-noise-filter
       - iot-bedrocc-safe-reset-advisor
       - iot-bedrocc-shift-reporter
+      # The pipeline searches this collection directly from an inline
+      # node agent, so it needs the grant in its own right — a sub-agent's
+      # grant does not reach a node that never names a sub-agent.
+      - iot-bedrocc-pipeline
     agent_permission: READ
     documents:
       - id: bedrocc-sop-001

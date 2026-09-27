@@ -6,6 +6,34 @@ from typing import Any
 
 from engine.tools.base import BaseTool, ToolResult
 
+# Bookkeeping the model does not need, and that would crowd out the fields it
+# does. Everything else scalar on a chunk is fair game for a citation.
+_HIDDEN_META = {
+    "filename",
+    "chunk_index",
+    "text_preview",
+    "source",
+    "kb_id",
+    "doc_id",
+    "backend",
+    "relationship_chain",
+}
+
+
+def _citation_fields(meta: dict[str, Any] | None) -> list[str]:
+    if not isinstance(meta, dict):
+        return []
+    out = []
+    for key, value in meta.items():
+        if key in _HIDDEN_META or value in (None, "", [], {}):
+            continue
+        if not isinstance(value, (str, int, float, bool)):
+            continue
+        out.append(f"{key}: {value}")
+        if len(out) >= 6:
+            break
+    return out
+
 
 class KnowledgeSearchTool(BaseTool):
     name = "knowledge_search"
@@ -212,6 +240,13 @@ class KnowledgeSearchTool(BaseTool):
                 parts.append(
                     f"[{i}] (score: {r.score:.3f}, source: {r.source} {source_label})"
                 )
+                # Document metadata carries the identifiers a citation needs —
+                # policy_id, jurisdiction, version. Only the filename used to
+                # reach the model, so agents asked for a policy id cited
+                # "rai-pol-001.md" instead of "STD-RETURN".
+                labels = _citation_fields(r.metadata)
+                if labels:
+                    parts.append("  " + ", ".join(labels))
                 parts.append(r.content)
                 if r.metadata.get("relationship_chain"):
                     parts.append(f"  Path: {r.metadata['relationship_chain']}")

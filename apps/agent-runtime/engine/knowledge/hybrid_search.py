@@ -38,6 +38,17 @@ async def _embed_query(query: str) -> list[float] | None:
     back to other backends instead of treating it as a hard error."""
     import os
 
+    # Same fallback the ingest path uses, and it has to be the same one:
+    # vectors from two schemes share a space and nothing else.
+    try:
+        from local_embeddings import embed as _local_embed
+        from local_embeddings import is_enabled as _local_enabled
+
+        if _local_enabled():
+            return _local_embed(query)
+    except ImportError:
+        pass
+
     azure_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
     azure_endpoint_raw = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
         "AZURE_OPENAI_API_BASE", ""
@@ -295,6 +306,21 @@ async def _vector_search_pgvector(
         )
         if db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
             db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        # text() will not bind `:emb::vector` — its parameter regex refuses a
+        # name followed by a colon, so the cast swallowed the placeholder and
+        # every search died on "no bound parameter named 'emb'". CAST() reads
+        # the same to Postgres and leaves the name alone.
+        import uuid as _uuid
+
+        id_params: list[_uuid.UUID] = []
+        for s in kb_ids:
+            try:
+                id_params.append(_uuid.UUID(str(s)))
+            except (ValueError, AttributeError):
+                continue
+        if not id_params:
+            return []
+
         engine = create_async_engine(db_url, pool_pre_ping=True)
         results: list[SearchResult] = []
         async with AsyncSession(engine) as session:
@@ -304,31 +330,41 @@ async def _vector_search_pgvector(
                         """
                 SELECT id::text, collection_id::text, document_id::text,
                        chunk_index, content, metadata,
-                       1 - (embedding <=> :emb::vector) AS score
+                       1 - (embedding <=> CAST(:emb AS vector)) AS score
                 FROM chunks
                 WHERE collection_id = ANY(:ids)
-                ORDER BY embedding <=> :emb::vector
+                ORDER BY embedding <=> CAST(:emb AS vector)
                 LIMIT :k
                 """
-                    ).bindparams(emb=emb_str, ids=kb_ids, k=top_k)
+                    ).bindparams(emb=emb_str, ids=id_params, k=top_k)
                 )
             ).all()
         await engine.dispose()
         for r in rows:
             meta = r[5] or {}
-            filename = meta.get("filename") if isinstance(meta, dict) else "unknown"
+            if not isinstance(meta, dict):
+                meta = {}
+            filename = meta.get("filename") or "unknown"
+            # Whatever the document was stored with — policy_id, jurisdiction,
+            # version — travels with the chunk. Only the filename used to come
+            # back, so an agent asked to cite a policy id could only name the
+            # file it came out of.
+            carried = dict(meta)
+            carried.update(
+                {
+                    "kb_id": r[1],
+                    "doc_id": r[2],
+                    "chunk_index": r[3],
+                    "backend": "pgvector",
+                }
+            )
             results.append(
                 SearchResult(
                     content=r[4],
                     score=float(r[6]),
-                    source=filename or "unknown",
+                    source=filename,
                     source_type="chunk",
-                    metadata={
-                        "kb_id": r[1],
-                        "doc_id": r[2],
-                        "chunk_index": r[3],
-                        "backend": "pgvector",
-                    },
+                    metadata=carried,
                 )
             )
         return results

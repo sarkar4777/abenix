@@ -7,9 +7,10 @@ Loads every `kb/*.yaml` file and ensures:
   3. Each agent listed in `agent_slugs[]` has an AgentCollectionGrant.
   4. Each document in `documents[]` is upserted by `doc.id`.
 
-Idempotent: running twice is a no-op. Documents are upserted by stable
-id, never duplicated. Cognify chunking + vector indexing happens in the
-hybrid_search write path, not here — this script only stages the rows.
+Idempotent: running twice is a no-op. Documents are upserted by stable id,
+never duplicated, and a document that already has chunks is left alone.
+Chunking and embedding happen here, with the same splitter the worker uses, so
+a seeded collection is searchable the moment the deploy finishes.
 
 Without this seed every standalone (ResolveAI, ClaimsIQ, Industrial IoT)
 sees `knowledge_search → results=0` because no collection rows exist
@@ -22,6 +23,7 @@ emit non-empty fallbacks instead of silently returning [].
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import os
 import sys
 import uuid
@@ -29,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from sqlalchemy import select
+from sqlalchemy import select, text as _sql
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -40,7 +42,12 @@ from models.collection_grant import (  # noqa: E402
     AgentCollectionGrant,
     CollectionPermission,
 )
-from models.knowledge_base import KBStatus, KnowledgeBase  # noqa: E402
+from models.knowledge_base import (  # noqa: E402
+    Document,
+    DocumentStatus,
+    KBStatus,
+    KnowledgeBase,
+)
 from models.knowledge_project import (  # noqa: E402
     CollectionVisibility,
     KnowledgeProject,
@@ -174,42 +181,192 @@ async def _grant_agents(
 _PENDING_DOCS: dict[str, int] = {}
 
 
+def _chunk(text: str, size: int = 1000, overlap: int = 200) -> list[str]:
+    """Same splitter the worker uses, so seeded and uploaded chunks match."""
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        return RecursiveCharacterTextSplitter(
+            chunk_size=size,
+            chunk_overlap=overlap,
+            length_function=len,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        ).split_text(text)
+    except ImportError:
+        # Seeding runs in the API pod, which may not carry the worker's
+        # dependencies. Paragraph splitting is coarser but keeps the seed
+        # working rather than skipping it.
+        out, buf = [], ""
+        for para in text.split("\n\n"):
+            if len(buf) + len(para) > size and buf:
+                out.append(buf.strip())
+                buf = buf[-overlap:] if overlap else ""
+            buf += para + "\n\n"
+        if buf.strip():
+            out.append(buf.strip())
+        return out or [text]
+
+
+def _embed(texts: list[str]) -> tuple[list[list[float]], str] | None:
+    """Embed with whatever provider is configured. None when none is."""
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if key:
+        try:
+            import openai
+
+            model = "text-embedding-3-small"
+            client = openai.OpenAI(api_key=key)
+            out: list[list[float]] = []
+            # The endpoint takes batches, and 64 seed docs is a few hundred
+            # chunks — one call each would be slow and needlessly rate-limited.
+            for i in range(0, len(texts), 64):
+                resp = client.embeddings.create(model=model, input=texts[i : i + 64])
+                out.extend(d.embedding for d in resp.data)
+            return out, model
+        except Exception as exc:  # noqa: BLE001
+            print(f"      (embedding provider failed: {type(exc).__name__}: {exc})")
+    try:
+        from local_embeddings import embed_many, embedder_id, is_enabled
+
+        if is_enabled():
+            return embed_many(texts), embedder_id()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 async def _upsert_documents(
     db: AsyncSession,
     *,
     collection: KnowledgeBase,
     documents: list[dict[str, Any]],
 ) -> int:
-    """Document seeding is intentionally a no-op.
+    """Write each seed document and its embedded chunks.
 
-    The platform's `documents` table is a metadata-only registry that
-    references externally-stored files (filename, file_type, file_size,
-    storage_url, chunk_count). The actual searchable content lives in
-    the `chunks` table (pgvector embeddings) and is populated by the
-    Cognify ingestion pipeline, not by raw SQL.
+    This used to be a deliberate no-op, on the reasoning that chunking and
+    embedding belonged to the ingestion pipeline rather than to raw SQL. The
+    effect was 64 showcase documents that existed only as YAML: every
+    collection empty, and every agent that calls knowledge_search answering
+    that it cannot look anything up. Since the `chunks` table is now created
+    at boot and an embedder is always reachable, seeding can do the real work.
 
-    YAML seed `documents:` entries describe content (title, body, meta)
-    in a shape that doesn't fit either table cleanly without inventing
-    storage_urls and running embedding. The right place to seed real
-    KB content is the upload UI or POST /api/knowledge/collections/
-    {id}/documents — both go through Cognify and get proper chunks.
-
-    So we accept the seed entries, log a friendly hint, and return 0
-    rows written. Collections + agent grants (the valuable rows for
-    runtime tool routing) are already persisted by the caller.
-
-    The count is returned to the caller so the run can say plainly that the
-    collections are empty. Left unsaid, every agent that calls
-    knowledge_search comes back with nothing and answers that it cannot look
-    anything up, which reads like a platform fault rather than an empty KB."""
+    Returns the number of documents that could NOT be made searchable, so the
+    caller can say so plainly instead of leaving it to be discovered.
+    """
     if not documents:
         return 0
-    print(
-        f"      ({len(documents)} doc spec(s) NOT ingested — POST them to "
-        f"/api/knowledge/collections/{collection.id}/documents, or use the "
-        f"upload UI, to get searchable chunks)"
+
+    specs = []
+    for doc in documents:
+        body = (doc.get("content") or "").strip()
+        if not body:
+            continue
+        specs.append((doc, doc.get("title") or doc.get("id") or "untitled", body))
+    if not specs:
+        return 0
+
+    stable_ids = {str(d.get("id") or "") for d, _, _ in specs}
+    existing = (
+        (
+            await db.execute(
+                select(Document).where(
+                    Document.kb_id == collection.id,
+                    Document.filename.in_([f"{s}.md" for s in stable_ids if s]),
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    return len(documents)
+    done = {d.filename for d in existing if d.chunk_count > 0}
+
+    todo = [(d, t, b) for d, t, b in specs if f"{d.get('id')}.md" not in done]
+    if not todo:
+        print(f"      ({len(specs)} doc(s) already indexed)")
+        return 0
+
+    all_chunks: list[str] = []
+    spans: list[tuple[int, int]] = []
+    for _doc, title, body in todo:
+        # The title goes in the chunk text: retrieval on "return policy"
+        # should find the return policy even when the body never repeats
+        # its own heading.
+        parts = _chunk(f"{title}\n\n{body}")
+        spans.append((len(all_chunks), len(all_chunks) + len(parts)))
+        all_chunks.extend(parts)
+
+    embedded = _embed(all_chunks)
+    if embedded is None:
+        print(f"      ({len(todo)} doc(s) NOT ingested — no embedding provider)")
+        return len(todo)
+    vectors, model = embedded
+
+    if collection.embedding_model != model:
+        collection.embedding_model = model
+
+    written = 0
+    for (doc, title, body), (lo, hi) in zip(todo, spans):
+        stable = str(doc.get("id") or uuid.uuid4())
+        row = next((d for d in existing if d.filename == f"{stable}.md"), None)
+        if row is None:
+            row = Document(
+                id=uuid.uuid4(),
+                kb_id=collection.id,
+                filename=f"{stable}.md",
+                file_type="md",
+                file_size=len(body.encode("utf-8")),
+                chunk_count=0,
+                status=DocumentStatus.PROCESSING,
+                storage_url=f"seed://{collection.id}/{stable}",
+            )
+            db.add(row)
+            await db.flush()
+
+        await db.execute(
+            _sql("DELETE FROM chunks WHERE document_id = :d").bindparams(d=row.id)
+        )
+        meta_base = dict(doc.get("metadata") or {})
+        meta_base.update({"filename": f"{stable}.md", "title": title, "source": "seed"})
+        for offset, idx in enumerate(range(lo, hi)):
+            meta = dict(meta_base)
+            meta["chunk_index"] = offset
+            meta["text_preview"] = all_chunks[idx][:200]
+            await db.execute(
+                _sql(
+                    """
+                    INSERT INTO chunks
+                        (id, collection_id, document_id, chunk_index, content,
+                         metadata, embedding)
+                    VALUES (:id, :cid, :did, :ix, :content,
+                            CAST(:meta AS jsonb), CAST(:emb AS vector))
+                    ON CONFLICT (document_id, chunk_index) DO UPDATE
+                        SET content = EXCLUDED.content,
+                            metadata = EXCLUDED.metadata,
+                            embedding = EXCLUDED.embedding
+                    """
+                ).bindparams(
+                    id=uuid.uuid4(),
+                    cid=collection.id,
+                    did=row.id,
+                    ix=offset,
+                    content=all_chunks[idx],
+                    meta=_json.dumps(meta),
+                    emb="[" + ",".join(f"{x:.7f}" for x in vectors[idx]) + "]",
+                )
+            )
+        row.chunk_count = hi - lo
+        row.status = DocumentStatus.READY
+        written += 1
+
+    collection.doc_count = (
+        await db.execute(
+            _sql("SELECT count(*) FROM documents WHERE kb_id = :k").bindparams(
+                k=collection.id
+            )
+        )
+    ).scalar() or 0
+    print(f"      ({written} doc(s) indexed, {len(all_chunks)} chunks, {model})")
+    return 0
 
 
 async def seed_kb() -> None:
@@ -299,9 +456,9 @@ def _warn_if_collections_empty() -> None:
     print("  look anything up:")
     for name in sorted(_PENDING_DOCS):
         print(f"    - {name}")
-    print("  Ingestion needs an embedding provider — set OPENAI_API_KEY, or")
-    print("  AZURE_OPENAI_API_KEY with AZURE_OPENAI_ENDPOINT — then upload the")
-    print("  documents through the Knowledge UI.")
+    print("  Ingestion needs an embedding provider — set OPENAI_API_KEY, or set")
+    print("  ABENIX_LOCAL_EMBEDDINGS=1 for the offline hashing embedder — then")
+    print("  re-run this seed.")
 
 
 if __name__ == "__main__":
