@@ -171,8 +171,16 @@ spec:
           # On minikube / single-node dev clusters, hostPath works
           # because every pod lands on the same node. Multi-node clusters
           # MUST flip sharedData.usePVC=true and provide a RWX class.
+          #
+          # This has to be the same host path the api, worker and
+          # cognify-worker mount, which is sharedDataHostPath. It used to be
+          # /tmp/<release>-shared-data, so the api wrote code-asset bundles
+          # into /var/lib/abenix/data and the runtime read an empty directory
+          # somewhere else — every code_asset call fell through to the HTTP
+          # download, which 401s because the download token only ever exists
+          # inside the api process.
           hostPath:
-            path: /tmp/{{ $release }}-shared-data
+            path: {{ $.Values.sharedDataHostPath | default "/var/lib/abenix/data" }}
             type: DirectoryOrCreate
           {{- end }}
         {{- if $.Values.mlModels.enabled }}

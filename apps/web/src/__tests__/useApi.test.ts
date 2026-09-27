@@ -52,12 +52,19 @@ describe('useApi', () => {
   });
 
   it('returns error when API responds with error', async () => {
+    // The envelope only ever carries a non-null `error` alongside a non-2xx
+    // status — `success()` on the API side always writes error: null. This
+    // used to mock ok: true with an error body, which apiFetch reports as a
+    // success with no error, so the assertion could never hold. It went
+    // unnoticed because nothing ran this suite.
     mockFetch.mockResolvedValueOnce({
-      ok: true,
+      ok: false,
+      status: 404,
+      headers: { get: () => null },
       json: () =>
         Promise.resolve({
           data: null,
-          error: 'Not found',
+          error: { message: 'Not found', code: 404, error_code: 'NOT_FOUND' },
           meta: null,
         }),
     });

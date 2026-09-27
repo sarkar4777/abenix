@@ -334,6 +334,11 @@ and benchmarks a clause against comparable deals. 19 agents behind an Insights
 Hub, with a delegation model where every run is stamped with the ContractIQ
 user who triggered it rather than a shared service account.
 
+<p align="center">
+  <img src="docs/screenshots/usecases/contractiq-insights.png" alt="ContractIQ Insights Hub" width="100%" />
+  <br/><em>ContractIQ — the Insights Hub, nine agentic workflows over the contract portfolio</em>
+</p>
+
 ### PharmaVigil — drug-safety intelligence
 
 Adverse-event intake through to a regulatory narrative: MedDRA coding, CIOMS
@@ -362,6 +367,11 @@ BayesianRidge fair-value model with an IsolationForest anomaly score and asks an
 LLM for the thesis, then raises a trade card for a human to accept or refuse.
 Nothing on the page is synthesised — when an agent fails the UI says the data is
 unavailable rather than showing a number nobody produced.
+
+<p align="center">
+  <img src="docs/screenshots/usecases/wingman-mispricing.png" alt="Wingman Price at Risk Lens" width="100%" />
+  <br/><em>Wingman — the Price at Risk Lens, Bayesian Ridge fair value beside the Isolation Forest regime-break detector</em>
+</p>
 
 ## 🛰 Edge runtimes
 

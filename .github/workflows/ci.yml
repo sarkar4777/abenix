@@ -67,6 +67,10 @@ jobs:
       # before, which is how twenty-three agents came to advertise a tool the
       # runtime then declined to give them.
       - run: python scripts/lint-agent-seeds.py
+      # The README is the public repo's front page, and a screenshot that is on
+      # disk but untracked renders as a broken image there while looking fine
+      # locally.
+      - run: python scripts/check-readme-images.py
 
   web-lint-typecheck-build:
     runs-on: ubuntu-latest
@@ -94,6 +98,10 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
           COREPACK_ENABLE_STRICT: "0"
+      # The vitest suites ran in no gate at all, so a test asserting behaviour
+      # apiFetch has never had sat broken and nothing said so. They are quick.
+      - name: Unit tests (vitest)
+        run: npm test
 
   e2e-smoke:
     needs: [python-lint, python-test, web-lint-typecheck-build]

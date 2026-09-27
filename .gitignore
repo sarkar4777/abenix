@@ -223,7 +223,12 @@ e2e/test-results/_demo_video/
 # Playwright debug captures and timestamped UAT artefacts.
 contractiq/e2e/screenshots/
 contractiq/e2e/fixtures/uat_run_*.pdf
-**/screenshots/
+**/e2e/screenshots/
+# `**/screenshots/` used to sit here and it also swallowed docs/screenshots/,
+# which the README embeds. Three PharmaVigil captures were written, never
+# committed, and the README pointed at a broken image on the public repo.
+!docs/screenshots/
+!apps/web/public/dev-docs/screenshots/
 
 # (contractiq/__init__.py is REQUIRED by apps/agent-runtime/Dockerfile to make
 # `contractiq.runtime.post_processors` importable — do NOT ignore it.)
