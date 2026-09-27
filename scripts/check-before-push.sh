@@ -66,6 +66,10 @@ run_python() {
   python scripts/lint-agent-seeds.py
   ok "agent seeds"
 
+  say "Docs: README images exist and are tracked"
+  python scripts/check-readme-images.py
+  ok "readme images"
+
   # Each standalone app keeps its own suite under <app>/api/tests. Nothing ran
   # them — not CI, not this script — so they could rot unnoticed. They are
   # cheap (no cluster, under a second each) so there is no reason to skip them.
@@ -101,6 +105,10 @@ run_web() {
   say "Web: tsc --noEmit"
   ( cd apps/web && npx tsc --noEmit )
   ok "tsc"
+
+  say "Web: vitest"
+  npm test
+  ok "vitest"
 
   if [ "$FAST" -eq 0 ]; then
     say "Web: next build"
