@@ -4,6 +4,16 @@
 
 ### Added
 
+- CI can be started by hand from the Actions tab.
+
+### Changed
+
+### Fixed
+
+## v2.4.0 — 2026-09-27
+
+### Added
+
 - Screenshots for the ContractIQ and Wingman sections of the README, and a capture spec that takes them. It logs in where the app needs it and asserts the page it landed on, because an unauthenticated run bounces to a marketing page and produces a perfectly large screenshot of the wrong thing.
 - `scripts/check-readme-images.py`, in CI and before push. Every local image the README embeds must exist and be tracked by git.
 
