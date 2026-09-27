@@ -26,7 +26,6 @@ model_config:
   max_tokens: 4096
   tools:
     - agent_step
-    - knowledge_search
     - code_asset
     - ml_model
     - document_extractor

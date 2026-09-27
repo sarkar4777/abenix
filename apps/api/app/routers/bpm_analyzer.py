@@ -592,6 +592,33 @@ MODEL_PRICING = {
 }
 
 
+def default_vision_model() -> str:
+    """Pick a default the pod can actually reach.
+
+    Every caller used to hardcode gemini-2.5-pro, so a deployment without a
+    Google key answered 502 on the BPM analyser and on all three Atlas
+    language paths, with the real reason buried in a gRPC traceback. Walk the
+    preference order and return the first model whose provider has a key.
+    """
+    has = {
+        "google": bool(
+            os.environ.get("GOOGLE_API_KEY", "").strip()
+            or os.environ.get("GEMINI_API_KEY", "").strip()
+        ),
+        "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+        "openai": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
+    }
+    for candidate in DEFAULT_VISION_MODELS:
+        try:
+            if has.get(_provider_for(candidate)):
+                return candidate
+        except RuntimeError:
+            continue
+    # Nothing configured. Return the historical default so the error the
+    # caller sees names a provider rather than an empty string.
+    return DEFAULT_VISION_MODELS[0]
+
+
 def _provider_for(model: str) -> str:
     m = (model or "").lower()
     if m.startswith("gemini"):
@@ -805,6 +832,101 @@ async def _run_vision_model(
     force_json: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Provider-route based on model name. `force_json` activates each"""
+    tried: list[str] = []
+    last: Exception | None = None
+    candidate: str | None = model
+    while candidate:
+        try:
+            return await _dispatch_vision(
+                system_prompt=system_prompt,
+                messages=messages,
+                model=candidate,
+                force_json=force_json,
+            )
+        except Exception as exc:
+            last = exc
+            tried.append(candidate)
+            if not _is_provider_outage(exc):
+                raise
+            candidate = _next_provider_model(tried)
+            if candidate:
+                logger.warning(
+                    "%s unusable (%s) — falling back to %s", tried[-1], exc, candidate
+                )
+    raise last if last else RuntimeError("No vision provider is configured")
+
+
+# A key that is present but rejected, or a workspace over its rate limit, looks
+# nothing like a missing key: the request goes out, comes back
+# 401/403/429/INVALID_ARGUMENT, and the caller gets a 502 with a provider
+# traceback. Walking to the next configured provider turns that into a working
+# answer, which matters most on a demo cluster where one vendor's key has
+# expired and another is throttled.
+_OUTAGE_MARKERS = (
+    "api key not valid",
+    "invalid_argument",
+    "invalid api key",
+    "incorrect api key",
+    "unauthenticated",
+    "permission_denied",
+    "authentication",
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "quota",
+    "insufficient_quota",
+    "resource_exhausted",
+    "credit balance",
+    "401",
+    "403",
+    "429",
+)
+
+
+def _is_provider_outage(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(m in text for m in _OUTAGE_MARKERS)
+
+
+def _provider_configured(provider: str) -> bool:
+    if provider == "anthropic":
+        return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+    if provider == "openai":
+        return bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    if provider == "google":
+        return bool(
+            os.environ.get("GOOGLE_API_KEY", "").strip()
+            or os.environ.get("GEMINI_API_KEY", "").strip()
+        )
+    return False
+
+
+def _next_provider_model(tried: list[str]) -> str | None:
+    """Best configured model on a provider we have not tried yet."""
+    spent = set()
+    for m in tried:
+        try:
+            spent.add(_provider_for(m))
+        except RuntimeError:
+            continue
+    for cand in DEFAULT_VISION_MODELS:
+        try:
+            provider = _provider_for(cand)
+        except RuntimeError:
+            continue
+        if provider in spent or not _provider_configured(provider):
+            continue
+        return cand
+    return None
+
+
+async def _dispatch_vision(
+    *,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    model: str,
+    force_json: bool = False,
+) -> tuple[str, dict[str, Any]]:
     provider = _provider_for(model)
     if provider == "anthropic":
         return await _run_anthropic(
@@ -842,7 +964,9 @@ async def list_vision_models(
         m for m in AVAILABLE_MODELS if "vision" in (m.get("capabilities") or [])
     ]
     agent = await _get_agent(db)
-    default = (agent.model_config_ if agent else {}).get("model") or "gemini-2.5-pro"
+    default = (agent.model_config_ if agent else {}).get(
+        "model"
+    ) or default_vision_model()
     return success(
         {
             "models": vision_models,  # rich objects: {id, label, provider, family, capabilities}
@@ -891,10 +1015,10 @@ async def upload_pdf(
     chosen_model = (
         (model or "").strip()
         or (agent.model_config_ or {}).get("model")
-        or "gemini-2.5-pro"
+        or default_vision_model()
     )
     if required_provider and _provider_for(chosen_model) != required_provider:
-        chosen_model = "gemini-2.5-pro"
+        chosen_model = default_vision_model()
 
     conv = Conversation(
         id=uuid.uuid4(),
@@ -1085,7 +1209,7 @@ async def chat_turn(
         chosen_model = (
             conv.model_used
             or (agent.model_config_ or {}).get("model")
-            or "gemini-2.5-pro"
+            or default_vision_model()
         )
         text, meta = await _run_vision_model(
             system_prompt=agent.system_prompt or "",
@@ -1267,7 +1391,7 @@ async def suggest_agents(
     model = (
         (body or {}).get("model")
         or (agent.model_config_ or {}).get("model")
-        or "gemini-2.5-pro"
+        or default_vision_model()
     )
 
     parsed: dict[str, Any] | None = None
@@ -1412,7 +1536,9 @@ async def build_and_test_agent(
 
     bpm_agent = await _get_agent(db)
     bpm_model = (
-        (bpm_agent.model_config_ or {}).get("model") if bpm_agent else "gemini-2.5-pro"
+        (bpm_agent.model_config_ or {}).get("model")
+        if bpm_agent
+        else default_vision_model()
     )
 
     synth_prompt = (
@@ -1436,7 +1562,7 @@ async def build_and_test_agent(
             synth_text, _ = await _run_vision_model(
                 system_prompt=bpm_agent.system_prompt or "",
                 messages=anthro_msgs,
-                model=bpm_model or "gemini-2.5-pro",
+                model=bpm_model or default_vision_model(),
                 force_json=True,
             )
             # Reuse the robust parser so smart quotes / fences / comments
@@ -1518,7 +1644,7 @@ async def build_and_test_agent(
         version="1.0.0",
         is_published=False,
         model_config_={
-            "model": spec.get("model") or "gemini-2.5-pro",
+            "model": spec.get("model") or default_vision_model(),
             "temperature": 0.2,
             "max_iterations": 12,
             "max_tokens": 4000,
@@ -1645,7 +1771,7 @@ async def create_suggested_agent(
         version="1.0.0",
         is_published=False,
         model_config_={
-            "model": body.get("model") or "gemini-2.5-pro",
+            "model": body.get("model") or default_vision_model(),
             "temperature": 0.2,
             "max_iterations": 12,
             "max_tokens": 4000,

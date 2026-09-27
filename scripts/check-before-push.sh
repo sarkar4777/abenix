@@ -62,6 +62,10 @@ run_python() {
   python -m pytest tests/unit/ -q --tb=short
   ok "pytest"
 
+  say "Python: agent seed lint"
+  python scripts/lint-agent-seeds.py
+  ok "agent seeds"
+
   # Each standalone app keeps its own suite under <app>/api/tests. Nothing ran
   # them — not CI, not this script — so they could rot unnoticed. They are
   # cheap (no cluster, under a second each) so there is no reason to skip them.

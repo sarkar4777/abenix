@@ -36,7 +36,6 @@ model_config:
     - academic_search
     - financial_calculator
     - code_executor
-    - knowledge_search
     - data_exporter
     - current_time
     - text_analyzer

@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.4.0 — 2026-09-27
+
+### Added
+
+- Knowledge collections ship with content. `seed_kb` chunks and embeds the documents in each `kb/*.yaml` instead of registering the collection and stopping, so 64 documents across 11 collections are searchable on a fresh deploy. Re-running writes nothing.
+- A metals standards reference for ContractIQ. Eight documents covering what LBMA, LPPM, OECD, RJC, Dodd-Frank and EU 2017/821 each govern, what makes them apply to a contract, and what a clause has to demonstrate. They do not reproduce the standards and name the body that publishes each one.
+- A safety reference for PharmaVigil. Seriousness criteria and the reporting clock, the important-medical-event rationale, the two causality scales, expectedness, the submission field contract, and coding conventions.
+- Tourism strategy documents seeded for the `st-chat` agent, which was already told it could search them.
+- An offline hashing embedder, so a clone with no provider key gets lexical retrieval rather than empty collections. Ingest and query share it.
+- `KnowledgeClient.bootstrap_project` and `KnowledgeClient.ensure_subject_collection` in the Python SDK. Both endpoints existed and no SDK method reached them.
+- `scripts/lint-agent-seeds.py` checks that an agent declaring `knowledge_search` has a collection granted somewhere, and runs in CI and in `check-before-push.sh`.
+
+### Changed
+
+- Local deploys seed the same seven scripts Azure does. `seed_code_assets` and `seed_atlas` were missing, so a local cluster came up with an empty Atlas and nothing to explain why.
+- The BPM analyser and Atlas pick their default model from whichever providers are configured, rather than always asking for Gemini. A provider that rejects or throttles the request falls through to the next one.
+- `knowledge_search` results carry the document's own metadata, so an agent asked for a policy id answers with the policy id instead of the filename it came out of.
+- The ContractIQ deep extractor is one definition rather than two under the same slug, and its help entry describes the pass-per-slice flow that actually runs.
+
+### Fixed
+
+- Knowledge search returned nothing, ever. The `chunks` table was created only by an alembic revision on a head the database never reached, so it did not exist and every ingest ended "vector store unavailable". It is now created at boot with the rest of the schema.
+- A pgvector query that could never bind its parameter. SQLAlchemy's `text()` will not accept `:emb::vector`, so every search failed on a missing bind parameter and returned an empty result instead of an error. Cast explicitly.
+- No queue-routed agent could reach a collection. The consumer imported a module that does not exist, into a bare `except`, and filtered permissions in the wrong case. The tool was dropped from the registry and the model narrated the call as prose. The failure now logs.
+- Both standalone apps that bootstrap a knowledge project at startup were failing silently against SDK methods that were never implemented.
+
 ## v2.4.0 — 2026-09-26
 
 ### Added

@@ -1,0 +1,368 @@
+# ContractIQ — the precious-metals standards reference.
+#
+# Six metals agents audit contracts against named published standards and all
+# six declared `knowledge_search` with no collection granted. The compliance
+# auditor's own prompt says the tool is for pulling "the canonical text of each
+# standard", and there was nothing to pull, so every verdict rested on model
+# recall with no citation behind it.
+#
+# IMPORTANT ABOUT WHAT THIS IS
+#
+# These documents do NOT reproduce the standards. LBMA, LPPM, OECD, RJC and
+# ISO texts are published by their own bodies and are the only authority on
+# their own contents. What is written here is the internal crib a compliance
+# team keeps alongside them: what each standard governs, what makes it apply
+# to a given contract, what a clause has to demonstrate to pass, and the
+# version traps that catch people out. Every document says where the real text
+# lives and that versions move.
+#
+# An agent that cites one of these is citing the checklist, not the standard,
+# and the documents are written so that it says so.
+
+project:
+  slug: contractiq
+  name: "ContractIQ Knowledge"
+  description: "Contract corpora — shared reference plus per-user collections."
+
+collections:
+  - slug: contractiq-metals-standards
+    name: "ContractIQ Metals Standards Reference"
+    description: >
+      Applicability triggers and clause requirements for the standards the
+      metals agents audit against. A checklist reference, not the standards.
+    default_visibility: tenant
+    vector_backend: pgvector
+    agent_slugs:
+      - contractiq-metals-compliance-auditor
+      - contractiq-metals-sourcing-tracker
+      - contractiq-metals-refiner-watch
+      - contractiq-metals-loco-analyzer
+      - contractiq-metals-dispute-scorer
+      - contractiq-metals-extractor
+      - contractiq-chat
+      # These two want the user's own contract clauses, not this corpus. They
+      # are listed here because the ensure-subject-collection endpoint mirrors
+      # a project's existing grants onto each new per-user collection, so a
+      # grant here is what earns them access to the contracts a user uploads.
+      - contractiq-clause-anomaly
+      - contractiq-endur-template-filler
+    agent_permission: READ
+    documents:
+      - id: ciq-met-gooddelivery
+        title: "Good Delivery — what the accreditation covers"
+        version: 1
+        metadata: { doc_id: "CIQ-LBMA-GD", category: "accreditation", bodies: "LBMA, LPPM" }
+        content: |
+          GOOD DELIVERY
+
+          Two lists, two bodies. LBMA maintains Good Delivery for gold and
+          silver; LPPM maintains it for platinum and palladium. A contract for
+          platinum that cites LBMA Good Delivery has cited the wrong body, and
+          that is a checklist failure rather than a drafting preference.
+
+          Accreditation attaches to the refiner, not to the metal and not to
+          the bar. A bar is Good Delivery because an accredited refiner
+          produced it while accredited. A refiner removed from the list does
+          not retroactively invalidate bars it produced while listed, and a
+          contract that says otherwise is creating an obligation the market
+          does not recognise.
+
+          WHAT A BAR-SPECIFICATION CLAUSE HAS TO PIN DOWN
+
+            * Weight range and the unit it is expressed in.
+            * Minimum fineness, and whether it is a floor or a target.
+            * Required marks: serial number, refiner mark, fineness, year.
+            * Physical form and appearance acceptance.
+            * Which list, by name, and for which metals.
+
+          A clause that says only "London Good Delivery" without the metal or
+          the body is unclear rather than failing. Flag it for clarification.
+
+          VERSION TRAP
+
+          The rules are revised. A contract that names a version has pinned
+          itself to that version, which is fine while it is current and a
+          finding once it is not. A contract that says "as amended from time
+          to time" has not pinned itself, which is usually what the parties
+          want. Read which one it is before calling a version reference stale.
+
+          Authority: the current rules are published by LBMA and by LPPM. This
+          document is a checklist, not the rules, and does not carry their text.
+
+      - id: ciq-met-rgg-oecd
+        title: "Responsible sourcing — the five-step framework"
+        version: 1
+        metadata: { doc_id: "CIQ-RGG-OECD", category: "responsible_sourcing", bodies: "LBMA, OECD" }
+        content: |
+          FIVE-STEP DUE DILIGENCE
+
+          The LBMA Responsible Gold Guidance is built on the OECD Due Diligence
+          Guidance for Responsible Supply Chains of Minerals from Conflict-
+          Affected and High-Risk Areas. The five steps are the OECD's, and a
+          contract clause that references one usually has to satisfy the other.
+
+            Step 1  Establish strong company management systems.
+            Step 2  Identify and assess risk in the supply chain.
+            Step 3  Design and implement a strategy to respond to risk.
+            Step 4  Independent third-party audit of due diligence.
+            Step 5  Public report on supply chain due diligence.
+
+          WHAT EVIDENCE EACH STEP LOOKS LIKE IN A CONTRACT
+
+            Step 1  A named responsible-sourcing policy, an accountable
+                    officer, and a record-retention period.
+            Step 2  Country of origin, mine identity where disclosed, refiner
+                    identity, and the transport route. A clause that promises
+                    origin "on request" is weaker than one that warrants it.
+            Step 3  What happens when risk is found: suspend, mitigate,
+                    disengage, and on what timetable.
+            Step 4  Who audits, how often, and whether the buyer may see the
+                    report or only its conclusion.
+            Step 5  Whether the counterparty publishes, and where.
+
+          A contract that names the guidance but carries none of this evidence
+          passes a keyword search and fails the checklist. That gap is the most
+          common finding in this whole corpus.
+
+          CONFLICT-AFFECTED AND HIGH-RISK AREAS
+
+          The designation is about conditions, not a fixed country list, and
+          it moves. A contract that hard-codes a list of countries has frozen
+          a judgement that the framework expects to be made continuously.
+
+          Authority: OECD and LBMA publish the guidance. This is a checklist.
+
+      - id: ciq-met-rjc
+        title: "RJC — Code of Practices and Chain of Custody"
+        version: 1
+        metadata: { doc_id: "CIQ-RJC", category: "responsible_sourcing", bodies: "RJC" }
+        content: |
+          TWO DIFFERENT RJC STANDARDS
+
+          They are routinely confused, and the confusion is a finding.
+
+            Code of Practices     Certifies the business: its practices across
+                                  human rights, labour, environment, and
+                                  provenance claims. A certified member.
+            Chain of Custody      Certifies the material: that a given
+                                  consignment can be traced through certified
+                                  entities. Certified material.
+
+          A member certified to the Code of Practices does not thereby supply
+          Chain of Custody material. A contract that requires "RJC certified
+          gold" and names only the Code of Practices has not required what it
+          thinks it required.
+
+          WHEN IT APPLIES
+
+          Chiefly where the material is destined for jewellery, and wherever
+          either party makes a responsible-provenance claim downstream. A
+          bullion-only contract between two refiners will usually reference the
+          Good Delivery rules and the OECD framework, and RJC not at all. That
+          is not a failure. Mark it not_applicable and say why.
+
+          Authority: RJC publishes both standards. This is a checklist.
+
+      - id: ciq-met-regulations
+        title: "Statutory triggers — which law applies to this contract"
+        version: 1
+        metadata: { doc_id: "CIQ-REGS", category: "regulatory", bodies: "SEC, EU, Switzerland, HMRC, ECHA" }
+        content: |
+          APPLICABILITY IS ABOUT THE PARTIES, NOT THE METAL
+
+          Each of these turns on who the parties are and where they sit. Decide
+          applicability first, and only then look for the clause. Marking an
+          item "fail" when it never applied is the second most common error in
+          this checklist.
+
+            Dodd-Frank section 1502
+              Applies when the buyer is a US SEC-reporting issuer and the metal
+              is one of the covered minerals. Tin, tantalum, tungsten and gold.
+              Platinum and palladium are not covered. Obligation is disclosure,
+              not prohibition, so a contract may comply while still sourcing
+              from a covered region, provided the diligence and reporting are
+              there.
+
+            EU Conflict Minerals Regulation 2017/821
+              Applies to Union importers of the covered minerals above the
+              volume thresholds. Direct obligations on the importer, so check
+              which party imports rather than which party is European.
+
+            Swiss Precious Metals Control Act
+              Applies when a party is Swiss-domiciled or the melting or
+              assaying happens in Switzerland. Governs hallmarking, melter
+              responsibility and assay office involvement.
+
+            HMRC Notice 701/14, investment gold VAT
+              Applies to UK parties, and only where the bar's weight and
+              fineness bring it within the investment-gold definition. A bar
+              that falls outside is a different VAT treatment, not an
+              exemption failure.
+
+            REACH, EC 1907/2006
+              Applies where a refining or treatment process within scope is
+              carried out in the EU. Rarely engaged by a straightforward
+              bullion sale. Check the process description before calling it.
+
+          Authority: each is published by its own body and is amended. This is
+          a checklist for deciding applicability, not legal advice, and not the
+          text of any of them.
+
+      - id: ciq-met-iso
+        title: "ISO references and what each one actually governs"
+        version: 1
+        metadata: { doc_id: "CIQ-ISO", category: "quality", bodies: "ISO" }
+        content: |
+          THE THREE THAT APPEAR IN METALS CONTRACTS
+
+            ISO 9001   Quality management systems. Governs how the
+                       organisation manages quality, and says nothing about
+                       the metal.
+            ISO 14001  Environmental management systems. Same shape, same
+                       limitation.
+            ISO 22368  Determination of fineness by X-ray fluorescence. This
+                       one is about the metal, and is the method reference an
+                       assay clause needs.
+
+          The distinction matters when scoring an assay dispute. A contract
+          that cites ISO 9001 in its assay clause has cited a management
+          standard where a method belongs, and the clause is ambiguous about
+          how fineness is actually determined. That ambiguity is precisely
+          what a dispute is later fought over.
+
+          WHAT AN ASSAY CLAUSE SHOULD NAME
+
+            * The method, by standard reference.
+            * Who assays, and whether the buyer may appoint an umpire.
+            * The tolerance, and whether it is symmetric.
+            * What happens when the umpire's result splits the difference, and
+              who pays for the umpire.
+
+          A clause naming a method but no umpire process is the single highest
+          dispute-exposure pattern in this corpus.
+
+          Authority: ISO publishes these. This is a checklist.
+
+      - id: ciq-met-sanctions
+        title: "Sanctions and origin exclusion clauses"
+        version: 1
+        metadata: { doc_id: "CIQ-SANCTIONS", category: "sanctions", bodies: "OFAC, UK, EU" }
+        content: |
+          WHAT AN EXCLUSION CLAUSE HAS TO DO
+
+          Name the regimes it answers to, bind both parties, survive
+          assignment, and give the buyer a remedy that is worth having. A
+          clause that warrants non-sanctioned origin without a remedy is a
+          statement of intent.
+
+            * Screening against the lists the parties are actually subject to.
+              A US buyer and an EU seller are subject to different ones, and a
+              clause naming only one leaves the other party unbound.
+            * A representation that survives each delivery, not only signature.
+            * Indemnity that reaches the loss the buyer would actually suffer,
+              which is usually the unsaleability of the metal rather than its
+              price.
+            * The right to reject, and what happens to metal already vaulted.
+
+          RUSSIAN-ORIGIN EXCLUSION
+
+          Treatment changed sharply in early 2022, and the market's handling of
+          pre-2022 stock is not the same as its handling of new supply. Two
+          questions decide the finding:
+
+            * Does the contract distinguish metal produced before the change
+              from metal produced after it? A clause that does not is unclear
+              rather than failing.
+            * Does it address metal already in a vault at the time of the
+              change? Silence here is the gap that actually bites.
+
+          A contract signed before 2022 with no Russian-origin clause is not a
+          drafting failure. It is a contract that predates the question, and
+          the finding is that it needs an amendment, not that it was wrong.
+
+          Authority: sanctions lists are published by their administering
+          bodies and change frequently. Verify current status at the time of
+          the audit rather than relying on this document.
+
+      - id: ciq-met-loco
+        title: "Loco delivery, premiums and who carries the risk"
+        version: 1
+        metadata: { doc_id: "CIQ-LOCO", category: "delivery", bodies: "market convention" }
+        content: |
+          LOCO IS A LOCATION, AND A PRICE
+
+          Loco London is the market's reference point for gold and silver, and
+          the other centres trade at a premium or discount to it. The premium
+          is not a fee written into the contract, it is embedded in the price,
+          which is why extracting it requires comparing the contract price to
+          the matching loco-London benchmark for the same date and quality.
+
+          Centres that appear in this portfolio: London, Zurich, New York,
+          Shanghai, Hong Kong, Dubai, Singapore.
+
+          WHAT CHANGES WITH THE CENTRE
+
+            * The premium or discount itself, which moves with local demand.
+            * Whether the metal is allocated or unallocated, and what that
+              means for the buyer if the vault operator fails.
+            * Import duty and VAT treatment, which can dwarf the premium.
+            * Which vault operators are acceptable, and whether the buyer may
+              name one.
+
+          IN-TRANSIT RISK
+
+          The question a loco clause must answer is when title and when risk
+          pass, because they need not pass together. A clause that transfers
+          title on payment and risk on collection leaves a window, and the
+          contract should say who insures it, for how much, and against what.
+
+            * Insurer named, or merely "adequately insured".
+            * Sum insured: market value at which date.
+            * Whether the buyer is a named insured or merely a loss payee.
+            * War, strikes and confiscation, which bullion policies often
+              carve out and which matter most in the centres where they are
+              carved out.
+
+          A loco transfer between centres that does not address in-transit
+          insurance allocation is a finding regardless of the premium.
+
+      - id: ciq-met-tolerance
+        title: "Tolerances, brand acceptability and where disputes come from"
+        version: 1
+        metadata: { doc_id: "CIQ-TOLERANCE", category: "dispute", bodies: "market convention" }
+        content: |
+          THE DIMENSIONS A DISPUTE ACTUALLY TURNS ON
+
+          Scoring dispute exposure means asking, for each dimension, whether
+          the contract decides the question or leaves it to be argued later.
+
+            Assay tolerance        Is there one, is it symmetric, and does a
+                                   result inside tolerance still adjust the
+                                   price or is it simply accepted?
+            Weight tolerance       Is it per bar or per lot? Per-lot tolerance
+                                   on a small lot is a much tighter obligation
+                                   than it looks.
+            Brand acceptability    A named list, a list by reference, or
+                                   silence. Silence means any Good Delivery
+                                   brand, which is broader than most buyers
+                                   intend.
+            Late delivery          A remedy, or only a right to terminate. A
+                                   termination-only clause is no remedy at all
+                                   in a rising market.
+            Force majeure          What it covers, and specifically whether it
+                                   reaches a vault closure, an export ban or a
+                                   sanctions designation. Generic wording
+                                   usually does not.
+            Sanctioned-origin      See CIQ-SANCTIONS. Scored separately
+                                   because the exposure is categorical rather
+                                   than a matter of degree.
+            Fineness ambiguity     A fineness given without a method, or a
+                                   method without a tolerance. Either alone is
+                                   incomplete.
+
+          WEIGHING THEM
+
+          An ambiguity that both parties read the same way costs nothing until
+          the market moves. Score the exposure, not the likelihood of a falling
+          out, and say which clause text drove each score so a reviewer can
+          disagree with the reading rather than the number.

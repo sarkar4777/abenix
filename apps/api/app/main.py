@@ -462,6 +462,69 @@ async def on_startup():
             finally:
                 await conn.execute(_t("SELECT pg_advisory_unlock(776601)"))
 
+    # The pgvector chunk store. It lives here and not in create_all because
+    # `chunks` is raw SQL outside the ORM, and not in its alembic revision
+    # because that revision sits on a head the database never reached — so the
+    # table simply never existed, every ingest ended "vector store
+    # unavailable", and knowledge_search had nothing to search. Its own
+    # transaction: a CREATE EXTENSION the role is not allowed to run would
+    # otherwise abort the one that just built the schema.
+    try:
+        from sqlalchemy import text as _vt
+
+        async with db_engine.begin() as vconn:
+            await vconn.execute(_vt("CREATE EXTENSION IF NOT EXISTS vector"))
+            await vconn.execute(
+                _vt(
+                    """
+                    CREATE TABLE IF NOT EXISTS chunks (
+                        id UUID PRIMARY KEY,
+                        collection_id UUID NOT NULL
+                            REFERENCES knowledge_collections(id) ON DELETE CASCADE,
+                        document_id UUID NOT NULL
+                            REFERENCES documents(id) ON DELETE CASCADE,
+                        chunk_index INTEGER NOT NULL,
+                        content TEXT NOT NULL,
+                        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        embedding vector(1536),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        UNIQUE (document_id, chunk_index)
+                    )
+                    """
+                )
+            )
+            await vconn.execute(
+                _vt(
+                    "CREATE INDEX IF NOT EXISTS ix_chunks_collection "
+                    "ON chunks (collection_id)"
+                )
+            )
+            await vconn.execute(
+                _vt(
+                    "CREATE INDEX IF NOT EXISTS ix_chunks_document "
+                    "ON chunks (document_id)"
+                )
+            )
+        # HNSW wants pgvector 0.5+. Separate transaction so an older build
+        # loses the speed-up and keeps the table.
+        try:
+            async with db_engine.begin() as iconn:
+                await iconn.execute(
+                    _vt(
+                        "CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw "
+                        "ON chunks USING hnsw (embedding vector_cosine_ops)"
+                    )
+                )
+        except Exception as _e:
+            logging.getLogger("startup").info("chunks hnsw index skipped: %s", _e)
+    except Exception as _e:
+        logging.getLogger("startup").warning(
+            "pgvector chunk store unavailable (%s) — knowledge search will "
+            "report 'vector store unavailable' until the database role can "
+            "CREATE EXTENSION vector",
+            _e,
+        )
+
     # Seed system tool presets for every tenant. Idempotent; preserves
     # user edits to existing rows (only flips is_system back on).
     try:

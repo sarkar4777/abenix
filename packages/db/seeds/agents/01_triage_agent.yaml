@@ -47,5 +47,5 @@ model_config:
   tools:
     - pii_redactor
     - text_analyzer
-    - knowledge_search   # read-only against ticket_category KB
+    - knowledge_search   # read-only against the SOP collection (escalation criteria)
     - moderation_vet

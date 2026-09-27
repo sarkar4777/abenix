@@ -24,7 +24,6 @@ model_config:
   max_tokens: 4096
   tools:
     - agent_step
-    - knowledge_search
     - image_analyzer
     - adverse_media
     - sanctions_screening

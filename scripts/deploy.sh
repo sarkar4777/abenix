@@ -808,7 +808,12 @@ seed_agents() {
   local failed_seeds=""
   # Order matters: seed_kb grants collections to agents by slug, so it has to
   # follow seed_agents.
-  for seed in seed_agents seed_users seed_portfolio_schemas seed_ml_models seed_kb; do
+  #
+  # Keep this list in step with the one in deploy-azure.sh. It had drifted two
+  # short — no seed_code_assets and no seed_atlas — so a local cluster came up
+  # with an empty Atlas and nothing to explain why, while Azure looked fine.
+  for seed in seed_agents seed_users seed_portfolio_schemas seed_ml_models \
+              seed_code_assets seed_kb seed_atlas; do
     run_seed "${seed}" || failed_seeds="${failed_seeds} ${seed}"
   done
 

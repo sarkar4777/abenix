@@ -130,6 +130,9 @@ collections:
     agent_slugs:
       - resolveai-trend-miner
       - resolveai-qa-reviewer
+      # Triage classifies urgency and risk flags, and the escalation SOP is
+      # the written rule it classifies against.
+      - resolveai-triage
     agent_permission: READ
     documents:
       - id: rai-sop-001

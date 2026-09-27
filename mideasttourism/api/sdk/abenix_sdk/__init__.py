@@ -482,6 +482,65 @@ class KnowledgeClient:
     def __init__(self, client: "Abenix"):
         self._client = client
 
+    async def bootstrap_project(
+        self,
+        slug: str,
+        name: str,
+        description: str = "",
+        collections: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Create a knowledge project and its collections, idempotently.
+
+        Apps call this at startup so their agents have somewhere to search
+        before anyone has uploaded anything. Re-running returns the existing
+        rows rather than duplicating them.
+
+        Each entry in `collections` takes `name`, and optionally `slug`,
+        `description`, `default_visibility` (private/project/tenant),
+        `vector_backend` (pinecone/pgvector), `agent_slugs` and
+        `agent_permission`. Agent slugs that do not resolve come back in
+        `skipped_agents` instead of failing the call.
+        """
+        res = await self._client._http.post(
+            "/api/knowledge-projects/bootstrap",
+            json={
+                "slug": slug,
+                "name": name,
+                "description": description,
+                "collections": collections or [],
+            },
+        )
+        res.raise_for_status()
+        return res.json().get("data", {})
+
+    async def ensure_subject_collection(
+        self,
+        project_slug: str,
+        subject_type: str,
+        subject_id: str,
+        description: str = "",
+        default_visibility: str = "private",
+        vector_backend: str = "pgvector",
+    ) -> dict[str, Any]:
+        """Get or create the collection belonging to one subject.
+
+        A subject is whatever the app partitions its corpus by — usually a
+        user, sometimes a tenant or a case. Returns the collection, so the
+        caller can pass its id straight to `cognify` or `search`.
+        """
+        res = await self._client._http.post(
+            f"/api/knowledge-projects/{project_slug}/subject-collections/ensure",
+            json={
+                "subject_type": subject_type,
+                "subject_id": subject_id,
+                "description": description,
+                "default_visibility": default_visibility,
+                "vector_backend": vector_backend,
+            },
+        )
+        res.raise_for_status()
+        return res.json().get("data", {})
+
     async def cognify(
         self,
         kb_id: str,
