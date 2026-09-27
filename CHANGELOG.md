@@ -4,6 +4,16 @@
 
 ### Added
 
+- CI can be started by hand from the Actions tab, and a manual run builds and publishes images the same way a push does. Leaving the publishing job out of manual runs meant the one job that touches the registry was the one job nobody could exercise on demand.
+
+### Changed
+
+### Fixed
+
+## v2.4.0 — 2026-09-27
+
+### Added
+
 - CI can be started by hand from the Actions tab.
 
 ### Changed

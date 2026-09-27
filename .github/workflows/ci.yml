@@ -145,7 +145,12 @@ jobs:
 
   build-images:
     needs: [python-lint, python-test, web-lint-typecheck-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # A manual run counts too. Without workflow_dispatch here, the one job
+    # that publishes images is the one job you cannot exercise on demand, so
+    # a registry or permissions problem only ever shows up on a real push.
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
