@@ -205,9 +205,32 @@ jobs:
           output: 'trivy-${{ matrix.service.name }}.sarif'
           severity: 'CRITICAL,HIGH'
           trivyignores: '.trivyignore'
+          # Report only what someone can act on. A scan of python:3.12-slim
+          # finds 162 vulnerabilities, of which 6 have a fix released and the
+          # other 156 are Debian packages — glibc, util-linux, systemd — that
+          # the distribution has published no fixed version for. Listing those
+          # produced 156 alerts that no amount of apt-get upgrade could clear,
+          # which buried the handful that mattered. Nothing fixable is hidden:
+          # the day Debian ships a fix the alert appears, and the apt-get
+          # upgrade already in every Dockerfile picks it up.
+          ignore-unfixed: true
+          # pip ships a manifest of its own bundled dependencies, and Trivy
+          # reads it as if those were installed. It reported setuptools 70.3.0
+          # and msgpack 1.1.2 while the real packages in the image were 84.0.0
+          # and 1.2.2. Only a pip release can change that manifest.
+          #
+          # This skips the two vendor trees, not pip itself. An outdated pip is
+          # still read from its dist-info METADATA and still reported, which is
+          # checked rather than assumed.
+          skip-dirs: '**/pip/_vendor,**/pip-*.dist-info/licenses'
         continue-on-error: true
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-${{ matrix.service.name }}.sarif'
+          # One category per image. Without it all four uploads share the
+          # default category and overwrite each other, so the alert list showed
+          # whichever image finished last and the other three went stale
+          # without ever being re-evaluated.
+          category: 'trivy-${{ matrix.service.name }}'
         continue-on-error: true

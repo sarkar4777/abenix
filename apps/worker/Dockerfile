@@ -9,7 +9,7 @@ b=tomllib.load(open('/tmp/db.toml','rb'))['project']['dependencies']; \
 c=tomllib.load(open('/tmp/runtime.toml','rb'))['project']['dependencies']; \
 f=open('/tmp/req.txt','w'); \
 [f.write(d+chr(10)) for d in sorted(set(a+b+c))]" && \
-    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --upgrade pip setuptools && \
     pip install --no-cache-dir -r /tmp/req.txt
 
 FROM python:3.12-slim
@@ -19,11 +19,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # wait-for-postgres / wait-for-redis init containers. python:3.12-slim
 # has neither by default → without these the init loop errors
 # "nc: not found" and the pod stays in Init:0/N forever.
-# pip is upgraded in the deps stage, not here, because the COPY below replaces
-# the whole of site-packages and would put the old pip straight back.
+# pip is upgraded in the deps stage, not here, because this stage's
+# site-packages is wiped and replaced by the deps stage's copy below.
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends procps netcat-openbsd && rm -rf /var/lib/apt/lists/*
 RUN adduser --system --uid 1001 appuser
 WORKDIR /app
+# COPY merges into the destination rather than replacing it, so the base
+# image's own dist-info directories survive next to the ones copied in and
+# Trivy reports the stale versions. Clear the directory first so what lands
+# here is exactly what the deps stage resolved.
+RUN rm -rf /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
 COPY apps/worker/ ./apps/worker/

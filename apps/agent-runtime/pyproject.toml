@@ -16,8 +16,13 @@ dependencies = [
     "fastapi>=0.111.0",
     "pyyaml>=6.0.0",
     "duckduckgo-search>=6.0.0",
-    "PyPDF2>=3.0.0",
+    # pypdf, not PyPDF2. Every `from pypdf import PdfReader` in this tree was
+    # migrated already, but the declaration was left behind, so the image kept
+    # installing the abandoned package and carrying CVE-2023-36464 with it.
+    "pypdf>=4.0.0",
     "python-docx>=1.0.0",
+    # Transitive via CacheControl, floored for GHSA-6v7p-g79w-8964.
+    "msgpack>=1.2.1",
     # Meeting Representative — LiveKit real-time + token-mint + audio
     # stream. `livekit-api` mints server-side tokens; `livekit` is the
     # RTC client we use in the adapter. pinecone for persona RAG.
