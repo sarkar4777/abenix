@@ -4,6 +4,16 @@
 
 ### Added
 
+### Changed
+
+- The published tree no longer carries the dependabot config. This repository is generated and republished on each release, so a PR raised against it can never land. Dependency updates happen upstream and arrive with a release. Security alerts are a repository setting and are unaffected.
+
+### Fixed
+
+## v2.4.1 — 2026-09-28
+
+### Added
+
 - A map of the repository for anyone who has just cloned it. Where each kind of change goes, and the four arrangements that catch people out.
 - `.trivyignore`, for findings that have no fix and a reason they are safe here. Each entry carries the reasoning and the condition that would invalidate it.
 - CI can be started by hand from the Actions tab, and a manual run builds and publishes images the same way a push does.
