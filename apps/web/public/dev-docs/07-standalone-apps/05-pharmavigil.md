@@ -78,7 +78,7 @@ and may override an unflagged one. Anything it still cannot code lands in
 The shipped dictionary is about 45 LLTs — the common reactions plus the
 Important Medical Event terms that change a seriousness assessment. MedDRA is
 licensed and cannot ship here. Point `MEDDRA_DICT_PATH` at a real export to use
-one; the matching logic does not change.
+one. The matching logic does not change.
 
 ### `disproportionality`
 
@@ -113,7 +113,7 @@ because reviewer behaviour turns on interactions a threshold cannot express:
 - five concomitant medications make an alternative cause likely, which pulls a
   mild case down and leaves a fatal one untouched
 - a positive dechallenge counts for more on a thin report than a complete one
-- a high Naranjo on a well-known listed reaction is routine; the same score on
+- a high Naranjo on a well-known listed reaction is routine, while the same score on
   an unlisted one is not
 
 Accuracy is not near 1.0 by construction — the label is drawn from a latent

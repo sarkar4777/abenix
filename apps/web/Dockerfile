@@ -43,6 +43,17 @@ FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 
+# The base image's Alpine packages trail the patched builds — libssl3 ships at
+# 3.5.6-r0 against a fixed 3.5.8-r0, which alone accounted for fifty findings.
+# npm and yarn are build tools, and the runtime only ever runs
+# `node apps/web/server.js`, so their vendored node_modules are pure surface.
+# Removing them takes the tar, minimatch, brace-expansion and sigstore
+# findings with them.
+RUN apk upgrade --no-cache \
+ && rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/bin/npm /usr/local/bin/npx \
+           /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 # Copy standalone output (server.js lives at /app/server.js)
 COPY --from=builder /app/apps/web/.next/standalone ./
 # Copy node_modules that standalone tracing missed (workspace hoisting issue)

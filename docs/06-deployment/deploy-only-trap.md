@@ -53,6 +53,6 @@ helm rollback abenix <previous-revision> -n abenix
 
 ## Why we haven't fixed the tooling
 
-It's a one-line change in `scripts/deploy-azure.sh` to make `--only` *not* rewrite tags on untouched deployments. The reason we haven't is that the current behaviour, while painful, makes the SHA-pinning invariant simple to reason about: every deployment at any point in time is pinned to one SHA, and `helm template` is the source of truth. Splitting that into per-deployment SHAs is a different model and adds drift surface.
+It's a one-line change in `scripts/deploy-azure.sh` to make `--only` *not* rewrite tags on untouched deployments. The reason we haven't is that the current behaviour, while painful, makes the SHA-pinning invariant simple to reason about, since every deployment at any point in time is pinned to one SHA, and `helm template` is the source of truth. Splitting that into per-deployment SHAs is a different model and adds drift surface.
 
 A planned alternative is to switch to `imagePullPolicy: IfNotPresent` and tag-by-content-hash. Until that lands, this trap is real. Don't fall in.

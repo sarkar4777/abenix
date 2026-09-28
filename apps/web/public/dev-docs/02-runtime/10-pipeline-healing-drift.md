@@ -148,7 +148,7 @@ Thresholds are tenant-configurable via the platform admin (not yet a per-agent s
 
 ### Where it surfaces in the UI
 
-- `/alerts` page — drift alerts share the alerts inbox with execution-failure alerts; filter chip to switch.
+- `/alerts` page — drift alerts share the alerts inbox with execution-failure alerts, and a filter chip switches between them.
 - `/analytics` page — drift trend lines per agent.
 - Slack / email fan-out — webhook URL configured in `/settings/notifications` fires on `critical` only.
 

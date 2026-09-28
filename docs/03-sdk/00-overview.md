@@ -12,7 +12,7 @@ The platform's clients are heterogeneous:
 - **CI / scripts** — Python or shell.
 - **Mobile/desktop apps** — TypeScript (via the JS SDK).
 
-Maintaining three SDKs is annoying but worth it: developers don't have to write HTTP/SSE boilerplate, and the SDK enforces the correct way to do common things (actAs, retries, error handling).
+Maintaining three SDKs is annoying but worth it, because developers don't have to write HTTP/SSE boilerplate, and the SDK enforces the correct way to do common things (actAs, retries, error handling).
 
 The Python SDK is the reference implementation. TS + Java mirror its surface.
 

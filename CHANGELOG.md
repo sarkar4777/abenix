@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.4.0 — 2026-09-28
+
+### Added
+
+- A map of the repository for anyone who has just cloned it. Where each kind of change goes, and the four arrangements that catch people out.
+- CI can be started by hand from the Actions tab, and a manual run builds and publishes images the same way a push does.
+
+### Changed
+
+- The web runtime image upgrades its OS packages and drops npm and yarn. The runtime only ever runs the Next server, so their vendored modules were pure scan surface.
+
+### Fixed
+
 ## v2.4.0 — 2026-09-27
 
 ### Added

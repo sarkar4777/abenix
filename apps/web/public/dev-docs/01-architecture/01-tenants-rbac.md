@@ -146,7 +146,7 @@ The `audit_logs` table has both a `user_id` (the API-key owner — who *holds* t
 
 **No.** The chain has depth exactly one. An incoming request can carry `X-Abenix-Subject` but the resulting agent run cannot turn around and call another agent with a new subject. The `invoke_agent` tool ([details below](#agent-to-agent-calls-and-subjects)) reuses the *root* execution's subject for every nested call. This is deliberate. Allowing re-delegation would let one compromised SDK consumer impersonate users across subject types, and the policy table would explode in size to cover the cross product.
 
-If you genuinely need a "user impersonates another user" path (rare — almost always a smell), do it server-side: the standalone app's own auth code re-issues a request with a different X-Abenix-Subject after running its own access check.
+If you genuinely need a "user impersonates another user" path (rare — almost always a smell), do it server-side, where the standalone app's own auth code re-issues a request with a different X-Abenix-Subject after running its own access check.
 
 ### Subject-type taxonomy
 
@@ -216,7 +216,7 @@ const result = await sdk
 
 ### Agent-to-agent calls and subjects
 
-When an agent calls another agent via the `invoke_agent` tool, the runtime opens a fresh HTTP request to `/api/agents/{slug}/execute` from inside the runtime pod. That request carries the platform's *internal* service key — not the original X-Abenix-Subject. The subject is implicit: the new sub-execution inherits the *parent_execution_id* and the platform looks up the root execution to find the original subject. Cost and audit roll up to the root.
+When an agent calls another agent via the `invoke_agent` tool, the runtime opens a fresh HTTP request to `/api/agents/{slug}/execute` from inside the runtime pod. That request carries the platform's *internal* service key — not the original X-Abenix-Subject. The subject is implicit, because the new sub-execution inherits the *parent_execution_id* and the platform looks up the root execution to find the original subject. Cost and audit roll up to the root.
 
 This means a fan-out across five sub-agents produces five audit rows, all attributed to the same subject, all linked by `parent_execution_id` to the root.
 
