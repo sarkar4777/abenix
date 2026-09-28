@@ -66,10 +66,15 @@ and `error` helpers so every payload has the same envelope.
 
 ## Four things that surprise people
 
-**There are two sets of Dockerfiles.** `apps/*/Dockerfile` is what CI builds
-and pushes to the registry. `docker/Dockerfile.*` is what `scripts/deploy.sh`
-builds locally. Changing one does not change the other, and a change that only
-lands in one will work in exactly one of the two places.
+**There are two sets of Dockerfiles.** `apps/*/Dockerfile` is what CI builds,
+so it is the set Trivy and the code-scanning alerts look at. `docker/Dockerfile.*`
+is what `scripts/deploy.sh` and `scripts/deploy-azure.sh` build, so it is the
+set that actually serves traffic. Changing one does not change the other.
+
+This bit once already. A round of CVE patching went into the CI set, CI went
+green, and every running image kept every finding. `scripts/check-dockerfile-hardening.py`
+now runs in CI and compares them, so the next time they diverge on base pinning
+or package upgrades it says so.
 
 **The SDK is vendored seven times.** Each example app carries its own copy so
 it can be built without the monorepo. `packages/sdk/python` is canonical and

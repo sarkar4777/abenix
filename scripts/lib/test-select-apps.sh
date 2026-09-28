@@ -80,6 +80,48 @@ check "app_selected finds a chosen key" "found" \
 check "app_selected rejects an unchosen key" "missing" \
   "$(SELECTED_APPS=(wingman); app_selected pharmavigil && echo found || echo missing)"
 
+# --- return status ----------------------------------------------------------
+#
+# deploy.sh runs under `set -e`, so a selection function that hands back a
+# non-zero status kills the whole deploy with nothing printed. Every check
+# above asserts the value these functions produce and none asserted the status
+# they exit with, so both functions could return 1 on ordinary input while the
+# suite stayed green. `APPS=none` aborted the deploy in exactly that way.
+#
+# These run the functions in a `set -e` subshell, the way deploy.sh calls them.
+status_of() { # status_of <APPS value>
+  bash -c "set -euo pipefail
+           source '${ROOT_DIR}/scripts/lib/select-apps.sh'
+           APPS='$1'
+           select_apps
+           describe_selection >/dev/null" >/dev/null 2>&1
+  echo $?
+}
+
+for sel in "none" "" "all" "pharmavigil" "pharmavigil,wingman" "1,3" "bogus" "2"; do
+  check "select_apps exits 0 under set -e for APPS='${sel}'" "0" "$(status_of "${sel}")"
+done
+
+# --- selection-made flag ----------------------------------------------------
+#
+# deploy.sh gates app image builds on this. Without it, "chose nothing" and
+# "never asked" both look like an empty SELECTED_APPS, and APPS=none spent
+# twenty minutes building fourteen images it then refused to deploy.
+flag_after() { # flag_after <APPS value>
+  bash -c "set -uo pipefail
+           source '${ROOT_DIR}/scripts/lib/select-apps.sh'
+           APPS='$1'
+           select_apps
+           echo \"\${APP_SELECTION_DONE:-unset}\"" 2>/dev/null
+}
+
+check "flag is set even when APPS=none selects nothing" "1" "$(flag_after none)"
+check "flag is set for a real selection" "1" "$(flag_after pharmavigil)"
+check "flag is unset before select_apps runs" "unset" \
+  "$(bash -c "set -uo pipefail
+              source '${ROOT_DIR}/scripts/lib/select-apps.sh'
+              echo \"\${APP_SELECTION_DONE:-unset}\"" 2>/dev/null)"
+
 echo ""
 echo "${PASS} passed, ${FAIL} failed"
 [ "${FAIL}" -eq 0 ]

@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-mcp
+  namespace: abenix
+  labels:
+    app: custom-mcp
+    purpose: uat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: custom-mcp
+  template:
+    metadata:
+      labels:
+        app: custom-mcp
+    spec:
+      containers:
+        - name: server
+          # Placeholder registry, same reason as the single-tool fixture next
+          # door — publish-public.sh scrubs real ACR names out of the tree.
+          # scripts/uat.sh rewrites this on minikube and you override it on a
+          # real cluster:
+          #   kubectl set image deploy/custom-mcp -n abenix \
+          #     server=<your-acr>.azurecr.io/custom-mcp:latest
+          image: your-acr.azurecr.io/custom-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "10m", memory: "32Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: custom-mcp
+  namespace: abenix
+  labels:
+    app: custom-mcp
+spec:
+  selector:
+    app: custom-mcp
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

@@ -38,8 +38,31 @@
 | `ML_MODEL_MAX_K8S_PER_TENANT` | no | `10` | Per-tenant cap on concurrent k8s model deployments |
 | `ML_MODEL_SERVING_IMAGE` | no | — | Image for the on-cluster model-serving pods |
 | `ALLOWED_IPS` | no | `""` | Comma-separated CIDR. empty = no restriction |
+| `MCP_ALLOWED_HOSTS` | no | the UAT fixture host | Comma-separated host suffixes an MCP server may be registered from. See below |
 | `EMAIL_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` | no | — | Outbound email for notifications |
 | `SLACK_DEFAULT_WEBHOOK_URL` | no | — | Default Slack webhook (per-tenant overrides exist) |
+
+### Registering your own MCP server
+
+`POST /api/mcp/connections` checks the host of `server_url` before it connects,
+and answers `400` with `host '<yours>' not in MCP_ALLOWED_HOSTS` when the host
+is not listed. The chart sets the variable from `mcpAllowedHosts` in the Helm
+values, and when that is empty it falls back to the UAT fixture host alone. So
+a freshly deployed cluster will refuse every MCP server except that one until
+you say otherwise.
+
+Entries are matched as suffixes, so a host is allowed when it equals an entry
+or ends with a dot plus that entry.
+
+```yaml
+# infra/helm/abenix/values-local.yaml
+mcpAllowedHosts: "uat-mcp.abenix.svc.cluster.local,custom-mcp.abenix.svc.cluster.local"
+```
+
+Leaving the variable empty in production is the safer setting rather than an
+oversight. The connector then falls through to a block-list that refuses
+localhost, cluster-internal names and cloud metadata endpoints, which is what
+stops a tenant pointing an MCP connection at your instance metadata.
 
 ---
 

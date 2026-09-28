@@ -1,10 +1,14 @@
 # ResolveAI API — standalone FastAPI service (port 8004).
 FROM python:3.12-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends gcc \
+# The base tag's packages trail the patched builds, so upgrade before
+# installing anything on top of them.
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends gcc \
   && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 COPY sdk/ ./sdk/
 COPY app/ ./app/
 COPY main.py .

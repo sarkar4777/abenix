@@ -17,6 +17,14 @@ _RULES: list[tuple[str, str]] = [
         r"stuck\s+in\s+running|sweep.*backfill|owning\s+process\s+likely\s+crashed",
         "STALE_SWEEP",
     ),
+    # Configuration, before the provider rules. An unrecognised model id used
+    # to fall through to the degradation chain and answer from whichever
+    # provider had a credential, so a typo in an agent's model returned a
+    # perfectly good reply from a model nobody asked for.
+    (
+        r"unknown\s+model|unrecognised\s+model|unrecognized\s+model",
+        "CONFIG_UNKNOWN_MODEL",
+    ),
     # LLM provider errors
     (r"rate.?limit|429|too\s*many", "LLM_RATE_LIMIT"),
     (

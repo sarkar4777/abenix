@@ -75,6 +75,10 @@ jobs:
       # disk but untracked renders as a broken image there while looking fine
       # locally.
       - run: python scripts/check-readme-images.py
+      # CI builds apps/*/Dockerfile but the cluster builds docker/Dockerfile.*,
+      # so the CVE patches went to one set and the images actually serving
+      # traffic kept every finding. Nothing compared them until this ran.
+      - run: python scripts/check-dockerfile-hardening.py
 
   web-lint-typecheck-build:
     runs-on: ubuntu-latest
