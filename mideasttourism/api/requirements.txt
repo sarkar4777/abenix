@@ -9,7 +9,6 @@ python-jose[cryptography]>=3.3.0
 bcrypt>=4.1.0
 httpx>=0.25.0
 anthropic>=0.39.0
-PyPDF2>=3.0.0
 # Real markdown rendering for /api/st/reports — the previous regex-based
 # implementation in the web layer collapsed tables and lists.
 markdown-it-py>=3.0.0

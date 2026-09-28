@@ -158,8 +158,8 @@ async def upload_contract(
     elif ext == "pdf":
         try:
             import io
-            import PyPDF2
-            reader = PyPDF2.PdfReader(io.BytesIO(content))
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(content))
             file_text = "\n".join(page.extract_text() or "" for page in reader.pages)
         except Exception:
             file_text = content.decode("utf-8", errors="replace")
