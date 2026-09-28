@@ -21,6 +21,22 @@
 ### Added
 
 - A map of the repository for anyone who has just cloned it. Where each kind of change goes, and the four arrangements that catch people out.
+- `.trivyignore`, for findings that have no fix and a reason they are safe here. Each entry carries the reasoning and the condition that would invalidate it.
+- CI can be started by hand from the Actions tab, and a manual run builds and publishes images the same way a push does.
+
+### Changed
+
+- The api, worker and agent-runtime images upgrade their Debian packages and pip during the build rather than waiting for a new base tag to be cut.
+- The web runtime image upgrades its OS packages and drops npm and yarn, which the Next server never invokes.
+- PyPDF2 is replaced by pypdf across the runtime and the worker. The API was already on it.
+
+### Fixed
+
+## v2.4.0 — 2026-09-28
+
+### Added
+
+- A map of the repository for anyone who has just cloned it. Where each kind of change goes, and the four arrangements that catch people out.
 - CI can be started by hand from the Actions tab, and a manual run builds and publishes images the same way a push does.
 
 ### Changed
