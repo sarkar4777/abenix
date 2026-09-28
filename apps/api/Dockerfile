@@ -18,7 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # The base tag's Debian packages trail the patched builds, and pip ships its
 # own advisories. Both are fixed in place rather than by waiting for a new
 # python:3.12-slim to be cut.
-RUN apt-get update \n && apt-get upgrade -y --no-install-recommends \n && rm -rf /var/lib/apt/lists/* \n && pip install --no-cache-dir --upgrade pip
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir --upgrade pip
 RUN adduser --system --uid 1001 appuser
 WORKDIR /app
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

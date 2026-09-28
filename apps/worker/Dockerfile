@@ -18,7 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # wait-for-postgres / wait-for-redis init containers. python:3.12-slim
 # has neither by default → without these the init loop errors
 # "nc: not found" and the pod stays in Init:0/N forever.
-RUN apt-get update \n && apt-get upgrade -y --no-install-recommends \n && apt-get install -y --no-install-recommends procps netcat-openbsd \n && rm -rf /var/lib/apt/lists/* \n && pip install --no-cache-dir --upgrade pip
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends procps netcat-openbsd && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir --upgrade pip
 RUN adduser --system --uid 1001 appuser
 WORKDIR /app
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
