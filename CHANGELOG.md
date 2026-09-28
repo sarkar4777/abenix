@@ -6,6 +6,23 @@
 
 ### Changed
 
+- Container scanning reports only findings that have a fix. A scan of the base image alone turns up 156 Debian vulnerabilities with no fixed version released, which buried the handful that could be acted on.
+- Each image's scan results are filed under their own category. All four shared one before, so they overwrote each other and three of the four went stale without being looked at.
+
+- The published tree no longer carries the dependabot config. This repository is generated and republished on each release, so a PR raised against it can never land. Dependency updates happen upstream and arrive with a release. Security alerts are a repository setting and are unaffected.
+
+### Fixed
+
+- Multi-stage images no longer carry the base image's old package metadata. COPY merges into the destination rather than replacing it, so the previous pip's dist-info survived beside the upgraded one and got reported.
+- PyPDF2 is gone from the dependency declarations, not just the imports. The worker and agent-runtime images were still installing it and never declared pypdf at all, and one app still called PyPDF2 directly.
+- setuptools is upgraded alongside pip in every image build.
+
+## v2.4.1 — 2026-09-28
+
+### Added
+
+### Changed
+
 - The published tree no longer carries the dependabot config. This repository is generated and republished on each release, so a PR raised against it can never land. Dependency updates happen upstream and arrive with a release. Security alerts are a repository setting and are unaffected.
 
 ### Fixed

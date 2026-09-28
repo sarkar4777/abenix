@@ -11,7 +11,7 @@ WORKDIR /app
 FROM base AS deps
 COPY apps/agent-runtime/pyproject.toml ./pyproject.toml
 COPY apps/agent-runtime/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir --upgrade pip setuptools && \
     pip install --no-cache-dir . && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir uvicorn fastapi boto3
@@ -19,9 +19,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
 FROM base AS runtime
 # The base tag's Debian packages trail the patched builds, so upgrade them
 # rather than wait for a new python:3.12-slim to be cut. pip is upgraded in the
-# deps stage instead of here, because the COPY below replaces the whole of
-# site-packages and would put the old pip straight back.
+# deps stage instead of here, because this stage's site-packages is wiped
+# and replaced by the deps stage's copy below.
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+# COPY merges into the destination rather than replacing it, so the base
+# image's own dist-info directories survive next to the ones copied in and
+# Trivy reports the stale versions. Clear the directory first so what lands
+# here is exactly what the deps stage resolved.
+RUN rm -rf /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
 COPY packages/db/ ./packages/db/

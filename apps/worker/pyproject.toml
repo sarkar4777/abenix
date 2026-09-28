@@ -14,9 +14,16 @@ dependencies = [
     "langchain-text-splitters>=0.2.0",
     "openai>=1.30.0",
     "pinecone>=5.0.0",
-    "PyPDF2>=3.0.0",
+    # pypdf, not PyPDF2. Every `from pypdf import PdfReader` in this tree was
+    # migrated already, but the declaration was left behind, so the image kept
+    # installing the abandoned package and carrying CVE-2023-36464 with it.
+    "pypdf>=4.0.0",
     "python-docx>=1.1.0",
     "boto3>=1.34.0",
+    # Transitive via CacheControl, floored for GHSA-6v7p-g79w-8964. Safe to
+    # move because we take celery[redis], so kombu's msgpack==1.1.2 pin (which
+    # only applies under its msgpack extra) is not in play.
+    "msgpack>=1.2.1",
 ]
 
 [project.optional-dependencies]

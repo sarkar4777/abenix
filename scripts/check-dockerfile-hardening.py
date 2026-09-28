@@ -39,6 +39,7 @@ PINNED_BASE = re.compile(r"^FROM\s+(python:3\.\d+\.\d+|node:\d+\.\d+)[-\w.]*", r
 OS_UPGRADE = re.compile(r"apt-get\s+upgrade|apk\s+upgrade", re.M)
 PIP_UPGRADE = re.compile(r"pip\s+install[^\n]*--upgrade\s+pip", re.M)
 SITE_PACKAGES_COPY = re.compile(r"^COPY\s+--from=\S+\s+\S*site-packages", re.M)
+SITE_PACKAGES_WIPE = re.compile(r"rm\s+-rf[^\n]*site-packages", re.M)
 PYTHON_BASE = re.compile(r"^FROM\s+python:", re.M)
 
 
@@ -93,7 +94,17 @@ def check(path: Path) -> list[str]:
     if PYTHON_BASE.search(text):
         if not PIP_UPGRADE.search(text):
             problems.append(f"{rel}: pip is never upgraded.")
-        elif SITE_PACKAGES_COPY.search(final) and PIP_UPGRADE.search(final):
+        # COPY merges into the destination, so whatever the base image already
+        # had at that path survives beside what is copied in. Trivy then reads
+        # the stale dist-info and reports a version that is no longer in use.
+        if SITE_PACKAGES_COPY.search(final) and not SITE_PACKAGES_WIPE.search(final):
+            problems.append(
+                f"{rel}: the final stage copies site-packages from another "
+                f"stage without clearing it first. COPY merges, so the base "
+                f"image's own dist-info survives and gets reported."
+            )
+
+        if SITE_PACKAGES_COPY.search(final) and PIP_UPGRADE.search(final):
             problems.append(
                 f"{rel}: pip is upgraded in the same stage that copies "
                 f"site-packages from another stage. The COPY undoes it."
