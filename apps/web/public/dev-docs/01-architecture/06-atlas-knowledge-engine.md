@@ -93,7 +93,7 @@ flowchart LR
 Stages:
 
 1. **Extractor dispatch** — [`services/extractors/dispatch.py`](../../apps/api/app/services/extractors/dispatch.py) routes by MIME:
-   - `pdf` → `text_pdf` first; if chars/page < 50 it falls through to `vision_pdf` (PyMuPDF rasterization + Claude vision)
+   - `pdf` → `text_pdf` first, and if chars/page < 50 it falls through to `vision_pdf` (PyMuPDF rasterization + Claude vision)
    - `docx`/`pptx`/`xlsx`/`html`/`epub`/`rtf` → `office` (unstructured.io)
    - `png`/`jpg`/`tiff` → vision
    - `txt`/`md`/`csv`/`json` → plain
@@ -145,7 +145,7 @@ Pair this with `atlas_search_grounded` and you get team-partitioned knowledge th
 `POST /api/knowledge/{kb}/documents/{doc}/replace` marks the old row `is_current=false, superseded_by=<new_id>`. Three consumers update automatically:
 
 - **Hybrid search** filters `documents.is_current = true` before similarity scoring.
-- **Atlas edges** derived from the new doc carry `valid_from = now`; edges from the superseded doc get `valid_to = supersede_time`.
+- **Atlas edges** derived from the new doc carry `valid_from = now`. Edges from the superseded doc get `valid_to = supersede_time`.
 - **Cognify** incremental jobs only fetch `is_current = true AND (cognified_at IS NULL OR updated_at > cognified_at)`.
 
 A `?include_superseded=true` query param surfaces the old chunks for audit / diff. See [`document-versioning.md`](../document-versioning.md) for the full lifecycle.

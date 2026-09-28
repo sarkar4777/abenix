@@ -184,7 +184,7 @@ All five paths log to `activity_log`, so a `user.sso_link_failed` audit row exis
 
 - **SAML** — OIDC covers Okta / Azure AD / Google Workspace / GitHub Enterprise. SAML is on the roadmap for the enterprise tier. File an issue if your IdP only speaks SAML.
 - **Just-in-time provisioning rules** — currently a fresh SSO user always gets their own tenant. Adding "if email is `@acme.com`, join the acme tenant as a `user` role" requires extending `_upsert_user()` in `sso.py` with a tenant-mapping table.
-- **Logout federation (RP-initiated logout)** — the Abenix logout clears local tokens but does NOT call the provider's end-session endpoint. Most users want this; happy to land if anyone files the issue.
+- **Logout federation (RP-initiated logout)** — the Abenix logout clears local tokens but does NOT call the provider's end-session endpoint. Most users want this, and it can land if anyone files the issue.
 
 ## Related
 

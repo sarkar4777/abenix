@@ -99,7 +99,7 @@ The dispatcher in `apps/worker/worker/tasks/trigger_dispatch.py` already handles
 
 This page is about **inbound** webhooks as triggers — they start executions.
 
-Outbound webhooks — Abenix calling YOUR system when an execution finishes — are a separate surface documented in [`09-reference/00-rest-api.md`](../09-reference/00-rest-api.md#webhooks). Same word, opposite direction. The product avoids conflating them in the UI: inbound are in `/triggers`, outbound are in `/settings/webhooks`.
+Outbound webhooks — Abenix calling YOUR system when an execution finishes — are a separate surface documented in [`09-reference/00-rest-api.md`](../09-reference/00-rest-api.md#webhooks). Same word, opposite direction. The product avoids conflating them in the UI, so inbound live in `/triggers`, outbound are in `/settings/webhooks`.
 
 ## Where to look
 
