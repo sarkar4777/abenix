@@ -98,39 +98,74 @@ seed_viewer() {
 
 seed_viewer
 
+# Bring up an in-cluster MCP fixture. Both fixtures are applied the same way,
+# so this is one function rather than two copies that drift apart.
+#
+# The manifests ship a placeholder registry, because publish-public.sh scrubs
+# real ACR names out of the tree. On minikube that can never pull, which
+# aborted the whole gate before a single spec ran. Build into the minikube
+# daemon and point the deployment at that instead.
+bring_up_mcp() { # bring_up_mcp <deploy-name> <manifest> <dockerfile> <needed-by>
+  local name="$1" manifest="$2" dockerfile="$3" needed_by="$4"
+
+  if ! kubectl -n abenix get deploy "${name}" >/dev/null 2>&1; then
+    echo "▶ Applying ${name} manifest..."
+    kubectl apply -f "${manifest}"
+  fi
+
+  if kubectl config current-context 2>/dev/null | grep -q minikube; then
+    echo "▶ minikube — building ${name} locally"
+    eval "$(minikube docker-env)"
+    docker build -q -t "localhost:5000/abenix/${name}:latest" \
+      -f "${dockerfile}" e2e/fixtures/mcp_server >/dev/null
+    kubectl -n abenix set image "deploy/${name}" \
+      "server=localhost:5000/abenix/${name}:latest" >/dev/null
+    kubectl -n abenix patch deploy "${name}" --type=json \
+      -p '[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null
+  fi
+
+  if ! kubectl -n abenix rollout status "deploy/${name}" --timeout=120s; then
+    echo "  ✗ ${name} never became ready — ${needed_by} needs it."
+    kubectl -n abenix describe pod -l "app=${name}" | sed -n '/Events:/,$p' | tail -12
+    exit 1
+  fi
+  echo "  ✓ ${name} ready"
+}
+
+bring_up_mcp uat-mcp \
+  e2e/fixtures/mcp_server/deployment.yaml \
+  e2e/fixtures/mcp_server/Dockerfile \
+  "the Industrial spec"
+
+bring_up_mcp custom-mcp \
+  e2e/fixtures/mcp_server/deployment-custom.yaml \
+  e2e/fixtures/mcp_server/Dockerfile.custom \
+  "the platform-surfaces spec"
+
+# A registered MCP host has to be on the API's allow-list or registration
+# answers 400 long before it tries to connect. Say so here rather than let a
+# spec fail with a status code and no explanation.
+allowed="$(kubectl -n abenix get configmap abenix-config \
+  -o jsonpath='{.data.MCP_ALLOWED_HOSTS}' 2>/dev/null || true)"
+for host in uat-mcp custom-mcp; do
+  case "${allowed}" in
+    *"${host}.abenix.svc.cluster.local"*) ;;
+    *)
+      echo "  ✗ ${host}.abenix.svc.cluster.local is not in MCP_ALLOWED_HOSTS."
+      echo "    Add it to mcpAllowedHosts in infra/helm/abenix/values-local.yaml"
+      echo "    and redeploy. Registration would answer 400 otherwise."
+      exit 1
+      ;;
+  esac
+done
+echo "  ✓ both MCP hosts are on the allow-list"
+
+# Fixtures come up before this exit. --seed-only means prepare the cluster
+# and stop, and the MCP fixtures are part of preparing it.
 if [ "${1:-}" = "--seed-only" ]; then
   echo "  ✓ seed-only mode — exiting before specs run"
   exit 0
 fi
-
-# Verify the in-cluster UAT MCP server is up — the industrial spec
-# depends on it. Auto-apply the manifest if missing.
-if ! kubectl -n abenix get deploy uat-mcp >/dev/null 2>&1; then
-  echo "▶ Applying UAT MCP manifest..."
-  kubectl apply -f e2e/fixtures/mcp_server/deployment.yaml
-fi
-
-# The manifest ships a placeholder registry, because publish-public.sh scrubs
-# real ACR names out of the tree. On minikube that can never pull, which
-# aborted the whole gate before a single spec ran. Build it into the minikube
-# daemon and point the deployment at that instead.
-if kubectl config current-context 2>/dev/null | grep -q minikube; then
-  echo "▶ minikube — building uat-mcp locally"
-  eval "$(minikube docker-env)"
-  docker build -q -t localhost:5000/abenix/uat-mcp:latest \
-    -f e2e/fixtures/mcp_server/Dockerfile e2e/fixtures/mcp_server >/dev/null
-  kubectl -n abenix set image deploy/uat-mcp \
-    server=localhost:5000/abenix/uat-mcp:latest >/dev/null
-  kubectl -n abenix patch deploy uat-mcp --type=json \
-    -p '[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null
-fi
-
-if ! kubectl -n abenix rollout status deploy/uat-mcp --timeout=120s; then
-  echo "  ✗ uat-mcp never became ready — the Industrial spec needs it."
-  kubectl -n abenix describe pod -l app=uat-mcp | sed -n '/Events:/,$p' | tail -12
-  exit 1
-fi
-echo "  ✓ uat-mcp ready"
 
 # Run each spec — abort on first failure (set -e).
 export PLAYWRIGHT_HTML_REPORT=playwright-report
@@ -160,6 +195,7 @@ BASE_URL="${CLAIMSIQ_BASE:-http://localhost:3005}" API_URL="${API}" \
 run_spec "Grafana Panels"  "e2e/uat_grafana_panels.spec.ts"
 run_spec "PharmaVigil"     "e2e/uat_pharmavigil.spec.ts"
 run_spec "Help surfaces"   "e2e/uat_help_surfaces.spec.ts"
+run_spec "Platform surfaces" "e2e/uat_platform_surfaces.spec.ts"
 
 echo
 echo "════════════════════════════════════════════════════════════════"

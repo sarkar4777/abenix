@@ -5,14 +5,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# The base tag's packages trail the patched builds, so upgrade before
+# installing anything on top of them.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt \
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r /app/requirements.txt \
     && find /usr/local/lib/python3.12 -name '__pycache__' -type d -prune -exec rm -rf {} + \
     && find /usr/local/lib/python3.12 -name '*.pyc' -delete
 

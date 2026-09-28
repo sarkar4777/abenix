@@ -23,7 +23,10 @@ scikit-learn>=1.5.0,<1.9
 onnxruntime>=1.18.0
 numpy>=1.26.0
 # K8s model deployment (ml_models router creates k8s Deployments/Services)
-kubernetes>=29.0.0
+# Upper bound because the client tracks the k8s API version and breaks across
+# majors. An open floor already let the resolver jump 29 -> 36 between two CI
+# runs with nothing in the diff to explain it. 36 is what the cluster runs.
+kubernetes>=29.0.0,<37
 # Meeting Representative — LiveKit RTC + API client
 livekit>=0.17.0
 livekit-api>=0.7.0

@@ -16,6 +16,8 @@ ENV WINGMAN_API_INTERNAL_URL=$WINGMAN_API_INTERNAL_URL
 RUN npx next build
 
 FROM node:20-alpine AS runner
+# The base image's Alpine packages trail the patched builds.
+RUN apk upgrade --no-cache
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
