@@ -98,7 +98,7 @@ class FileReaderTool(BaseTool):
             return ToolResult(content=f"Failed to read file: {str(e)}", is_error=True)
 
     def _read_pdf(self, path: Path) -> str:
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
 
         reader = PdfReader(str(path))
         pages = []
