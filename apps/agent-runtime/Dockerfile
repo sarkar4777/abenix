@@ -12,15 +12,17 @@ a=tomllib.load(open('/tmp/runtime.toml','rb'))['project']['dependencies']; \
 b=tomllib.load(open('/tmp/db.toml','rb'))['project']['dependencies']; \
 f=open('/tmp/extra-req.txt','w'); \
 [f.write(d+chr(10)) for d in sorted(set(a+b))]" && \
+    pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /tmp/runtime-req.txt -r /tmp/extra-req.txt
 
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
-# The base tag's Debian packages trail the patched builds, and pip ships its
-# own advisories. Both are fixed in place rather than by waiting for a new
-# python:3.12-slim to be cut.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir --upgrade pip
+# The base tag's Debian packages trail the patched builds, so upgrade them
+# rather than wait for a new python:3.12-slim to be cut. pip is upgraded in the
+# deps stage instead of here, because the COPY below replaces the whole of
+# site-packages and would put the old pip straight back.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 RUN adduser --system --uid 1001 appuser
 WORKDIR /app
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
