@@ -183,9 +183,9 @@ class DocumentParserTool(BaseTool):
     ) -> tuple[str, int, list[str]]:
         warnings: list[str] = []
         try:
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
         except ImportError:
-            warnings.append("PyPDF2 is not installed -- PDF parsing unavailable")
+            warnings.append("pypdf is not installed -- PDF parsing unavailable")
             return "", 0, warnings
 
         reader = PdfReader(str(path))

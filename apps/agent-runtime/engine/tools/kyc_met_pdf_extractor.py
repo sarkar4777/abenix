@@ -724,7 +724,7 @@ class KycMetPdfExtractorTool(BaseTool):
         # limited, credits exhausted, or scanned-but-no-image-rendered).
         if not raw_pages:
             try:
-                from PyPDF2 import PdfReader
+                from pypdf import PdfReader
 
                 reader = PdfReader(str(path))
                 for i, page in enumerate(reader.pages, start=1):
@@ -733,11 +733,11 @@ class KycMetPdfExtractorTool(BaseTool):
                         raw_pages.append(f"--- Page {i} ---\n{text}")
                 if raw_pages:
                     warnings.append(
-                        "Vision unavailable or empty — used PyPDF2 text fallback."
+                        "Vision unavailable or empty — used pypdf text fallback."
                     )
                     provider = f"{provider}+pypdf2_fallback"
             except Exception as e:
-                warnings.append(f"PyPDF2 fallback failed: {e}")
+                warnings.append(f"pypdf fallback failed: {e}")
 
         raw_text = "\n\n".join(raw_pages)
         parsed = _parse_met_fields(raw_text)

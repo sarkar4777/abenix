@@ -144,7 +144,7 @@ Agent-facing tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_se
 | `POST` | `/api/knowledge/cognify-conflicts/{id}/resolve` | Body `{resolved_value}` — pick the value to keep |
 | `POST` | `/api/knowledge/{kb}/documents/{doc}/replace` | Upload a new version. Old row → `is_current=false, superseded_by=<new_id>` |
 | `POST` | `/api/knowledge/{kb}/reembed` | Body `{embedding_model, dry_run?}`. Enqueues kb_reembed worker, returns `job_id` + cost estimate + ETA |
-| `GET` / `POST` / `DELETE` | `/api/knowledge/{kb}/documents/{doc}/grants` | Document-level ACL: `(subject_type, subject_id, permission)`. Pre-filters candidates before similarity search; cached 60 s in Redis |
+| `GET` / `POST` / `DELETE` | `/api/knowledge/{kb}/documents/{doc}/grants` | Document-level ACL: `(subject_type, subject_id, permission)`. Pre-filters candidates before similarity search, cached 60 s in Redis |
 
 ### GDPR
 

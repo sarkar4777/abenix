@@ -135,7 +135,7 @@ Thresholds are tenant-configurable via the platform admin (not yet a per-agent s
 | `baseline_value` | what the metric looked like in the previous window |
 | `current_value` | what it looks like now |
 | `deviation_pct` | signed percentage change |
-| `acknowledged` | reviewer marked it as understood; alerts stop firing for the same condition |
+| `acknowledged` | reviewer marked it as understood, and alerts stop firing for the same condition |
 
 ### The routes
 

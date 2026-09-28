@@ -106,7 +106,7 @@ Connect agents to the systems enterprise ops actually run on, without burning a 
 | Primitive | What it lets an agent do |
 |---|---|
 | **Connector framework + 8 presets** | Call SAP PM / ServiceNow / Maximo / Workday / Sensitech / Carrier Lynx / DTN Weather / BNEF with one tool node + secret-ref auth + `/test` button. |
-| **Multi-signoff approval gates** | Block a $40k claim until N humans sign off; TTL enforced; real inbox at `/approvals`. |
+| **Multi-signoff approval gates** | Block a $40k claim until N humans sign off, with a TTL enforced and a real inbox at `/approvals`. |
 | **Time-series + MQTT** | TimescaleDB hypertable, mosquitto broker, plus `tsdb_query` · `mqtt_publish` · `subscribed_feed` · `windowed_state` palette tools. |
 | **Idempotency + DLQ + audit** | Replay-safe execute, dead-letter inbox, integrity-hashed audit log per tenant. |
 | **Bidirectional writes** | OPC-UA write, MQTT publish, CMMS create-work-order — agents can push setpoints, not just read sensors. |
@@ -465,7 +465,7 @@ docker run -d --name abenix-edge \
 | 3. Mark agent edge-eligible | Builder → Advanced | tool whitelist + `edge_constraints` (max payload, max runtime, MQTT topic ACLs) |
 | 4. Deploy | `/edge` → gateway card → Deploy agent | platform compiles signed `.agent` bundle, publishes to `edge.{gateway_id}.deploy` |
 | 5. Hot-load | runtime | RSA-PSS verify → extract to `/var/edge/agents/{slug}/` → ready to execute |
-| 6. Call | sync `POST {gateway}/agents/{slug}/execute` or async via MQTT topic `agents.{slug}.input` | tool calls run locally; only `mqtt_publish` ACL'd topics escape the edge |
+| 6. Call | sync `POST {gateway}/agents/{slug}/execute` or async via MQTT topic `agents.{slug}.input` | tool calls run locally and only `mqtt_publish` ACL'd topics escape the edge |
 
 The full bundle format (manifest schema, signing math, failure modes) is documented in-product at `/help → Edge runtimes`.
 
@@ -534,7 +534,7 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 
 | Concern | What ships |
 |---|---|
-| **Tenant isolation** | `tenant_id` on every row; cross-tenant reads return `404`, not `403`. Vector backends enforce the same filter at the index level. |
+| **Tenant isolation** | `tenant_id` on every row, and cross-tenant reads return `404`, not `403`. Vector backends enforce the same filter at the index level. |
 | **RBAC + multiplexing** | 3 roles (admin / creator / user) + per-feature flags via `/api/me/permissions`. `ResourceShare` for cross-team grants. **actAs** delegation for SaaS apps. |
 | **Auth** | Email + bcrypt, JWT with refresh, per-key scopes (`execute`, `read`, `write`, `can_delegate`), API keys SHA-256-hashed at rest. |
 | **Moderation + DLP** | Pre-LLM gate on input + post-LLM gate on output. Actions: `block`, `redact`, `flag`, `allow`. Tenant-scoped, non-bypassable. |
@@ -546,7 +546,7 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 | **Archives** | Recording tables (invocations / executions / messages / activity_logs) auto-archive nightly to gzip'd JSONL on a hostPath PV. Admin-editable retention per table (defaults: 30d invocations, 60d executions, 90d audit). Manifest + sha256 in `archive_runs`. Manual trigger + download at `/admin/archives`. |
 | **Idempotency + DLQ** | `Idempotency-Key` header → 24 h replay cache. Failed executions land in `/admin/dlq` with one-click replay. |
 | **Edge security** | RSA-PSS / SHA-256 signed `.agent` bundles. Tampering refuses to load. Tool whitelist enforced at compile and load. MQTT publish constrained by per-agent ACL. |
-| **HA + self-host** | Stateless API + web; per-pool runtimes with KEDA autoscaling; NATS for at-least-once + replay; stale-execution sweeper. One Helm chart on AKS / minikube / EKS / GKE. MIT license. |
+| **HA + self-host** | Stateless API and web, per-pool runtimes with KEDA autoscaling, NATS for at-least-once delivery and replay, plus a stale-execution sweeper. One Helm chart on AKS / minikube / EKS / GKE. MIT license. |
 
 <p align="center">
   <img src="docs/screenshots/08-alerts-page.png" alt="Alerts page" width="100%" />
