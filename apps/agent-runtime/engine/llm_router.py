@@ -1351,6 +1351,21 @@ class LLMRouter:
             return "google"
         return "anthropic"
 
+    def is_known_model(self, model: str) -> bool:
+        """Whether this deployment recognises the model id at all.
+
+        Recognised means the DB pricing table or MODEL_TO_PROVIDER names it, or
+        it carries a provider's prefix. Anything else is a typo or a stale
+        config rather than a model to go looking for.
+        """
+        m = (model or "").strip()
+        if not m:
+            return False
+        _load_db_pricing()
+        if m in _DB_PROVIDER_CACHE or m in MODEL_TO_PROVIDER:
+            return True
+        return m.startswith(("claude", "gpt", "gemini", "azure-"))
+
     def candidate_chain(self, model: str) -> list[tuple[str, str]]:
         """Ordered (provider, model) attempts for a request.
 
@@ -1359,6 +1374,16 @@ class LLMRouter:
         onto whatever credentials this deployment actually has, so an install
         with only one provider configured still runs.
         """
+        # Degradation is for a model we know about whose provider has no
+        # credential. An id nobody recognises is a different thing, and letting
+        # it degrade meant an agent configured with a typo'd model ran happily
+        # on whichever provider answered, with nothing recording the swap.
+        if not self.is_known_model(model):
+            raise ValueError(
+                f"Unknown model '{model}'. Configure it in Admin -> LLM Pricing "
+                f"or use one of the ids that deployment lists."
+            )
+
         chain: list[tuple[str, str]] = []
         cfg = claude_subscription.get_config()
         native = self._native_provider_name(model)

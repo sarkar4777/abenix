@@ -29,6 +29,8 @@ ENV NODE_OPTIONS=--max-old-space-size=6144
 RUN npm run build
 
 FROM node:20-alpine AS runner
+# The base image's Alpine packages trail the patched builds.
+RUN apk upgrade --no-cache
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

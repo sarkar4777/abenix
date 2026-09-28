@@ -1,7 +1,10 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# The base tag's packages trail the patched builds, so upgrade before
+# installing anything on top of them.
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     gcc libpq-dev \
     # weasyprint native deps for PDF rendering
     libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-liberation \
@@ -10,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Build context is mideasttourism/ (the parent of api/) — see scripts/deploy-azure.sh.
 # This lets us COPY test-data/ alongside the api/ source tree.
 COPY api/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY api/app/ ./app/
 COPY api/sdk/ ./sdk/

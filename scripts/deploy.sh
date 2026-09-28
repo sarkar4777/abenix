@@ -278,6 +278,15 @@ build_core_service() {
   return 0
 }
 
+# True when this app's images should be built. deploy_local calls select_apps
+# first, so the selection is known by the time we get here. deploy_cloud and
+# deploy_build never prompt, and for them an unset APP_SELECTION_DONE means
+# build everything rather than nothing.
+_should_build_app() { # _should_build_app <registry-key>
+  [ -n "${APP_SELECTION_DONE:-}" ] || return 0
+  app_selected "$1"
+}
+
 build_images() {
   local registry="${1:-localhost:5000/abenix}"
   local push="${2:-false}"
@@ -298,7 +307,7 @@ build_images() {
   done
 
   # Build ContractIQ standalone images (api + web)
-  if [ -d "${ROOT_DIR}/contractiq" ]; then
+  if _should_build_app contractiq && [ -d "${ROOT_DIR}/contractiq" ]; then
     step "Building ContractIQ standalone images"
     for ciq in "api" "web"; do
       local ciq_image="${registry}/contractiq-${ciq}:${IMAGE_TAG}"
@@ -317,7 +326,7 @@ build_images() {
   fi
 
   # Build Industrial-IoT standalone images (api + web)
-  if [ -d "${ROOT_DIR}/industrial-iot" ]; then
+  if _should_build_app industrial-iot && [ -d "${ROOT_DIR}/industrial-iot" ]; then
     step "Building Industrial-IoT standalone images"
     for part in "api" "web"; do
       local img="${registry}/industrial-iot-${part}:${IMAGE_TAG}"
@@ -332,7 +341,7 @@ build_images() {
   fi
 
   # Build ResolveAI standalone images (api + web)
-  if [ -d "${ROOT_DIR}/resolveai" ]; then
+  if _should_build_app resolveai && [ -d "${ROOT_DIR}/resolveai" ]; then
     step "Building ResolveAI standalone images"
     for part in "api" "web"; do
       local img="${registry}/resolveai-${part}:${IMAGE_TAG}"
@@ -347,7 +356,7 @@ build_images() {
   fi
 
   # Build PharmaVigil standalone images (api + web)
-  if [ -d "${ROOT_DIR}/pharmavigil" ]; then
+  if _should_build_app pharmavigil && [ -d "${ROOT_DIR}/pharmavigil" ]; then
     step "Building PharmaVigil standalone images"
     for part in "api" "web"; do
       local pv_img="${registry}/pharmavigil-${part}:${IMAGE_TAG}"
@@ -366,7 +375,7 @@ build_images() {
   # deploy-azure.sh builds them — the local path just never did, which is
   # why :3002 and :3006 were dead on minikube while working on AKS.
   for app in "mideasttourism" "wingman"; do
-    if [ -d "${ROOT_DIR}/${app}" ]; then
+    if _should_build_app "${app}" && [ -d "${ROOT_DIR}/${app}" ]; then
       step "Building ${app} standalone images"
       for part in "api" "web"; do
         local simg="${registry}/${app}-${part}:${IMAGE_TAG}"
@@ -400,7 +409,7 @@ build_images() {
   # Build ClaimsIQ single-container image (Spring Boot + Vaadin Flow).
   # One Dockerfile under app/ but the build context must be the claimsiq
   # root so the multi-stage gradle build can see both sdk/ and app/.
-  if [ -d "${ROOT_DIR}/claimsiq" ]; then
+  if _should_build_app claimsiq && [ -d "${ROOT_DIR}/claimsiq" ]; then
     step "Building ClaimsIQ container"
     local img="${registry}/claimsiq:${IMAGE_TAG}"
     local df="${ROOT_DIR}/claimsiq/app/Dockerfile"
@@ -671,6 +680,65 @@ wait_for_pods() {
     log "Waiting... (${not_ready} pods not ready, $((timeout - elapsed))s remaining)"
     sleep 10
   done
+}
+
+# ── Roll the pods whose image content changed ───────────────────────────────
+# IMAGE_TAG is the git SHA, so an uncommitted change rebuilds the image under
+# the tag it already had. Helm then writes an identical pod spec, k8s sees
+# nothing to do, and the cluster keeps serving the previous build. You edit
+# code, deploy, watch it succeed, and test against the old code.
+#
+# The image id is content-addressed, so stamping it on the pod template rolls
+# exactly when the content changed and does nothing when it did not.
+roll_changed_images() {
+  local ctx
+  ctx="$(kubectl config current-context 2>/dev/null || true)"
+  case "${ctx}" in *minikube*) ;; *) return 0 ;; esac
+
+  # Read ids from the daemon that holds these images.
+  eval "$(minikube docker-env 2>/dev/null)" || return 0
+
+  local d image id short
+  for d in $(kubectl get deploy -n "${NAMESPACE}" -o name 2>/dev/null); do
+    image=$(kubectl get "${d}" -n "${NAMESPACE}" \
+            -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
+    case "${image}" in localhost:5000/abenix/*) ;; *) continue ;; esac
+
+    id=$(docker image inspect --format '{{.Id}}' "${image}" 2>/dev/null || true)
+    [ -n "${id}" ] || continue
+    short="${id#sha256:}"
+    short="${short:0:16}"
+
+    kubectl patch "${d}" -n "${NAMESPACE}" --type=merge \
+      -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"abenix.dev/image-id\":\"${short}\"}}}}}" \
+      >/dev/null 2>&1 || true
+  done
+  return 0
+}
+
+# ── Roll the pods that read abenix-config ───────────────────────────────────
+# A deployment whose env comes from envFrom.configMapRef does not restart when
+# that configmap changes, so helm reports "deployed" while every pod carries on
+# with the old values. Changing MCP_ALLOWED_HOSTS and watching the API keep
+# refusing the host is how this was found.
+#
+# Stamping the config's hash onto the pod template is idempotent — same hash,
+# no rollout — so this is safe to run on every deploy.
+roll_config_consumers() {
+  local hash
+  hash=$(kubectl get configmap abenix-config -n "${NAMESPACE}" -o jsonpath='{.data}' 2>/dev/null \
+         | sha256sum | cut -c1-16)
+  [ -n "${hash}" ] || return 0
+
+  local d
+  for d in $(kubectl get deploy -n "${NAMESPACE}" -o name 2>/dev/null); do
+    kubectl get "${d}" -n "${NAMESPACE}" -o yaml 2>/dev/null \
+      | grep -q "name: abenix-config" || continue
+    kubectl patch "${d}" -n "${NAMESPACE}" --type=merge \
+      -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"abenix.dev/config-hash\":\"${hash}\"}}}}}" \
+      >/dev/null 2>&1 || true
+  done
+  return 0
 }
 
 # ── Generate persistent JWT keys ────────────────────────────────────────────
@@ -1215,6 +1283,8 @@ deploy_local() {
     2>&1 | tail -5
   ok "Helm release deployed"
 
+  roll_config_consumers
+  roll_changed_images
   wait_for_pods 300 || true
   ensure_jwt_keys || true
   run_migrations || true
@@ -1358,6 +1428,8 @@ deploy_local_runtime() {
     2>&1 | tail -5
   ok "Helm release deployed (with runtime pod)"
 
+  roll_config_consumers
+  roll_changed_images
   wait_for_pods 300 || true
   ensure_jwt_keys || true
   run_migrations || true

@@ -1,4 +1,7 @@
-FROM node:20.18-alpine AS base
+# Unpinned on purpose. A pinned patch tag stops picking up Alpine security
+# updates the moment it is cut, and this set is what the cluster and ACR build,
+# so it is the one that has to stay current. apps/web/Dockerfile is the CI set.
+FROM node:20-alpine AS base
 
 FROM base AS deps
 WORKDIR /app
@@ -17,6 +20,15 @@ RUN npm run build --workspace=@abenix/web
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# The base image's Alpine packages trail the patched builds — libssl3 alone
+# accounted for fifty Trivy findings. npm and yarn are build tools and the
+# runtime only ever runs `node apps/web/server.js`, so their vendored
+# node_modules are pure surface. Removing them takes the tar, minimatch,
+# brace-expansion and sigstore findings with them.
+RUN apk upgrade --no-cache \
+ && rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/bin/npm /usr/local/bin/npx \
+           /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 COPY --from=builder /app/apps/web/.next/standalone ./

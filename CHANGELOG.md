@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.4.1 — 2026-09-28
+
+### Added
+
+- A map of the repository for anyone who has just cloned it. Where each kind of change goes, and the four arrangements that catch people out.
+- `.trivyignore`, for findings that have no fix and a reason they are safe here. Each entry carries the reasoning and the condition that would invalidate it.
+- CI can be started by hand from the Actions tab, and a manual run builds and publishes images the same way a push does.
+- A check that every shipped Dockerfile patches its base image. There are two sets, CI builds one and the cluster builds the other, and nothing compared them.
+- `MCP_ALLOWED_HOSTS` is documented, including why an empty value is the safer production setting and what a rejected registration looks like.
+- A second MCP fixture with three tools, for exercising tool discovery rather than just the connection. `scripts/uat.sh` brings both fixtures up and says so when a host is missing from the allow-list.
+- A UAT spec covering the operator surfaces: load playground, SDK playground, scaling admin, MCP registration, alerts and edge deployment.
+
+### Changed
+
+- The api, worker and agent-runtime images upgrade their Debian packages and pip during the build rather than waiting for a new base tag to be cut.
+- The web runtime image upgrades its OS packages and drops npm and yarn, which the Next server never invokes.
+- PyPDF2 is replaced by pypdf across the runtime and the worker. The API was already on it.
+
+### Fixed
+
+- The images the cluster and Azure actually build now upgrade their OS packages and pip too. The earlier patches went to the CI set only, so the running images kept every finding while CI reported green.
+- Every standalone app image patches its base as well, which is fourteen more images that were building on unpatched bases.
+- A config-only change reaches the pods. A deployment reading its environment from a ConfigMap does not restart when that ConfigMap changes, so Helm reported success while every pod carried on with the old values.
+- `APPS=none` no longer builds the fourteen use-case app images it then declines to deploy. The selection gated deployment but not the build.
+- `kubernetes` has an upper bound. An open floor let the resolver jump from 29 to 36 between two CI runs with nothing in the diff to explain it.
+
 ## v2.4.0 — 2026-09-28
 
 ### Added

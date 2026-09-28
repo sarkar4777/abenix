@@ -331,3 +331,8 @@ nats:
     enabled: true
     fileStorage:
       size: 1Gi
+
+# MCP servers a local cluster may register. The chart default allows only the
+# UAT fixture, so any other in-cluster MCP service has to be named here or the
+# connect call answers 400.
+mcpAllowedHosts: "uat-mcp.abenix.svc.cluster.local,custom-mcp.abenix.svc.cluster.local"

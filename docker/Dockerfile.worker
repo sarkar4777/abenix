@@ -1,4 +1,7 @@
-FROM python:3.12.8-slim AS base
+# Unpinned on purpose. A pinned patch tag stops picking up Debian security
+# updates the moment it is cut, and this set is what the cluster and ACR build,
+# so it is the one that has to stay current. apps/*/Dockerfile is the CI set.
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -12,7 +15,8 @@ COPY apps/agent-runtime/requirements.txt ./requirements-runtime.txt
 # Install directly from requirements.txt — more reliable than PEP 621 with no
 # [build-system] section. agent-runtime requirements are best-effort (the
 # subset the worker needs for embedded agent execution).
-RUN pip install --no-cache-dir -r requirements.txt && \
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r requirements-runtime.txt 2>/dev/null || true
 
 FROM base AS runtime
@@ -20,7 +24,10 @@ FROM base AS runtime
 # wait-for-postgres / wait-for-redis initContainers call `nc`.
 # python:3.12-slim ships neither — without them the pod is stuck
 # forever (probe fails / init loop exits with "nc: not found").
-RUN apt-get update && apt-get install -y --no-install-recommends procps netcat-openbsd && \
+# The `upgrade` rides along here rather than in its own layer. pip is upgraded
+# in the deps stage, because the COPY below replaces site-packages wholesale.
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends procps netcat-openbsd && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin

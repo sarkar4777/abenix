@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+WORKDIR /app
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir 'fastapi==0.115.6' 'uvicorn[standard]==0.34.0' \
+ && rm -rf /root/.cache
+COPY custom_server.py ./
+EXPOSE 8080
+CMD ["uvicorn", "custom_server:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -85,8 +85,14 @@ parse_app_selection() {
         fi
       done
     fi
-    [ "${matched}" -eq 0 ] && echo "  unknown app '${token}' — skipped" >&2
+    if [ "${matched}" -eq 0 ]; then
+      echo "  unknown app '${token}' — skipped" >&2
+    fi
   done
+  # Explicit, because the loop above ends on whatever the last test evaluated
+  # to. Every name matching left that as false, so the function handed back 1
+  # and `set -e` in the caller killed the deploy before it printed anything.
+  return 0
 }
 
 _print_menu() {
@@ -127,8 +133,21 @@ select_apps() {
   SELECTED_APPS=()
   local k
   while IFS= read -r k; do
-    [ -n "${k}" ] && SELECTED_APPS+=("${k}")
+    # An `if` rather than `[ -n ... ] && ...`. With no apps selected the herestring
+    # still yields one empty line, the test fails, and `&&` hands back 1 as the
+    # loop's status. That made select_apps return 1, and `set -e` in the caller
+    # killed the whole deploy without printing anything.
+    if [ -n "${k}" ]; then
+      SELECTED_APPS+=("${k}")
+    fi
   done <<< "${chosen}"
+
+  # Lets a caller tell "chose nothing" apart from "never asked". An empty
+  # SELECTED_APPS means both, and deploy.sh needs the difference: APPS=none
+  # should skip building app images, but deploy_cloud never prompts and must
+  # still build all of them.
+  APP_SELECTION_DONE=1
+  return 0
 }
 
 app_selected() { # app_selected <key>
