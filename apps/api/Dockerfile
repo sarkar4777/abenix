@@ -15,6 +15,10 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/apps/agent-runtime:/app/packages/db:/app/packages/sdk/python
+# The base tag's Debian packages trail the patched builds, and pip ships its
+# own advisories. Both are fixed in place rather than by waiting for a new
+# python:3.12-slim to be cut.
+RUN apt-get update \n && apt-get upgrade -y --no-install-recommends \n && rm -rf /var/lib/apt/lists/* \n && pip install --no-cache-dir --upgrade pip
 RUN adduser --system --uid 1001 appuser
 WORKDIR /app
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

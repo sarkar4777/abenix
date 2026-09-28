@@ -91,7 +91,7 @@ class DocumentExtractorTool(BaseTool):
             return f"Error: File not found: {file_path}"
         try:
             if path.suffix.lower() == ".pdf":
-                from PyPDF2 import PdfReader
+                from pypdf import PdfReader
 
                 reader = PdfReader(str(path))
                 pages = []

@@ -61,7 +61,7 @@ def _extract_text(file_path: str, file_type: str) -> str:
     ft = file_type.lower()
 
     if ft in ("pdf", "application/pdf"):
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
 
         reader = PdfReader(str(path))
         pages = []
