@@ -40,7 +40,7 @@ Three paths fan out from a single `replace` call. All happen automatically — n
 
 **Atlas graph queries.** New edges derived from the replacement document carry `valid_from = now, valid_to = NULL` (the bi-temporal columns added in v2.0). Edges from the superseded document get `valid_to = supersede_time` so they become historical facts. The default Cypher templates use `WHERE r.valid_to IS NULL`, so routine traversal returns only the new state. Forensic agents use `atlas_as_of(timestamp)` to query the historical graph explicitly.
 
-**Cognify.** Incremental jobs only fetch documents where `is_current = true AND (cognified_at IS NULL OR updated_at > cognified_at)`. The replaced document immediately appears in the next job's frontier; the superseded document is excluded. Entity resolution still MERGEs against existing nodes so the new doc enriches the graph without duplicating identities.
+**Cognify.** Incremental jobs only fetch documents where `is_current = true AND (cognified_at IS NULL OR updated_at > cognified_at)`. The replaced document immediately appears in the next job's frontier, and the superseded document is excluded. Entity resolution still MERGEs against existing nodes so the new doc enriches the graph without duplicating identities.
 
 **The agent's view, end-to-end:**
 

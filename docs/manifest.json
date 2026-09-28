@@ -291,6 +291,10 @@
         {
           "slug": "08-howto/06-encryption-setup",
           "title": "Set up at-rest encryption (KEK)"
+        },
+        {
+          "slug": "08-howto/07-finding-your-way-around",
+          "title": "Finding your way around"
         }
       ]
     },

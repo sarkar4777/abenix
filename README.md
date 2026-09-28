@@ -77,7 +77,7 @@ Every agent has its own pod pool, KEDA queue-depth scaler, NATS subject, budget 
 
 Pipelines don't have their own runtime — they compose Layer 1 (agent nodes route to their own pool) and Layer 2 (tool nodes go through the gate). Full architecture in [`docs/02-runtime/08-queue-scaling.md`](docs/02-runtime/08-queue-scaling.md).
 
-n8n / Zapier / LangGraph are excellent when the problem is *integration-shaped* — "Salesforce row changed, drop a Slack message." Abenix earns its place when the problem is *agent-shaped*: long-running reasoning, shared knowledge, audit-grade traceability, and isolation per tenant under load.
+n8n / Zapier / LangGraph are excellent when the problem is *integration-shaped* — "Salesforce row changed, drop a Slack message." Abenix earns its place when the problem is *agent-shaped*, meaning long-running reasoning, shared knowledge, audit-grade traceability, and isolation per tenant under load.
 
 ### 3. Real multi-tenancy + actAs delegation
 
@@ -93,7 +93,7 @@ The killer feature is **actAs**: a SaaS app holding a single platform key serves
 
 Failures are first-class citizens, not exception traces in a log file:
 
-- **Stable `failure_code` taxonomy** (`LLM_RATE_LIMIT`, `SANDBOX_TIMEOUT`, `MODERATION_BLOCKED`, `BUDGET_EXCEEDED`…) on every execution. The `/alerts` page groups by code; Slack + email fan-out via env var.
+- **Stable `failure_code` taxonomy** (`LLM_RATE_LIMIT`, `SANDBOX_TIMEOUT`, `MODERATION_BLOCKED`, `BUDGET_EXCEEDED`…) on every execution. The `/alerts` page groups by code, with Slack and email fan-out set by env var.
 - **Pipeline Surgeon** — every node crash captures a structured failure-diff. The Surgeon proposes a JSON-Patch (RFC 6902) you Apply or Reject from `/agents/{id}/healing`. Never auto-applied. One-click rollback to `dsl_before`.
 - **`Idempotency-Key` header** on `/api/agents/{id}/execute` — replay returns the cached payload for 24 h.
 - **Dead-letter queue** at `/admin/dlq` — failed executions land here with one-click replay or discard.
@@ -125,7 +125,7 @@ Same `.agent` bundle, same MQTT delivery topic, same HTTP contract. Tool budget 
 
 ### 7. Multimodal end-to-end
 
-Drop a PDF, image, audio, video, DOCX, DWG/DXF, GeoJSON, or text file anywhere Abenix accepts uploads. The platform routes the modality to the right provider (Claude / Gemini / GPT-4o for vision, Gemini for audio + video). Field technicians dictate work-order closeouts; vision models read damage photos; agents reason over chart-shaped diagrams.
+Drop a PDF, image, audio, video, DOCX, DWG/DXF, GeoJSON, or text file anywhere Abenix accepts uploads. The platform routes the modality to the right provider (Claude / Gemini / GPT-4o for vision, Gemini for audio + video). Field technicians dictate work-order closeouts, vision models read damage photos, and agents reason over chart-shaped diagrams.
 
 ### 8. One Helm chart, observability inside
 
@@ -304,7 +304,7 @@ Six tabs covering the highest-frequency industrial use cases:
 - **Design Studio** — engineering & EPC copilot with 9-node DAG, deterministic CapEx/LCOE recompute, 3 ranked design scenarios.
 - **Field Guide** — wind-farm maintenance copilot with photo-upload damage assessment, OEM-cited repair procedure, OR-tools 7-day technician scheduler.
 - **Alarm Desk** — ops control-room alarm triage with SCADA-severity override, cascade banner, 4-stage safe-reset advisor behind a 2-signoff approval gate.
-- **Architecture** — in-product UAT guide; every scenario card links its seeded pipeline + KB collection.
+- **Architecture** — in-product UAT guide, where every scenario card links its seeded pipeline and KB collection.
 
 *Why it's interesting.* Two adjacent industrial domains, one platform. Every tab has a **Live mode** toggle that flips it from synthetic data to live MQTT + connector + TSDB feeds. The Pump tab is the end-to-end edge demo — bundle digest, agent slug, gateway, latency comparison vs cloud pipeline.
 
@@ -317,7 +317,7 @@ Six tabs covering the highest-frequency industrial use cases:
 
 Four pipelines on the same case data: Inbound Resolution (6-agent), SLA Sweep (cron), Post-QA (on case close), Trend Mining (weekly). Refund tiers + escalation paths + tone guidelines live in a seeded KB.
 
-*Why it's interesting.* Customer-service teams drown in repetitive triage; their highest-leverage moves (deflection, tone calibration, trend detection) get neglected. ResolveAI runs all four loops continuously while a human stays in approve / takeover mode.
+*Why it's interesting.* Customer-service teams drown in repetitive triage, and their highest-leverage moves (deflection, tone calibration, trend detection) get neglected. ResolveAI runs all four loops continuously while a human stays in approve / takeover mode.
 
 <p align="center">
   <img src="docs/screenshots/usecases/resolveai-case.png" alt="ResolveAI case detail" width="100%" />
@@ -423,7 +423,7 @@ sequenceDiagram
     end
 ```
 
-**The cohesive story.** Cloud authoring, signed delivery, edge execution. The `.agent` bundle is the *only* mutable artefact crossing the trust boundary — it's RSA-PSS signed at compile time, verified at every load, and constrained by a tool whitelist that's enforced twice (once by the compiler, once by the runtime). MQTT is the default transport because plants already have a broker; HTTP is the fallback when MQTT publish fails. Tool budget on edge is deliberately small — `mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor` — so an agent that needs `knowledge_search` or `atlas_*` can't accidentally be edge-deployed and stall on a missing dependency. Every gateway re-registers on a 60-second loop, so a network blip just delays the next OTA update — nothing is permanently broken by an offline window.
+**The cohesive story.** Cloud authoring, signed delivery, edge execution. The `.agent` bundle is the *only* mutable artefact crossing the trust boundary — it's RSA-PSS signed at compile time, verified at every load, and constrained by a tool whitelist that's enforced twice (once by the compiler, once by the runtime). MQTT is the default transport because plants already have a broker, and HTTP is the fallback when MQTT publish fails. Tool budget on edge is deliberately small — `mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor` — so an agent that needs `knowledge_search` or `atlas_*` can't accidentally be edge-deployed and stall on a missing dependency. Every gateway re-registers on a 60-second loop, so a network blip just delays the next OTA update — nothing is permanently broken by an offline window.
 
 ### Pick a variant
 

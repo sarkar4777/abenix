@@ -462,7 +462,7 @@ pipeline_config:
 
 When this pipeline runs, the pipeline pod (in the `default` runtime pool) iterates its nodes. `timestamp` is a sub-ms inline tool call. `dsp` goes through the gate, lands on `tools:queue`, an agent-runtime pod picks it up and runs the user's uploaded code. `diagnose` enqueues to whatever pool the `iot-diagnoser` agent is configured for — possibly `heavy-reasoning`. `report` is a structured-output node, runs in-process. **No new infrastructure** — every primitive already existed.
 
-**Error propagation.** If any tool node fails (gate returns 429, tool raises, agent times out), the pipeline executor checks for an `on_error` edge defined on that node. If present, the failure routes there with the error captured in the node's output. If absent, the pipeline halts and the execution row is marked `failed` with `failed_node_id` set. Downstream nodes never run. The retry policy comes from the *outer* execution's runtime_pool (NATS redelivers after `ack_wait` if the pipeline pod itself crashed; otherwise the pipeline is considered complete-with-failure and is not retried).
+**Error propagation.** If any tool node fails (gate returns 429, tool raises, agent times out), the pipeline executor checks for an `on_error` edge defined on that node. If present, the failure routes there with the error captured in the node's output. If absent, the pipeline halts and the execution row is marked `failed` with `failed_node_id` set. Downstream nodes never run. The retry policy comes from the *outer* execution's runtime_pool (NATS redelivers after `ack_wait` if the pipeline pod itself crashed. Otherwise the pipeline is considered complete-with-failure and is not retried).
 
 ### Decision tree for operators
 
