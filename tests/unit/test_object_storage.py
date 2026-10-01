@@ -18,6 +18,10 @@ from app.core.object_storage import (
 )
 
 
+# every test here awaits the storage or the restore
+pytestmark = pytest.mark.asyncio
+
+
 async def _collect(stream) -> list[bytes]:
     return [c async for c in stream]
 
