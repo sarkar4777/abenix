@@ -30,6 +30,8 @@ fi
 _build_secrets_flags() {
   local flags=""
   [ -n "${ANTHROPIC_API_KEY:-}" ]  && flags="${flags} --set secrets.anthropicApiKey=${ANTHROPIC_API_KEY}"
+  [ -n "${EDGE_SIGNING_KEY_FILE:-}" ]    && flags="${flags} --set-file secrets.edgeSigningKeyPem=${EDGE_SIGNING_KEY_FILE}"
+  [ -n "${EDGE_SIGNING_PUBKEY_FILE:-}" ] && flags="${flags} --set-file secrets.edgeSigningPubkeyPem=${EDGE_SIGNING_PUBKEY_FILE}"
   [ -n "${ABENIX_DATA_KEY_KEK_BASE64:-}" ] && flags="${flags} --set secrets.dataKeyKekBase64=${ABENIX_DATA_KEY_KEK_BASE64}"
   [ -n "${CLAUDE_SUBSCRIPTION_TOKEN:-}" ] && flags="${flags} --set secrets.claudeSubscriptionToken=${CLAUDE_SUBSCRIPTION_TOKEN}"
   [ -n "${OPENAI_API_KEY:-}" ]     && flags="${flags} --set secrets.openaiApiKey=${OPENAI_API_KEY}"
@@ -1300,6 +1302,8 @@ install_observability_stack() {
   # visible immediately, which is what operators expect right after
   # `deploy.sh local`.
   kubectl rollout restart deployment/abenix-grafana -n "${NAMESPACE}" >/dev/null 2>&1 || true
+  # Prometheus only reads its config at start, so a changed alerting target needs a roll too.
+  kubectl rollout restart deployment/abenix-prometheus -n "${NAMESPACE}" >/dev/null 2>&1 || true
 
   kubectl wait --for=condition=Available --timeout=120s \
     deployment/abenix-prometheus -n "${NAMESPACE}" 2>/dev/null \
@@ -1437,6 +1441,8 @@ deploy_local() {
         --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
         --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
         --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+        --set allow_unsigned="${EDGE_ALLOW_UNSIGNED:-true}" \
+        ${EDGE_SIGNING_PUBKEY_FILE:+--set-file signing_pubkey=${EDGE_SIGNING_PUBKEY_FILE}} \
         --timeout 5m --wait=false 2>&1 | tail -3 \
         || warn "edge-runtime helm install failed (non-fatal)"
       ok "edge-runtime installed"
@@ -1878,5 +1884,6 @@ case "${1:-}" in
   build)          deploy_build         ;;
   reload)         deploy_reload "${2:-}" ;;
   forwards)       deploy_forwards      ;;
+  observability)  install_observability_stack ;;
   *)              usage                ;;
 esac

@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { KeyRound, Lock, Unlock, Search, ExternalLink, RotateCcw, FlaskConical, Save } from 'lucide-react';
+import { KeyRound, Lock, Unlock, Search, ExternalLink, RotateCcw, FlaskConical, Save, Building2, Globe } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import type { ToolCredentialSource } from '@/components/CredentialBadge';
 
 // Everything on this page comes from GET /api/admin/tool-config, which is
 // generated from the tools' own config_fields. Nothing here names a tool.
 
 type Kind = 'secret' | 'string' | 'url' | 'int' | 'bool' | 'select';
-type Source = 'override' | 'stored' | 'env' | 'file' | 'default' | 'unset';
+type Source = ToolCredentialSource;
+type Scope = 'tenant' | 'platform';
 
 interface KeyRow {
   key: string;
@@ -25,8 +27,14 @@ interface KeyRow {
   tools: string[];
   source: Source;
   is_set: boolean;
+  scope: Scope;
+  effective_source: Source;
+  tenant_source: 'tenant' | 'unset';
+  platform_source: Source;
   can_test: boolean;
   value?: string;
+  tenant_value?: string;
+  platform_value?: string;
 }
 
 interface Catalogue {
@@ -37,11 +45,14 @@ interface Catalogue {
   encrypted_at_rest: boolean;
   propagation_seconds: number;
   out_of_scope: string[];
+  scope: Scope;
+  tenant_id: string | null;
 }
 
 const SOURCE_LABEL: Record<Source, string> = {
   override: 'test override',
-  stored: 'saved here',
+  tenant: 'saved for this tenant',
+  stored: 'saved for the platform',
   env: 'from environment',
   file: 'from tool_defaults.yaml',
   default: 'tool default',
@@ -50,11 +61,17 @@ const SOURCE_LABEL: Record<Source, string> = {
 
 const SOURCE_CLS: Record<Source, string> = {
   override: 'text-violet-300 border-violet-500/30 bg-violet-500/10',
-  stored: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+  tenant: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+  stored: 'text-teal-300 border-teal-500/30 bg-teal-500/10',
   env: 'text-cyan-300 border-cyan-500/30 bg-cyan-500/10',
   file: 'text-sky-300 border-sky-500/30 bg-sky-500/10',
   default: 'text-slate-300 border-slate-600 bg-slate-700/30',
   unset: 'text-slate-500 border-slate-700 bg-slate-800/40',
+};
+
+const SCOPE_HELP: Record<Scope, string> = {
+  tenant: 'Values saved here apply to this tenant only and win over the platform value. This is what your agents run with.',
+  platform: 'Values saved here are the fallback for every tenant. A tenant that saved its own value keeps it.',
 };
 
 function placeholderFor(row: KeyRow): string {
@@ -64,7 +81,12 @@ function placeholderFor(row: KeyRow): string {
   return row.kind === 'url' ? 'https://…' : 'not set';
 }
 
+function hasRowInScope(row: KeyRow, scope: Scope): boolean {
+  return scope === 'tenant' ? row.tenant_source === 'tenant' : row.platform_source === 'stored';
+}
+
 export default function ToolConfigPage() {
+  const [scope, setScope] = useState<Scope>('tenant');
   const [cat, setCat] = useState<Catalogue | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -74,10 +96,10 @@ export default function ToolConfigPage() {
   const [query, setQuery] = useState('');
   const [onlyMissing, setOnlyMissing] = useState(false);
 
-  async function load() {
+  async function load(s: Scope) {
     setLoading(true);
     setErr(null);
-    const r = await apiFetch<Catalogue>('/api/admin/tool-config');
+    const r = await apiFetch<Catalogue>(`/api/admin/tool-config?scope=${s}`);
     if (r.data) {
       setCat(r.data);
     } else {
@@ -89,7 +111,7 @@ export default function ToolConfigPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(scope); }, [scope]);
 
   // deep link: /admin/tool-config#TAVILY_API_KEY
   useEffect(() => {
@@ -102,6 +124,12 @@ export default function ToolConfigPage() {
       el.classList.add('ring-1', 'ring-cyan-400/60');
     }
   }, [cat]);
+
+  function switchScope(s: Scope) {
+    if (s === scope) return;
+    setRowMsg({});
+    setScope(s);
+  }
 
   function applyRow(updated: KeyRow) {
     setCat((c) => c && {
@@ -120,13 +148,14 @@ export default function ToolConfigPage() {
     setBusy((b) => ({ ...b, [row.key]: true }));
     const r = await apiFetch<KeyRow>(`/api/admin/tool-config/${encodeURIComponent(row.key)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ value }),
+      body: JSON.stringify({ value, scope }),
     });
     setBusy((b) => ({ ...b, [row.key]: false }));
     if (r.data) {
       applyRow(r.data);
       setDrafts((d) => { const n = { ...d }; delete n[row.key]; return n; });
-      setRowMsg((m) => ({ ...m, [row.key]: { ok: true, text: `Saved. Agents pick it up within ${cat?.propagation_seconds ?? 30} seconds.` } }));
+      const who = scope === 'tenant' ? 'this tenant' : 'the platform';
+      setRowMsg((m) => ({ ...m, [row.key]: { ok: true, text: `Saved for ${who}. Agents pick it up within ${cat?.propagation_seconds ?? 30} seconds.` } }));
     } else {
       setRowMsg((m) => ({ ...m, [row.key]: { ok: false, text: r.error || 'Save failed' } }));
     }
@@ -134,7 +163,7 @@ export default function ToolConfigPage() {
 
   async function clear(row: KeyRow) {
     setBusy((b) => ({ ...b, [row.key]: true }));
-    const r = await apiFetch<KeyRow>(`/api/admin/tool-config/${encodeURIComponent(row.key)}`, { method: 'DELETE' });
+    const r = await apiFetch<KeyRow>(`/api/admin/tool-config/${encodeURIComponent(row.key)}?scope=${scope}`, { method: 'DELETE' });
     setBusy((b) => ({ ...b, [row.key]: false }));
     if (r.data) {
       applyRow(r.data);
@@ -148,7 +177,7 @@ export default function ToolConfigPage() {
     setBusy((b) => ({ ...b, [row.key]: true }));
     const r = await apiFetch<{ ok: boolean; message: string; tool: string }>(
       `/api/admin/tool-config/${encodeURIComponent(row.key)}/test`,
-      { method: 'POST', body: JSON.stringify({ value: (drafts[row.key] ?? '').trim() }) },
+      { method: 'POST', body: JSON.stringify({ value: (drafts[row.key] ?? '').trim(), scope }) },
     );
     setBusy((b) => ({ ...b, [row.key]: false }));
     if (r.data) {
@@ -179,7 +208,7 @@ export default function ToolConfigPage() {
       .filter((g) => g.keys.length > 0);
   }, [cat, query, onlyMissing]);
 
-  if (loading) {
+  if (loading && !cat) {
     return <div className="p-8 text-slate-400 text-sm">Loading tool configuration…</div>;
   }
   if (err || !cat) {
@@ -192,6 +221,20 @@ export default function ToolConfigPage() {
     );
   }
 
+  const scopeBtn = (s: Scope, label: string, Icon: typeof Building2) => (
+    <button
+      type="button"
+      onClick={() => switchScope(s)}
+      aria-pressed={scope === s}
+      data-testid={`tool-config-scope-${s}`}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition ${
+        scope === s ? 'bg-cyan-500 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+      }`}
+    >
+      <Icon className="w-3.5 h-3.5" /> {label}
+    </button>
+  );
+
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
       <header className="mb-6">
@@ -201,10 +244,17 @@ export default function ToolConfigPage() {
         </div>
         <p className="text-slate-400 max-w-3xl">
           Every value a built-in tool needs to run, declared by the tool itself. Save a value here and
-          agents use it within {cat.propagation_seconds} seconds, with no redeploy. A value saved here
-          wins over the environment and over <code className="text-cyan-300">tool_defaults.yaml</code>.
-          Clear it and the next source applies again.
+          agents use it within {cat.propagation_seconds} seconds, with no redeploy. A value saved for this
+          tenant wins over the platform value, which wins over the environment and over{' '}
+          <code className="text-cyan-300">tool_defaults.yaml</code>. Clear it and the next source applies again.
         </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="inline-flex items-center gap-1 p-1 rounded-lg border border-slate-700 bg-slate-900/60" role="group" aria-label="Scope" data-testid="tool-config-scope">
+            {scopeBtn('tenant', 'This tenant', Building2)}
+            {scopeBtn('platform', 'Platform', Globe)}
+          </div>
+          <p className="text-xs text-slate-400" data-testid="tool-config-scope-help">{SCOPE_HELP[scope]}</p>
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
           <span className="px-2 py-1 rounded border border-slate-700 bg-slate-800/50 text-slate-300" data-testid="tool-config-counts">
             {cat.key_count} values across {cat.tool_count} tools
@@ -246,7 +296,7 @@ export default function ToolConfigPage() {
         </label>
       </div>
 
-      <div className="space-y-4">
+      <div className={`space-y-4 ${loading ? 'opacity-60' : ''}`}>
         {visible.map((g) => (
           <motion.section
             key={g.group}
@@ -272,6 +322,8 @@ export default function ToolConfigPage() {
                 const draft = drafts[row.key] ?? '';
                 const msg = rowMsg[row.key];
                 const isBusy = !!busy[row.key];
+                const canClear = hasRowInScope(row, scope);
+                const tenantOverrides = scope === 'platform' && row.tenant_source === 'tenant';
                 return (
                   <li key={row.key} id={`row-${row.key}`} className="px-4 py-3 rounded" data-testid={`tool-config-row-${row.key}`}>
                     <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -290,9 +342,20 @@ export default function ToolConfigPage() {
                             className={`text-[9px] uppercase tracking-wider border rounded px-1.5 py-0.5 ${SOURCE_CLS[row.source]}`}
                             data-testid={`tool-config-source-${row.key}`}
                             data-source={row.source}
+                            data-scope={scope}
+                            title={scope === 'tenant' ? 'What this tenant’s agents run with' : 'The platform fallback, tenant rows ignored'}
                           >
                             {SOURCE_LABEL[row.source]}
                           </span>
+                          {tenantOverrides && (
+                            <span
+                              className="text-[9px] uppercase tracking-wider border rounded px-1.5 py-0.5 text-emerald-300 border-emerald-500/30 bg-emerald-500/10"
+                              data-testid={`tool-config-effective-${row.key}`}
+                              title="Your tenant saved its own value, so this platform value is not what your agents use"
+                            >
+                              this tenant overrides
+                            </span>
+                          )}
                         </div>
                         {row.description && <p className="text-[11px] text-slate-500 mt-1 max-w-2xl">{row.description}</p>}
                         <p className="text-[11px] text-slate-500 mt-1">
@@ -352,6 +415,7 @@ export default function ToolConfigPage() {
                         onClick={() => save(row)}
                         disabled={isBusy || !draft.trim()}
                         data-testid={`tool-config-save-${row.key}`}
+                        title={scope === 'tenant' ? 'Save for this tenant' : 'Save for the platform'}
                         className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-cyan-500 text-white text-xs font-semibold hover:bg-cyan-400 disabled:opacity-40"
                       >
                         <Save className="w-3 h-3" /> Save
@@ -366,14 +430,14 @@ export default function ToolConfigPage() {
                           <FlaskConical className="w-3 h-3" /> Test
                         </button>
                       )}
-                      {row.source === 'stored' && (
+                      {canClear && (
                         <button
                           onClick={() => clear(row)}
                           disabled={isBusy}
                           data-testid={`tool-config-clear-${row.key}`}
                           className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-700/60 text-slate-400 text-xs hover:text-white hover:bg-slate-800/70 disabled:opacity-40"
                         >
-                          <RotateCcw className="w-3 h-3" /> Clear saved value
+                          <RotateCcw className="w-3 h-3" /> {scope === 'tenant' ? 'Clear tenant value' : 'Clear platform value'}
                         </button>
                       )}
                     </div>

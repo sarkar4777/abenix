@@ -45,6 +45,7 @@ import {
   Workflow,
   Network,
   Archive,
+  Video,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/stores/sidebar';
@@ -108,6 +109,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'SDK Playground',  icon: Code2, href: '/sdk-playground',  feature: 'use_sdk_playground' },
       { label: 'Load Playground', icon: Gauge, href: '/load-playground', feature: 'use_load_playground' },
       { label: 'Triggers',        icon: Zap,   href: '/triggers',        feature: 'use_triggers' },
+      { label: 'Meetings',        icon: Video, href: '/meetings',        feature: 'use_meetings' },
     ],
   },
   {
@@ -136,21 +138,20 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'ADMIN',
     defaultOpen: false,
     items: [
-      // Platform operations
+      // Platform operations stay hard admin gates
       { label: 'Cluster Health',    icon: Cpu,         href: '/admin/cluster',      adminOnly: true },
       { label: 'Scaling',           icon: Gauge,       href: '/admin/scaling',      adminOnly: true },
       { label: 'Tool Scaling',      icon: Gauge,       href: '/admin/tool-scaling', adminOnly: true },
       { label: 'Pipeline Scaling',  icon: Gauge,       href: '/admin/pipeline-scaling', adminOnly: true },
       { label: 'Archives',          icon: Archive,     href: '/admin/archives',     adminOnly: true },
-      { label: 'Model Selection',   icon: Cpu,         href: '/admin/llm-settings', adminOnly: true },
-      { label: 'Tool Configuration', icon: Wrench,     href: '/admin/tool-config',  adminOnly: true },
-      { label: 'LLM Pricing',       icon: DollarSign,  href: '/admin/llm-pricing',  adminOnly: true },
-      { label: 'Connectors',        icon: Plug,        href: '/admin/connectors',   adminOnly: true },
       { label: 'Dead Letter Queue', icon: Inbox,       href: '/admin/dlq',          adminOnly: true },
-      // Safety / governance — Moderation + Alerts already render under MONITOR
-      // for every user with view_alerts; the ADMIN entries here would just be
-      // duplicates. Review Queue is admin-only so it stays.
-      { label: 'Review Queue',      icon: ShieldCheck, href: '/review-queue',       adminOnly: true },
+      // Tenant settings follow the manage_settings flag from ROLE_FEATURES
+      { label: 'Model Selection',   icon: Cpu,         href: '/admin/llm-settings', feature: 'manage_settings' },
+      { label: 'Tool Configuration', icon: Wrench,     href: '/admin/tool-config',  feature: 'manage_settings' },
+      { label: 'LLM Pricing',       icon: DollarSign,  href: '/admin/llm-pricing',  feature: 'manage_settings' },
+      { label: 'Connectors',        icon: Plug,        href: '/admin/connectors',   feature: 'manage_settings' },
+      // Moderation + Alerts already render under MONITOR for view_alerts
+      { label: 'Review Queue',      icon: ShieldCheck, href: '/review-queue',       feature: 'review_queue' },
       // People + access
       { label: 'Team',              icon: Users,       href: '/settings/team',      feature: 'manage_team' },
     ],
@@ -166,7 +167,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'API Keys',       icon: Key,  href: '/settings/api-keys',  feature: 'manage_api_keys' },
       { label: 'Cognify config',  icon: Plug, href: '/settings/cognify' },
       { label: 'GDPR (right to erasure)', icon: Plug, href: '/settings/gdpr' },
-      { label: 'Integrations',   icon: Plug, href: '/settings/integrations' },
+      { label: 'Integrations',   icon: Plug, href: '/settings/integrations', feature: 'manage_settings' },
       { label: 'Settings',       icon: Settings,   href: '/settings' },
       { label: 'Help',           icon: HelpCircle, href: '/help' },
       { label: 'Developer docs', icon: Book,       href: '/docs',     external: true },
@@ -237,11 +238,15 @@ function SidebarNav({
 
   // Filter items by feature flag + adminOnly + return only groups
   // that have at least one visible item (no empty group headers).
+  // Flags that are admin-only in ROLE_FEATURES stay hidden until the
+  // permissions call lands, so a slow network never flashes admin items.
+  const ADMIN_DEFAULT_FEATURES = ['review_queue', 'manage_settings', 'manage_team'];
   const visibleGroups = NAV_GROUPS
     .map(group => {
       const items = group.items.filter(item => {
         if (item.adminOnly && !isAdmin) return false;
         if (item.feature && features[item.feature] === false) return false;
+        if (item.feature && !perms && ADMIN_DEFAULT_FEATURES.includes(item.feature) && !isAdmin) return false;
         return true;
       });
       return { ...group, items };

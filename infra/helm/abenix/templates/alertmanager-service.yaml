@@ -1,0 +1,23 @@
+{{- $alerting := default dict .Values.alerting }}
+{{- $am := default dict $alerting.alertmanager }}
+{{- $amEnabled := true }}
+{{- if hasKey $am "enabled" }}{{- $amEnabled = $am.enabled }}{{- end }}
+{{- if $amEnabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-alertmanager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 9093
+      targetPort: http
+{{- end }}

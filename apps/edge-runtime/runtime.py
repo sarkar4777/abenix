@@ -62,6 +62,12 @@ class Config:
         self.signing_pubkey_path = os.environ.get(
             "SIGNING_PUBKEY_PATH", "/etc/edge/signing_pub.pem"
         )
+        # Only the literal string "true" opens the unsigned path, dev only
+        self.allow_unsigned = (
+            os.environ.get("EDGE_ALLOW_UNSIGNED", "").strip().lower() == "true"
+        )
+        # When set, bundles compiled for another tenant are refused
+        self.tenant_id = os.environ.get("TENANT_ID", "").strip()
         self.bundle_dir = Path(os.environ.get("BUNDLE_DIR", "/var/edge/agents"))
         self.endpoint_url = os.environ.get("ENDPOINT_URL", "")
         self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -89,8 +95,36 @@ def _load_pubkey(cfg: Config):
     return serialization.load_pem_public_key(pem.encode("utf-8"))
 
 
-def _verify_signature(bundle_bytes: bytes, pubkey) -> tuple[bytes, dict]:
-    """Strip the signature out, verify it, and return (raw_tar, manifest)."""
+def check_startup(cfg: Config) -> None:
+    """Refuse to boot a gateway that could not verify anything it is sent."""
+    try:
+        pubkey = _load_pubkey(cfg)
+    except ValueError as e:
+        raise SystemExit(f"edge-runtime: signing public key could not be parsed: {e}")
+    if cfg.allow_unsigned:
+        LOG.warning(
+            "EDGE_ALLOW_UNSIGNED=true: unsigned bundles will be accepted on this "
+            "gateway. Development only, never run production like this."
+        )
+    elif pubkey is None:
+        raise SystemExit(
+            "edge-runtime: no signing public key. Set SIGNING_PUBKEY_PEM or mount "
+            f"it at SIGNING_PUBKEY_PATH ({cfg.signing_pubkey_path}). Fetch it from "
+            "GET /api/edge/signing-key on the platform. EDGE_ALLOW_UNSIGNED=true "
+            "bypasses this for local development only."
+        )
+    if cfg.tenant_id:
+        LOG.info("tenant_binding tenant_id=%s", cfg.tenant_id)
+
+
+def _verify_signature(
+    bundle_bytes: bytes, pubkey, allow_unsigned: bool = False
+) -> tuple[bytes, dict]:
+    """Strip the signature out, verify it, and return (raw_tar, manifest).
+
+    Missing signature or missing pubkey fail unless allow_unsigned. A present
+    but invalid signature always fails.
+    """
     sig: bytes | None = None
     members: list[tuple[tarfile.TarInfo, bytes]] = []
     with tarfile.open(fileobj=io.BytesIO(bundle_bytes), mode="r") as tar:
@@ -102,8 +136,11 @@ def _verify_signature(bundle_bytes: bytes, pubkey) -> tuple[bytes, dict]:
             else:
                 members.append((m, data))
 
-    if sig is None:
-        raise BundleError("bundle missing signature.sig")
+    if sig is None and not allow_unsigned:
+        raise BundleError(
+            "bundle is unsigned (no signature.sig). Refusing to load, set "
+            "EDGE_ALLOW_UNSIGNED=true only for local development"
+        )
 
     out = io.BytesIO()
     with tarfile.open(fileobj=out, mode="w") as dst:
@@ -115,7 +152,22 @@ def _verify_signature(bundle_bytes: bytes, pubkey) -> tuple[bytes, dict]:
             dst.addfile(info, io.BytesIO(data))
     raw_tar = out.getvalue()
 
-    if pubkey is not None:
+    if sig is None:
+        LOG.warning(
+            "accepting UNSIGNED bundle because EDGE_ALLOW_UNSIGNED=true, "
+            "development only"
+        )
+    elif pubkey is None:
+        if not allow_unsigned:
+            raise BundleError(
+                "no signing public key configured, cannot verify bundle. Set "
+                "SIGNING_PUBKEY_PEM or SIGNING_PUBKEY_PATH"
+            )
+        LOG.warning(
+            "accepting UNVERIFIED bundle, no pubkey and EDGE_ALLOW_UNSIGNED=true, "
+            "development only"
+        )
+    else:
         try:
             pubkey.verify(
                 sig,
@@ -125,8 +177,6 @@ def _verify_signature(bundle_bytes: bytes, pubkey) -> tuple[bytes, dict]:
             )
         except InvalidSignature as e:
             raise BundleError(f"bundle_signature_invalid: {e}") from e
-    else:
-        LOG.warning("no signing pubkey configured — accepting bundle UNVERIFIED")
 
     manifest = None
     for m, data in members:
@@ -200,10 +250,34 @@ class Registry:
         self.agents: dict[str, LoadedAgent] = {}
         self.lock = threading.Lock()
 
+    def _check_tenant(self, manifest: dict) -> None:
+        if not self.cfg.tenant_id:
+            return
+        bundle_tenant = str(manifest.get("tenant_id") or "")
+        if bundle_tenant != self.cfg.tenant_id:
+            LOG.error(
+                "bundle_tenant_mismatch slug=%s bundle_tenant=%s runtime_tenant=%s",
+                manifest.get("slug"),
+                bundle_tenant or "<none>",
+                self.cfg.tenant_id,
+            )
+            raise BundleError(
+                f"bundle tenant_id {bundle_tenant or '<none>'} does not match "
+                f"runtime TENANT_ID {self.cfg.tenant_id}"
+            )
+
     def install_bundle(self, bundle_bytes: bytes) -> LoadedAgent:
         pubkey = _load_pubkey(self.cfg)
-        _, manifest = _verify_signature(bundle_bytes, pubkey)
+        try:
+            _, manifest = _verify_signature(
+                bundle_bytes, pubkey, self.cfg.allow_unsigned
+            )
+        except BundleError as e:
+            # Nothing was touched, whatever is loaded keeps serving
+            LOG.error("bundle_rejected reason=%s loaded_agents=%d", e, len(self.agents))
+            raise
         _validate_manifest(manifest)
+        self._check_tenant(manifest)
         slug = manifest["slug"]
         dest = self.cfg.bundle_dir / slug
         _untar_to_dir(bundle_bytes, dest)
@@ -228,6 +302,7 @@ class Registry:
         for d in self.cfg.bundle_dir.iterdir():
             try:
                 manifest = yaml.safe_load((d / "agent.yaml").read_text("utf-8"))
+                self._check_tenant(manifest)
                 slug = manifest["slug"]
                 fake_digest = hashlib.sha256(slug.encode()).hexdigest()
                 self.agents[slug] = LoadedAgent(slug, d, manifest, fake_digest)
@@ -487,6 +562,7 @@ def mqtt_subscriber(cfg: Config, registry: Registry) -> None:
 
 async def amain(port: int) -> None:
     cfg = Config()
+    check_startup(cfg)
     registry = Registry(cfg)
     registry.reload_from_disk()
 

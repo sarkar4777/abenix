@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import sees_other_users_resources
 from app.core.deps import get_current_user, get_db
 from app.core.execution_state import (
     get_execution_tree,
@@ -510,9 +511,14 @@ async def list_executions(
 ) -> JSONResponse:
     """List past executions with optional filters."""
     query = select(Execution).where(Execution.tenant_id == user.tenant_id)
+    # a member sees their own runs, admins (the flag) see the tenant's
+    if not sees_other_users_resources(user):
+        query = query.where(Execution.user_id == user.id)
     count_query = select(func.count(Execution.id)).where(
         Execution.tenant_id == user.tenant_id
     )
+    if not sees_other_users_resources(user):
+        count_query = count_query.where(Execution.user_id == user.id)
 
     if agent_id:
         query = query.where(Execution.agent_id == agent_id)
@@ -528,6 +534,8 @@ async def list_executions(
 
     # Completed / failed counts (unfiltered by status so the KPI cards are always correct)
     base_where = [Execution.tenant_id == user.tenant_id]
+    if not sees_other_users_resources(user):
+        base_where.append(Execution.user_id == user.id)
     if agent_id:
         base_where.append(Execution.agent_id == agent_id)
     if search:

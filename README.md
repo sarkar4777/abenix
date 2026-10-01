@@ -455,9 +455,25 @@ docker run -d --name abenix-edge \
   -e GATEWAY_ID=$GATEWAY_ID \
   -e MQTT_URL=mqtt://mqtt.your-plant:1883 \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -e TENANT_ID=$TENANT_ID \
+  -v /etc/edge:/etc/edge:ro \             # signing_pub.pem lives here
   -p 8080:8080 \
   agentforge/edge-runtime:latest          # or :rust, :c — variant in the image name
 ```
+
+### Signing keys, fail closed
+
+Bundles are RSA-PSS signed and the chain refuses rather than degrades. Outside dev the API returns `503` on compile, deploy and token mint until `EDGE_SIGNING_KEY_PEM` is set, it never mints a key into `/tmp`. A gateway refuses to start without the matching public key and refuses any unsigned, tampered or foreign-tenant bundle, keeping the previous bundle running. `EDGE_ALLOW_UNSIGNED=true` is the only bypass and it is logged on every load.
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out edge_signing_priv.pem
+openssl pkey -in edge_signing_priv.pem -pubout -out edge_signing_pub.pem
+EDGE_SIGNING_KEY_FILE=./edge_signing_priv.pem EDGE_SIGNING_PUBKEY_FILE=./edge_signing_pub.pem \
+  bash scripts/deploy-azure.sh redeploy
+curl -s $PLATFORM_URL/api/edge/signing-key | jq -r .data.public_key_pem > /etc/edge/signing_pub.pem
+```
+
+Local dev keeps working without any of this. The API mints one dev key under the data dir and warns once, and `values-local.yaml` allows unsigned bundles. Details in [`docs/06-deployment/05-edge-runtime.md`](docs/06-deployment/05-edge-runtime.md).
 
 ### Lifecycle
 

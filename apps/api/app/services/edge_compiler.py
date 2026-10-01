@@ -82,6 +82,8 @@ def _manifest_from_agent(agent: Agent) -> dict[str, Any]:
     return {
         "name": agent.name,
         "slug": agent.slug,
+        # Signed with the rest of the tar, so a gateway can pin itself to one tenant
+        "tenant_id": str(agent.tenant_id) if agent.tenant_id else "",
         "version": agent.version or "0.1.0",
         "model": cfg.get("model") or "claude-sonnet-4-5-20250929",
         "temperature": float(cfg.get("temperature", 0.7)),
@@ -154,6 +156,18 @@ def load_signing_key(pem: str | bytes) -> rsa.RSAPrivateKey:
     if not isinstance(key, rsa.RSAPrivateKey):
         raise EdgeCompileError("signing key must be an RSA private key")
     return key
+
+
+def public_key_pem(signing_key: rsa.RSAPrivateKey) -> str:
+    """PEM (SubjectPublicKeyInfo) of the verify key gateways need."""
+    return (
+        signing_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("utf-8")
+    )
 
 
 async def compile_agent_bundle(

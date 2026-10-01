@@ -9,7 +9,7 @@ interface ToolRow {
   config?: ToolConfigInfo;
 }
 
-/** tool id -> credential state, from /api/tools. Shared through SWR so one fetch serves every component. */
+/** tool id -> credential state, from /api/tools, resolved for the caller's tenant. Shared through SWR so one fetch serves every component. */
 export function useToolConfigMap(): Record<string, ToolConfigInfo> {
   const { data } = useApi<ToolRow[] | { tools: ToolRow[] }>('/api/tools', { dedupingInterval: 30_000 });
   return useMemo(() => {

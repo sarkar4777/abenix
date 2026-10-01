@@ -10,6 +10,11 @@ this file.
 Storage is per key, not per tool. OPENAI_API_KEY is read by eight tools and is
 entered once. The screen groups keys by provider and lists the tools each one
 unlocks.
+
+Two scopes. A tenant row in tenant_tool_credentials wins for that tenant, a
+platform row in platform_settings is the fallback for everyone. Every state
+here is computed for a tenant, so the badges a user sees are the ones their
+agents will run with.
 """
 
 from __future__ import annotations
@@ -182,9 +187,37 @@ def _masked(decl: KeyDecl, value: str) -> str:
     return f"{'*' * 8}{v[-4:]}" if len(v) > 4 else "*" * 8
 
 
-def key_state(decl: KeyDecl, include_value: bool) -> dict[str, Any]:
-    source = credentials.source(decl.key, default=decl.default)
-    value = credentials.get(decl.key, default=decl.default)
+SCOPES = ("tenant", "platform")
+
+
+def _tid(tenant_id: Any) -> str:
+    # "" tells the resolver to ignore tenant rows, never None (that reads the context)
+    return str(tenant_id or "").strip()
+
+
+def key_state(
+    decl: KeyDecl,
+    include_value: bool,
+    tenant_id: Any = None,
+    scope: str = "tenant",
+) -> dict[str, Any]:
+    """One row of the screen, as the given tenant sees it.
+
+    ``source`` and ``value`` follow ``scope``: the tenant view is what that
+    tenant's agents run with, the platform view ignores tenant rows.
+    ``tenant_source`` says whether this tenant has its own row and
+    ``platform_source`` where the platform fallback comes from.
+    """
+    tid = _tid(tenant_id)
+    tenant_row = credentials.tenant_value(decl.key, tid)
+    tenant_src = credentials.source(decl.key, default=decl.default, tenant_id=tid)
+    tenant_val = credentials.get(decl.key, default=decl.default, tenant_id=tid)
+    platform_src = credentials.source(decl.key, default=decl.default, tenant_id="")
+    platform_val = credentials.get(decl.key, default=decl.default, tenant_id="")
+    if scope == "platform":
+        source, value = platform_src, platform_val
+    else:
+        source, value = tenant_src, tenant_val
     out: dict[str, Any] = {
         "key": decl.key,
         "label": decl.label,
@@ -198,24 +231,31 @@ def key_state(decl: KeyDecl, include_value: bool) -> dict[str, Any]:
         "tools": sorted(decl.tools),
         "source": source,
         "is_set": bool(value),
+        "scope": scope,
+        "effective_source": tenant_src,
+        "tenant_source": "tenant" if tenant_row else "unset",
+        "platform_source": platform_src,
         "can_test": decl.test_tool is not None,
     }
     if include_value:
         out["value"] = _masked(decl, value)
+        out["tenant_value"] = _masked(decl, tenant_row)
+        out["platform_value"] = _masked(decl, platform_val)
     return out
 
 
-def tool_status(slug: str) -> str:
+def tool_status(slug: str, tenant_id: Any = None) -> str:
     """configured | missing | optional | none, for a badge."""
     decls = declarations()
     keys = required_for_tool(slug)
     if not keys:
         return "none"
+    tid = _tid(tenant_id)
     required_missing = False
     optional_missing = False
     for k, required in keys.items():
         d = decls[k]
-        if credentials.get(k, default=d.default):
+        if credentials.get(k, default=d.default, tenant_id=tid):
             continue
         if required:
             required_missing = True
@@ -228,30 +268,38 @@ def tool_status(slug: str) -> str:
     return "configured"
 
 
-def tool_config_for(slug: str) -> dict[str, Any]:
-    """The per-tool shape /api/tools carries."""
+def tool_config_for(slug: str, tenant_id: Any = None) -> dict[str, Any]:
+    """The per-tool shape /api/tools carries, for the caller's tenant."""
     decls = declarations()
     fields = []
     for k, required in required_for_tool(slug).items():
-        st = key_state(decls[k], include_value=False)
+        st = key_state(decls[k], include_value=False, tenant_id=tenant_id)
         st["required"] = required
         fields.append(st)
-    return {"fields": fields, "status": tool_status(slug)}
+    return {"fields": fields, "status": tool_status(slug, tenant_id)}
 
 
-async def catalogue(include_values: bool = False, force: bool = True) -> dict[str, Any]:
+async def catalogue(
+    include_values: bool = False,
+    force: bool = True,
+    tenant_id: Any = None,
+    scope: str = "tenant",
+) -> dict[str, Any]:
     """Grouped by provider. The admin screen asks for values, the rest do not."""
     await refresh(force=force)
     decls = declarations()
+    tid = _tid(tenant_id) if scope == "tenant" else ""
     groups: dict[str, list[dict[str, Any]]] = {}
     for d in sorted(
         decls.values(), key=lambda d: (d.group.lower(), not d.required, d.key)
     ):
-        groups.setdefault(d.group, []).append(key_state(d, include_values))
+        groups.setdefault(d.group, []).append(
+            key_state(d, include_values, tenant_id=tenant_id, scope=scope)
+        )
     missing_required = sum(
         1
         for d in decls.values()
-        if d.required and not credentials.get(d.key, default=d.default)
+        if d.required and not credentials.get(d.key, default=d.default, tenant_id=tid)
     )
     try:
         from app.core.tool_secrets import encrypted_at_rest
@@ -267,6 +315,8 @@ async def catalogue(include_values: bool = False, force: bool = True) -> dict[st
         "key_count": len(decls),
         "tool_count": len(_BY_TOOL or {}),
         "missing_required": missing_required,
+        "scope": scope,
+        "tenant_id": _tid(tenant_id) or None,
         "encrypted_at_rest": enc,
         "propagation_seconds": int(credentials._ttl),
         "out_of_scope": OUT_OF_SCOPE,

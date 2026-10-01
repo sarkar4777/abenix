@@ -1006,7 +1006,7 @@ async def list_tools(
     out: list[dict[str, Any]] = []
     for entry in TOOL_CATALOG:
         merged = dict(entry)
-        merged["config"] = _tc.tool_config_for(merged["id"])
+        merged["config"] = _tc.tool_config_for(merged["id"], tenant_id=user.tenant_id)
         if not merged.get("input_schema"):
             schema = runtime_schemas.get(merged["id"])
             if schema:
@@ -1036,7 +1036,7 @@ async def list_tools(
                 "category": _guess_category(slug),
                 "input_schema": runtime_schemas.get(slug) or {},
                 "uncatalogued": True,
-                "config": _tc.tool_config_for(slug),
+                "config": _tc.tool_config_for(slug, tenant_id=user.tenant_id),
             }
         )
     return success(out, meta={"count": len(out)})

@@ -19,12 +19,14 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 from app.services.edge_compiler import (
     EdgeCompileError,
     compile_agent_bundle,
     load_signing_key,
+    public_key_pem,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -38,48 +40,145 @@ router = APIRouter(prefix="/api/edge", tags=["edge"])
 
 
 _signing_key_cache: rsa.RSAPrivateKey | None = None
+_dev_key_in_use = False
+_dev_key_warned = False
+
+_DEV_ENVIRONMENTS = {"dev", "development", "local", "test", "testing"}
+_SIGNING_ALGORITHM = "RSA-PSS-SHA256 (MGF1-SHA256, salt 32)"
+_MISSING_KEY_MSG = (
+    "edge bundle signing is unavailable: EDGE_SIGNING_KEY_PEM is not set. "
+    "Generate a key pair (see docs/06-deployment/05-edge-runtime.md) and "
+    "set secrets.edgeSigningKeyPem on the chart. Dev keys are only minted "
+    "when ENVIRONMENT is dev, local or test."
+)
+
+
+class EdgeSigningUnavailable(RuntimeError):
+    """No usable signing key and the environment forbids minting one."""
+
+
+def _is_dev_environment() -> bool:
+    env = os.environ.get("ENVIRONMENT", "").strip().lower()
+    if env:
+        return env in _DEV_ENVIRONMENTS
+    return bool(settings.debug)
+
+
+def _dev_key_dir() -> Path:
+    explicit = os.environ.get("EDGE_SIGNING_KEY_DIR", "").strip()
+    if explicit:
+        return Path(explicit)
+    # Same shared data mount as uploads so API replicas see one key
+    upload_dir = os.environ.get("UPLOAD_DIR", "").strip()
+    base = Path(upload_dir).parent if upload_dir else Path("/data")
+    return base / "edge"
+
+
+def _write_private(path: Path, key: rsa.RSAPrivateKey) -> None:
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    tmp = path.with_suffix(".pem.tmp")
+    tmp.write_bytes(pem)
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    os.replace(tmp, path)
+
+
+def _load_or_create_dev_key(priv_path: Path) -> rsa.RSAPrivateKey:
+    global _dev_key_warned
+    if not priv_path.exists():
+        priv_path.parent.mkdir(parents=True, exist_ok=True)
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        # Another replica may have won the race, keep whichever landed first
+        if not priv_path.exists():
+            _write_private(priv_path, key)
+    key = load_signing_key(priv_path.read_bytes())
+    pub_path = priv_path.with_name("signing_pub.pem")
+    if not pub_path.exists():
+        pub_path.write_text(public_key_pem(key), encoding="utf-8")
+    if not _dev_key_warned:
+        _dev_key_warned = True
+        logger.warning(
+            "edge_dev_signing_key path=%s generated dev key, not for shared or "
+            "production clusters. Set EDGE_SIGNING_KEY_PEM to pin one.",
+            priv_path,
+        )
+    return key
 
 
 def _resolve_signing_key() -> rsa.RSAPrivateKey:
-    """Load or generate a signing key.
-
-    Production deployments inject EDGE_SIGNING_KEY_PEM via secret. In dev we
-    generate an ephemeral key on first use; the matching public key is
-    written to /tmp/edge_signing_pub.pem so the smoke test can pick it up.
-    """
-    global _signing_key_cache
+    """Return the bundle signing key, never minting one outside dev."""
+    global _signing_key_cache, _dev_key_in_use
     if _signing_key_cache is not None:
         return _signing_key_cache
 
     pem = os.environ.get("EDGE_SIGNING_KEY_PEM", "").strip()
     if pem:
         _signing_key_cache = load_signing_key(pem)
+        _dev_key_in_use = False
         return _signing_key_cache
 
-    key_path = os.environ.get("EDGE_SIGNING_KEY_PATH", "/tmp/edge_signing_priv.pem")
-    pub_path = os.environ.get("EDGE_SIGNING_PUB_PATH", "/tmp/edge_signing_pub.pem")
-    p = Path(key_path)
-    if p.exists():
-        _signing_key_cache = load_signing_key(p.read_bytes())
+    # Operator-mounted file, valid in any environment
+    key_path = os.environ.get("EDGE_SIGNING_KEY_PATH", "").strip()
+    if key_path and Path(key_path).exists():
+        _signing_key_cache = load_signing_key(Path(key_path).read_bytes())
+        _dev_key_in_use = False
         return _signing_key_cache
 
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(
-        key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-    )
-    Path(pub_path).write_bytes(
-        key.public_key().public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-    )
-    _signing_key_cache = key
+    if not _is_dev_environment():
+        raise EdgeSigningUnavailable(_MISSING_KEY_MSG)
+
+    priv_path = Path(key_path) if key_path else _dev_key_dir() / "signing_priv.pem"
+    _signing_key_cache = _load_or_create_dev_key(priv_path)
+    _dev_key_in_use = True
     return _signing_key_cache
+
+
+def _signing_key_or_503() -> rsa.RSAPrivateKey:
+    try:
+        return _resolve_signing_key()
+    except EdgeSigningUnavailable as e:
+        raise HTTPException(503, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(503, f"edge signing key is unusable: {e}") from e
+
+
+@router.on_event("startup")
+async def _signing_key_startup_check() -> None:
+    if os.environ.get("EDGE_ALLOW_UNSIGNED", "").lower() == "true":
+        if _is_dev_environment():
+            logger.warning(
+                "EDGE_ALLOW_UNSIGNED=true, gateways may load unsigned bundles"
+            )
+        else:
+            logger.error(
+                "EDGE_ALLOW_UNSIGNED=true outside dev, unsigned bundles would be "
+                "accepted, unset it"
+            )
+    try:
+        _resolve_signing_key()
+    except EdgeSigningUnavailable as e:
+        logger.error("edge_signing_key_missing: %s compile/sign/mint return 503", e)
+    except ValueError as e:
+        logger.error("edge_signing_key_unusable: %s", e)
+
+
+@router.get("/signing-key")
+async def signing_key() -> JSONResponse:
+    """Public verify key for gateways. The private half never leaves the API."""
+    sk = _signing_key_or_503()
+    return success(
+        {
+            "public_key_pem": public_key_pem(sk),
+            "algorithm": _SIGNING_ALGORITHM,
+            "dev_key": _dev_key_in_use,
+        }
+    )
 
 
 def _serialize_gateway(g: EdgeGateway) -> dict[str, Any]:
@@ -197,9 +296,10 @@ async def mint_edge_token(
     import hashlib
     import secrets
 
-    from cryptography.hazmat.primitives import serialization
-
     from models.api_key import ApiKey
+
+    # Refuse before minting a token nobody can pair with a verify key
+    pubkey_pem = public_key_pem(_signing_key_or_503())
 
     name = (body.get("name") or f"edge-{secrets.token_hex(3)}").strip()
     raw = "af_" + secrets.token_urlsafe(40)
@@ -217,19 +317,6 @@ async def mint_edge_token(
     db.add(key)
     await db.commit()
 
-    try:
-        sk = _resolve_signing_key()
-        pubkey_pem = (
-            sk.public_key()
-            .public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo,
-            )
-            .decode()
-        )
-    except Exception:
-        pubkey_pem = ""
-
     return success(
         {
             "platform_token": raw,
@@ -239,7 +326,8 @@ async def mint_edge_token(
             "warning": (
                 "Save the platform_token now — it will not be shown again. "
                 "Drop the signing_pubkey_pem at /etc/edge/signing_pub.pem (or "
-                "set SIGNING_PUBKEY env) so the runtime verifies bundle signatures."
+                "set SIGNING_PUBKEY_PEM) so the runtime verifies bundle signatures. "
+                "GET /api/edge/signing-key serves the same key."
             ),
         }
     )
@@ -367,7 +455,7 @@ async def deploy_to_gateway(
         bundle, digest = await compile_agent_bundle(
             db=db,
             agent_id=str(agent.id),
-            signing_key=_resolve_signing_key(),
+            signing_key=_signing_key_or_503(),
         )
     except EdgeCompileError as e:
         return error(str(e), 400)
@@ -473,7 +561,7 @@ async def compile_agent(
 
     try:
         bundle, digest = await compile_agent_bundle(
-            db=db, agent_id=str(agent.id), signing_key=_resolve_signing_key()
+            db=db, agent_id=str(agent.id), signing_key=_signing_key_or_503()
         )
     except EdgeCompileError as e:
         return JSONResponse({"detail": str(e)}, status_code=400)

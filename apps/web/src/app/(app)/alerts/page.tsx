@@ -19,20 +19,31 @@ interface FailureGroup {
 
 interface PlatformAlert {
   name: string;
-  state: 'firing' | 'pending' | 'inactive' | string;
+  state: 'firing' | 'pending' | 'inactive' | 'silenced' | 'inhibited' | string;
   severity: string;
   active_since: string | null;
+  ends_at?: string | null;
   summary: string | null;
   description: string | null;
   runbook: string | null;
   labels: Record<string, string>;
+  fingerprint?: string | null;
+  silenced?: boolean;
+  inhibited?: boolean;
 }
 
 interface PlatformAlertsResponse {
   alerts: PlatformAlert[];
   counts: Record<string, number>;
+  source: 'alertmanager' | 'prometheus' | string;
   prometheus_url: string;
+  alertmanager_url?: string;
 }
+
+const SOURCE_LABEL: Record<string, string> = {
+  alertmanager: 'Alertmanager',
+  prometheus: 'Prometheus (Alertmanager unreachable)',
+};
 
 interface Permissions {
   is_admin: boolean;
@@ -124,6 +135,9 @@ export default function AlertsPage() {
   const { data: platform, error: platformError, mutate: refreshPlatform } =
     useApi<PlatformAlertsResponse>(isAdmin ? '/api/admin/alerts' : null, { refreshInterval: 60_000 });
   const firing = (platform?.alerts || []).filter(a => a.state === 'firing');
+  // Alertmanager also reports silenced / inhibited alerts, Prometheus never does.
+  const muted = (platform?.alerts || []).filter(a => a.state === 'silenced' || a.state === 'inhibited');
+  const platformSource = platform?.source || 'prometheus';
 
   const totalFailures = (groups || []).reduce((s, g) => s + g.count, 0);
   const failureRate = stats && stats.today_executions > 0
@@ -198,21 +212,37 @@ export default function AlertsPage() {
 
         {/* Platform alerts (admin only) */}
         {isAdmin && (
-          <section className="space-y-2">
+          <section className="space-y-2" data-testid="platform-alerts">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold text-white">Platform alerts</h2>
                 <p className="text-xs text-slate-500">
-                  Firing Prometheus rules. Admins get these in-app and on Slack as they fire.
+                  Prometheus rules routed through Alertmanager. Admins get these in-app and on Slack as they fire and resolve.
                 </p>
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full border ${firing.length > 0 ? 'bg-red-500/10 border-red-500/40 text-red-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'}`}>
-                {firing.length} firing
-              </span>
+              <div className="flex items-center gap-2">
+                {platform && (
+                  <span
+                    data-testid="platform-alerts-source"
+                    title={platformSource === 'alertmanager' ? platform.alertmanager_url : platform.prometheus_url}
+                    className={`text-xs px-2 py-0.5 rounded-full border ${platformSource === 'alertmanager' ? 'bg-slate-700/30 border-slate-600/40 text-slate-300' : 'bg-amber-500/10 border-amber-500/40 text-amber-300'}`}
+                  >
+                    source: {SOURCE_LABEL[platformSource] || platformSource}
+                  </span>
+                )}
+                {muted.length > 0 && (
+                  <span data-testid="platform-alerts-muted" className="text-xs px-2 py-0.5 rounded-full border bg-slate-500/10 border-slate-500/40 text-slate-300">
+                    {muted.length} silenced
+                  </span>
+                )}
+                <span data-testid="platform-alerts-firing" className={`text-xs px-2 py-0.5 rounded-full border ${firing.length > 0 ? 'bg-red-500/10 border-red-500/40 text-red-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'}`}>
+                  {firing.length} firing
+                </span>
+              </div>
             </div>
             {platformError && (
               <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
-                Prometheus unavailable: {platformError}
+                Alert backends unavailable: {platformError}
               </div>
             )}
             {!platformError && firing.length === 0 && (
@@ -220,14 +250,23 @@ export default function AlertsPage() {
                 No platform alerts firing.
               </div>
             )}
-            {firing.map(a => {
+            {[...firing, ...muted].map(a => {
               const sev = (a.severity || 'info').toLowerCase();
+              const isMuted = a.state === 'silenced' || a.state === 'inhibited';
               return (
-                <div key={`${a.name}-${JSON.stringify(a.labels)}`} className={`rounded-xl border ${ALERT_SEV_STYLES[sev] || ALERT_SEV_STYLES.info} p-4 flex flex-wrap items-start gap-3`}>
+                <div
+                  key={a.fingerprint || `${a.name}-${JSON.stringify(a.labels)}`}
+                  data-testid="platform-alert-row"
+                  data-state={a.state}
+                  className={`rounded-xl border ${ALERT_SEV_STYLES[sev] || ALERT_SEV_STYLES.info} p-4 flex flex-wrap items-start gap-3 ${isMuted ? 'opacity-60' : ''}`}
+                >
                   <div className="flex-1 min-w-[200px]">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-sm font-semibold">{a.name}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 uppercase tracking-wider">{sev}</span>
+                      {isMuted && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-500/20 uppercase tracking-wider">{a.state}</span>
+                      )}
                     </div>
                     {(a.summary || a.description) && (
                       <p className="text-xs text-slate-400 mt-0.5">{a.summary || a.description}</p>
@@ -235,6 +274,7 @@ export default function AlertsPage() {
                   </div>
                   <div className="text-right shrink-0 text-[11px] text-slate-400">
                     <div>since {relTime(a.active_since)}</div>
+                    {a.ends_at && <div>resolves {relTime(a.ends_at)}</div>}
                     {a.runbook && (
                       <a href={a.runbook} target="_blank" rel="noopener" className="text-cyan-400 hover:underline inline-flex items-center gap-1">
                         runbook <ExternalLink className="w-2.5 h-2.5" />

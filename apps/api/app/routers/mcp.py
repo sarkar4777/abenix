@@ -121,7 +121,9 @@ def _redact_auth_config(cfg: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
-def _serialize_connection(c: UserMCPConnection) -> dict[str, Any]:
+def _serialize_connection(
+    c: UserMCPConnection, orphaned: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     return {
         "id": str(c.id),
         "server_name": c.server_name,
@@ -138,6 +140,7 @@ def _serialize_connection(c: UserMCPConnection) -> dict[str, Any]:
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "oauth2_configured": bool(c.oauth2_client_id),
         "oauth2_connected": bool(c.oauth2_access_token_enc),
+        "orphaned_agent_tools": orphaned or [],
     }
 
 
@@ -150,7 +153,47 @@ def _serialize_agent_tool(t: AgentMCPTool) -> dict[str, Any]:
         "tool_config": t.tool_config,
         "approval_required": t.approval_required,
         "max_calls_per_execution": t.max_calls_per_execution,
+        "is_orphaned": bool(t.is_orphaned),
+        "orphaned_at": t.orphaned_at.isoformat() if t.orphaned_at else None,
     }
+
+
+def _orphan_entry(t: AgentMCPTool, agent_name: str | None = None) -> dict[str, Any]:
+    return {
+        "id": str(t.id),
+        "agent_id": str(t.agent_id),
+        "agent_name": agent_name,
+        "tool_name": t.tool_name,
+        "orphaned_at": t.orphaned_at.isoformat() if t.orphaned_at else None,
+    }
+
+
+async def _orphaned_by_connection(
+    db: AsyncSession, connection_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[dict[str, Any]]]:
+    out: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    if not connection_ids:
+        return out
+    rows = await db.execute(
+        select(AgentMCPTool, Agent.name)
+        .outerjoin(Agent, Agent.id == AgentMCPTool.agent_id)
+        .where(
+            AgentMCPTool.mcp_connection_id.in_(connection_ids),
+            AgentMCPTool.is_orphaned.is_(True),
+        )
+    )
+    for tool, agent_name in rows.all():
+        out.setdefault(tool.mcp_connection_id, []).append(
+            _orphan_entry(tool, agent_name)
+        )
+    return out
+
+
+def _orphaned_message(tool_name: str, server_name: str) -> str:
+    return (
+        f"tool {tool_name} on server {server_name} is no longer offered, "
+        "remove it from the agent or re-add it on the server"
+    )
 
 
 @router.get("/connections")
@@ -195,7 +238,8 @@ async def list_connections(
 
     result = await db.execute(query)
     connections = result.scalars().all()
-    data = [_serialize_connection(c) for c in connections]
+    orphaned = await _orphaned_by_connection(db, [c.id for c in connections])
+    data = [_serialize_connection(c, orphaned.get(c.id)) for c in connections]
     return success(data, meta={"total": total, "limit": limit, "offset": offset})
 
 
@@ -326,7 +370,8 @@ async def get_connection(
     conn = result.scalar_one_or_none()
     if not conn:
         return error("Connection not found", 404)
-    return success(_serialize_connection(conn))
+    orphaned = await _orphaned_by_connection(db, [conn.id])
+    return success(_serialize_connection(conn, orphaned.get(conn.id)))
 
 
 @router.put("/connections/{connection_id}")
@@ -446,19 +491,25 @@ async def discover_tools(
     conn.health_status = "healthy"
     conn.last_health_check = datetime.now(timezone.utc)
 
-    # Attached tool rows whose name the server no longer offers are dead, drop them.
+    # Attached rows whose name the server no longer offers are flagged, not deleted.
     live_names = {t["name"] for t in discovered}
+    now = datetime.now(timezone.utc)
     stale_result = await db.execute(
-        select(AgentMCPTool).where(AgentMCPTool.mcp_connection_id == connection_id)
+        select(AgentMCPTool, Agent.name)
+        .outerjoin(Agent, Agent.id == AgentMCPTool.agent_id)
+        .where(AgentMCPTool.mcp_connection_id == connection_id)
     )
-    removed_agent_tools: list[dict[str, Any]] = []
-    for row in stale_result.scalars().all():
+    orphaned_agent_tools: list[dict[str, Any]] = []
+    for row, agent_name in stale_result.all():
         if row.tool_name in live_names:
+            if row.is_orphaned:
+                row.is_orphaned = False
+                row.orphaned_at = None
             continue
-        removed_agent_tools.append(
-            {"agent_id": str(row.agent_id), "tool_name": row.tool_name}
-        )
-        await db.delete(row)
+        if not row.is_orphaned:
+            row.is_orphaned = True
+            row.orphaned_at = now
+        orphaned_agent_tools.append(_orphan_entry(row, agent_name))
 
     await db.commit()
     await db.refresh(conn)
@@ -469,7 +520,7 @@ async def discover_tools(
             "server_name": conn.server_name,
             "tools": discovered,
             "tools_count": len(discovered),
-            "removed_agent_tools": removed_agent_tools,
+            "orphaned_agent_tools": orphaned_agent_tools,
         }
     )
 
@@ -937,7 +988,8 @@ async def attach_tool(
             UserMCPConnection.user_id == user.id,
         )
     )
-    if not conn_result.scalar_one_or_none():
+    conn = conn_result.scalar_one_or_none()
+    if not conn:
         return error("MCP connection not found", 404)
 
     existing = await db.execute(
@@ -947,8 +999,18 @@ async def attach_tool(
             AgentMCPTool.tool_name == body.tool_name,
         )
     )
-    if existing.scalar_one_or_none():
+    existing_row = existing.scalar_one_or_none()
+    if existing_row is not None and existing_row.is_orphaned:
+        return error(_orphaned_message(body.tool_name, conn.server_name), 400)
+    if existing_row is not None:
         return error("Tool already attached", 409)
+
+    # A name discovery dropped is orphaned for every agent on the connection.
+    discovered_names = {
+        t.get("name") for t in (conn.discovered_tools or []) if isinstance(t, dict)
+    }
+    if discovered_names and body.tool_name not in discovered_names:
+        return error(_orphaned_message(body.tool_name, conn.server_name), 400)
 
     tool = AgentMCPTool(
         agent_id=agent_id,

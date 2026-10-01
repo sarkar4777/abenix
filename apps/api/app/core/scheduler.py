@@ -25,7 +25,12 @@ TRIGGER_CLAIM_BATCH = 100
 # pg advisory lock keys (int4, ASCII sentinels) for the singleton jobs.
 QUOTA_LOCK_KEY = 0x51554F54  # "QUOT"
 ARCHIVE_LOCK_KEY = 0x41524348  # "ARCH"
-ALERTS_LOCK_KEY = 0x414C5254  # "ALRT"
+SWEEP_LOCK_KEY = 0x5354414C  # "STAL"
+DRIFT_LOCK_KEY = 0x44524654  # "DRFT"
+
+
+def drift_scan_interval_seconds() -> int:
+    return max(30, int(os.environ.get("DRIFT_SCAN_INTERVAL_SECONDS", "300")))
 
 
 def get_scheduler() -> AsyncIOScheduler:
@@ -251,87 +256,78 @@ async def sweep_stale_executions() -> None:
     max_minutes = int(os.environ.get("STALE_EXECUTION_MAX_MINUTES", "10"))
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_minutes)
 
-    # Postgres advisory lock so only one API replica runs the sweep
-    # per interval. Without this, every replica's APScheduler would race
-    # to mark the same rows + fire duplicate notifications. Lock is
-    # session-scoped — releases when the `async with` exits.
-    SWEEP_LOCK_KEY = 0x5354414C  # ASCII "STAL", a stable int4 sentinel
+    stale: list = []
     try:
-        async with async_session() as db:
-            from sqlalchemy import text as _sql_text
-
-            r = await db.execute(
-                _sql_text("SELECT pg_try_advisory_lock(:k)"), {"k": SWEEP_LOCK_KEY}
-            )
-            if not bool(r.scalar()):
-                logger.debug(
-                    "sweep_stale_executions: another replica holds the lock; skipping"
-                )
+        # One replica per interval, the lock drops with the helper's transaction
+        async with advisory_lock(SWEEP_LOCK_KEY) as held:
+            if not held:
+                logger.debug("sweep_stale_executions: another replica holds the lock")
                 return
-            # Find the stale rows first so we can notify the owning users.
-            r = await db.execute(
-                select(
-                    Execution.id,
-                    Execution.user_id,
-                    Execution.tenant_id,
-                    Execution.agent_id,
-                    Execution.created_at,
-                ).where(
-                    Execution.status == ExecutionStatus.RUNNING,
-                    Execution.created_at < cutoff,
+            async with async_session() as db:
+                # Find the stale rows first so we can notify the owning users.
+                r = await db.execute(
+                    select(
+                        Execution.id,
+                        Execution.user_id,
+                        Execution.tenant_id,
+                        Execution.agent_id,
+                        Execution.created_at,
+                    ).where(
+                        Execution.status == ExecutionStatus.RUNNING,
+                        Execution.created_at < cutoff,
+                    )
                 )
-            )
-            stale = r.all()
-            if not stale:
-                return
-            # Runs parked on a HITL gate are alive, not stale
-            try:
-                from app.core.hitl import waiting_execution_ids
+                found = r.all()
+                if not found:
+                    return
+                # Runs parked on a HITL gate are alive, not stale
+                try:
+                    from app.core.hitl import waiting_execution_ids
 
-                waiting = await waiting_execution_ids([str(row[0]) for row in stale])
-            except Exception as e:
-                logger.warning("hitl waiting lookup failed, skipping sweep: %s", e)
-                return
-            stale = [row for row in stale if str(row[0]) not in waiting]
-            if not stale:
-                return
-            ids = [row[0] for row in stale]
-            logger.info(
-                "Sweeping %d stale executions (older than %d min)",
-                len(ids),
-                max_minutes,
-            )
-            # Emit a Prometheus counter so the Grafana "Stale sweeps
-            # (24h)" panel lights up. A healthy cluster has this near
-            # zero — spikes indicate pods are crashing silently.
-            try:
-                from app.core.telemetry import stale_sweeps_total
-
-                stale_sweeps_total.labels(reason="owning_pod_crashed").inc(len(ids))
-            except Exception:
-                pass
-
-            await db.execute(
-                update(Execution)
-                .where(
-                    Execution.id.in_(ids),
-                    Execution.status == ExecutionStatus.RUNNING,
+                    waiting = await waiting_execution_ids(
+                        [str(row[0]) for row in found]
+                    )
+                except Exception as e:
+                    logger.warning("hitl waiting lookup failed, skipping sweep: %s", e)
+                    return
+                stale = [row for row in found if str(row[0]) not in waiting]
+                if not stale:
+                    return
+                ids = [row[0] for row in stale]
+                logger.info(
+                    "Sweeping %d stale executions (older than %d min)",
+                    len(ids),
+                    max_minutes,
                 )
-                .values(
-                    status=ExecutionStatus.FAILED,
-                    failure_code="STALE_SWEEP",
-                    error_message=(
-                        f"Sweep: execution stuck in RUNNING for >{max_minutes} minutes. "
-                        "The owning process likely crashed or was terminated before "
-                        "it could update the execution status."
-                    )[:2000],
-                    completed_at=datetime.now(timezone.utc),
-                )
-            )
-            await db.commit()
+                # Feeds the Grafana "Stale sweeps (24h)" panel
+                try:
+                    from app.core.telemetry import stale_sweeps_total
 
-        # Fire notifications outside the DB transaction so a notification
-        # glitch doesn't roll back the sweep.
+                    stale_sweeps_total.labels(reason="owning_pod_crashed").inc(len(ids))
+                except Exception:
+                    pass
+
+                await db.execute(
+                    update(Execution)
+                    .where(
+                        Execution.id.in_(ids),
+                        Execution.status == ExecutionStatus.RUNNING,
+                    )
+                    .values(
+                        status=ExecutionStatus.FAILED,
+                        failure_code="STALE_SWEEP",
+                        error_message=(
+                            f"Sweep: execution stuck in RUNNING for >{max_minutes} minutes. "
+                            "The owning process likely crashed or was terminated before "
+                            "it could update the execution status."
+                        )[:2000],
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+                await db.commit()
+
+        # Notifications run after the lock and the sweep transaction so a
+        # notification glitch cannot roll back the sweep.
         try:
             from models.notification import Notification, NotificationType
             from app.core.ws_manager import ws_manager
@@ -478,6 +474,25 @@ async def ping_models() -> None:
         logger.exception("ping_models failed: %s", exc)
 
 
+async def score_drift_backlog() -> None:
+    """Score finished executions the inline hooks missed, one replica at a time."""
+    try:
+        from app.core.deps import async_session
+        from app.services.execution_hooks import scan_backlog
+
+        async with advisory_lock(DRIFT_LOCK_KEY) as held:
+            if not held:
+                logger.debug("score_drift_backlog: another replica holds the lock")
+                return
+            recorded = await scan_backlog(
+                async_session, interval_seconds=drift_scan_interval_seconds()
+            )
+        if recorded:
+            logger.info("score_drift_backlog: recorded %d executions", recorded)
+    except Exception as e:
+        logger.error("score_drift_backlog failed: %s", e, exc_info=True)
+
+
 def start_scheduler() -> None:
     """Start the APScheduler with the trigger check job."""
     scheduler = get_scheduler()
@@ -521,6 +536,16 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
 
+    scheduler.add_job(
+        score_drift_backlog,
+        trigger="interval",
+        seconds=drift_scan_interval_seconds(),
+        id="score_drift_backlog",
+        name="Score finished executions the drift hooks missed",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+    )
+
     # Monthly token quota reset (runs on the 1st of each month at midnight UTC)
     scheduler.add_job(
         reset_monthly_quotas,
@@ -543,15 +568,8 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
 
-    scheduler.add_job(
-        poll_platform_alerts,
-        trigger="interval",
-        seconds=max(15, int(os.environ.get("PLATFORM_ALERT_POLL_SECONDS", "60"))),
-        id="poll_platform_alerts",
-        name="Fan out firing Prometheus alerts to admins",
-        replace_existing=True,
-        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
-    )
+    # Platform alerts arrive by Alertmanager webhook (routers/admin_alerts.py),
+    # the Prometheus poller that used to run here is gone.
 
     scheduler.start()
     logger.info("Cron trigger scheduler started (checking every 30 seconds)")
@@ -569,93 +587,6 @@ async def _nightly_archive() -> None:
             await run_all_archives(async_session)
     except Exception as e:
         logger.exception("nightly archive failed: %s", e)
-
-
-def _platform_alerts_enabled() -> bool:
-    return os.environ.get("PLATFORM_ALERTS_ENABLED", "true").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-
-
-async def _alert_recently_notified(db, name: str, cutoff: datetime) -> bool:
-    from sqlalchemy import select
-
-    from models.notification import Notification
-
-    r = await db.execute(
-        select(Notification.id)
-        .where(
-            Notification.type == "system_alert",
-            Notification.metadata_["source"].astext == "prometheus",
-            Notification.metadata_["alertname"].astext == name,
-            Notification.created_at > cutoff,
-        )
-        .limit(1)
-    )
-    return r.first() is not None
-
-
-_prom_unreachable_logged = False
-
-
-async def poll_platform_alerts() -> None:
-    """Pull firing alerts from Prometheus and fan them out to admins + Slack.
-
-    Dedupe is DB-backed (last system_alert for the same alertname within
-    PLATFORM_ALERT_DEDUPE_MINUTES), so it holds across replicas and restarts.
-    """
-    global _prom_unreachable_logged
-    if not _platform_alerts_enabled():
-        return
-    dedupe_minutes = int(os.environ.get("PLATFORM_ALERT_DEDUPE_MINUTES", "30"))
-    try:
-        async with advisory_lock(ALERTS_LOCK_KEY) as held:
-            if not held:
-                return
-            from app.routers.admin_alerts import fetch_prometheus_alerts
-
-            try:
-                alerts = await fetch_prometheus_alerts()
-            except Exception as exc:
-                if not _prom_unreachable_logged:
-                    logger.warning("poll_platform_alerts: %s", exc)
-                    _prom_unreachable_logged = True
-                return
-            _prom_unreachable_logged = False
-            firing = [a for a in alerts if a.get("state") == "firing"]
-            if not firing:
-                return
-
-            from app.core.deps import async_session
-            from app.core.notifications import notify_platform_alert
-
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=dedupe_minutes)
-            sent = 0
-            async with async_session() as db:
-                for alert in firing:
-                    name = alert.get("name") or "unknown"
-                    if await _alert_recently_notified(db, name, cutoff):
-                        continue
-                    sent += await notify_platform_alert(
-                        db,
-                        name=name,
-                        severity=alert.get("severity") or "info",
-                        summary=alert.get("summary") or alert.get("description") or "",
-                        since=alert.get("active_since"),
-                        labels=alert.get("labels") or {},
-                    )
-                await db.commit()
-            if sent:
-                logger.info(
-                    "poll_platform_alerts: %d firing, %d notifications sent",
-                    len(firing),
-                    sent,
-                )
-    except Exception as e:
-        logger.error("poll_platform_alerts failed: %s", e, exc_info=True)
 
 
 def stop_scheduler() -> None:

@@ -171,6 +171,15 @@ async def resolve_tools(
         tool_settings: dict[str, dict[str, Any]] = conn.get("tool_settings") or {}
         label = _server_label(conn)
 
+        # Rows discovery flagged as orphaned are never registered, the model is told why.
+        for orphan in conn.get("orphaned_tools") or []:
+            warnings.append(
+                f"tool {orphan} on server {label} is no longer offered, "
+                "remove it from the agent or re-add it on the server"
+            )
+        if not allowed_tools and conn.get("orphaned_tools"):
+            continue
+
         client = MCPClient(
             server_url=server_url,
             auth_type=auth_type,
@@ -306,7 +315,11 @@ async def load_agent_mcp_connections(
                 "auth_config": decrypt(conn.tenant_id, conn.auth_config) or {},
                 "tools": [],
                 "tool_settings": {},
+                "orphaned_tools": [],
             }
+        if getattr(tool, "is_orphaned", False):
+            mcp_conns[key]["orphaned_tools"].append(tool.tool_name)
+            continue
         mcp_conns[key]["tools"].append(tool.tool_name)
         mcp_conns[key]["tool_settings"][tool.tool_name] = {
             "approval_required": bool(tool.approval_required),
