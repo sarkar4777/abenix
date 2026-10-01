@@ -239,6 +239,18 @@ sharedData:
   storageClass: ""
   storageSize: "20Gi"
 
+# Execution archives. Dumps go to the objectStorage backend above under
+# archives/<tenant>/<run>.jsonl.gz. In local mode they land on /data/archives,
+# which is pod-local unless this PVC is on. Mounting it also needs
+# api.archivesPVC.enabled so the api subchart picks the claim up.
+archives:
+  pvc:
+    enabled: false
+    claimName: abenix-archives
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    storageSize: 10Gi
+
 meeting:
   # LiveKit connection for the Meeting Representative agent. Set these in
   # the tenant's secret or override per-environment via `helm --set`.
@@ -330,16 +342,29 @@ scaling:
     enabled: false
   pools: []
 
-# Platform alert delivery. The API scheduler polls Prometheus for firing
-# alerts and fans them out to tenant admins (in-app + WS) and Slack
-# (ABENIX_SLACK_WEBHOOK_URL / per-tenant webhook). No Alertmanager needed.
+# Platform alert delivery. Prometheus rules fire into the chart's
+# Alertmanager, which posts to the API webhook. The API fans each alert
+# out to tenant admins (in-app + WS) and Slack (per-tenant webhook or
+# ABENIX_SLACK_WEBHOOK_URL). The token the webhook checks is
+# secrets.alertWebhookToken (auto-generated when empty).
 alerting:
   prometheusUrl: ""  # empty = http://<release>-prometheus.<ns>.svc.cluster.local:9090
+  alertmanagerUrl: ""  # empty = http://<release>-alertmanager.<ns>.svc.cluster.local:9093
+  alertmanager:
+    enabled: true
+    image: prom/alertmanager:v0.27.0
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { cpu: 200m, memory: 256Mi }
+  # Optional second receiver: Alertmanager posts straight to this Slack hook.
+  slackWebhookUrl: ""
+  slackChannel: ""
+  repeatInterval: 4h
+  resolveTimeout: 5m
+  # Re-notify the same alert fingerprint at most once per window.
+  dedupeMinutes: 30
   platformAlerts:
     enabled: true
-    pollSeconds: 60
-    # Re-notify the same alertname at most once per window.
-    dedupeMinutes: 30
 
 # Progress pub/sub namespacing — overridden per tenant/app deployment.
 # Defaults are generic ("progress:", "parent:") so the engine doesn't
@@ -377,6 +402,8 @@ secrets:
   anthropicApiKey: ""
   # Claude Pro/Max subscription token (`claude setup-token`). Optional.
   claudeSubscriptionToken: ""
+  # Alertmanager -> API webhook bearer token. Empty = generated once per install.
+  alertWebhookToken: ""
   neo4jPassword: ""
   openaiApiKey: ""
   pineconeApiKey: ""
@@ -388,6 +415,17 @@ secrets:
   # the admin screen and persona memory. Keep it stable, a changed KEK makes
   # stored values unreadable and they have to be entered again.
   dataKeyKekBase64: ""
+  # Edge bundle signing. RSA-2048 private key PEM the API signs .agent bundles
+  # with, required outside dev. Deploy scripts pass it with --set-file from
+  # EDGE_SIGNING_KEY_FILE. The pubkey is informational on the API, gateways
+  # fetch it from GET /api/edge/signing-key.
+  edgeSigningKeyPem: ""
+  edgeSigningPubkeyPem: ""
+
+# Edge gateway signing policy. allowUnsigned lets a gateway load bundles with
+# no signature, local development only, never true on a shared cluster.
+edge:
+  allowUnsigned: false
 
 # Azure OpenAI embedding deployment name. Worker + agent-runtime prefer
 # Azure when AZURE_OPENAI_API_KEY + endpoint are set; the direct OpenAI

@@ -63,6 +63,15 @@ class ArchiveRun(Base, UUIDMixin, TimestampMixin):
     file_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     file_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Object-storage key (archives/{tenant}/{run}.jsonl.gz) and the backend it sits on
+    storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    storage_backend: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    restored_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    restored_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    restore_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     oldest_row_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -84,6 +84,11 @@ def is_admin(user: User) -> bool:
     return role.lower() == "admin"
 
 
+def sees_other_users_resources(user: User) -> bool:
+    # Tenant-wide list visibility comes from the role table, not the role name.
+    return bool(features_for(user).get("see_other_users_resources"))
+
+
 async def accessible_resource_ids(
     db: AsyncSession,
     user: User,
@@ -124,18 +129,14 @@ def apply_resource_scope(
     """Add the right WHERE clause to a SQLAlchemy `select(model)` based"""
     creator_col = getattr(model, creator_field, None)
     tenant_col = getattr(model, tenant_field, None)
-    role_str = (
-        user.role.value if hasattr(user.role, "value") else str(user.role)
-    ).lower()
-    is_admin_user = role_str == "admin"
+    sees_all = sees_other_users_resources(user)
 
     # Always tenant-scoped — never leak across tenants.
     base = [tenant_col == user.tenant_id] if tenant_col is not None else []
 
-    if scope == "tenant" or (scope == "all" and is_admin_user):
-        # Admin sees everything in the tenant; explicit tenant scope
-        # is admin-only (members get rejected before this gets called
-        # in the router).
+    if scope == "tenant" or (scope == "all" and sees_all):
+        # see_other_users_resources widens the default scope to the tenant,
+        # explicit tenant scope is rejected in the router for everyone else.
         return query.where(*base)
 
     if scope == "mine":

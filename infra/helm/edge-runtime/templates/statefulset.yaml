@@ -58,6 +58,10 @@ spec:
               value: {{ .Values.endpoint_url | quote }}
             - name: SIGNING_PUBKEY_PATH
               value: /etc/edge/signing_pub.pem
+            - name: EDGE_ALLOW_UNSIGNED
+              value: {{ .Values.allow_unsigned | default false | toString | quote }}
+            - name: TENANT_ID
+              value: {{ .Values.tenant_id | default "" | quote }}
             - name: BUNDLE_DIR
               value: /var/edge/agents
             - name: ANTHROPIC_API_KEY

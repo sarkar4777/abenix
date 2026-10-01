@@ -1,0 +1,27 @@
+{{- if and .Values.archives.pvc.enabled (eq (.Values.objectStorage.type | default "local") "local") }}
+# Archive dumps in local object-storage mode. Mounted at /data/archives on
+# the api pod so dumps outlive a pod restart. Unused when objectStorage.type
+# is s3 or azure, the archiver writes straight to the bucket then.
+#
+# More than one api replica needs a ReadWriteMany class (azurefile-csi,
+# NFS, EFS). ReadWriteOnce is fine on single-node dev.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.archives.pvc.claimName | default "abenix-archives" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: archives
+    app.kubernetes.io/part-of: abenix
+spec:
+  accessModes:
+    - {{ .Values.archives.pvc.accessMode | default "ReadWriteOnce" }}
+  {{- /* See ml-models-pvc.yaml: an empty storageClassName disables dynamic
+        provisioning, so only emit it when an operator named a class. */}}
+  {{- with .Values.archives.pvc.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.archives.pvc.storageSize | default "10Gi" }}
+{{- end }}

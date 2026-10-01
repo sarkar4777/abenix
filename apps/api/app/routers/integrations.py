@@ -95,4 +95,8 @@ async def tool_integrations(user: User = Depends(get_current_user)) -> JSONRespo
     """
     from app.services import tool_config
 
-    return success(await tool_config.catalogue(include_values=False, force=False))
+    return success(
+        await tool_config.catalogue(
+            include_values=False, force=False, tenant_id=user.tenant_id
+        )
+    )

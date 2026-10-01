@@ -48,7 +48,7 @@ spec:
           # The PVC mount at /data/ml-models lands under hostPath /data,
           # so the init container must mount it too — chmod must touch
           # the share itself, not the hostPath subdirectory it hides.
-          command: ['sh', '-c', 'mkdir -p /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache && chmod 777 /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache']
+          command: ['sh', '-c', 'mkdir -p /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache /data/archives && chmod 777 /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache /data/archives']
           securityContext:
             runAsUser: 0
             runAsNonRoot: false
@@ -58,6 +58,10 @@ spec:
             {{- if .Values.mlModelsPVC.enabled }}
             - name: ml-models
               mountPath: /data/ml-models
+            {{- end }}
+            {{- if and .Values.archivesPVC .Values.archivesPVC.enabled }}
+            - name: archives
+              mountPath: /data/archives
             {{- end }}
           resources:
             requests:
@@ -142,6 +146,12 @@ spec:
             - name: ml-models
               mountPath: /data/ml-models
             {{- end }}
+            {{- if and .Values.archivesPVC .Values.archivesPVC.enabled }}
+            # Archive dumps in local object-storage mode, see the umbrella
+            # archives-pvc.yaml. Keeps them off the pod-local /data overlay.
+            - name: archives
+              mountPath: /data/archives
+            {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -158,6 +168,11 @@ spec:
         - name: ml-models
           persistentVolumeClaim:
             claimName: {{ .Values.mlModelsPVC.claimName | default "ml-models-storage" }}
+        {{- end }}
+        {{- if and .Values.archivesPVC .Values.archivesPVC.enabled }}
+        - name: archives
+          persistentVolumeClaim:
+            claimName: {{ .Values.archivesPVC.claimName | default "abenix-archives" }}
         {{- end }}
         - name: tmp
           emptyDir: {}

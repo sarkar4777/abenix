@@ -5,12 +5,17 @@ import { KeyRound } from 'lucide-react';
 
 export type ToolCredentialStatus = 'configured' | 'missing' | 'optional' | 'none';
 
+/** Where a value comes from, highest first. 'tenant' is a row saved for the caller's tenant, 'stored' one saved for the platform. */
+export type ToolCredentialSource = 'override' | 'tenant' | 'stored' | 'env' | 'file' | 'default' | 'unset';
+
 export interface ToolConfigField {
   key: string;
   label?: string;
   required: boolean;
   is_set: boolean;
-  source: string;
+  source: ToolCredentialSource | string;
+  tenant_source?: 'tenant' | 'unset';
+  platform_source?: ToolCredentialSource | string;
   signup_url?: string;
 }
 
@@ -45,10 +50,11 @@ export function CredentialBadge({
   if (!config || config.status === 'none') return null;
   const s = STYLE[config.status];
   const missing = missingKeys(config).map((f) => f.key);
+  const fromTenant = config.fields.filter((f) => f.source === 'tenant').length;
   const title =
     config.status === 'configured'
-      ? `All ${config.fields.length} configured value(s) present`
-      : `Not set: ${missing.join(', ')}. An admin adds these under Admin -> Tool Configuration.`;
+      ? `All ${config.fields.length} configured value(s) present${fromTenant ? `, ${fromTenant} saved for this tenant` : ''}`
+      : `Not set for this tenant: ${missing.join(', ')}. An admin adds these under Admin -> Tool Configuration.`;
   return (
     <span
       title={title}

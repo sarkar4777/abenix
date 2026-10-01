@@ -465,6 +465,70 @@ async def _notify_trigger_failure(
     )
 
 
+def trigger_outcome_status(status: Any) -> str:
+    return "completed" if str(status or "").lower() == "completed" else "failed"
+
+
+async def write_trigger_outcome(
+    session_factory: Any,
+    execution_id: str,
+    status: str,
+    error: str | None,
+    *,
+    trigger_id: str | None = None,
+) -> bool:
+    """Stamp last_status / last_run_at on the trigger that fired this execution.
+
+    Executions do not carry a trigger column, so the id comes from the queue
+    payload. A failed outcome also notifies the owner, which is where the
+    error text lands since agent_triggers has no last_error column.
+    """
+    if not trigger_id:
+        return False
+    import logging
+
+    from sqlalchemy import update
+
+    try:
+        tid = uuid.UUID(str(trigger_id))
+    except ValueError:
+        return False
+    outcome = trigger_outcome_status(status)
+    async with session_factory() as db:
+        r = await db.execute(
+            update(AgentTrigger)
+            .where(AgentTrigger.id == tid)
+            .values(last_status=outcome, last_run_at=datetime.now(timezone.utc))
+        )
+        await db.commit()
+        updated = (getattr(r, "rowcount", 0) or 0) > 0
+        if not updated or outcome != "failed":
+            return updated
+        try:
+            row = (
+                await db.execute(
+                    select(AgentTrigger.created_by, AgentTrigger.tenant_id).where(
+                        AgentTrigger.id == tid
+                    )
+                )
+            ).first()
+            if row and row[0]:
+                await _notify_trigger_failure(
+                    db,
+                    tenant_id=row[1],
+                    user_id=row[0],
+                    trigger_id=str(tid),
+                    execution_id=str(execution_id),
+                    error=str(error or "execution failed"),
+                )
+                await db.commit()
+        except Exception as exc:
+            logging.getLogger("abenix.triggers").warning(
+                "trigger %s failure notice skipped: %s", tid, exc
+            )
+    return updated
+
+
 @router.post("/webhook/{token}")
 async def receive_webhook(
     token: str,

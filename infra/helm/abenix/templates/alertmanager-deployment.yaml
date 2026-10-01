@@ -1,0 +1,78 @@
+{{- /*
+Single-replica Alertmanager. Prometheus (infra/observability/prometheus.yaml)
+sends it firing rules, it posts them to the API webhook. The webhook token
+comes from abenix-secrets so the API and Alertmanager always agree on it.
+*/}}
+{{- $alerting := default dict .Values.alerting }}
+{{- $am := default dict $alerting.alertmanager }}
+{{- $amEnabled := true }}
+{{- if hasKey $am "enabled" }}{{- $amEnabled = $am.enabled }}{{- end }}
+{{- if $amEnabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-alertmanager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alertmanager
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/alertmanager-configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: alertmanager
+          image: {{ default "prom/alertmanager:v0.27.0" $am.image }}
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --web.listen-address=:9093
+          ports:
+            - name: http
+              containerPort: 9093
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: token
+              mountPath: /etc/alertmanager/secrets
+              readOnly: true
+            - name: storage
+              mountPath: /alertmanager
+          resources:
+            {{- toYaml (default (dict "requests" (dict "cpu" "20m" "memory" "64Mi") "limits" (dict "cpu" "200m" "memory" "256Mi")) $am.resources) | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-alertmanager-config
+        - name: token
+          secret:
+            secretName: abenix-secrets
+            items:
+              - key: ALERT_WEBHOOK_TOKEN
+                path: token
+        - name: storage
+          emptyDir:
+            sizeLimit: 256Mi
+{{- end }}

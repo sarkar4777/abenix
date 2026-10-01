@@ -329,6 +329,7 @@ async def _mark_done(
     failure_code: str | None = None,
     model_used: str | None = None,
     confidence_score: float | None = None,
+    trigger_id: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import select, update
@@ -416,6 +417,66 @@ async def _mark_done(
             .values(**values)
         )
         await db.commit()
+    try:
+        await _after_terminal(execution_id, status, error, trigger_id)
+    except Exception as e:
+        logger.warning(
+            "consumer: terminal follow-ups failed for %s: %s", execution_id, e
+        )
+
+
+async def _write_trigger_outcome_fallback(
+    Session: Any, status: str, trigger_id: str
+) -> None:
+    """Same columns write_trigger_outcome touches, for the slim runtime image."""
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    async with Session() as db:
+        await db.execute(
+            text(
+                "UPDATE agent_triggers SET last_status = :s, last_run_at = :t "
+                "WHERE id = :id"
+            ),
+            {
+                "s": "completed" if status == "completed" else "failed",
+                "t": datetime.now(timezone.utc),
+                "id": uuid.UUID(str(trigger_id)),
+            },
+        )
+        await db.commit()
+
+
+async def _after_terminal(
+    execution_id: str, status: str, error: str | None, trigger_id: str | None
+) -> None:
+    """Best-effort follow-ups once the row is terminal: drift scoring, trigger status."""
+    Session = await _get_session_factory()
+    record = None
+    try:
+        from app.services.execution_hooks import record_terminal_by_id as record
+    except Exception:
+        # Runtime image ships without app.services, the scheduler backlog scan covers it
+        logger.debug("consumer: execution_hooks unavailable for %s", execution_id)
+    if record is not None:
+        try:
+            await record(Session, execution_id)
+        except Exception as e:
+            logger.warning("consumer: drift record skipped for %s: %s", execution_id, e)
+    if not trigger_id:
+        return
+    writer = None
+    try:
+        from app.routers.triggers import write_trigger_outcome as writer
+    except Exception:
+        writer = None
+    try:
+        if writer is not None:
+            await writer(Session, execution_id, status, error, trigger_id=trigger_id)
+        else:
+            await _write_trigger_outcome_fallback(Session, status, trigger_id)
+    except Exception as e:
+        logger.warning("consumer: trigger %s outcome write failed: %s", trigger_id, e)
 
 
 _redis_pool: Any = None
@@ -486,6 +547,7 @@ async def _run_one(payload: dict) -> None:
     context = payload.get("context") or {}
     api_key_id = payload.get("api_key_id") or None
     user_id = payload.get("user_id") or None
+    trigger_id = payload.get("trigger_id") or None
 
     loaded = await _load_execution(execution_id)
     if loaded is None:
@@ -504,6 +566,9 @@ async def _run_one(payload: dict) -> None:
 
     agent_name = loaded["agent_name"]
     tenant_id = loaded["tenant_id"]
+    from engine.credentials import set_tenant as _set_credential_tenant
+
+    _set_credential_tenant(tenant_id)
     is_pipeline = loaded["is_pipeline"]
 
     await _publish(
@@ -684,6 +749,7 @@ async def _run_one(payload: dict) -> None:
                 failure_code=(
                     None if pipeline_status == "completed" else "PIPELINE_NODE_FAILED"
                 ),
+                trigger_id=trigger_id,
             )
             # Debit api_keys / users so customer quotas stay enforced on
             # queue-routed pipeline runs. Pipelines aggregate token counts
@@ -1013,6 +1079,7 @@ async def _run_one(payload: dict) -> None:
                 failure_code=_final_code,
                 model_used=_last_done.get("effective_model") or _last_done.get("model"),
                 confidence_score=_last_done.get("confidence_score"),
+                trigger_id=trigger_id,
             )
             # Debit api_keys / users counters — the inline path does this
             # via app.core.usage.update_user_usage; queue-routed runs need
@@ -1058,6 +1125,7 @@ async def _run_one(payload: dict) -> None:
             str(e)[:2000],
             trace_id=_tid_fail,
             tool_calls=_agg_tool_calls or None,
+            trigger_id=trigger_id,
         )
         # Classify + emit the runtime-side terminal outcome. Without this,
         # every remote-runtime failure left active_executions stuck +1

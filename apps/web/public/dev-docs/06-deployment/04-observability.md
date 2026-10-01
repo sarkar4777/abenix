@@ -157,17 +157,47 @@ Log format is structured JSON in production (`LOG_FORMAT=json`). Each line:
 
 ## Alerts
 
-The helm chart provisions a basic alert set in `infra/prometheus/alerts.yaml`:
+Rule files ship as ConfigMaps from the helm chart (`templates/prometheus-rules.yaml` and `templates/scaling-alerts.yaml`) and are mounted on the thin Prometheus pod:
 
 | Alert | Fires when |
 |---|---|
 | `HighErrorRate` | 5xx rate on `abenix-api` > 5% for 5min |
-| `ExecutionFailureSpike` | `executions_failed_total` rate doubles in 10min |
-| `LLMSpendBurst` | `llm_cost_usd_total` rate > $10/hour |
-| `QueueBacklog` | `queue_depth{subject=~"exec\\..*"}` > 100 for 10min |
-| `PodCrashLooping` | container restart count > 5 in 15min |
+| `HighLatency` | API p95 latency > 2s for 10min |
+| `ExecutionFailureRate` | failed executions > 20% of completed for 10min |
+| `PostgresDown` / `RedisDown` | health check reports the component down for 2min |
+| P1 to P4 scaling alerts | see `SCALING_PLAN.md` section 7 |
 
-Alerts route to whatever you've configured in Grafana / Alertmanager — Slack + email by default for the demo tenant.
+### How an alert reaches you
+
+```
+Prometheus rule  ->  Alertmanager (chart)  ->  POST /api/admin/alerts/webhook  ->  in-app + Slack
+```
+
+1. Prometheus evaluates the rules and sends firing and resolved alerts to `<release>-alertmanager:9093`.
+2. Alertmanager groups by `alertname` and `severity`, waits 30s, repeats at most every 4h (`alerting.repeatInterval`) and resolves after 5m without data (`alerting.resolveTimeout`).
+3. Every group goes to the `abenix-api` receiver, a webhook at `http://<release>-api:8000/api/admin/alerts/webhook` with `Authorization: Bearer <token>`. The token is `ALERT_WEBHOOK_TOKEN` in `abenix-secrets`, generated once per install and kept across upgrades.
+4. The API validates the token, dedupes by alert fingerprint for `alerting.dedupeMinutes`, then writes one `system_alert` notification per active admin and posts once per distinct Slack webhook (per-tenant hook or `ABENIX_SLACK_WEBHOOK_URL`). Resolved alerts arrive the same way with a `[RESOLVED]` title.
+5. When `alerting.slackWebhookUrl` is set, Alertmanager also posts the raw alert to that hook through a second receiver.
+
+The `/alerts` page reads current alerts from Alertmanager `/api/v2/alerts` (so it can show silenced and inhibited ones) and falls back to the Prometheus `/api/v1/alerts` proxy when Alertmanager is unreachable. The badge next to the heading says which backend answered.
+
+### Values
+
+| Value | Default | Meaning |
+|---|---|---|
+| `alerting.alertmanager.enabled` | `true` | Ship the Alertmanager Deployment, Service and ConfigMap. Off means the page only has the Prometheus fallback and nothing pushes to the webhook |
+| `alerting.slackWebhookUrl` | `""` | Optional second Slack receiver on Alertmanager itself |
+| `alerting.dedupeMinutes` | `30` | Window in which the same fingerprint is not re-notified by the API |
+| `secrets.alertWebhookToken` | `""` | Webhook bearer token. Empty means the chart generates one and keeps it on upgrade |
+
+Prometheus itself is deployed from `infra/observability/prometheus.yaml`. Its `prometheus.yml` needs this stanza for the hand-off to happen:
+
+```yaml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['abenix-alertmanager.abenix.svc.cluster.local:9093']
+```
 
 ---
 

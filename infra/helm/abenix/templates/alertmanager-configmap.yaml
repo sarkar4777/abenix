@@ -1,0 +1,57 @@
+{{- /*
+Alertmanager routing. Every alert goes to the API webhook, which fans out
+in-app + Slack. A second Slack receiver is wired only when
+alerting.slackWebhookUrl is set. The webhook token is read from the
+abenix-secrets mount so this ConfigMap stays free of secrets.
+*/}}
+{{- $alerting := default dict .Values.alerting }}
+{{- $am := default dict $alerting.alertmanager }}
+{{- $amEnabled := true }}
+{{- if hasKey $am "enabled" }}{{- $amEnabled = $am.enabled }}{{- end }}
+{{- if $amEnabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-alertmanager-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: {{ default "5m" $alerting.resolveTimeout }}
+    route:
+      receiver: abenix-api
+      group_by: ['alertname', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: {{ default "4h" $alerting.repeatInterval }}
+      routes:
+        {{- if $alerting.slackWebhookUrl }}
+        - receiver: slack
+          continue: true
+        {{- end }}
+        - receiver: abenix-api
+    receivers:
+      - name: abenix-api
+        webhook_configs:
+          - url: http://{{ .Release.Name }}-api:8000/api/admin/alerts/webhook
+            send_resolved: true
+            max_alerts: 0
+            http_config:
+              authorization:
+                type: Bearer
+                credentials_file: /etc/alertmanager/secrets/token
+      {{- if $alerting.slackWebhookUrl }}
+      - name: slack
+        slack_configs:
+          - api_url: {{ $alerting.slackWebhookUrl | quote }}
+            send_resolved: true
+            {{- if $alerting.slackChannel }}
+            channel: {{ $alerting.slackChannel | quote }}
+            {{- end }}
+            title: {{ `'[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'` }}
+            text: {{ `'{{ range .Alerts }}{{ .Annotations.summary }}{{ "\n" }}{{ end }}'` }}
+      {{- end }}
+{{- end }}

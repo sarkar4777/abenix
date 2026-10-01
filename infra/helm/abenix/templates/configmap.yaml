@@ -9,6 +9,8 @@ data:
   ENVIRONMENT: {{ .Values.environment | default "production" | quote }}
   DEBUG: {{ if eq (.Values.environment | default "production") "production" }}"false"{{ else }}"true"{{ end }}
   LOG_LEVEL: {{ .Values.logLevel | default "info" | quote }}
+  # Edge signing policy, the API logs an error when this is true outside dev
+  EDGE_ALLOW_UNSIGNED: {{ if and .Values.edge .Values.edge.allowUnsigned }}"true"{{ else }}"false"{{ end }}
   PGSSLMODE: "disable"
   RUNTIME_MODE: {{ .Values.runtimeMode | default "embedded" | quote }}
   RUNTIME_URL: "http://{{ .Release.Name }}-agent-runtime:8001"
@@ -16,13 +18,19 @@ data:
   # backend instead of running them inline. Requires per-pool
   # Deployments (scaling.enabled) + a valid queueBackend selection.
   SCALING_EXEC_REMOTE: {{ .Values.scaling.execRemote | default false | quote }}
-  # Platform alert poller (apps/api/app/core/scheduler.py poll_platform_alerts).
+  # Platform alerts: Alertmanager posts to /api/admin/alerts/webhook, the
+  # alerts page reads Alertmanager first and falls back to Prometheus.
   {{- $alerting := default dict .Values.alerting }}
   {{- $platformAlerts := default dict $alerting.platformAlerts }}
+  {{- $am := default dict $alerting.alertmanager }}
+  {{- $amEnabled := true }}
+  {{- if hasKey $am "enabled" }}{{- $amEnabled = $am.enabled }}{{- end }}
   PROMETHEUS_URL: {{ default (printf "http://%s-prometheus.%s.svc.cluster.local:9090" .Release.Name .Release.Namespace) $alerting.prometheusUrl | quote }}
+  {{- if $amEnabled }}
+  ALERTMANAGER_URL: {{ default (printf "http://%s-alertmanager.%s.svc.cluster.local:9093" .Release.Name .Release.Namespace) $alerting.alertmanagerUrl | quote }}
+  {{- end }}
   PLATFORM_ALERTS_ENABLED: {{ (hasKey $platformAlerts "enabled" | ternary $platformAlerts.enabled true) | quote }}
-  PLATFORM_ALERT_POLL_SECONDS: {{ default 60 $platformAlerts.pollSeconds | quote }}
-  PLATFORM_ALERT_DEDUPE_MINUTES: {{ default 30 $platformAlerts.dedupeMinutes | quote }}
+  PLATFORM_ALERT_DEDUPE_MINUTES: {{ default (default 30 $platformAlerts.dedupeMinutes) $alerting.dedupeMinutes | quote }}
   QUEUE_BACKEND: {{ default "celery" .Values.scaling.queueBackend | quote }}
   {{- if eq (default "celery" .Values.scaling.queueBackend) "nats" }}
   NATS_URL: "nats://{{ .Release.Name }}-nats:4222"

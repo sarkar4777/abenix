@@ -17,6 +17,7 @@ from starlette.responses import StreamingResponse
 
 from app.core.audit import log_action
 from app.core.config import settings
+from app.core.permissions import sees_other_users_resources
 from app.core.deps import get_current_user, get_db
 from app.core.notifications import create_notification
 from app.core.responses import error, success
@@ -45,73 +46,6 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 # Lazy singleton for cache orchestrator
 _cache_orchestrator: Any = None
-
-
-class _StopDrift(Exception):
-    """Sentinel used to short-circuit the drift try-block when the toggle is off."""
-
-    pass
-
-
-async def _persist_drift_alerts(
-    db: AsyncSession,
-    drift_alerts: list[Any],
-    agent: Agent,
-    execution_id: str,
-) -> None:
-    """Turn dataclass DriftAlert instances returned by DriftDetector into DB
-    rows so they show up at GET /api/analytics/drift-alerts and in the UI."""
-    if not drift_alerts:
-        return
-    import uuid as _uuid
-    from models.drift_alert import DriftAlert as DriftAlertRow
-
-    for a in drift_alerts:
-        try:
-            db.add(
-                DriftAlertRow(
-                    tenant_id=agent.tenant_id,
-                    agent_id=agent.id,
-                    execution_id=_uuid.UUID(execution_id) if execution_id else None,
-                    severity=a.severity,
-                    metric=a.metric_name,
-                    baseline_value=a.baseline_value,
-                    current_value=a.current_value,
-                    deviation_pct=a.deviation_pct,
-                    acknowledged=False,
-                )
-            )
-        except Exception:
-            continue
-    try:
-        await db.commit()
-    except Exception:
-        await db.rollback()
-
-
-async def _drift_enabled(agent: Agent | None) -> bool:
-    """Three-level toggle (most specific wins):"""
-    import os as _os
-
-    if agent is not None:
-        cfg = agent.model_config_ or {}
-        if cfg.get("drift_detection") is False:
-            return False
-    # Tenant-level Redis override
-    if agent is not None and getattr(agent, "tenant_id", None):
-        try:
-            import redis.asyncio as aioredis
-            from app.core.config import settings
-
-            r = aioredis.from_url(str(settings.redis_url), decode_responses=True)
-            raw = await r.get(f"drift:config:enabled:{agent.tenant_id}")
-            await r.aclose()
-            if raw is not None:
-                return raw.strip().lower() not in ("0", "false", "no", "off")
-        except Exception:
-            pass
-    env = (_os.environ.get("DRIFT_DETECTION_ENABLED", "true") or "").strip().lower()
-    return env not in ("0", "false", "no", "off")
 
 
 def _merge_tool_trace(tool_calls: list[dict[str, Any]], trace: dict[str, Any]) -> None:
@@ -346,7 +280,7 @@ async def list_agents(
     if scope == "prebuilt":
         # Only pre-built (OOB) agents — used by the "Pre-Built" UI tab
         visibility = Agent.agent_type == AgentType.OOB
-    elif is_admin(user) and scope in ("all", "tenant"):
+    elif sees_other_users_resources(user) and scope in ("all", "tenant"):
         visibility = or_(
             Agent.tenant_id == user.tenant_id,
             Agent.agent_type == AgentType.OOB,
@@ -1182,6 +1116,12 @@ async def duplicate_agent(
     source = result.scalar_one_or_none()
     if not source:
         return error("Agent not found", 404)
+
+    from app.services.agent_share import resolve_agent_access
+
+    # VIEW is enough to copy, the clone runs under the copier's own grants
+    if not await resolve_agent_access(db, user, source):
+        return error("You do not have access to this agent", 403)
 
     new_slug = f"{source.slug}-copy-{uuid.uuid4().hex[:6]}"
 
@@ -2756,43 +2696,13 @@ async def _non_stream_pipeline_execution(
     }
     await db.commit()
 
-    # Drift detection for pipeline executions (gated by env + tenant + agent)
+    # Drift detection, the hook gates on env + tenant + agent and dedupes
+    _total_cost = 0.0
     try:
-        from app.core.config import settings
+        from app.services.execution_hooks import execution_metrics, record_terminal
 
-        _ag_q = await db.execute(select(Agent).where(Agent.id == execution.agent_id))
-        _ag = _ag_q.scalar_one_or_none()
-        if _ag and await _drift_enabled(_ag):
-            # Aggregate per-node counters across the pipeline
-            _total_in = 0
-            _total_out = 0
-            _total_cost = 0.0
-            _tool_fails = 0
-            _tool_calls = 0
-            for _nid, _nr in (serialized.get("node_results") or {}).items():
-                o = _nr.get("output") if isinstance(_nr, dict) else None
-                if isinstance(o, dict):
-                    _total_in += int(o.get("input_tokens", 0) or 0)
-                    _total_out += int(o.get("output_tokens", 0) or 0)
-                    _total_cost += float(o.get("cost", 0) or 0)
-                    _tool_calls += int(o.get("tool_calls_count", 1) or 1)
-                    if _nr.get("status") == "failed":
-                        _tool_fails += 1
-            from engine.drift_detection import DriftDetector
-
-            detector = DriftDetector(redis_url=str(settings.redis_url))
-            _alerts = await detector.record_execution(
-                agent_id=str(execution.agent_id),
-                duration_ms=int(result.total_duration_ms or 0),
-                input_tokens=_total_in,
-                output_tokens=_total_out,
-                cost=_total_cost,
-                confidence=1.0,
-                output_length=len(execution.output_message or ""),
-                tool_failures=_tool_fails,
-                total_tool_calls=max(_tool_calls, 1),
-            )
-            await _persist_drift_alerts(db, _alerts, _ag, str(execution.id))
+        _total_cost = execution_metrics(execution)["cost"]
+        await record_terminal(db, execution)
     except Exception:
         pass
 
@@ -3293,35 +3203,13 @@ async def _stream_execution(
                 )
             await db.commit()
 
-            # Record drift detection data (gated by env + tenant + per-agent toggle)
+            # Drift detection, the hook gates on env + tenant + agent and dedupes
             try:
-                _agent_q = await db.execute(select(Agent).where(Agent.id == agent_id))
-                _agent_for_drift = _agent_q.scalar_one_or_none()
-                if _agent_for_drift and await _drift_enabled(_agent_for_drift):
-                    from engine.drift_detection import DriftDetector
+                from app.services.execution_hooks import record_terminal
 
-                    detector = DriftDetector(redis_url=str(settings.redis_url))
-                    _drift_alerts = await detector.record_execution(
-                        agent_id=str(agent_id),
-                        duration_ms=final_data.get("duration_ms", 0) or 0,
-                        input_tokens=final_data.get("input_tokens", 0) or 0,
-                        output_tokens=final_data.get("output_tokens", 0) or 0,
-                        cost=float(final_data.get("cost", 0) or 0),
-                        confidence=final_data.get("confidence_score", 1.0) or 1.0,
-                        output_length=len(full_output),
-                        tool_failures=sum(
-                            1 for tc in all_tool_calls if tc.get("is_error")
-                        ),
-                        total_tool_calls=len(all_tool_calls),
-                    )
-                    await _persist_drift_alerts(
-                        db,
-                        _drift_alerts,
-                        _agent_for_drift,
-                        str(execution_id),
-                    )
+                await record_terminal(db, execution)
             except Exception:
-                pass  # Graceful degradation
+                pass
 
             # Mark live execution complete
             try:
@@ -3686,33 +3574,11 @@ async def _non_stream_execution(
             )
         await db.commit()
 
-        # Drift detection (gated by env + per-agent toggle)
+        # Drift detection, the hook gates on env + tenant + agent and dedupes
         try:
-            _agent_q = await db.execute(
-                select(Agent).where(Agent.id == execution.agent_id)
-            )
-            _agent_for_drift = _agent_q.scalar_one_or_none()
-            if not _agent_for_drift or not await _drift_enabled(_agent_for_drift):
-                raise _StopDrift()
-            from engine.drift_detection import DriftDetector
+            from app.services.execution_hooks import record_terminal
 
-            detector = DriftDetector(redis_url=str(settings.redis_url))
-            _drift_alerts = await detector.record_execution(
-                agent_id=str(execution.agent_id),
-                duration_ms=result.duration_ms or 0,
-                input_tokens=result.input_tokens or 0,
-                output_tokens=result.output_tokens or 0,
-                cost=float(result.cost or 0),
-                confidence=confidence or 1.0,
-                output_length=len(result.output or ""),
-                tool_failures=sum(
-                    1 for tc in (result.tool_calls or []) if tc.get("is_error")
-                ),
-                total_tool_calls=len(result.tool_calls or []),
-            )
-            await _persist_drift_alerts(
-                db, _drift_alerts, _agent_for_drift, str(execution.id)
-            )
+            await record_terminal(db, execution)
         except Exception:
             pass
 
