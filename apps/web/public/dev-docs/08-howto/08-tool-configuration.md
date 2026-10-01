@@ -10,13 +10,16 @@
 
 | Badge | Meaning |
 |---|---|
-| saved here | An admin saved it on this screen. Wins over everything below. |
+| saved for this tenant | An admin of your tenant saved it with the scope on "This tenant". Wins over everything below, for your tenant only. |
+| saved for the platform | An admin saved it with the scope on "Platform". The fallback for every tenant. |
 | from environment | Set on the pods by the deployment (helm values or the cluster secret). |
 | from tool_defaults.yaml | A default shipped in `packages/db/seeds/tool_defaults.yaml`. |
 | tool default | The value the tool declared. |
 | not set | Nothing provides it. |
 
-Paste a value and **Save**. Every pod picks it up within 30 seconds, no redeploy. **Clear saved value** removes what was saved so the next source applies again. **Test**, where offered, sends one request to the provider with the value you typed and reports what the provider answered.
+The switch at the top picks the scope you are editing. **This tenant** is the default and shows what your agents run with. **Platform** shows the fallback every tenant gets when it has not saved its own value, with tenant rows ignored. A row that your tenant overrides is marked "this tenant overrides" in the platform view so you know a platform change will not reach your agents. Any admin may write either scope. Platform writes are audited with the scope and tenant in the API log.
+
+Paste a value and **Save**. It is saved in the scope you picked. Every pod picks it up within 30 seconds, no redeploy. **Clear tenant value** or **Clear platform value** removes what was saved in that scope so the next source applies again. **Test**, where offered, sends one request to the provider with the value you typed and reports what the provider answered.
 
 A row marked **required** belongs to a tool that cannot run without it. The tool answers the agent with one sentence naming the key and this screen, so a user asking an agent to do something that needs a missing key is told exactly what to ask you for. Optional rows belong to tools that run in a degraded mode without them, and the tool says so in its answer.
 
@@ -26,7 +29,7 @@ Not on this screen: MCP tools carry their credentials on the MCP connection at `
 
 Where else the same information appears:
 
-- `/tools` shows a badge per tool, "needs key", "optional key" or "key set", and a Configure link for admins.
+- `/tools` shows a badge per tool, "needs key", "optional key" or "key set", resolved for the caller's tenant, and a Configure link for admins.
 - The builder palette shows the same badge, and the agent panel's checklist counts "tool credentials configured x/y" for the tools on the canvas.
 - `/settings/integrations` lists the same keys for everyone and tells non-admins to ask an admin.
 
@@ -36,16 +39,19 @@ Where else the same information appears:
 
 Precedence, highest first:
 
-1. a value saved on the admin screen, stored in `platform_settings` as `tool.credential.<KEY>`
-2. the process environment of the pod
-3. `packages/db/seeds/tool_defaults.yaml`
-4. the default the tool declared
+1. a value saved for the tenant, one row per `(tenant_id, key)` in `tenant_tool_credentials`
+2. a value saved for the platform, stored in `platform_settings` as `tool.credential.<KEY>`
+3. the process environment of the pod
+4. `packages/db/seeds/tool_defaults.yaml`
+5. the default the tool declared
 
-The environment is still a fine place for keys. Helm values and `.env` keep working, and the admin screen shows "from environment" for them. The screen is for the keys nobody thought of at deploy time and for rotation without a rollout.
+The tenant is the one whose agent is running. The executor sets it at the start of every run, the queue consumer sets it before it builds an executor, and a tool built with its own `tenant_id` falls back to that when nothing set the context. A tool call outside any run, for example the key test on the admin screen, resolves for the caller's tenant.
 
-Propagation is 30 seconds. The agent-runtime reads the table over `DATABASE_URL` with asyncpg, in a single-flight refresh that serves the previous snapshot while it runs, so a slow database never blocks a tool call. The API's own copy is refreshed on every admin read, so the admin screen is always current. Other API workers may lag by up to 30 seconds, which only matters for the badges.
+The environment is still a fine place for keys. Helm values and `.env` keep working, and the admin screen shows "from environment" for them. The screen is for the keys nobody thought of at deploy time, for rotation without a rollout, and for tenants that bring their own keys.
 
-Encryption at rest uses the same AES-GCM helper as persona memory, under one fixed platform scope. Set the KEK once:
+Propagation is 30 seconds. The agent-runtime reads both tables over `DATABASE_URL` with asyncpg, in a single-flight refresh that serves the previous snapshot while it runs, so a slow database never blocks a tool call. The tenant table is read whole, it is small. Until the migration that creates it has run the runtime logs once and resolves platform rows only. The API's own copy is refreshed on every admin read, so the admin screen is always current. Other API workers may lag by up to 30 seconds, which only matters for the badges.
+
+Encryption at rest uses the same AES-GCM helper as persona memory, under one fixed scope shared by platform and tenant rows. Set the KEK once:
 
 ```bash
 export ABENIX_DATA_KEY_KEK_BASE64="$(openssl rand -base64 32)"
@@ -56,16 +62,16 @@ The chart puts it in the cluster secret and every pod gets it through `envFrom`.
 
 The deploy prints, after seeding, which seeded agents reference tools whose required keys are not set. Nothing fails, it is a reminder of what to paste into the screen.
 
-The API endpoints, all admin only:
+The API endpoints, all admin only. `scope` is `tenant` or `platform` and defaults to `tenant`:
 
 | Method | Path | Does |
 |---|---|---|
-| GET | `/api/admin/tool-config` | Every key grouped by provider, with source, masked value and the tools it unlocks |
-| PATCH | `/api/admin/tool-config/{KEY}` | Save a value. Validated by kind. Returns the row |
-| DELETE | `/api/admin/tool-config/{KEY}` | Remove the saved value |
-| POST | `/api/admin/tool-config/{KEY}/test` | Run the declaring tool's check, with `{"value": "..."}` or the saved value |
+| GET | `/api/admin/tool-config?scope=` | Every key grouped by provider. `source` and the masked `value` follow the scope. Each row also carries `tenant_source`, `platform_source`, `effective_source` and the masked `tenant_value` and `platform_value` |
+| PATCH | `/api/admin/tool-config/{KEY}` | Save a value in `scope`, given in the body or the query. Validated by kind. Returns the row |
+| DELETE | `/api/admin/tool-config/{KEY}?scope=` | Remove the value saved in that scope |
+| POST | `/api/admin/tool-config/{KEY}/test` | Run the declaring tool's check, with `{"value": "..."}` or the saved value for the caller's tenant |
 
-For everyone: `GET /api/tools` carries a `config` object per tool with `status` and `fields`, never values. `GET /api/integrations/tools` is the same catalogue without values.
+For everyone: `GET /api/tools` carries a `config` object per tool with `status` and `fields`, never values, resolved for the caller's tenant. `GET /api/integrations/tools` is the same catalogue without values.
 
 ---
 

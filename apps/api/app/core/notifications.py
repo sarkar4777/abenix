@@ -254,8 +254,11 @@ async def notify_platform_alert(
     since: str | None,
     labels: dict | None = None,
     link: str = "/alerts",
+    fingerprint: str | None = None,
+    status: str = "firing",
+    source: str = "prometheus",
 ) -> int:
-    """Fan a firing Prometheus alert out to every active admin and to Slack.
+    """Fan a platform alert out to every active admin and to Slack.
 
     In-app rows go through create_notification with push=False and a manual
     WS push, so one alert produces one Slack post per distinct webhook rather
@@ -267,12 +270,21 @@ async def notify_platform_alert(
     from models.user import User, UserRole
 
     sev = (severity or "info").lower()
-    title = f"[{sev.upper()}] {name}"
-    body = summary or f"Prometheus alert {name} is firing."
-    if since:
-        body = f"{body} (since {since})"
+    resolved = (status or "firing").lower() == "resolved"
+    if resolved:
+        title = f"[RESOLVED] {name}"
+        body = f"{summary} has resolved." if summary else f"Alert {name} resolved."
+        if since:
+            body = f"{body} (at {since})"
+    else:
+        title = f"[{sev.upper()}] {name}"
+        body = summary or f"Alert {name} is firing."
+        if since:
+            body = f"{body} (since {since})"
     metadata = {
-        "source": "prometheus",
+        "source": source,
+        "status": "resolved" if resolved else "firing",
+        "fingerprint": fingerprint,
         "alertname": name,
         "severity": sev,
         "active_since": since,

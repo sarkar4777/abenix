@@ -111,7 +111,8 @@ Every edge runtime pod (Python, Rust, or C) consumes three credentials. None of 
 | Env var | What it is | Where it comes from | What breaks without it |
 |---|---|---|---|
 | `PLATFORM_TOKEN` | An `af_*` API key the runtime sends as `Authorization: Bearer …` to the cloud | UI: `/edge` → **Mint edge token + pubkey**. CLI: `POST /api/edge/tokens/mint`. Auto-mint in `deploy-azure.sh` via `_generate_abenix_api_key`. | Runtime logs `register_failed status=401`. Heartbeats fail. UI shows gateway offline. Bundles can still be pushed via direct HTTP fallback. |
-| `SIGNING_PUBKEY` (PEM) or `SIGNING_PUBKEY_PATH=/etc/edge/signing_pub.pem` | RSA-PSS-2048 public key. Cloud signs `.agent` bundles with the matching private key. | Same UI button returns it next to the token. The private key lives on the api pod (`EDGE_SIGNING_KEY_PEM` env or `/tmp/edge_signing_priv.pem`). | Rust runtime logs `no signing pubkey configured — accepting bundle UNVERIFIED`. **Real security gap** — any HTTP caller can push an unsigned bundle to the gateway. C runtime hard-fails if the pubkey is missing. |
+| `SIGNING_PUBKEY_PEM` (PEM) or `SIGNING_PUBKEY_PATH=/etc/edge/signing_pub.pem` | RSA-PSS-2048 public key. Cloud signs `.agent` bundles with the matching private key. | `GET /api/edge/signing-key` (no auth, public half only), or the mint button next to the token. The private key is `EDGE_SIGNING_KEY_PEM` on the api pod. | The Python runtime refuses to start: `edge-runtime: no signing public key`. Signed bundles cannot be verified so nothing loads. Only `EDGE_ALLOW_UNSIGNED=true` bypasses this, and it logs a warning at startup and on every load. C runtime hard-fails too. |
+| `TENANT_ID` (optional) | Platform tenant this gateway belongs to | Any tenant UUID visible in the platform | Without it the gateway loads any tenant's bundle. With it, a bundle whose signed `tenant_id` differs is refused and `bundle_tenant_mismatch` is logged with both ids. |
 | `ANTHROPIC_API_KEY` (or `LOCAL_LLM_URL`) | Cloud LLM credential, or a local LLM endpoint URL | Set the `anthropic_api_key` helm value at install. For local-only edge use a local Ollama URL via `LOCAL_LLM_URL=http://ollama:11434/v1`. | Execute returns `{"stub": true, "error": "ANTHROPIC_API_KEY not configured on edge runtime"}`. Tools that don't need an LLM (code_executor, mqtt_publish, current_time, windowed_state) still work. |
 
 ### Token lifecycle
@@ -123,10 +124,34 @@ Every edge runtime pod (Python, Rust, or C) consumes three credentials. None of 
 
 ### Signing key lifecycle
 
-1. **Generate.** Cloud auto-generates on first call to `/api/edge/agents/{id}/compile`. Persists to `/tmp/edge_signing_priv.pem` by default. **For production set `EDGE_SIGNING_KEY_PEM` (PEM literal) or `EDGE_SIGNING_KEY_PATH` to a stable mount** so a pod restart doesn't generate a new keypair and invalidate every gateway's pubkey.
-2. **Distribute the pubkey.** The mint endpoint above returns it inline. `deploy-azure.sh` auto-fetches via `_fetch_edge_signing_pubkey` and passes to the helm chart's `signing_pubkey` value, which lands at `/etc/edge/signing_pub.pem` inside the runtime pod.
-3. **Rotate.** Replace `EDGE_SIGNING_KEY_PEM`, restart the api pod, re-publish the pubkey to every gateway. Bundles signed with the old key fail verification on the gateway — the runtime falls back to the previous accepted bundle.
-4. **Verify.** Rust runtime logs `agent_loaded slug=… digest=…` on success, `signature_invalid` on failure. The C runtime hard-rejects unsigned input — there is no UNVERIFIED fallback.
+Signing fails closed. Outside dev the API never mints a key, and a gateway never loads a bundle it cannot verify.
+
+1. **Generate.** RSA-2048, PKCS8, unencrypted. Keep the private half out of git.
+   ```bash
+   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out edge_signing_priv.pem
+   openssl pkey -in edge_signing_priv.pem -pubout -out edge_signing_pub.pem
+   ```
+2. **Install on the API.** The deploy scripts read two file paths and pass them with `--set-file`, so the multi-line PEM survives the shell.
+   ```bash
+   EDGE_SIGNING_KEY_FILE=./edge_signing_priv.pem \
+   EDGE_SIGNING_PUBKEY_FILE=./edge_signing_pub.pem \
+   bash scripts/deploy-azure.sh redeploy
+   ```
+   That lands as `secrets.edgeSigningKeyPem` and `secrets.edgeSigningPubkeyPem` in `abenix-secrets`, which the api pod reads as `EDGE_SIGNING_KEY_PEM` and `EDGE_SIGNING_PUBKEY_PEM`. A mounted file via `EDGE_SIGNING_KEY_PATH` works too.
+3. **Distribute the pubkey.** `GET /api/edge/signing-key` returns `{public_key_pem, algorithm, dev_key}` with no auth. `deploy-azure.sh` fetches it and passes the chart's `signing_pubkey` value, which lands at `/etc/edge/signing_pub.pem` inside the runtime pod. Bare gateways can `curl` it into that path.
+4. **Rotate.** Replace the key files, redeploy, then helm-upgrade every gateway with the new `signing_pubkey`. A bundle signed with the old key fails verification, the gateway logs `bundle_rejected` and keeps serving the previous bundle.
+5. **Verify.** `agent_loaded slug=… digest=…` on success. `bundle_rejected reason=bundle_signature_invalid` on tamper, `bundle_tenant_mismatch` on a foreign tenant.
+
+What fails closed means in practice:
+
+| Situation | API (`ENVIRONMENT` not dev/local/test) | Gateway |
+|---|---|---|
+| No signing key configured | `503` on compile, deploy and token mint, naming `EDGE_SIGNING_KEY_PEM`. Nothing is written to `/tmp`. | Refuses to start without a pubkey, message names `SIGNING_PUBKEY_PEM` and the fetch endpoint |
+| Unsigned bundle pushed | n/a, the API always signs | Rejected unless `EDGE_ALLOW_UNSIGNED=true`, which is logged at startup and on every load |
+| Bad or foreign signature | n/a | Rejected, logged, previous bundle keeps running |
+| `tenant_id` mismatch | n/a | Rejected when `TENANT_ID` is set, both ids logged |
+
+Dev is the one exception. With `ENVIRONMENT=local|dev|test` (or `DEBUG=true` and no `ENVIRONMENT`) the API generates a key once, stores it under the shared data dir (`<UPLOAD_DIR>/../edge/signing_priv.pem`, `/data/edge` on k8s, override with `EDGE_SIGNING_KEY_DIR`) so replicas and restarts agree, and logs one `edge_dev_signing_key` warning. `values-local.yaml` sets `edge.allowUnsigned: true` and `deploy.sh` passes `allow_unsigned=true` to the local gateway. `values-azure.yaml` keeps it false and the Azure API requires a real key because `ENVIRONMENT=staging` is not dev.
 
 ### Local LLM vs cloud LLM at the edge
 

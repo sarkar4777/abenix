@@ -257,6 +257,11 @@ objectStorage:
   region: us-east-1
   container: ""
 
+# Archives follow objectStorage into S3, no volume needed
+archives:
+  pvc:
+    enabled: false
+
 pinecone:
   indexName: abenix-prod
 

@@ -51,6 +51,16 @@ interface MCPConnection {
   created_at: string | null;
   oauth2_configured: boolean;
   oauth2_connected: boolean;
+  orphaned_agent_tools?: OrphanedAgentTool[];
+}
+
+// An agent still references this tool but the server no longer offers it
+interface OrphanedAgentTool {
+  id: string;
+  agent_id: string;
+  agent_name: string | null;
+  tool_name: string;
+  orphaned_at: string | null;
 }
 
 interface ToolInfo {
@@ -378,11 +388,16 @@ function getToolBadge(tool: ToolInfo): { label: string; className: string } | nu
 function ToolsDrawer({
   connection,
   onClose,
+  onRemoveOrphan,
+  removingOrphan,
 }: {
   connection: MCPConnection;
   onClose: () => void;
+  onRemoveOrphan: (orphan: OrphanedAgentTool) => void;
+  removingOrphan: string | null;
 }) {
   const tools = connection.discovered_tools || [];
+  const orphaned = connection.orphaned_agent_tools || [];
   const isMobile = useIsMobile();
 
   return (
@@ -409,6 +424,41 @@ function ToolsDrawer({
         </div>
 
         <div className="p-4 space-y-2">
+          {orphaned.length > 0 && (
+            <div className="space-y-2 mb-4" data-testid="mcp-orphaned-tools">
+              <p className="text-xs text-amber-400">
+                {orphaned.length} attached tool{orphaned.length !== 1 ? 's' : ''} no longer offered by this server
+              </p>
+              {orphaned.map((o) => (
+                <div
+                  key={o.id}
+                  className="p-3 bg-amber-500/5 border border-amber-500/30 rounded-lg flex items-center gap-2 flex-wrap"
+                >
+                  <Wrench className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="text-sm font-medium text-white">{o.tool_name}</span>
+                  <span className="text-[10px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded">
+                    orphaned
+                  </span>
+                  <span className="text-xs text-slate-500 truncate">
+                    on {o.agent_name || o.agent_id}
+                  </span>
+                  <button
+                    onClick={() => onRemoveOrphan(o)}
+                    disabled={removingOrphan === o.id}
+                    className="ml-auto text-xs text-slate-400 hover:text-red-400 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                    title="Remove from agent"
+                  >
+                    {removingOrphan === o.id ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3 h-3" />
+                    )}
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {tools.length === 0 && (
             <p className="text-sm text-slate-500 text-center py-8">
               No tools discovered yet. Click &quot;Discover&quot; on the server card.
@@ -769,6 +819,7 @@ function MyServersTab({
   const [oauthStarting, setOauthStarting] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [removingOrphan, setRemovingOrphan] = useState<string | null>(null);
 
   const discoverTools = async (connId: string) => {
     setDiscovering(connId);
@@ -779,18 +830,25 @@ function MyServersTab({
       });
       const json = await res.json();
       if (json.data) {
+        const orphaned: OrphanedAgentTool[] = json.data.orphaned_agent_tools || [];
         setConnections((prev) =>
           prev.map((c) =>
             c.id === connId
               ? {
                   ...c,
                   discovered_tools: json.data.tools,
+                  orphaned_agent_tools: orphaned,
                   health_status: 'healthy',
                   last_health_check: new Date().toISOString(),
                 }
               : c,
           ),
         );
+        if (orphaned.length > 0) {
+          toastError(
+            `${orphaned.length} attached tool${orphaned.length !== 1 ? 's are' : ' is'} no longer offered by this server`,
+          );
+        }
       }
     } catch {
       setConnections((prev) =>
@@ -846,6 +904,33 @@ function MyServersTab({
     } finally {
       setDeleting(false);
       setConfirmDeleteId(null);
+    }
+  };
+
+  const removeOrphan = async (connId: string, orphan: OrphanedAgentTool) => {
+    setRemovingOrphan(orphan.id);
+    try {
+      const res = await fetch(`${API_URL}/api/mcp/agents/${orphan.agent_id}/tools`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ mcp_connection_id: connId, tool_name: orphan.tool_name }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setConnections((prev) =>
+        prev.map((c) =>
+          c.id === connId
+            ? {
+                ...c,
+                orphaned_agent_tools: (c.orphaned_agent_tools || []).filter((o) => o.id !== orphan.id),
+              }
+            : c,
+        ),
+      );
+      toastSuccess(`Removed ${orphan.tool_name} from the agent`);
+    } catch {
+      toastError(`Failed to remove ${orphan.tool_name}`);
+    } finally {
+      setRemovingOrphan(null);
     }
   };
 
@@ -921,6 +1006,7 @@ function MyServersTab({
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map((conn) => {
           const toolCount = conn.discovered_tools?.length ?? 0;
+          const orphanCount = conn.orphaned_agent_tools?.length ?? 0;
           const isDiscovering = discovering === conn.id;
           const isChecking = healthChecking === conn.id;
           const isHealthy = conn.health_status === 'healthy';
@@ -990,8 +1076,18 @@ function MyServersTab({
               )}
 
               <div className="flex items-center justify-between pt-3 border-t border-slate-700/30">
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-slate-500 flex items-center gap-1.5">
                   {toolCount > 0 ? `${toolCount} tools` : 'No tools yet'}
+                  {orphanCount > 0 && (
+                    <button
+                      onClick={() => setDrawerConn(conn)}
+                      className="flex items-center gap-1 text-[10px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded hover:bg-amber-500/20"
+                      title="Attached tools the server no longer offers"
+                      data-testid="mcp-orphaned-badge"
+                    >
+                      <AlertTriangle className="w-3 h-3" /> {orphanCount} orphaned
+                    </button>
+                  )}
                 </span>
                 <div className="flex items-center gap-1">
                   <button
@@ -1019,7 +1115,7 @@ function MyServersTab({
                       <RefreshCw className="w-3 h-3" />
                     )}
                   </button>
-                  {toolCount > 0 && (
+                  {(toolCount > 0 || orphanCount > 0) && (
                     <button
                       onClick={() => setDrawerConn(conn)}
                       className="text-xs text-slate-400 hover:text-white flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-700/50 transition-colors"
@@ -1053,7 +1149,14 @@ function MyServersTab({
       />
 
       <AnimatePresence>
-        {drawerConn && <ToolsDrawer connection={drawerConn} onClose={() => setDrawerConn(null)} />}
+        {drawerConn && (
+          <ToolsDrawer
+            connection={connections.find((c) => c.id === drawerConn.id) ?? drawerConn}
+            onClose={() => setDrawerConn(null)}
+            onRemoveOrphan={(o) => removeOrphan(drawerConn.id, o)}
+            removingOrphan={removingOrphan}
+          />
+        )}
       </AnimatePresence>
     </div>
   );

@@ -9,10 +9,12 @@ import json
 import logging
 import os
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from engine import credentials
 from engine.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -528,6 +530,7 @@ class PipelineExecutor:
         context: dict[str, Any] | None = None,
     ) -> PipelineResult:
         start = time.monotonic()
+        credentials.set_tenant(self._tenant_id)
         context = context or {}
 
         node_map = {n.id: n for n in nodes}
@@ -638,6 +641,17 @@ class PipelineExecutor:
                     execution_path.append(nid)
                     node_outputs[nid] = result.output
 
+                    # Keep the last good output so a later failure diff has an expected_sample
+                    if self._agent_id:
+                        try:
+                            from engine.healing import fire_and_forget, remember_success
+
+                            fire_and_forget(
+                                remember_success(self._agent_id, nid, result.output)
+                            )
+                        except Exception as _he:
+                            logger.debug("healing success sample skipped: %s", _he)
+
                     # Handle switch routing: mark target nodes for activation
                     if node.switch and isinstance(result.output, dict):
                         matched_targets = result.output.get("__switch_targets", [])
@@ -684,12 +698,16 @@ class PipelineExecutor:
                         ):
                             try:
                                 from engine.healing import (
-                                    capture_failure,
+                                    capture_node_failure,
                                     fire_and_forget,
                                 )
 
+                                # healing rebuilds the exception from error_type and reads the last good sample
                                 fire_and_forget(
-                                    capture_failure(
+                                    capture_node_failure(
+                                        error_traceback=(result.metadata or {}).get(
+                                            "traceback"
+                                        ),
                                         db_url=self._db_url,
                                         tenant_id=self._tenant_id,
                                         pipeline_id=self._agent_id,
@@ -702,13 +720,10 @@ class PipelineExecutor:
                                             "agent" if node.agent_slug else "tool"
                                         ),
                                         node_target=(node.agent_slug or node.tool_name),
-                                        error_class=(
-                                            result.error_type or "PipelineError"
-                                        ),
+                                        error_type=result.error_type,
                                         error_message=(
                                             result.error_message or result.error or ""
                                         ),
-                                        error_traceback=None,
                                         upstream_inputs={
                                             k: node_outputs.get(k)
                                             for k in node.depends_on
@@ -1241,6 +1256,7 @@ class PipelineExecutor:
                 tool_name=node.tool_name,
                 resolved_arguments=resolved_args,
                 duration_ms=int((time.monotonic() - node_start) * 1000),
+                metadata={"traceback": traceback.format_exc()[-4000:]},
             )
 
     async def _resolve_agent_by_slug(self, slug: str) -> dict[str, Any] | None:

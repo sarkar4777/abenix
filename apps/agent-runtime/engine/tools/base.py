@@ -97,10 +97,18 @@ class BaseTool(ABC):
         @functools.wraps(original)
         async def execute(self: BaseTool, arguments: dict[str, Any]) -> ToolResult:
             await credentials.ensure_fresh()
+            # a tool built with its own tenant_id covers reads outside an executor run
+            token = None
+            own_tenant = str(getattr(self, "tenant_id", "") or "")
+            if own_tenant and not credentials.current_tenant():
+                token = credentials.set_tenant(own_tenant)
             try:
                 return await original(self, arguments)
             except ToolNeedsConfiguration as exc:
                 return needs_configuration_result(self, exc)
+            finally:
+                if token is not None:
+                    credentials.reset_tenant(token)
 
         execute._config_wrapped = True  # type: ignore[attr-defined]
         cls.execute = execute  # type: ignore[assignment]
@@ -122,8 +130,13 @@ class BaseTool(ABC):
         fld = self.config_field(key)
         if default is None and fld is not None:
             default = fld.default
+        tenant = None
+        if not credentials.current_tenant():
+            tenant = str(getattr(self, "tenant_id", "") or "") or None
         try:
-            return credentials.get(key, required=required, default=default)
+            return credentials.get(
+                key, required=required, default=default, tenant_id=tenant
+            )
         except ToolNeedsConfiguration as exc:
             if fld is not None:
                 exc.signup_url = exc.signup_url or fld.signup_url

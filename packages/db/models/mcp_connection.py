@@ -58,6 +58,13 @@ class AgentMCPTool(UUIDMixin, Base):
     tool_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
     max_calls_per_execution: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Set by discover when the server stops offering the name, cleared when it returns.
+    is_orphaned: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    orphaned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     agent: Mapped["Agent"] = relationship(back_populates="mcp_tools")
     mcp_connection: Mapped["UserMCPConnection"] = relationship(

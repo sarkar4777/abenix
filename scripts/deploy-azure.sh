@@ -345,6 +345,8 @@ _warn_unmanaged_deployments() {
 _build_secrets_flags() {
   local flags=""
   [ -n "${ANTHROPIC_API_KEY:-}" ]        && flags="${flags} --set secrets.anthropicApiKey=${ANTHROPIC_API_KEY}"
+  [ -n "${EDGE_SIGNING_KEY_FILE:-}" ]    && flags="${flags} --set-file secrets.edgeSigningKeyPem=${EDGE_SIGNING_KEY_FILE}"
+  [ -n "${EDGE_SIGNING_PUBKEY_FILE:-}" ] && flags="${flags} --set-file secrets.edgeSigningPubkeyPem=${EDGE_SIGNING_PUBKEY_FILE}"
   [ -n "${ABENIX_DATA_KEY_KEK_BASE64:-}" ] && flags="${flags} --set secrets.dataKeyKekBase64=${ABENIX_DATA_KEY_KEK_BASE64}"
   [ -n "${CLAUDE_SUBSCRIPTION_TOKEN:-}" ] && flags="${flags} --set secrets.claudeSubscriptionToken=${CLAUDE_SUBSCRIPTION_TOKEN}"
   [ -n "${OPENAI_API_KEY:-}" ]           && flags="${flags} --set secrets.openaiApiKey=${OPENAI_API_KEY}"

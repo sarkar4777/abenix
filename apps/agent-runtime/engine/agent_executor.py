@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+from engine import credentials
 from engine.llm_router import LLMResponse, LLMRouter
 from engine.metrics import (
     agent_active_streams,
@@ -368,6 +369,7 @@ class AgentExecutor:
     async def invoke(self, input_message: str) -> ExecutionResult:
         from engine.tracing import get_tracer, current_trace_id
 
+        credentials.set_tenant(getattr(self, "tenant_id", ""))
         tracer = get_tracer("abenix.agent_executor")
         with tracer.start_as_current_span("agent.execute") as _span:
             _span.set_attribute("agent.id", str(self.agent_id))
@@ -895,6 +897,7 @@ class AgentExecutor:
         self, input_message: str
     ) -> AsyncGenerator[ExecutionEvent, None]:
         start = time.monotonic()
+        credentials.set_tenant(getattr(self, "tenant_id", ""))
         agent_active_streams.inc()
         await self.sandbox.apply_platform_defaults()
         self.sandbox.start()

@@ -215,6 +215,12 @@ It parses every file under `engine/tools/` and fails when
 
 CI runs it, `deploy.sh` runs it before building images, and `tests/unit/test_tool_contract.py` runs it under pytest. This is what makes the guarantee hold: a tool that passes CI is on the admin screen.
 
+Then regenerate the builder's tool docs. CI runs the same script with `--check` and fails when the file is stale.
+
+```bash
+python scripts/gen-tool-docs.py --write
+```
+
 ---
 
 ## Step 5. See it on the admin screen

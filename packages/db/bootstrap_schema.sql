@@ -415,6 +415,18 @@ CREATE TABLE saved_tools (
 CREATE INDEX ix_saved_tools_tenant_id ON saved_tools (tenant_id);
 CREATE INDEX ix_saved_tool_status ON saved_tools (tenant_id, status);
 
+-- tenant_tool_credentials
+CREATE TABLE tenant_tool_credentials (
+	tenant_id UUID NOT NULL,
+	key VARCHAR(128) NOT NULL,
+	value TEXT,
+	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+	updated_by UUID,
+	PRIMARY KEY (tenant_id, key),
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+	FOREIGN KEY(updated_by) REFERENCES users (id)
+);
+
 -- team_invites
 CREATE TABLE team_invites (
 	invited_by UUID NOT NULL, 
@@ -512,6 +524,8 @@ CREATE TABLE agent_mcp_tools (
 	tool_config JSONB, 
 	approval_required BOOLEAN NOT NULL, 
 	max_calls_per_execution INTEGER, 
+	is_orphaned BOOLEAN DEFAULT false NOT NULL, 
+	orphaned_at TIMESTAMP WITH TIME ZONE, 
 	id UUID NOT NULL, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(agent_id) REFERENCES agents (id), 

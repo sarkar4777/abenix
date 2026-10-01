@@ -11,8 +11,16 @@ platform_token: ""
 mqtt_url: ""
 
 # RSA-PSS public key (PEM) the gateway uses to verify `.agent` signatures.
-# Inject the matching value when bundles are signed by the platform.
+# Required unless allow_unsigned is true, the pod refuses to start without it.
+# Fetch it from GET /api/edge/signing-key on the platform.
 signing_pubkey: ""
+
+# Only the literal true opens the unsigned path. Local development only.
+allow_unsigned: false
+
+# Pin this gateway to one platform tenant. Bundles whose manifest tenant_id
+# differs are refused and logged. Empty accepts any tenant.
+tenant_id: ""
 
 # Inference fall-back — Anthropic API key used when the bundle has no
 # local model_weights/. Phase-2 will plumb a distilled local model.

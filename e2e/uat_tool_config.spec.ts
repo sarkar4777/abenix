@@ -3,9 +3,11 @@
  *
  * The screen is generated from the tools' own config_fields, so the test does
  * not hard-code a tool list. It picks a key off the API, saves a value for it
- * from the browser, sees the source flip to "saved here", sees the badge on
- * /tools follow within the propagation window, clears it, and checks a viewer
- * gets neither the sidebar entry nor the endpoint.
+ * from the browser in the default tenant scope, sees the source flip to
+ * "saved for this tenant", sees the badge on /tools follow within the
+ * propagation window, clears it, checks the platform scope sits under the
+ * tenant scope, and checks a viewer gets neither the sidebar entry nor the
+ * endpoint.
  *
  *   BASE=http://localhost:3100 API=http://localhost:8000 npx playwright test e2e/uat_tool_config.spec.ts --workers=1
  */
@@ -62,6 +64,7 @@ test.describe.serial('tool configuration', () => {
     expect(d.groups.length).toBeGreaterThan(20);
     expect(typeof d.encrypted_at_rest).toBe('boolean');
     expect(d.propagation_seconds).toBe(30);
+    expect(d.scope).toBe('tenant');
     // the provider keys are on the same screen as everything else
     const keys = new Set<string>(d.groups.flatMap((g: any) => g.keys.map((k: any) => k.key)));
     for (const k of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'TAVILY_API_KEY', 'GITHUB_TOKEN']) expect(keys.has(k), k).toBeTruthy();
@@ -94,19 +97,26 @@ test.describe.serial('tool configuration', () => {
     await expect(row.getByTestId(`tool-config-source-${key}`)).toHaveAttribute('data-source', 'unset');
     await expect(row).toContainText(tool);
 
+    // the screen opens on the tenant scope
+    await expect(page.getByTestId('tool-config-scope-tenant')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('tool-config-scope-platform')).toHaveAttribute('aria-pressed', 'false');
+
     await row.getByTestId(`tool-config-input-${key}`).fill('uat-test-value-1234');
     await row.getByTestId(`tool-config-save-${key}`).click();
-    await expect(row.getByTestId(`tool-config-msg-${key}`)).toContainText(/Saved/);
-    await expect(row.getByTestId(`tool-config-source-${key}`)).toHaveAttribute('data-source', 'stored');
+    await expect(row.getByTestId(`tool-config-msg-${key}`)).toContainText(/Saved for this tenant/);
+    await expect(row.getByTestId(`tool-config-source-${key}`)).toHaveAttribute('data-source', 'tenant');
     // the masked value shows the tail only
     await expect(row.getByTestId(`tool-config-input-${key}`)).toHaveAttribute('placeholder', /\*+1234$/);
 
-    // the admin GET reads the table directly
+    // the admin GET reads the table directly and says which scope holds it
     const st = await api(page, 'GET', '/api/admin/tool-config');
     const saved = st.json.data.groups.flatMap((g: any) => g.keys).find((k: any) => k.key === key);
-    expect(saved.source).toBe('stored');
+    expect(saved.source).toBe('tenant');
+    expect(saved.tenant_source).toBe('tenant');
+    expect(saved.platform_source).not.toBe('tenant');
     expect(saved.is_set).toBe(true);
     expect(saved.value).toMatch(/^\*+1234$/);
+    expect(saved.tenant_value).toMatch(/^\*+1234$/);
 
     // the badge on /tools follows within the propagation window
     await expect.poll(async () => {
@@ -131,7 +141,66 @@ test.describe.serial('tool configuration', () => {
     const row2 = page.getByTestId(`tool-config-row-${key}`);
     await row2.getByTestId(`tool-config-clear-${key}`).click();
     await expect(row2.getByTestId(`tool-config-msg-${key}`)).toContainText(/Cleared/);
-    await expect(row2.getByTestId(`tool-config-source-${key}`)).not.toHaveAttribute('data-source', 'stored');
+    await expect(row2.getByTestId(`tool-config-source-${key}`)).not.toHaveAttribute('data-source', 'tenant');
+  });
+
+  test('a tenant value sits above the platform value', async ({ page }) => {
+    await login(page);
+    // platform first, then the tenant overrides it
+    const p = await api(page, 'PATCH', `/api/admin/tool-config/${key}`, { value: 'platform-value-5555', scope: 'platform' });
+    expect(p.status).toBe(200);
+    expect(p.json.data.scope).toBe('platform');
+    expect(p.json.data.source).toBe('stored');
+    const t = await api(page, 'PATCH', `/api/admin/tool-config/${key}`, { value: 'tenant-value-6666', scope: 'tenant' });
+    expect(t.status).toBe(200);
+    expect(t.json.data.source).toBe('tenant');
+    expect(t.json.data.tenant_source).toBe('tenant');
+    expect(t.json.data.platform_source).toBe('stored');
+    expect(t.json.data.value).toMatch(/6666$/);
+
+    // the default GET is the tenant view, the platform view ignores the tenant row
+    const tenantView = await api(page, 'GET', '/api/admin/tool-config');
+    const rowT = tenantView.json.data.groups.flatMap((g: any) => g.keys).find((k: any) => k.key === key);
+    expect(rowT.source).toBe('tenant');
+    const platformView = await api(page, 'GET', '/api/admin/tool-config?scope=platform');
+    expect(platformView.json.data.scope).toBe('platform');
+    const rowP = platformView.json.data.groups.flatMap((g: any) => g.keys).find((k: any) => k.key === key);
+    expect(rowP.source).toBe('stored');
+    expect(rowP.value).toMatch(/5555$/);
+    expect(rowP.tenant_source).toBe('tenant');
+    const bad = await api(page, 'GET', '/api/admin/tool-config?scope=galaxy');
+    expect(bad.status).toBe(400);
+
+    // /api/tools resolves for this tenant and reports the key as set
+    await expect.poll(async () => {
+      const reg = await api(page, 'GET', '/api/tools');
+      const rows: any[] = Array.isArray(reg.json?.data) ? reg.json.data : reg.json?.data?.tools ?? [];
+      const cfg = rows.find((r) => r.id === tool)?.config;
+      const field = cfg?.fields?.find((f: any) => f.key === key);
+      return `${cfg?.status}:${field?.source}`;
+    }, { timeout: 45_000, intervals: [2000] }).toBe('configured:tenant');
+
+    // the screen: tenant view shows the tenant badge, platform view shows the fallback and the override marker
+    await visit(page, `/admin/tool-config#${key}`);
+    const row = page.getByTestId(`tool-config-row-${key}`);
+    await expect(row.getByTestId(`tool-config-source-${key}`)).toHaveAttribute('data-source', 'tenant');
+    await expect(row.getByTestId(`tool-config-clear-${key}`)).toContainText(/tenant/i);
+    await page.getByTestId('tool-config-scope-platform').click();
+    await expect(page.getByTestId('tool-config-scope-platform')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('tool-config-scope-help')).toContainText(/every tenant/);
+    const rowPlat = page.getByTestId(`tool-config-row-${key}`);
+    await expect(rowPlat.getByTestId(`tool-config-source-${key}`)).toHaveAttribute('data-source', 'stored');
+    await expect(rowPlat.getByTestId(`tool-config-effective-${key}`)).toBeVisible();
+    await expect(rowPlat.getByTestId(`tool-config-clear-${key}`)).toContainText(/platform/i);
+
+    // clearing the tenant row leaves the platform row in effect, clearing that leaves neither
+    const c1 = await api(page, 'DELETE', `/api/admin/tool-config/${key}?scope=tenant`);
+    expect(c1.status).toBe(200);
+    expect(c1.json.data.source).toBe('stored');
+    expect(c1.json.data.tenant_source).toBe('unset');
+    const c2 = await api(page, 'DELETE', `/api/admin/tool-config/${key}?scope=platform`);
+    expect(c2.status).toBe(200);
+    expect(c2.json.data.source).not.toMatch(/tenant|stored/);
   });
 
   test('validation and the test button', async ({ page }) => {

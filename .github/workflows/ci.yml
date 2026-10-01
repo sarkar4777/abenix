@@ -83,6 +83,8 @@ jobs:
       # the catalogue badges and the Integrations page can be generated from it.
       # A tool that reads the environment directly is invisible to all three.
       - run: python scripts/check-tool-config.py
+      # TOOL_DOCS in the web app is generated from the runtime tool classes.
+      - run: python scripts/gen-tool-docs.py --check
 
   web-lint-typecheck-build:
     runs-on: ubuntu-latest

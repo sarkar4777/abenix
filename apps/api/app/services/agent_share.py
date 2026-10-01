@@ -112,6 +112,25 @@ async def resolve_agent_access(
     )
 
 
+async def accessible_agent_ids(
+    db: AsyncSession,
+    user: User,
+    *,
+    permission_required: SharePermission = SharePermission.VIEW,
+) -> set[uuid.UUID]:
+    """Tenant agents the user created or holds a share on. Platform agents are left out, everyone has those."""
+    own = await db.execute(
+        select(Agent.id).where(
+            Agent.tenant_id == user.tenant_id, Agent.creator_id == user.id
+        )
+    )
+    ids = {row[0] for row in own.all()}
+    ids |= await accessible_resource_ids(
+        db, user, kind=AGENT_KIND, minimum_permission=permission_required
+    )
+    return ids
+
+
 def can_manage_shares(agent: Agent, user: User) -> bool:
     return agent.tenant_id == user.tenant_id and (
         agent.creator_id == user.id or is_admin(user)

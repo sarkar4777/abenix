@@ -33,6 +33,12 @@ SCHEMA_CANONICAL_COLUMNS=(
   "agent_memories.importance"
   "approvals.client_token"
   "approvals.gate_kind"
+  "tenant_tool_credentials.tenant_id"
+  "tenant_tool_credentials.key"
+  "tenant_tool_credentials.value"
+  "agent_mcp_tools.is_orphaned"
+  "archive_runs.storage_key"
+  "archive_runs.restored_at"
 )
 
 SCHEMA_USE_CASE_COLUMNS=(

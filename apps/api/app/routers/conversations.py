@@ -15,11 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user, get_db
+from app.core.permissions import is_platform_agent
 from app.core.responses import error, success
 from app.schemas.conversations import (
     SaveMessageRequest,
     UpdateConversationRequest,
 )
+from app.services.agent_share import accessible_agent_ids, resolve_agent_access
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.agent import Agent, AgentType
 from models.conversation import Conversation, Message
+from models.resource_share import SharePermission
 from models.user import User
+
+AGENT_FORBIDDEN = "You do not have access to this agent"
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -117,20 +122,27 @@ async def list_conversations(
 ) -> JSONResponse:
     """List threads visible to the current user / acting subject."""
     subject_type, subject_id = _resolve_subject(request, user)
+    own = or_(
+        and_(
+            Conversation.subject_type == subject_type,
+            Conversation.subject_id == subject_id,
+        ),
+        # Legacy threads predate subject scoping — show ours too
+        and_(
+            Conversation.subject_type.is_(None),
+            Conversation.user_id == user.id,
+        ),
+    )
+    visible = own
+    # Threads on agents the user created or was shared stay visible, a delegated app subject only sees its own
+    if subject_type == "user":
+        agent_ids = await accessible_agent_ids(db, user)
+        if agent_ids:
+            visible = or_(own, Conversation.agent_id.in_(agent_ids))
     filters = [
         Conversation.tenant_id == user.tenant_id,
         Conversation.is_archived == archived,
-        or_(
-            and_(
-                Conversation.subject_type == subject_type,
-                Conversation.subject_id == subject_id,
-            ),
-            # Legacy threads predate subject scoping — show ours too
-            and_(
-                Conversation.subject_type.is_(None),
-                Conversation.user_id == user.id,
-            ),
-        ),
+        visible,
     ]
     if app_slug:
         filters.append(Conversation.app_slug == app_slug)
@@ -183,10 +195,14 @@ async def create_conversation(
         ).scalar_one_or_none()
         if not agent_row:
             return error("Agent not found", 404)
+        if not await resolve_agent_access(db, user, agent_row):
+            return error(AGENT_FORBIDDEN, 403)
         agent_slug = agent_slug or agent_row.slug
     elif agent_slug:
         agent_row = await _resolve_agent_by_slug(db, agent_slug, user.tenant_id)
         if agent_row:
+            if not await resolve_agent_access(db, user, agent_row):
+                return error(AGENT_FORBIDDEN, 403)
             agent_uuid = agent_row.id
 
     conv = Conversation(
@@ -228,6 +244,28 @@ def _check_thread_access(
     return None
 
 
+async def _can_read_thread(
+    db: AsyncSession, conv: Conversation, request: Request, user: User
+) -> bool:
+    """Own thread, admin, or a thread on a tenant agent the user can access."""
+    if _check_thread_access(conv, request, user) is None:
+        return True
+    if conv.tenant_id != user.tenant_id or conv.agent_id is None:
+        return False
+    if _resolve_subject(request, user)[0] != "user":
+        return False
+    agent = (
+        await db.execute(
+            select(Agent).where(
+                Agent.id == conv.agent_id, Agent.tenant_id == user.tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if agent is None or is_platform_agent(agent):
+        return False
+    return await resolve_agent_access(db, user, agent)
+
+
 @router.get("/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
@@ -251,8 +289,8 @@ async def get_conversation(
     conv = result.scalar_one_or_none()
     if not conv:
         return error("Conversation not found", 404)
-    if denied := _check_thread_access(conv, request, user):
-        return error(denied, 403)
+    if not await _can_read_thread(db, conv, request, user):
+        return error("Forbidden", 403)
 
     return success(_serialize_conversation(conv, include_messages=True))
 
@@ -286,10 +324,15 @@ async def send_turn(
     if not agent_slug:
         return error("Thread has no bound agent and no agent_slug provided", 400)
 
-    # Refresh agent_id when the slug was re-seeded
-    if not conv.agent_id or body.get("agent_slug"):
-        agent_row = await _resolve_agent_by_slug(db, agent_slug, user.tenant_id)
-        if agent_row:
+    # Every turn executes the agent, so check EXECUTE each time, shares can be revoked
+    agent_row = await _resolve_agent_by_slug(db, agent_slug, user.tenant_id)
+    if agent_row is not None:
+        if not await resolve_agent_access(
+            db, user, agent_row, permission_required=SharePermission.EXECUTE
+        ):
+            return error(AGENT_FORBIDDEN, 403)
+        # Refresh agent_id when the slug was re-seeded
+        if not conv.agent_id or body.get("agent_slug"):
             conv.agent_id = agent_row.id
             conv.agent_slug = agent_row.slug
 

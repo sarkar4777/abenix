@@ -25,6 +25,7 @@ Anything not in that list is rejected by the runtime on load.
 |---|---|---|---|
 | `name` | yes | str | human-readable name |
 | `slug` | yes | str | `[a-z0-9_-]+`, unique on the gateway |
+| `tenant_id` | yes | str | platform tenant that compiled the bundle, covered by the signature. A gateway with `TENANT_ID` set refuses any other value |
 | `version` | yes | str | semver, e.g. `1.0.0` |
 | `model` | yes | str | provider model id, e.g. `claude-sonnet-4-5-20250929`; ignored if `model_weights/` is present |
 | `temperature` | yes | float | 0.0 to 2.0 |
@@ -98,6 +99,13 @@ On the edge runtime:
 3. Verify the signature against the configured public key.
 4. Reject the bundle if verification fails — no fallback, no warning, the
    pod logs a `bundle_signature_invalid` event and ignores the deployment.
+   The previously loaded bundle for that slug keeps running.
+5. A bundle with no `signature.sig`, or a gateway with no public key, is
+   rejected the same way. The only bypass is `EDGE_ALLOW_UNSIGNED=true`,
+   meant for local development, logged at startup and on every load. A
+   gateway without a public key and without that flag refuses to start.
+6. If `TENANT_ID` is set on the gateway, `manifest.tenant_id` must match or
+   the bundle is rejected with `bundle_tenant_mismatch` naming both ids.
 
 Rotating the signing key is a helm upgrade with the new `signing_pubkey`;
 in-flight bundles signed by the old key remain trusted until the rollout

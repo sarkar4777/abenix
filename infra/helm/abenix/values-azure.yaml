@@ -32,6 +32,14 @@ secrets:
   googleApiKey: ""
   pineconeApiKey: ""
   stripeSecretKey: ""
+  # Required. ENVIRONMENT=staging is not dev, so without this the API returns
+  # 503 on every edge compile/sign. Pass EDGE_SIGNING_KEY_FILE to deploy-azure.sh.
+  edgeSigningKeyPem: ""
+  edgeSigningPubkeyPem: ""
+
+# Gateways on this cluster verify every bundle, unsigned is never allowed.
+edge:
+  allowUnsigned: false
 
 # Azure OpenAI embedding deployment name. Cluster already has
 # AZURE_OPENAI_API_KEY + AZURE_OPENAI_API_BASE wired through abenix-secrets;
@@ -76,6 +84,10 @@ api:
   mlModelsPVC:
     enabled: true
     claimName: ml-models-storage
+  # Archive dumps on the RWX claim from the archives section below
+  archivesPVC:
+    enabled: true
+    claimName: abenix-archives
   image:
     repository: your-acr.azurecr.io/api
     tag: wave2
@@ -210,6 +222,14 @@ monitoring:
     # Rules ship as a ConfigMap mounted on the thin Prometheus pod
     # (infra/observability/prometheus.yaml) — no operator required.
     enabled: true
+# Alertmanager ships in this chart and posts to the API webhook.
+# Set slackWebhookUrl to also post raw alerts to an ops channel.
+alerting:
+  prometheusUrl: "http://abenix-prometheus.abenix.svc.cluster.local:9090"
+  alertmanager:
+    enabled: true
+  slackWebhookUrl: ""
+  dedupeMinutes: 30
 pdb:
   enabled: false
 
@@ -298,6 +318,16 @@ sharedData:
   usePVC: true
   storageClass: azurefile-csi
   storageSize: 20Gi
+
+# Archive dumps need their own RWX volume on AKS, /data is a per-node
+# hostPath on the api pod. Pair with api.archivesPVC.enabled.
+archives:
+  pvc:
+    enabled: true
+    claimName: abenix-archives
+    storageClass: azurefile-csi
+    accessMode: ReadWriteMany
+    storageSize: 10Gi
 
 backup:
   enabled: true

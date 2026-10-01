@@ -237,6 +237,40 @@ There are 4 roles on a tenant. Each user has exactly one.
 
 The role is stored in `users.role` as a Postgres enum. Endpoint-level gates use `is_admin(user)` and similar helpers from [`apps/api/app/core/permissions.py`](../../apps/api/app/core/permissions.py). There is a per-resource override via the `resource_shares` table.
 
+### Feature flags
+
+`ROLE_FEATURES` in [`apps/api/app/core/permissions.py`](../../apps/api/app/core/permissions.py) is the single source for per-feature access. `features_for(user)` merges the `user` row with the role override and `/api/me/permissions` returns the result. Every flag has a consumer, either a sidebar item in `Sidebar.tsx` or an API read. `tests/unit/test_feature_flags_wired.py` fails when a flag is added without one.
+
+| Flag | user | creator | admin | Read by |
+|---|---|---|---|---|
+| `view_dashboard` | yes | yes | yes | Sidebar, Dashboard |
+| `create_agents` | yes | yes | yes | Sidebar, My Agents |
+| `use_builder` | yes | yes | yes | Sidebar, Agent Builder / Tools Catalogue / BPM Analyzer |
+| `create_pipelines` | yes | yes | yes | Sidebar, Portfolio Schemas |
+| `use_chat` | yes | yes | yes | Sidebar, AI Chat |
+| `use_kb` | yes | yes | yes | Sidebar, Knowledge Bases / Atlas |
+| `use_persona` | yes | yes | yes | Sidebar, Persona KB |
+| `use_ml_models` | yes | yes | yes | Sidebar, ML Models |
+| `use_code_runner` | yes | yes | yes | Sidebar, Code Runner |
+| `use_meetings` | yes | yes | yes | Sidebar, Meetings |
+| `use_triggers` | yes | yes | yes | Sidebar, Triggers |
+| `view_executions` | yes | yes | yes | Sidebar, Observability / Executions / Live Debug |
+| `view_analytics` | yes | yes | yes | Sidebar, Analytics |
+| `view_alerts` | yes | yes | yes | Sidebar, Alerts / Moderation |
+| `use_marketplace` | yes | yes | yes | Sidebar, Marketplace |
+| `use_sdk_playground` | yes | yes | yes | Sidebar, SDK Playground |
+| `use_load_playground` | yes | yes | yes | Sidebar, Load Playground |
+| `manage_api_keys` | yes | yes | yes | Sidebar, API Keys |
+| `manage_mcp` | yes | yes | yes | Sidebar, MCP Servers |
+| `manage_ontology` | no | yes | yes | `ontology_schemas.py` schema editor routes |
+| `publish_to_marketplace` | no | yes | yes | Sidebar, Creator Hub and `can_publish_agent()` |
+| `review_queue` | no | no | yes | Sidebar, Review Queue |
+| `manage_team` | no | no | yes | Sidebar, Team |
+| `manage_settings` | no | no | yes | Sidebar, Model Selection / Tool Configuration / LLM Pricing / Connectors / Integrations |
+| `see_other_users_resources` | no | no | yes | `sees_other_users_resources()` widens `apply_resource_scope()` to the whole tenant |
+
+The sidebar is a UX hint, the API re-checks role and flag on every route. Platform operations under `/admin/*` (cluster, scaling, archives, DLQ) stay hard admin gates and are not flags.
+
 ---
 
 ## Resource sharing

@@ -44,6 +44,9 @@ web:
 # -- API (FastAPI) -----------------------------------------------------------
 api:
   replicaCount: 1
+  archivesPVC:
+    enabled: true
+    claimName: abenix-archives
   image:
     repository: localhost:5000/abenix/api
     tag: latest
@@ -240,6 +243,14 @@ secrets:
   openaiApiKey: ""
   pineconeApiKey: ""
   googleApiKey: ""
+  # Empty here, the local API mints a dev signing key under /data/edge and
+  # warns about it. Set EDGE_SIGNING_KEY_FILE on deploy.sh to pin one.
+  edgeSigningKeyPem: ""
+  edgeSigningPubkeyPem: ""
+
+# Local gateways may load unsigned bundles, dev only.
+edge:
+  allowUnsigned: true
 
 # -- Object storage ----------------------------------------------------------
 objectStorage:
@@ -247,6 +258,14 @@ objectStorage:
   uploadDir: /data/uploads
   bucket: ""
   region: ""
+
+# Single node, so a ReadWriteOnce claim from the default class is enough
+archives:
+  pvc:
+    enabled: true
+    claimName: abenix-archives
+    accessMode: ReadWriteOnce
+    storageSize: 5Gi
 
 pinecone:
   indexName: abenix-dev
@@ -295,6 +314,14 @@ mlModels:
 # -- Monitoring — disabled for local ----------------------------------------
 monitoring:
   enabled: false
+
+# -- Alerting — Alertmanager on, routes to the API webhook ------------------
+alerting:
+  prometheusUrl: "http://abenix-prometheus.abenix.svc.cluster.local:9090"
+  alertmanager:
+    enabled: true
+  slackWebhookUrl: ""
+  dedupeMinutes: 30
 
 # ── Wave-2 scaling — NATS-default on minikube, same as AKS ─────────────────
 # scripts/deploy.sh local runs with this ON so dev/prod behaviour matches.

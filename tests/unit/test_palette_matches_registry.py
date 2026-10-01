@@ -1,15 +1,19 @@
-"""Every tool id the web UI lists must exist in the runtime registry."""
+"""Every tool id the web UI lists must exist in the runtime registry, and every
+runtime tool must have a TOOL_DOCS entry."""
 
 from __future__ import annotations
 
 import importlib
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PALETTE = ROOT / "apps" / "web" / "src" / "components" / "builder" / "ToolPalette.tsx"
 DOCS = ROOT / "apps" / "web" / "src" / "lib" / "tool-docs.ts"
 TOOLS_ROUTER = ROOT / "apps" / "api" / "app" / "routers" / "tools.py"
+GENERATOR = ROOT / "scripts" / "gen-tool-docs.py"
 
 
 def _runtime_tool_names() -> set[str]:
@@ -67,3 +71,23 @@ def test_palette_has_no_duplicate_ids():
     ids = _palette_ids()
     dupes = sorted({i for i in ids if ids.count(i) > 1})
     assert not dupes, f"duplicate palette ids: {dupes}"
+
+
+def test_every_runtime_tool_has_tool_docs():
+    docs = set(_doc_keys())
+    missing = sorted(n for n in _runtime_tool_names() if n not in docs)
+    assert not missing, (
+        "TOOL_DOCS is missing runtime tools, run "
+        f"python scripts/gen-tool-docs.py --write: {missing}"
+    )
+
+
+def test_tool_docs_match_the_generator():
+    r = subprocess.run(
+        [sys.executable, str(GENERATOR), "--check"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=ROOT,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr

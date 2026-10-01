@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,12 +64,13 @@ def test_messages_scope_goes_through_conversations():
     assert "conversations" in archiver._TENANT_PREDICATE["messages"]
 
 
-def test_archive_path_is_namespaced_by_tenant():
-    tenant = uuid.uuid4()
-    p = archiver._path_for(tenant, "executions", datetime(2026, 10, 1, tzinfo=timezone.utc))
-    assert str(tenant) in p.parts
-    assert "executions" in p.parts
-    assert archiver.is_under_archive_root(p)
+def test_archive_key_is_namespaced_by_tenant():
+    tenant, run_id = uuid.uuid4(), uuid.uuid4()
+    key = archiver.archive_key(tenant, run_id)
+    assert key == f"archives/{tenant}/{run_id}.jsonl.gz"
+    local = archiver.get_archive_storage()
+    assert local.backend == "local"
+    assert archiver.is_under_archive_root(local.path_for(key))
 
 
 def test_download_rejects_paths_outside_archive_root():

@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
+import time
 import traceback as _tb
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -303,3 +305,156 @@ def fire_and_forget(coro: Any) -> None:
                 logger.warning("fire_and_forget task failed: %s", exc)
 
     task.add_done_callback(_done)
+
+
+# Last good output per pipeline node, so a failure diff carries an expected_sample.
+_SUCCESS_TTL_SECONDS = 7 * 24 * 3600
+_SUCCESS_SAMPLE_BYTES = 4_096
+_SUCCESS_FALLBACK_MAX = 2_048
+_success_fallback: dict[str, tuple[float, str]] = {}
+_redis_pool: Any = None
+
+# error_type carries a category for tool/timeout/validation failures, else the raising class name
+_RESULT_ERROR_KINDS = frozenset(
+    {"timeout", "tool_error", "llm_error", "validation", "PipelineError"}
+)
+
+
+def _success_key(pipeline_id: str, node_id: str) -> str:
+    return f"healing:last_success:{pipeline_id}:{node_id}"
+
+
+async def _get_redis() -> Any:
+    global _redis_pool
+    url = os.environ.get("REDIS_URL", "").strip()
+    if not url:
+        return None
+    if _redis_pool is None:
+        try:
+            import redis.asyncio as aioredis
+
+            _redis_pool = aioredis.from_url(
+                url, decode_responses=True, socket_connect_timeout=2.0
+            )
+        except Exception as e:
+            logger.debug("healing: redis unavailable: %s", e)
+            return None
+    return _redis_pool
+
+
+def _fallback_get(key: str) -> str | None:
+    hit = _success_fallback.get(key)
+    if hit is None:
+        return None
+    expires_at, payload = hit
+    if expires_at < time.monotonic():
+        _success_fallback.pop(key, None)
+        return None
+    return payload
+
+
+def _fallback_set(key: str, payload: str) -> None:
+    now = time.monotonic()
+    if len(_success_fallback) >= _SUCCESS_FALLBACK_MAX:
+        for k in [k for k, (exp, _) in _success_fallback.items() if exp < now]:
+            _success_fallback.pop(k, None)
+        while len(_success_fallback) >= _SUCCESS_FALLBACK_MAX:
+            _success_fallback.pop(next(iter(_success_fallback)), None)
+    _success_fallback[key] = (now + _SUCCESS_TTL_SECONDS, payload)
+
+
+def success_sample(output: Any) -> Any:
+    """Redacted copy of a node output, capped at 4 KB."""
+    return _truncate_json(redact_sample(output), _SUCCESS_SAMPLE_BYTES)
+
+
+async def remember_success(pipeline_id: str, node_id: str, output: Any) -> None:
+    """Store a node's latest good output for 7 days. Redis first, process dict otherwise."""
+    if not pipeline_id or not node_id or output is None:
+        return
+    key = _success_key(pipeline_id, node_id)
+    try:
+        payload = json.dumps(success_sample(output), default=str)
+    except Exception as e:
+        logger.debug("healing: sample not serialisable: %s", e)
+        return
+    r = await _get_redis()
+    if r is not None:
+        try:
+            await r.set(key, payload, ex=_SUCCESS_TTL_SECONDS)
+            return
+        except Exception as e:
+            logger.debug("healing: redis set failed, using process store: %s", e)
+    _fallback_set(key, payload)
+
+
+async def last_success(pipeline_id: str, node_id: str) -> Any | None:
+    if not pipeline_id or not node_id:
+        return None
+    key = _success_key(pipeline_id, node_id)
+    payload: str | None = None
+    r = await _get_redis()
+    if r is not None:
+        try:
+            payload = await r.get(key)
+        except Exception as e:
+            logger.debug("healing: redis get failed, using process store: %s", e)
+    if payload is None:
+        payload = _fallback_get(key)
+    if payload is None:
+        return None
+    try:
+        return json.loads(payload)
+    except Exception:
+        return None
+
+
+def exception_from_result(
+    error_type: str | None, error_message: str | None
+) -> BaseException | None:
+    """Rebuild the node's exception from the class name the executor kept.
+
+    The executor swallows the original object, so this is only ever
+    formatted into a traceback header, never raised.
+    """
+    if not error_type or error_type in _RESULT_ERROR_KINDS:
+        return None
+    import builtins
+
+    cls = getattr(builtins, error_type, None)
+    if not (isinstance(cls, type) and issubclass(cls, BaseException)):
+        cls = type(error_type, (Exception,), {"__module__": "builtins"})
+    try:
+        return cls(error_message or "")
+    except Exception:
+        return Exception(error_message or "")
+
+
+async def capture_node_failure(
+    *,
+    pipeline_id: str,
+    node_id: str,
+    error_type: str | None,
+    error_message: str,
+    **kwargs: Any,
+) -> str | None:
+    """capture_failure fed with the node's last good output and a traceback.
+
+    A raised exception is rebuilt and passed as `exc`, a tool-reported
+    error goes in as the traceback text.
+    """
+    sample = await last_success(pipeline_id, node_id)
+    # a real traceback from the executor beats a rebuilt exception
+    real_tb = kwargs.pop("error_traceback", None)
+    exc = None if real_tb else exception_from_result(error_type, error_message)
+    return await capture_failure(
+        pipeline_id=pipeline_id,
+        node_id=node_id,
+        error_class=error_type or "PipelineError",
+        error_message=error_message,
+        error_traceback=real_tb
+        or (None if exc is not None else (error_message or None)),
+        last_success_sample=sample,
+        exc=exc,
+        **kwargs,
+    )

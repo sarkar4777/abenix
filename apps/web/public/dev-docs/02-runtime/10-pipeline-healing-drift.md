@@ -17,7 +17,8 @@ Both are tenant-scoped. Patch decisions leave an `activity_logs` row.
 | Drift detector | `apps/agent-runtime/engine/drift_detection.py` |
 | Healing API | `apps/api/app/routers/pipeline_healing.py` |
 | Drift API | `apps/api/app/routers/analytics.py` |
-| Drift call sites + alert persistence | `apps/api/app/routers/agents.py` (`_persist_drift_alerts`, `_drift_enabled`) |
+| Drift hook, toggles, alert persistence, backlog scan | `apps/api/app/services/execution_hooks.py` (`record_terminal`, `drift_enabled`, `persist_drift_alerts`, `scan_backlog`) |
+| Drift backlog job | `apps/api/app/core/scheduler.py` (`score_drift_backlog`) |
 | Tables | `packages/db/models/pipeline_healing.py`, `packages/db/models/drift_alert.py` |
 | UI | `apps/web/src/app/(app)/agents/[id]/healing/page.tsx`, drift section on `/analytics` |
 
@@ -130,7 +131,22 @@ Migration `1100_f_patch_cas` adds the two compare-and-swap columns. `packages/db
 
 ## Drift detection
 
-There is no scheduler. Detection runs inline in the API process right after an execution completes, in the three execution paths in `routers/agents.py` (streamed, non-streamed, non-streamed pipeline). Runs completed by the queue worker are not scored.
+Detection is no longer inline only. Every terminal path calls one hook, `record_terminal(db_or_session_factory, execution_row)` in `services/execution_hooks.py`, and a scheduler job sweeps up anything the hooks missed.
+
+Terminal paths that call the hook:
+
+- the three execute paths in `routers/agents.py` (streamed, non-streamed, non-streamed pipeline)
+- the queue consumer in `apps/agent-runtime/consumer.py`, from `_mark_done`, so completed and failed runs are scored for both agents and pipelines
+
+The hook reads duration, tokens, cost, confidence, output length, tool failures and total tool calls off the execution row. Pipelines have no token or cost columns filled, so those are summed from `node_results` the way the old inline code did. Failed runs are recorded too, their duration and tool failure rate are part of the signal.
+
+Each execution is scored at most once. The hook claims `drift:recorded:{execution_id}` in Redis with `SET NX` (TTL `DRIFT_RECORDED_TTL_SECONDS`, default one day) before recording and drops the claim if the detector raises, so a retry is possible. There is no `drift_recorded_at` column.
+
+### Backlog scan
+
+`score_drift_backlog` in `core/scheduler.py` runs every `DRIFT_SCAN_INTERVAL_SECONDS` (default 300) under the transaction-scoped `advisory_lock()` so one API replica does the work. It calls `scan_backlog`, which reads completed and failed executions whose `completed_at` falls after the last watermark (`drift:backlog:watermark` in Redis, one interval of overlap) and runs them through the same hook. Already claimed ids are skipped, so a run scored inline costs one Redis read. Batches are capped at `DRIFT_SCAN_BATCH` (default 500), a full batch moves the watermark to the last row instead of now so nothing is skipped.
+
+This is what catches a consumer-side miss. The runtime image ships only a few `apps/api` modules, so when the consumer cannot import the hook the next scan scores the run within one interval.
 
 ### Toggles
 
@@ -170,7 +186,7 @@ The DB path is preferred because it sees every completed run, including worker r
 
 ### Alerts
 
-`_persist_drift_alerts` in `routers/agents.py` writes one `drift_alerts` row per metric that crossed a threshold, with `agent_id`, `execution_id`, `severity`, `metric`, `baseline_value`, `current_value`, `deviation_pct`, `acknowledged`.
+`persist_drift_alerts` in `services/execution_hooks.py` writes one `drift_alerts` row per metric that crossed a threshold, with `agent_id`, `execution_id`, `severity`, `metric`, `baseline_value`, `current_value`, `deviation_pct`, `acknowledged`.
 
 Acknowledging sets the flag on that row only. It does not suppress future alerts for the same condition. There is no Slack or email fan-out for drift.
 
@@ -184,6 +200,7 @@ Acknowledging sets the flag on that row only. It does not suppress future alerts
 ## Tests
 
 - `tests/unit/test_drift_detector.py`: sigma floor lets 0..1 metrics and small costs alert, noise does not, baseline is captured then refreshed, DB path wins when available
+- `tests/unit/test_execution_hooks.py`: hook records completed and failed rows, pipeline counters come from `node_results`, agent, tenant and env toggles each stop it, a second call for the same id is a no-op, the backlog scan records what the hooks missed and moves the watermark
 - `tests/unit/test_pipeline_surgeon.py`: patch applies to the real shape, removal, unknown tool, cycle, entry/exit and id changes are rejected, unknown risk reads as high
 - `tests/unit/test_healing_capture.py`: redaction walks nested samples, traceback fallback
 

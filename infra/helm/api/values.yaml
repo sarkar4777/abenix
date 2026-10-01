@@ -41,3 +41,9 @@ tolerations: []
 mlModelsPVC:
   enabled: false
   claimName: ml-models-storage
+
+# Mounts the umbrella archives PVC at /data/archives (local object-storage
+# mode only). Off by default so a plain install does not demand a claim.
+archivesPVC:
+  enabled: false
+  claimName: abenix-archives
