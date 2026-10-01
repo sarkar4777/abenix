@@ -23,6 +23,10 @@ from models.archive import ArchiveRun, ArchiveRunStatus
 from models.user import UserRole
 
 
+# every test here awaits the storage or the restore
+pytestmark = pytest.mark.asyncio
+
+
 class TBase(DeclarativeBase):
     pass
 
@@ -62,7 +66,11 @@ class SyncAsAsync:
         self.conn = engine.connect()
 
     async def execute(self, stmt, params=None):
-        return self.conn.execute(stmt, params) if params is not None else self.conn.execute(stmt)
+        return (
+            self.conn.execute(stmt, params)
+            if params is not None
+            else self.conn.execute(stmt)
+        )
 
     async def commit(self):
         self.conn.commit()
@@ -177,10 +185,7 @@ async def test_dump_then_restore_round_trip_with_coercion(tmp_path, db):
     assert run.notes["restore"]["relinked"] == 1
     assert run.notes["restore"]["dropped_columns"] == ["legacy_col"]
 
-    got = {
-        r.id: r
-        for r in (await db.execute(sa.select(Thing.__table__))).all()
-    }
+    got = {r.id: r for r in (await db.execute(sa.select(Thing.__table__))).all()}
     assert set(got) == {PARENT, CHILD, LONER}
     child, parent, loner = got[CHILD], got[PARENT], got[LONER]
     # uuid, json, enum, numeric, bool, int all came back typed
@@ -224,7 +229,9 @@ async def test_partial_overlap_only_inserts_the_missing_rows(tmp_path, db):
     assert run.restored_rows == 2
     assert run.notes["restore"]["skipped_existing"] == 1
     status = (
-        await db.execute(text("SELECT status FROM things WHERE id = :id"), {"id": PARENT.hex})
+        await db.execute(
+            text("SELECT status FROM things WHERE id = :id"), {"id": PARENT.hex}
+        )
     ).scalar()
     assert status == "RUNNING"  # existing row untouched
 
@@ -281,7 +288,7 @@ async def test_dump_lines_stream_across_chunk_boundaries():
         for i in range(0, len(blob), 37):
             yield blob[i : i + 37]
 
-    got = [l async for l in archiver.iter_dump_lines(tiny_chunks())]
+    got = [line async for line in archiver.iter_dump_lines(tiny_chunks())]
     assert got == lines
 
 
@@ -290,7 +297,12 @@ def test_coerce_value_handles_each_type():
     u = uuid.uuid4()
     assert cv(UUID(as_uuid=True), str(u)) == u
     assert cv(sa.DateTime(timezone=True), "2026-01-01T00:00:00").tzinfo is timezone.utc
-    assert cv(sa.DateTime(timezone=True), "2026-01-01T00:00:00+02:00").utcoffset().total_seconds() == 7200
+    assert (
+        cv(sa.DateTime(timezone=True), "2026-01-01T00:00:00+02:00")
+        .utcoffset()
+        .total_seconds()
+        == 7200
+    )
     assert cv(JSONB, '{"a": 1}') == {"a": 1}
     assert cv(JSONB, {"a": 1}) == {"a": 1}
     assert cv(sa.Enum(Status), "COMPLETED") is Status.COMPLETED
@@ -357,7 +369,9 @@ async def test_restore_endpoint_is_tenant_scoped_and_admin_only():
         run_id=uuid.uuid4(), user=user, db=RouterDB(rows=[])
     )
     assert resp.status_code == 404
-    viewer = SimpleNamespace(id=uuid.uuid4(), tenant_id=uuid.uuid4(), role=UserRole.USER)
+    viewer = SimpleNamespace(
+        id=uuid.uuid4(), tenant_id=uuid.uuid4(), role=UserRole.USER
+    )
     resp = await archives_router.restore_archive_run(
         run_id=uuid.uuid4(), user=viewer, db=RouterDB(rows=[])
     )
@@ -366,7 +380,9 @@ async def test_restore_endpoint_is_tenant_scoped_and_admin_only():
 
 async def test_restore_endpoint_refuses_legacy_runs():
     user = _admin()
-    run = SimpleNamespace(id=uuid.uuid4(), tenant_id=user.tenant_id, file_uri="/data/archives/x.gz")
+    run = SimpleNamespace(
+        id=uuid.uuid4(), tenant_id=user.tenant_id, file_uri="/data/archives/x.gz"
+    )
     resp = await archives_router.restore_archive_run(
         run_id=run.id, user=user, db=RouterDB(rows=[run])
     )
