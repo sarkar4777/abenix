@@ -102,6 +102,12 @@ model_config:
         expires_seconds: 86400
 ```
 
+### The `human_approval` tool, the lighter gate
+
+`human_approval` is the in-run gate most seeded agents use. It parks the run on a Redis entry (`hitl:approval:{execution}:{gate}`, listed under `hitl:pending:{tenant}`) with a gate id, an `expires_at` and a `hitl:waiting:{execution}` marker that keeps the stale-run sweeper off the execution while it waits. Since 2.5 these gates are rows on `/approvals` and `GET /api/approvals` too, with ids of the form `hitl:{execution_id}:{gate_id}` and `gate_kind: human_approval`. Signing one off through `/api/approvals/{id}/signoff` writes the decision to Redis, which resumes the run, and writes an `approvals` history row so the decision shows under recent decisions and reaches the notification path. The gate needs an execution context, a tool registry built without `execution_id` gets an error instead of an invisible wait.
+
+Who may sign off: admins and creators. A sign-off by the user who requested it is allowed and recorded with `self_approved: true` on the signoff, because most tenants have one admin. Viewers cannot sign off. To make an agent fail rather than answer when it skips the gate, set `model_config.require_tools: [human_approval]`.
+
 ### 2. As an explicit pipeline node
 Cleaner — the gate is part of the DAG, not buried in a tool call.
 
@@ -158,7 +164,7 @@ flowchart LR
   C --> E[Live expiry counter]
 ```
 
-The `/approvals` page shows pending + recent rows. Payload renders as a key/value grid (not raw JSON) so a compliance reviewer can scan vendor, amount, risk tier at a glance. See [05-ui/02-api-client](../05-ui/02-api-client.md) and the page-catalogue.
+The `/approvals` page shows pending + recent rows, including `human_approval` gates from running agents, marked with a gate kind badge. Payload renders as a key/value grid (not raw JSON) so a compliance reviewer can scan vendor, amount, risk tier at a glance. See [05-ui/02-api-client](../05-ui/02-api-client.md) and the page-catalogue.
 
 ---
 

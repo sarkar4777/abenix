@@ -41,6 +41,7 @@ from app.routers import (
     admin_model_availability,
     llm_models,
     admin_settings,
+    admin_tool_config,
     public_settings,
     agent_comments,
     agent_favorites,
@@ -248,6 +249,7 @@ app.include_router(_invocations_mod.router)
 app.include_router(_archives_mod.router)
 app.include_router(admin_scaling.router)
 app.include_router(admin_settings.router)
+app.include_router(admin_tool_config.router)
 app.include_router(public_settings.router)
 app.include_router(admin_pricing.router)
 app.include_router(admin_model_availability.router)

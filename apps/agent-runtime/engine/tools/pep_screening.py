@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from engine import credentials
 import json
 import logging
-import os
 import re
 import unicodedata
 from difflib import SequenceMatcher
@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -268,9 +268,12 @@ async def _query_gov_roster(
     url = meta["url"]
     if "{key}" in url:
         key_env = meta.get("key_env")
-        api_key = os.environ.get(key_env or "", "")
+        api_key = credentials.get(key_env or "")
         if not api_key:
-            return [], f"{meta['name']} needs env var {key_env}"
+            return (
+                [],
+                f"{meta['name']} needs {key_env}, an admin can add it under Tool Configuration",
+            )
         url = url.format(key=api_key)
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
@@ -323,6 +326,16 @@ async def _query_gov_roster(
 
 class PEPScreeningTool(BaseTool):
     name = "pep_screening"
+    config_fields = (
+        ConfigField(
+            "OPENSANCTIONS_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenSanctions",
+            signup_url="https://www.opensanctions.org/api/",
+        ),
+    )
     description = (
         "Screen a person against Politically Exposed Persons (PEP) lists — "
         "heads of state, cabinet, parliamentarians, senior judges, central "
@@ -408,7 +421,12 @@ class PEPScreeningTool(BaseTool):
         names_to_try = [name] + [a for a in aliases if a and a.strip()]
 
         if "opensanctions" in sources:
-            api_key = os.environ.get("OPENSANCTIONS_API_KEY") or None
+            api_key = self.cfg("OPENSANCTIONS_API_KEY") or None
+            if api_key is None:
+                warnings.append(
+                    "OpenSanctions queried without OPENSANCTIONS_API_KEY, results may be "
+                    "rate limited, an admin can add it under Tool Configuration"
+                )
             for n in names_to_try:
                 hits, warn = await _query_opensanctions(n, jurisdiction, api_key)
                 if warn:

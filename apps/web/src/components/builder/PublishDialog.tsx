@@ -104,18 +104,32 @@ export default function PublishDialog({
         return;
       }
 
-      // Handle sharing if specific users selected
+      // Specific-people grants are ResourceShare rows via POST /share
       if (visibility === 'specific' && shareEmails.trim()) {
         const emails = shareEmails.split(',').map((e) => e.trim()).filter(Boolean);
+        const failures: string[] = [];
         for (const email of emails) {
-          await fetch(`${API_URL}/api/agents/${agentId}/shares`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ email, permission: 'execute' }),
-          }).catch(() => {});
+          try {
+            const r = await fetch(`${API_URL}/api/agents/${agentId}/share`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ email, permission: 'execute' }),
+            });
+            if (!r.ok) {
+              const b = await r.json().catch(() => null);
+              failures.push(`${email}: ${b?.error?.message || `HTTP ${r.status}`}`);
+            }
+          } catch {
+            failures.push(`${email}: network error`);
+          }
+        }
+        if (failures.length > 0) {
+          setError(`Published, but some shares failed. ${failures.join(' | ')}`);
+          onPublished();
+          return;
         }
       }
 

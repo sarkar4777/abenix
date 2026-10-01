@@ -21,7 +21,18 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import crypto
 from app.core.deps import get_current_user, get_db
+from app.core.hitl import (
+    approver_denial,
+    is_self_approval,
+    get_pending_hitl,
+    hitl_row_id,
+    hitl_to_approval_row,
+    list_pending_hitl,
+    parse_hitl_id,
+    write_hitl_decision,
+)
 from app.core.notifications import create_notification
 from app.core.responses import error, success
 from app.schemas.connectors import (
@@ -33,6 +44,7 @@ from app.schemas.connectors import (
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.approval import Approval, ApprovalStatus  # noqa: E402
+from models.execution import Execution  # noqa: E402
 from models.tenant import Tenant  # noqa: E402
 from models.user import User  # noqa: E402
 
@@ -171,124 +183,74 @@ async def list_approvals(
     result = await db.execute(stmt)
     rows = result.scalars().all()
     _ = mine  # tenant scope is enough for now; keep param for future per-user routing
-    return success([_serialize(a) for a in rows])
+    items = [_serialize(a) for a in rows]
+
+    # Runtime human_approval gates live in Redis, not in the approvals table
+    include_hitl = (
+        (status is None or status == "pending")
+        and (kind is None or kind == "human_approval")
+        and agent_id is None
+    )
+    if include_hitl:
+        try:
+            gates = await list_pending_hitl(str(user.tenant_id))
+        except Exception as e:
+            logger.warning("hitl pending list unavailable: %s", e)
+            gates = []
+        for g in gates:
+            if execution_id is not None and str(g.get("execution_id")) != str(
+                execution_id
+            ):
+                continue
+            items.append(hitl_to_approval_row(g))
+        items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+        items = items[:limit]
+    return success(items)
 
 
-@router.get("/{approval_id}")
-async def get_approval(
-    approval_id: uuid.UUID,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    result = await db.execute(
-        select(Approval).where(
-            Approval.id == approval_id, Approval.tenant_id == user.tenant_id
+async def _hitl_execution(
+    db: AsyncSession, user: User, execution_id: str
+) -> Execution | None:
+    try:
+        ex_uuid = uuid.UUID(execution_id)
+    except ValueError:
+        return None
+    res = await db.execute(
+        select(Execution).where(
+            Execution.id == ex_uuid, Execution.tenant_id == user.tenant_id
         )
     )
-    a = result.scalar_one_or_none()
-    if not a:
-        return error("Approval not found", 404)
-    if (
-        a.status == ApprovalStatus.pending
-        and a.expires_at
-        and a.expires_at < datetime.now(timezone.utc)
-    ):
-        a.status = ApprovalStatus.expired
-        a.decided_at = datetime.now(timezone.utc)
-        await db.commit()
-        await db.refresh(a)
-    return success(_serialize(a))
+    return res.scalar_one_or_none()
 
 
-@router.get("/{approval_id}/wait")
-async def wait_for_approval(
-    approval_id: uuid.UUID,
-    timeout_seconds: int = Query(30, ge=1, le=120),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Long-poll a single approval until status leaves pending or timeout fires.
-
-    SDK consumers call this from a worker that picked up an `approval_id`
-    out-of-band (queue, webhook, scheduled job) and want the resolved row
-    without burning CPU on a 2-second loop.
-    """
-    deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
-    while True:
-        result = await db.execute(
-            select(Approval).where(
-                Approval.id == approval_id, Approval.tenant_id == user.tenant_id
-            )
-        )
-        a = result.scalar_one_or_none()
-        if not a:
-            return error("Approval not found", 404)
-        if (
-            a.status == ApprovalStatus.pending
-            and a.expires_at
-            and a.expires_at < datetime.now(timezone.utc)
-        ):
-            a.status = ApprovalStatus.expired
-            a.decided_at = datetime.now(timezone.utc)
-            await db.commit()
-            await db.refresh(a)
-        if a.status != ApprovalStatus.pending:
-            return success(_serialize(a))
-        if datetime.now(timezone.utc) >= deadline:
-            return success(_serialize(a))
-        await asyncio.sleep(1.0)
-
-
-@router.post("/{approval_id}/signoff")
-async def sign_off(
-    approval_id: uuid.UUID,
-    body: ApprovalSignoffRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    if body.decision not in ("approve", "deny"):
-        return error("decision must be 'approve' or 'deny'", 400)
-    result = await db.execute(
+async def _hitl_history_row(
+    db: AsyncSession, tenant_id: uuid.UUID, execution_id: str, gate_id: str
+) -> Approval | None:
+    res = await db.execute(
         select(Approval).where(
-            Approval.id == approval_id, Approval.tenant_id == user.tenant_id
+            Approval.tenant_id == tenant_id,
+            Approval.client_token == hitl_row_id(execution_id, gate_id),
         )
     )
-    a = result.scalar_one_or_none()
-    if not a:
-        return error("Approval not found", 404)
+    return res.scalar_one_or_none()
 
-    if body.client_token:
-        for s in a.signoffs or []:
-            if s.get("client_token") == body.client_token:
-                return success(_serialize(a))
 
-    if a.status != ApprovalStatus.pending:
-        return error(f"Approval is already {a.status.value}", 409)
-
-    signoffs = list(a.signoffs or [])
-    if any(s.get("user_id") == str(user.id) for s in signoffs):
-        return error("User has already signed off on this approval", 409)
-    record: dict[str, Any] = {
-        "user_id": str(user.id),
-        "user_email": user.email,
-        "decision": body.decision,
-        "reason": body.reason or "",
-        "at": datetime.now(timezone.utc).isoformat(),
-    }
-    if body.client_token:
-        record["client_token"] = body.client_token
-    signoffs.append(record)
-    a.signoffs = signoffs
-    prev_status = a.status
-    new_status = _evaluate_status(a)
-    a.status = new_status
-    if new_status != ApprovalStatus.pending:
-        a.decided_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(a)
-    if prev_status == ApprovalStatus.pending and new_status != ApprovalStatus.pending:
-        await _notify_resolved(db, a, decider=user)
-    return success(_serialize(a))
+async def _hitl_snapshot(
+    db: AsyncSession, user: User, execution_id: str, gate_id: str
+) -> dict[str, Any] | None:
+    """Pending gate as a row, the recorded decision row, or None."""
+    exec_row = await _hitl_execution(db, user, execution_id)
+    if exec_row is None:
+        return None
+    pending = await get_pending_hitl(str(user.tenant_id), execution_id, gate_id)
+    if pending is not None:
+        row = hitl_to_approval_row(pending)
+        row["requested_by"] = str(exec_row.user_id) if exec_row.user_id else None
+        return row
+    history = await _hitl_history_row(db, user.tenant_id, execution_id, gate_id)
+    if history is not None:
+        return _serialize(history)
+    return None
 
 
 @router.get("/webhooks")
@@ -326,7 +288,7 @@ async def set_webhook(
         if body.secret == "":
             settings.pop("approval_webhook_secret", None)
         else:
-            settings["approval_webhook_secret"] = body.secret
+            settings["approval_webhook_secret"] = crypto.encrypt(tenant.id, body.secret)
     from sqlalchemy.orm.attributes import flag_modified
 
     tenant.settings = settings
@@ -340,6 +302,236 @@ async def set_webhook(
     )
 
 
+def _parse_approval_id(approval_id: str) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(approval_id)
+    except (ValueError, TypeError):
+        return None
+
+
+@router.get("/{approval_id}")
+async def get_approval(
+    approval_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    hitl = parse_hitl_id(approval_id)
+    if hitl:
+        row = await _hitl_snapshot(db, user, *hitl)
+        return success(row) if row else error("Approval not found", 404)
+    approval_uuid = _parse_approval_id(approval_id)
+    if approval_uuid is None:
+        return error("Approval not found", 404)
+    result = await db.execute(
+        select(Approval).where(
+            Approval.id == approval_uuid, Approval.tenant_id == user.tenant_id
+        )
+    )
+    a = result.scalar_one_or_none()
+    if not a:
+        return error("Approval not found", 404)
+    if (
+        a.status == ApprovalStatus.pending
+        and a.expires_at
+        and a.expires_at < datetime.now(timezone.utc)
+    ):
+        a.status = ApprovalStatus.expired
+        a.decided_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(a)
+    return success(_serialize(a))
+
+
+@router.get("/{approval_id}/wait")
+async def wait_for_approval(
+    approval_id: str,
+    timeout_seconds: int = Query(30, ge=1, le=120),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Long-poll a single approval until status leaves pending or timeout fires.
+
+    SDK consumers call this from a worker that picked up an `approval_id`
+    out-of-band (queue, webhook, scheduled job) and want the resolved row
+    without burning CPU on a 2-second loop.
+    """
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+    hitl = parse_hitl_id(approval_id)
+    if hitl:
+        while True:
+            row = await _hitl_snapshot(db, user, *hitl)
+            if row is None:
+                return error("Approval not found", 404)
+            if row.get("status") != "pending" or datetime.now(timezone.utc) >= deadline:
+                return success(row)
+            await asyncio.sleep(1.0)
+    approval_uuid = _parse_approval_id(approval_id)
+    if approval_uuid is None:
+        return error("Approval not found", 404)
+    while True:
+        result = await db.execute(
+            select(Approval).where(
+                Approval.id == approval_uuid, Approval.tenant_id == user.tenant_id
+            )
+        )
+        a = result.scalar_one_or_none()
+        if not a:
+            return error("Approval not found", 404)
+        if (
+            a.status == ApprovalStatus.pending
+            and a.expires_at
+            and a.expires_at < datetime.now(timezone.utc)
+        ):
+            a.status = ApprovalStatus.expired
+            a.decided_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(a)
+        if a.status != ApprovalStatus.pending:
+            return success(_serialize(a))
+        if datetime.now(timezone.utc) >= deadline:
+            return success(_serialize(a))
+        await asyncio.sleep(1.0)
+
+
+async def _sign_off_hitl(
+    db: AsyncSession,
+    user: User,
+    execution_id: str,
+    gate_id: str,
+    body: ApprovalSignoffRequest,
+) -> JSONResponse:
+    exec_row = await _hitl_execution(db, user, execution_id)
+    if exec_row is None:
+        return error("Approval not found", 404)
+    history = await _hitl_history_row(db, user.tenant_id, execution_id, gate_id)
+    if history is not None:
+        return error(f"Approval is already {history.status.value}", 409)
+    pending = await get_pending_hitl(str(user.tenant_id), execution_id, gate_id)
+    if pending is None:
+        return error("Approval not found", 404)
+    denial = await approver_denial(db, user, exec_row.user_id)
+    if denial:
+        return error(denial, 403)
+
+    decision = "approved" if body.decision == "approve" else "rejected"
+    written = await write_hitl_decision(
+        execution_id=execution_id,
+        gate_id=gate_id,
+        decision=decision,
+        reviewer=user.full_name or user.email,
+        reviewer_id=str(user.id),
+        tenant_id=str(user.tenant_id),
+        comment=body.reason or "",
+    )
+    if not written:
+        return error("Approval is already decided", 409)
+
+    now = datetime.now(timezone.utc)
+    record: dict[str, Any] = {
+        "user_id": str(user.id),
+        "user_email": user.email,
+        "decision": body.decision,
+        "reason": body.reason or "",
+        "at": now.isoformat(),
+    }
+    if body.client_token:
+        record["client_token"] = body.client_token
+    # History row so the decision shows under recent decisions and notifies the requester
+    a = Approval(
+        tenant_id=user.tenant_id,
+        agent_id=exec_row.agent_id,
+        agent_execution_id=exec_row.id,
+        title=pending.get("action") or "Approval requested",
+        payload={
+            "details": pending.get("details") or "",
+            "risk_level": pending.get("risk_level") or "medium",
+            "agent_name": pending.get("agent_name") or "",
+            "gate_id": gate_id,
+        },
+        required_signoffs=1,
+        signoffs=[record],
+        status=(
+            ApprovalStatus.approved if decision == "approved" else ApprovalStatus.denied
+        ),
+        requested_by=exec_row.user_id,
+        expires_at=None,
+        decided_at=now,
+        gate_kind="human_approval",
+        client_token=hitl_row_id(execution_id, gate_id),
+    )
+    requested_at = pending.get("requested_at")
+    if requested_at:
+        a.created_at = datetime.fromtimestamp(float(requested_at), tz=timezone.utc)
+    db.add(a)
+    await db.commit()
+    await db.refresh(a)
+    await _notify_resolved(db, a, decider=user)
+    return success(_serialize(a))
+
+
+@router.post("/{approval_id}/signoff")
+async def sign_off(
+    approval_id: str,
+    body: ApprovalSignoffRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    if body.decision not in ("approve", "deny"):
+        return error("decision must be 'approve' or 'deny'", 400)
+    hitl = parse_hitl_id(approval_id)
+    if hitl:
+        return await _sign_off_hitl(db, user, hitl[0], hitl[1], body)
+    approval_uuid = _parse_approval_id(approval_id)
+    if approval_uuid is None:
+        return error("Approval not found", 404)
+    result = await db.execute(
+        select(Approval).where(
+            Approval.id == approval_uuid, Approval.tenant_id == user.tenant_id
+        )
+    )
+    a = result.scalar_one_or_none()
+    if not a:
+        return error("Approval not found", 404)
+
+    if body.client_token:
+        for s in a.signoffs or []:
+            if s.get("client_token") == body.client_token:
+                return success(_serialize(a))
+
+    if a.status != ApprovalStatus.pending:
+        return error(f"Approval is already {a.status.value}", 409)
+
+    denial = await approver_denial(db, user, a.requested_by)
+    if denial:
+        return error(denial, 403)
+
+    signoffs = list(a.signoffs or [])
+    if any(s.get("user_id") == str(user.id) for s in signoffs):
+        return error("User has already signed off on this approval", 409)
+    record: dict[str, Any] = {
+        "user_id": str(user.id),
+        "user_email": user.email,
+        "decision": body.decision,
+        "reason": body.reason or "",
+        "at": datetime.now(timezone.utc).isoformat(),
+        "self_approved": is_self_approval(user, a.requested_by),
+    }
+    if body.client_token:
+        record["client_token"] = body.client_token
+    signoffs.append(record)
+    a.signoffs = signoffs
+    prev_status = a.status
+    new_status = _evaluate_status(a)
+    a.status = new_status
+    if new_status != ApprovalStatus.pending:
+        a.decided_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(a)
+    if prev_status == ApprovalStatus.pending and new_status != ApprovalStatus.pending:
+        await _notify_resolved(db, a, decider=user)
+    return success(_serialize(a))
+
+
 async def _tenant_settings(db: AsyncSession, tenant_id: uuid.UUID) -> dict[str, Any]:
     res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = res.scalar_one_or_none()
@@ -347,12 +539,17 @@ async def _tenant_settings(db: AsyncSession, tenant_id: uuid.UUID) -> dict[str, 
 
 
 async def _post_webhook(
-    settings: dict[str, Any], event: str, payload: dict[str, Any]
+    settings: dict[str, Any],
+    event: str,
+    payload: dict[str, Any],
+    tenant_id: uuid.UUID | str | None = None,
 ) -> None:
     url = (settings.get("approval_webhook_url") or "").strip()
     if not url:
         return
     secret = settings.get("approval_webhook_secret") or ""
+    if secret and tenant_id is not None:
+        secret = crypto.decrypt(tenant_id, secret)
     body = {"event": event, "data": payload}
     headers = {"Content-Type": "application/json"}
     if secret:
@@ -413,7 +610,9 @@ async def _notify_pending(
         )
     await db.commit()
     settings = await _tenant_settings(db, approval.tenant_id)
-    await _post_webhook(settings, "approval_pending", _serialize(approval))
+    await _post_webhook(
+        settings, "approval_pending", _serialize(approval), approval.tenant_id
+    )
 
 
 async def _notify_resolved(
@@ -460,4 +659,6 @@ async def _notify_resolved(
     if targets:
         await db.commit()
     settings = await _tenant_settings(db, approval.tenant_id)
-    await _post_webhook(settings, "approval_resolved", _serialize(approval))
+    await _post_webhook(
+        settings, "approval_resolved", _serialize(approval), approval.tenant_id
+    )

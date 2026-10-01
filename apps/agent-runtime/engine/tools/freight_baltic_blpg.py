@@ -32,7 +32,7 @@ from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 # Indicative levels in $/MT propane for a VLGC voyage. Operations
 # refreshes this from OPEC MOMR + RBN + Clarksons publications.
@@ -94,13 +94,29 @@ def _load_curated() -> dict[str, dict[str, Any]]:
 
 class FreightBalticBlpgTool(BaseTool):
     name = "freight_baltic_blpg"
+    config_fields = (
+        ConfigField(
+            "BALTIC_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Baltic Exchange",
+        ),
+        ConfigField(
+            "BALTIC_API_URL",
+            label="API URL",
+            kind="url",
+            required=False,
+            group="Baltic Exchange",
+        ),
+    )
     description = (
         "Baltic Exchange BLPG indices for LPG freight ($/MT propane VLGC). "
         "Exposes BLPG1 (Ras Tanura -> Chiba), BLPG2 (Houston -> Flushing) "
         "and BLPG3 (Houston -> Chiba via Panama) with mid / low / high "
         "for the route. Calibrated to Q1-2026 OPEC-MOMR public-domain "
         "levels; production deployments set BALTIC_API_KEY + "
-        "BALTIC_API_URL env vars to swap to the live subscription feed "
+        "BALTIC_API_URL under Admin -> Tool Configuration to swap to the live subscription feed "
         "without any agent-side code change. Two actions: route (single "
         "BLPG with mid/low/high), all (all three routes side-by-side)."
     )
@@ -128,8 +144,8 @@ class FreightBalticBlpgTool(BaseTool):
         return ToolResult(content=f"Unknown action '{action}'", is_error=True)
 
     async def _fetch_live(self, route_code: str) -> dict[str, Any] | None:
-        url = os.environ.get("BALTIC_API_URL", "").strip()
-        key = os.environ.get("BALTIC_API_KEY", "").strip()
+        url = self.cfg("BALTIC_API_URL").strip()
+        key = self.cfg("BALTIC_API_KEY").strip()
         if not url or not key:
             return None
         try:

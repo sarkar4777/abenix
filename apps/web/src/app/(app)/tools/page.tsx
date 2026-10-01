@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Search, Bot, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import { CredentialBadge, CredentialHint, adminConfigHref, type ToolConfigInfo } from '@/components/CredentialBadge';
+import { useIsAdmin } from '@/hooks/useToolConfig';
 
 interface Tool {
   id: string;
@@ -11,6 +13,8 @@ interface Tool {
   description?: string;
   category?: string;
   input_schema?: Record<string, unknown>;
+  /** credential state, generated from the tool's config_fields */
+  config?: ToolConfigInfo;
 }
 
 const CATEGORY_ORDER = [
@@ -47,6 +51,7 @@ export default function ToolsCataloguePage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [openCats, setOpenCats] = useState<Record<string, boolean>>({});
+  const isAdmin = useIsAdmin();
 
   useEffect(() => {
     let cancelled = false;
@@ -193,7 +198,9 @@ export default function ToolsCataloguePage() {
                       {items.map(t => (
                         <li
                           key={t.id}
+                          id={t.id}
                           className="px-5 py-4 hover:bg-slate-800/30 transition-colors"
+                          data-testid={`tool-row-${t.id}`}
                         >
                           <div className="flex items-start gap-3">
                             <Bot className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
@@ -207,12 +214,23 @@ export default function ToolsCataloguePage() {
                                     {t.name}
                                   </span>
                                 )}
+                                <CredentialBadge config={t.config} />
+                                {isAdmin && t.config && t.config.status !== 'none' && (
+                                  <Link
+                                    href={adminConfigHref(t.config)}
+                                    className="text-[11px] text-cyan-400 hover:underline"
+                                    data-testid={`tool-configure-${t.id}`}
+                                  >
+                                    Configure
+                                  </Link>
+                                )}
                               </div>
                               {t.description && (
                                 <p className="text-sm text-slate-400 mt-1 leading-relaxed">
                                   {t.description}
                                 </p>
                               )}
+                              <CredentialHint config={t.config} isAdmin={isAdmin} />
                               {!t.input_schema && (
                                 <p className="text-[11px] text-amber-300/80 mt-2">
                                   ⚠ No schema published — the agent will have

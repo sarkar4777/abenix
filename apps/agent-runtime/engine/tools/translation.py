@@ -2,16 +2,39 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 class TranslationTool(BaseTool):
     name = "translation"
+    config_fields = (
+        ConfigField(
+            "DEEPL_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="DeepL",
+            signup_url="https://www.deepl.com/pro-api",
+        ),
+        ConfigField(
+            "LIBRETRANSLATE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="LibreTranslate",
+        ),
+        ConfigField(
+            "LIBRETRANSLATE_URL",
+            label="Server URL",
+            kind="url",
+            required=False,
+            group="LibreTranslate",
+        ),
+    )
     description = (
         "Translate text to a target language. Uses DeepL when DEEPL_API_KEY "
         "is set (best quality), falls back to LibreTranslate via "
@@ -50,9 +73,9 @@ class TranslationTool(BaseTool):
                 content="text and target_lang are required", is_error=True
             )
 
-        deepl_key = os.environ.get("DEEPL_API_KEY", "").strip()
-        libre_url = os.environ.get("LIBRETRANSLATE_URL", "").strip()
-        libre_key = os.environ.get("LIBRETRANSLATE_API_KEY", "").strip()
+        deepl_key = self.cfg("DEEPL_API_KEY").strip()
+        libre_url = self.cfg("LIBRETRANSLATE_URL").strip()
+        libre_key = self.cfg("LIBRETRANSLATE_API_KEY").strip()
 
         try:
             if deepl_key:
@@ -117,12 +140,19 @@ class TranslationTool(BaseTool):
                     },
                 )
 
+            # Hand the text back unchanged, and say so in the content. Saying it
+            # only in metadata let the untranslated text pass as a translation.
+            reason = (
+                "No translation provider is configured (DEEPL_API_KEY or "
+                "LIBRETRANSLATE_URL), the text was not translated."
+            )
             return ToolResult(
-                content=text,
+                content=f"[not translated] {reason}\n\n{text}",
                 metadata={
                     "provider": "none",
                     "skipped": True,
-                    "reason": "No translation provider configured. Set DEEPL_API_KEY or LIBRETRANSLATE_URL.",
+                    "reason": reason,
+                    "warnings": [reason],
                     "target_lang": target,
                 },
             )

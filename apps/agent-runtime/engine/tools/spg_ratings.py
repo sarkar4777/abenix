@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 logger = logging.getLogger(__name__)
@@ -27,9 +26,25 @@ USER_AGENT = "AgentForge issuer-rating-refresh contact@agentforge.local"
 
 class SPGRatingsTool(BaseTool):
     name = "spg_ratings_api"
+    config_fields = (
+        ConfigField(
+            "SPG_RATINGS_API_KEY",
+            label="API key",
+            kind="secret",
+            required=True,
+            group="S&P Global Ratings",
+        ),
+        ConfigField(
+            "SPG_RATINGS_API_URL",
+            label="API URL",
+            kind="url",
+            required=False,
+            group="S&P Global Ratings",
+        ),
+    )
     description = (
         "Fetch current issuer credit rating + outlook from S&P Global Ratings. "
-        "Requires $SPG_RATINGS_API_KEY and $SPG_RATINGS_API_URL "
+        "Needs SPG_RATINGS_API_KEY and SPG_RATINGS_API_URL, set under Admin -> Tool Configuration, "
         "(provided by S&P under a Capital IQ contract). Without keys the "
         "tool returns needs_configuration; never fabricates a rating."
     )
@@ -43,10 +58,10 @@ class SPGRatingsTool(BaseTool):
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        api_key = os.environ.get("SPG_RATINGS_API_KEY", "").strip()
-        api_url = os.environ.get("SPG_RATINGS_API_URL", "").strip()
+        api_key = self.cfg("SPG_RATINGS_API_KEY", required=True).strip()
+        api_url = self.cfg("SPG_RATINGS_API_URL").strip()
 
-        if not api_key or not api_url:
+        if not api_url:
             return ToolResult(
                 content=json.dumps(
                     {
@@ -56,7 +71,7 @@ class SPGRatingsTool(BaseTool):
                             "S&P Global Ratings access requires a Capital IQ contract. "
                             "Once procured, set SPG_RATINGS_API_KEY (Bearer token) + "
                             "SPG_RATINGS_API_URL (e.g. https://api.capitaliq.com/ratings/v1) "
-                            "in platform Integrations. The tool will pull the current "
+                            "under Admin -> Tool Configuration. The tool will pull the current "
                             "issuer rating + outlook + last action date on every refresh. "
                             "No mocked data is returned without the key."
                         ),

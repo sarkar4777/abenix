@@ -38,6 +38,19 @@ model_config:
   model: claude-sonnet-4-5-20250929
   temperature: 0.3
   max_iterations: 15
+  # What you type on the chat page lands in {{context.owner}} and {{context.repo}}.
+  # The defaults keep the demo runnable with no input and no GITHUB_TOKEN.
+  input_variables:
+    - name: owner
+      type: string
+      description: GitHub organisation or user
+      required: false
+      default: octocat
+    - name: repo
+      type: string
+      description: Repository name
+      required: false
+      default: spoon-knife
   tools:
     - github_tool
     - llm_call
@@ -51,14 +64,13 @@ model_config:
 mode: pipeline
 pipeline_config:
   nodes:
-    # Default to a small public repo so demos work without GITHUB_TOKEN.
-    # Override by setting {{context.owner}} and {{context.repo}} at execution time.
+    # owner and repo come from input_variables above, defaults are a small public repo.
     - id: repo_meta
       tool_name: github_tool
       arguments:
         operation: get_repo
-        owner: octocat
-        repo: spoon-knife
+        owner: "{{context.owner}}"
+        repo: "{{context.repo}}"
       position:
         x: 100
         y: 100
@@ -66,8 +78,8 @@ pipeline_config:
       tool_name: github_tool
       arguments:
         operation: list_files
-        owner: octocat
-        repo: spoon-knife
+        owner: "{{context.owner}}"
+        repo: "{{context.repo}}"
       position:
         x: 400
         y: 100
@@ -75,8 +87,8 @@ pipeline_config:
       tool_name: github_tool
       arguments:
         operation: get_languages
-        owner: octocat
-        repo: spoon-knife
+        owner: "{{context.owner}}"
+        repo: "{{context.repo}}"
       position:
         x: 700
         y: 100
@@ -84,8 +96,8 @@ pipeline_config:
       tool_name: github_tool
       arguments:
         operation: get_commits
-        owner: octocat
-        repo: spoon-knife
+        owner: "{{context.owner}}"
+        repo: "{{context.repo}}"
         per_page: 20
       position:
         x: 1000
@@ -94,8 +106,8 @@ pipeline_config:
       tool_name: github_tool
       arguments:
         operation: list_issues
-        owner: octocat
-        repo: spoon-knife
+        owner: "{{context.owner}}"
+        repo: "{{context.repo}}"
         state: open
         per_page: 20
       position:
@@ -105,8 +117,8 @@ pipeline_config:
       tool_name: github_tool
       arguments:
         operation: list_pull_requests
-        owner: octocat
-        repo: spoon-knife
+        owner: "{{context.owner}}"
+        repo: "{{context.repo}}"
         state: open
       position:
         x: 1600
@@ -115,8 +127,8 @@ pipeline_config:
       tool_name: github_tool
       arguments:
         operation: get_workflows
-        owner: octocat
-        repo: spoon-knife
+        owner: "{{context.owner}}"
+        repo: "{{context.repo}}"
       position:
         x: 1900
         y: 100

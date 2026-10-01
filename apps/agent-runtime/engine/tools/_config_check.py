@@ -15,31 +15,36 @@ upstream failures as `is_error=True` so the executor records them.
 
 from __future__ import annotations
 
-import os
-
+from engine import credentials
 from engine.tools.base import ToolResult
 
 
 def require_env(
     *vars_any_of: str, tool_name: str, purpose: str = ""
 ) -> ToolResult | None:
-    """Return a ToolResult error if NONE of the named env vars is set.
+    """Return a ToolResult error if NONE of the named values is configured.
 
     Some tools accept any of several keys (e.g. OPENAI_API_KEY OR
     ANTHROPIC_API_KEY). Pass them all — if at least one is set,
-    returns None and the caller continues normally.
+    returns None and the caller continues normally. Values come through
+    the resolver, so a key an admin saved counts the same as one in the
+    environment, and the message sends the user to the admin screen rather
+    than to a shell.
     """
-    if any(os.environ.get(v) for v in vars_any_of):
+    if any(credentials.get(v) for v in vars_any_of):
         return None
-    keys = " or ".join(f"`{v}`" for v in vars_any_of)
+    keys = " or ".join(vars_any_of)
     msg_purpose = f" (used for {purpose})" if purpose else ""
     return ToolResult(
         content=(
-            f"{tool_name} is not configured: set {keys} in the environment{msg_purpose}. "
-            f"This tool wraps an external API and cannot run without that credential. "
-            f"See docs/configuration#external-tools for the full list of optional integrations."
+            f"{keys} is not configured{msg_purpose}. "
+            "An admin can add it under Admin -> Tool Configuration."
         ),
         is_error=True,
+        metadata={
+            "needs_configuration": vars_any_of[0] if vars_any_of else "",
+            "tool": tool_name,
+        },
     )
 
 

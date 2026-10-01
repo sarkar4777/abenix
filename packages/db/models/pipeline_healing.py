@@ -76,6 +76,13 @@ class PipelinePatchProposal(UUIDMixin, TenantMixin, TimestampMixin, Base):
     dsl_before: Mapped[dict[str, Any]] = mapped_column(JSONB)
     json_patch: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     dsl_after: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # sha256 of the canonical pipeline_config the patch was drafted against.
+    # apply/rollback compare it to the live config and refuse on mismatch.
+    dsl_before_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Exact pipeline_config that apply replaced, so rollback restores it.
+    applied_snapshot: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     status: Mapped[PipelinePatchStatus] = mapped_column(
         Enum(
             PipelinePatchStatus,

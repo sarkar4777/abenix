@@ -89,3 +89,7 @@ input_variables:
 
 example_prompts:
   - '{"rule": {"corridor_id":"USGC-NWE","side":"sell_forward","size_mt":10000,"trigger":{"metric":"net_arb_per_mt","operator":">","value":30}}, "horizon_days": 30, "n_simulations": 10000}'
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - EIA_API_KEY

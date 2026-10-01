@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from engine import credentials
 import json
-import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 # Service registry: name → {env_key, base_url, description}
 SERVICES = {
@@ -38,6 +38,36 @@ SERVICES = {
 
 class IntegrationHubTool(BaseTool):
     name = "integration_hub"
+    # One secret per service in SERVICES, plus the Jira and Salesforce
+    # addresses read by name below. Several services share a key with
+    # another tool, which is fine, storage is per key.
+    config_fields = tuple(
+        ConfigField(
+            env,
+            label=f"{svc} credential",
+            kind="secret",
+            group=svc.replace("_", " ").title(),
+            dynamic=True,
+        )
+        for svc, env in sorted({n: s["env"] for n, s in SERVICES.items()}.items())
+        if env not in ("AWS_ACCESS_KEY_ID",)
+    ) + (
+        ConfigField(
+            "AWS_ACCESS_KEY_ID",
+            label="Access key id",
+            kind="secret",
+            group="AWS",
+            dynamic=True,
+        ),
+        ConfigField("JIRA_URL", label="Site URL", kind="url", group="Jira"),
+        ConfigField("JIRA_EMAIL", label="Account email", kind="string", group="Jira"),
+        ConfigField(
+            "SALESFORCE_INSTANCE_URL",
+            label="Instance URL",
+            kind="url",
+            group="Salesforce",
+        ),
+    )
     description = (
         "Connect to 20+ enterprise services: Slack, Teams, Gmail, Salesforce, HubSpot, "
         "Zendesk, Jira, Google Sheets, Notion, Airtable, Asana, Linear, Intercom, "
@@ -62,7 +92,7 @@ class IntegrationHubTool(BaseTool):
             },
             "auth_token": {
                 "type": "string",
-                "description": "Override auth token (optional, uses env var if omitted)",
+                "description": "Override auth token (optional, uses the configured value if omitted)",
             },
         },
         "required": ["service", "action"],
@@ -81,7 +111,7 @@ class IntegrationHubTool(BaseTool):
             )
 
         svc = SERVICES[service]
-        auth = auth_override or os.environ.get(svc["env"], "")
+        auth = auth_override or credentials.get(svc["env"])
 
         # Route to service-specific handler
         handler = getattr(self, f"_handle_{service}", None)
@@ -176,8 +206,8 @@ class IntegrationHubTool(BaseTool):
 
     async def _handle_jira(self, action: str, data: dict, auth: str) -> ToolResult:
         """Jira: create/search issues."""
-        jira_url = os.environ.get("JIRA_URL", "")
-        jira_email = os.environ.get("JIRA_EMAIL", "")
+        jira_url = self.cfg("JIRA_URL")
+        jira_email = self.cfg("JIRA_EMAIL")
         if not auth or not jira_url:
             return ToolResult(
                 content="Error: JIRA_TOKEN and JIRA_URL required", is_error=True
@@ -268,7 +298,7 @@ class IntegrationHubTool(BaseTool):
         self, action: str, data: dict, auth: str
     ) -> ToolResult:
         """Salesforce: query and create records."""
-        instance_url = os.environ.get("SALESFORCE_INSTANCE_URL", "")
+        instance_url = self.cfg("SALESFORCE_INSTANCE_URL")
         if not auth or not instance_url:
             return ToolResult(
                 content="Error: SALESFORCE_TOKEN and SALESFORCE_INSTANCE_URL required",
@@ -337,7 +367,7 @@ class IntegrationHubTool(BaseTool):
                     "service": service,
                     "description": svc.get("desc", ""),
                     "action_requested": action,
-                    "message": f"Service '{service}' is available. Configure {svc.get('env', 'AUTH_TOKEN')} environment variable to enable live operations.",
+                    "message": f"Service '{service}' is available. Set {svc.get('env', 'AUTH_TOKEN')} under Admin -> Tool Configuration to enable live operations.",
                     "auth_configured": bool(auth),
                     "data_received": data,
                 }

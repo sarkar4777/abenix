@@ -24,6 +24,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { CredentialBadge, type ToolConfigInfo } from '@/components/CredentialBadge';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -37,6 +38,8 @@ interface ToolItem {
   connectionId?: string;
   /** Category slug straight from /api/tools, used when TOOL_DOCS has no entry. */
   apiCategory?: string;
+  /** Credential state straight from /api/tools. */
+  config?: ToolConfigInfo;
 }
 
 const BUILT_IN_TOOLS: ToolItem[] = [
@@ -69,13 +72,10 @@ const BUILT_IN_TOOLS: ToolItem[] = [
   { id: 'entso_e', name: 'ENTSO-E Power', description: 'European electricity prices and generation data', icon: TrendingUp, source: 'builtin' },
   { id: 'ember_climate', name: 'Ember Climate', description: 'UK power prices, EU carbon prices', icon: TrendingUp, source: 'builtin' },
   { id: 'ecb_rates', name: 'ECB Rates', description: 'FX rates, inflation, interest rates', icon: TrendingUp, source: 'builtin' },
-  // Search
-  { id: 'contract_search', name: 'Contract Search', description: 'Search across uploaded PPA/gas contracts', icon: Search, source: 'builtin' },
   // Finance
   { id: 'financial_calculator', name: 'Financial Calculator', description: 'NPV, IRR, mortgage, amortization', icon: Calculator, source: 'builtin' },
   { id: 'risk_analyzer', name: 'Risk Analyzer', description: 'Monte Carlo, sensitivity, VaR', icon: Calculator, source: 'builtin' },
   { id: 'market_data', name: 'Market Data', description: 'Stock, forex, commodity prices', icon: Globe, source: 'builtin' },
-  { id: 'ppa_calculator', name: 'PPA Calculator', description: 'LCOE, NPV, IRR, financial modeling', icon: Calculator, source: 'builtin' },
   // Utility
   { id: 'date_calculator', name: 'Date Calculator', description: 'Date math, business days, holidays', icon: Clock, source: 'builtin' },
   { id: 'unit_converter', name: 'Unit Converter', description: 'Convert length, weight, energy, etc.', icon: Calculator, source: 'builtin' },
@@ -264,6 +264,7 @@ function ToolSection({
                       {tool.name}
                     </p>
                     <BadgeTag badge={tool.badge ?? null} />
+                    <CredentialBadge config={tool.config} compact />
                   </div>
                   <p className="text-[10px] text-slate-500 truncate">{tool.description}</p>
                 </div>
@@ -312,12 +313,13 @@ export default function ToolPalette({ selectedTools, onToggleTool }: ToolPalette
       .then(async (r) => {
         if (!r.ok) return;
         const json = await r.json();
-        const rows: Array<{ id: string; name?: string; description?: string; category?: string }> = json?.data || [];
+        const rows: Array<{ id: string; name?: string; description?: string; category?: string; config?: ToolConfigInfo }> = json?.data || [];
         if (!rows.length) return;
         // Preserve any icon overrides from BUILT_IN_TOOLS for the ids we
         // already hand-picked (so we don't downgrade existing UX).
         const overrides: Record<string, LucideIcon> = {};
-        for (const t of BUILT_IN_TOOLS) overrides[t.id] = t.icon;
+        const badges: Record<string, ToolItem['badge']> = {};
+        for (const t of BUILT_IN_TOOLS) { overrides[t.id] = t.icon; badges[t.id] = t.badge; }
         const mapped: ToolItem[] = rows.map((t) => ({
           id: t.id,
           name: t.name || t.id,
@@ -325,6 +327,8 @@ export default function ToolPalette({ selectedTools, onToggleTool }: ToolPalette
           icon: overrides[t.id] || _iconFor(t.id, t.category),
           source: 'builtin',
           apiCategory: t.category,
+          badge: badges[t.id] ?? null,
+          config: t.config,
         }));
         setLiveTools(mapped);
       })

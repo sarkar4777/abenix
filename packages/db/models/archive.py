@@ -4,7 +4,17 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Index, Integer, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +31,12 @@ class ArchiveRunStatus(str, enum.Enum):
 class ArchiveRun(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "archive_runs"
 
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     source_table: Mapped[str] = mapped_column(String(64), index=True)
     triggered_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
@@ -66,6 +82,11 @@ class ArchiveRun(Base, UUIDMixin, TimestampMixin):
 class RetentionPolicy(Base, TimestampMixin):
     __tablename__ = "retention_policies"
 
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     source_table: Mapped[str] = mapped_column(String(64), primary_key=True)
     retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

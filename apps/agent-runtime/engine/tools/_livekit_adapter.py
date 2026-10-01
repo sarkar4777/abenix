@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from engine import credentials
 import asyncio
 import logging
-import os
 import time
 from typing import Any, AsyncIterator
 
@@ -48,7 +48,7 @@ class LiveKitAdapter(MeetingAdapter):
                 ),
             )
 
-        url = req.url or os.environ.get("LIVEKIT_URL", "").strip()
+        url = req.url or credentials.get("LIVEKIT_URL").strip()
         token = req.token
         if not token:
             token = _mint_token(req, ttl_seconds=3600)
@@ -248,8 +248,8 @@ class LiveKitAdapter(MeetingAdapter):
 
 def _mint_token(req: JoinRequest, *, ttl_seconds: int = 3600) -> str:
     """Mint a JWT for LiveKit using the server API key/secret."""
-    api_key = os.environ.get("LIVEKIT_API_KEY", "").strip()
-    api_secret = os.environ.get("LIVEKIT_API_SECRET", "").strip()
+    api_key = credentials.get("LIVEKIT_API_KEY").strip()
+    api_secret = credentials.get("LIVEKIT_API_SECRET").strip()
     if not (api_key and api_secret):
         return ""
     try:

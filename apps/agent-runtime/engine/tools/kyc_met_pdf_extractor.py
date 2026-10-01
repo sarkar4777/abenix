@@ -19,7 +19,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,9 @@ _RENDER_DPI = 150
 
 
 def _provider() -> str:
-    if os.environ.get("ANTHROPIC_API_KEY", "").strip():
+    if credentials.get("ANTHROPIC_API_KEY").strip():
         return "anthropic"
-    if os.environ.get("GOOGLE_API_KEY", "").strip():
+    if credentials.get("GOOGLE_API_KEY").strip():
         return "gemini"
     return "none"
 
@@ -59,7 +60,7 @@ async def _vision_extract(image_b64: str, page_no: int) -> str:
         import httpx
     except ImportError:
         return ""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    api_key = credentials.get("ANTHROPIC_API_KEY").strip()
     if not api_key:
         return ""
     prompt = (
@@ -650,6 +651,24 @@ def _all_envelopes_empty(parsed: dict[str, Any]) -> bool:
 
 class KycMetPdfExtractorTool(BaseTool):
     name = "kyc_met_pdf_extractor"
+    config_fields = (
+        ConfigField(
+            "ANTHROPIC_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Anthropic",
+            signup_url="https://console.anthropic.com/settings/keys",
+        ),
+        ConfigField(
+            "GOOGLE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Google AI",
+            signup_url="https://aistudio.google.com/app/apikey",
+        ),
+    )
     description = (
         "Extract a MET-template KYC Standard Check PDF into the strict "
         "MET-shaped JSON identical to what the kyc-standard-check agent "

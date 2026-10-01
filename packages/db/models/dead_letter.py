@@ -16,7 +16,7 @@ class DeadLetterExecution(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "dead_letter_executions"
 
     execution_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("executions.id"), index=True
+        UUID(as_uuid=True), ForeignKey("executions.id"), index=True, unique=True
     )
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True, index=True
@@ -29,3 +29,7 @@ class DeadLetterExecution(UUIDMixin, TenantMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Latest execution spawned by /replay, so the UI can link to it.
+    replay_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("executions.id"), nullable=True
+    )

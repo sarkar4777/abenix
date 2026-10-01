@@ -5,11 +5,61 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from engine.provider_credentials import PROVIDER_CONFIG_FIELDS
 from engine.tools.base import BaseTool, ToolResult
 
 
 class LLMCallTool(BaseTool):
+    # The LLM provider keys, declared here so they sit on the admin screen.
+    config_fields = PROVIDER_CONFIG_FIELDS
     name = "llm_call"
+
+    @classmethod
+    async def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        from engine.tools._config_probe import probe
+
+        if key == "ANTHROPIC_API_KEY":
+            return await probe(
+                "GET",
+                "https://api.anthropic.com/v1/models",
+                headers={
+                    "x-api-key": values.get(key, ""),
+                    "anthropic-version": "2023-06-01",
+                },
+                accepted="Anthropic accepted the key",
+            )
+        if key == "OPENAI_API_KEY":
+            return await probe(
+                "GET",
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {values.get(key, '')}"},
+                accepted="OpenAI accepted the key",
+            )
+        if key in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
+            return await probe(
+                "GET",
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": values.get(key, ""), "pageSize": 1},
+                accepted="Google AI accepted the key",
+            )
+        if key and key.startswith("AZURE_OPENAI_"):
+            base = (values.get("AZURE_OPENAI_API_BASE") or "").rstrip("/")
+            if not base:
+                return False, "AZURE_OPENAI_API_BASE is needed to test the key"
+            return await probe(
+                "GET",
+                f"{base}/openai/models",
+                params={
+                    "api-version": values.get("AZURE_OPENAI_API_VERSION")
+                    or "2024-10-01-preview"
+                },
+                headers={"api-key": values.get("AZURE_OPENAI_API_KEY", "")},
+                accepted="Azure OpenAI accepted the key",
+            )
+        return None
+
     description = (
         "Make a sub-call to a large language model within a pipeline. Supports multiple "
         "providers and models including Claude, GPT-4o, and Gemini. Useful for "

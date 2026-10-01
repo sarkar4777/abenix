@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import unicodedata
 from typing import Any
@@ -12,7 +11,8 @@ from urllib.parse import quote_plus
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ async def _gleif_parents(lei: str) -> dict[str, Any]:
 async def _opencorporates_search(
     name: str, country: str | None
 ) -> list[dict[str, Any]]:
-    api_token = os.environ.get("OPENCORPORATES_API_KEY", "")
+    api_token = credentials.get("OPENCORPORATES_API_KEY")
     params: dict[str, Any] = {"q": name, "per_page": 5, "format": "json"}
     if country:
         params["jurisdiction_code"] = country.lower()[:2]
@@ -129,7 +129,7 @@ async def _opencorporates_search(
 async def _opencorporates_officers(
     jurisdiction: str, company_number: str
 ) -> list[dict[str, Any]]:
-    api_token = os.environ.get("OPENCORPORATES_API_KEY", "")
+    api_token = credentials.get("OPENCORPORATES_API_KEY")
     url = (
         f"https://api.opencorporates.com/v0.4/companies/{jurisdiction}/{company_number}"
     )
@@ -166,7 +166,7 @@ async def _uk_psc(company_number: str) -> list[dict[str, Any]]:
     Docs: https://developer.company-information.service.gov.uk/
     Requires COMPANIES_HOUSE_API_KEY (free basic HTTP auth).
     """
-    api_key = os.environ.get("COMPANIES_HOUSE_API_KEY", "")
+    api_key = credentials.get("COMPANIES_HOUSE_API_KEY")
     if not api_key:
         return []
     url = f"https://api.company-information.service.gov.uk/company/{company_number}/persons-with-significant-control"
@@ -266,6 +266,24 @@ def _compute_effective_pct(ownership_paths: list[list[dict[str, Any]]]) -> float
 
 class UBODiscoveryTool(BaseTool):
     name = "ubo_discovery"
+    config_fields = (
+        ConfigField(
+            "COMPANIES_HOUSE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Companies House",
+            signup_url="https://developer.company-information.service.gov.uk/",
+        ),
+        ConfigField(
+            "OPENCORPORATES_API_KEY",
+            label="API token",
+            kind="secret",
+            required=False,
+            group="OpenCorporates",
+            signup_url="https://opencorporates.com/api_accounts/new",
+        ),
+    )
     description = (
         "Discover the Ultimate Beneficial Owners (UBOs) of a legal entity by "
         "walking the corporate ownership tree. Fuses four independent data "
@@ -354,6 +372,7 @@ class UBODiscoveryTool(BaseTool):
         ]
 
         warnings: list[str] = []
+        sources_skipped: list[str] = []
         discovery_gaps: list[dict[str, Any]] = []
         ownership_tree: dict[str, Any] = {"root": name, "nodes": [], "edges": []}
 
@@ -432,6 +451,11 @@ class UBODiscoveryTool(BaseTool):
         oc_candidates: list[dict[str, Any]] = []
         oc_officers: list[dict[str, Any]] = []
         if "opencorporates" in sources:
+            if not credentials.get("OPENCORPORATES_API_KEY"):
+                warnings.append(
+                    "OpenCorporates queried without OPENCORPORATES_API_KEY, results are "
+                    "limited and may be throttled, an admin can add it under Tool Configuration"
+                )
             oc_candidates = await _opencorporates_search(name, country)
             if oc_candidates:
                 best = oc_candidates[0]
@@ -452,7 +476,13 @@ class UBODiscoveryTool(BaseTool):
                 and (oc_candidates[0].get("jurisdiction") or "").startswith("gb")
             ):
                 reg = oc_candidates[0].get("company_number")
-            if reg:
+            if reg and not credentials.get("COMPANIES_HOUSE_API_KEY"):
+                sources_skipped.append("uk_psc")
+                warnings.append(
+                    "UK PSC register not queried: COMPANIES_HOUSE_API_KEY is not configured, "
+                    "an admin can add it under Tool Configuration"
+                )
+            elif reg:
                 uk_psc_owners = await _uk_psc(reg)
                 for owner in uk_psc_owners:
                     if not owner.get("is_active"):
@@ -566,6 +596,7 @@ class UBODiscoveryTool(BaseTool):
                     "potential_ubos_from_officers": potential_ubos_from_officers,
                     "discovery_gaps": discovery_gaps,
                     "warnings": warnings,
+                    "sources_skipped": sources_skipped,
                     "disclaimer": (
                         "UBO discovery is only as complete as the public registers. "
                         "Bearer-share, trust, and nominee arrangements may hide the "

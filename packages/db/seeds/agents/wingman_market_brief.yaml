@@ -98,3 +98,8 @@ input_variables:
 
 example_prompts:
   - '{}'
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - AISSTREAM_API_KEY
+  - EIA_API_KEY

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import time
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 GITHUB_API_BASE = "https://api.github.com"
 MAX_CONTENT_LENGTH = 100_000
@@ -16,10 +15,39 @@ MAX_CONTENT_LENGTH = 100_000
 
 class GitHubTool(BaseTool):
     name = "github_tool"
+    config_fields = (
+        ConfigField(
+            "GITHUB_TOKEN",
+            label="Personal access token",
+            kind="secret",
+            required=False,
+            group="GitHub",
+            signup_url="https://github.com/settings/tokens",
+        ),
+    )
+
+    @classmethod
+    async def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        from engine.tools._config_probe import probe
+
+        return await probe(
+            "GET",
+            f"{GITHUB_API_BASE}/user",
+            headers={
+                "Authorization": f"Bearer {values.get('GITHUB_TOKEN', '')}",
+                "Accept": "application/vnd.github+json",
+            },
+            accepted="GitHub accepted the token",
+        )
+
     description = (
         "Interact with the GitHub REST API to inspect repositories, read files, "
         "search code, list issues and pull requests, view commits, check CI workflows, "
-        "and compare branches. Requires a GITHUB_TOKEN environment variable."
+        "and compare branches. Read only. Public repositories work without a token "
+        "at GitHub's unauthenticated rate limit. Private repositories and a higher "
+        "rate limit need GITHUB_TOKEN."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -90,7 +118,7 @@ class GitHubTool(BaseTool):
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        token = os.environ.get("GITHUB_TOKEN", "")
+        token = self.cfg("GITHUB_TOKEN")
         operation = arguments.get("operation", "")
 
         # Public read-only operations work without auth (rate-limited to 60/hour/IP
@@ -110,11 +138,14 @@ class GitHubTool(BaseTool):
         if not token and operation not in PUBLIC_READ_OPS:
             return ToolResult(
                 content=(
-                    f"GITHUB_TOKEN environment variable is not set and "
-                    f"operation '{operation}' requires authentication. "
-                    f"Set GITHUB_TOKEN or use one of: {sorted(PUBLIC_READ_OPS)}"
+                    f"GITHUB_TOKEN is not configured and {operation} needs it. "
+                    f"An admin can add it under Admin -> Tool Configuration, or use one of: {sorted(PUBLIC_READ_OPS)}"
                 ),
                 is_error=True,
+                metadata={
+                    "needs_configuration": "GITHUB_TOKEN",
+                    "signup_url": "https://github.com/settings/tokens",
+                },
             )
 
         operation = arguments.get("operation", "")

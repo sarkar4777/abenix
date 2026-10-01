@@ -248,15 +248,17 @@ class TestGracefulSkip:
                 {"to": "+447700900123", "body": "hello", "channel": "sms"}
             )
         )
-        assert not r.is_error
-        assert r.metadata.get("skipped") is True
-        assert r.metadata.get("queued", {}).get("body") == "hello"
+        # Twilio has no dev mode now. A missing credential is the one standard
+        # result every tool gives, naming the key and the admin screen.
+        assert r.is_error
+        assert r.metadata.get("needs_configuration") == "TWILIO_ACCOUNT_SID"
+        assert "Admin -> Tool Configuration" in r.content
 
     def test_zapier_nla_skips_without_key(self, monkeypatch):
         monkeypatch.delenv("ZAPIER_NLA_KEY", raising=False)
         r = asyncio.run(ZapierPassThroughTool().execute({"operation": "list_actions"}))
-        assert not r.is_error
-        assert r.metadata.get("skipped") is True
+        assert r.is_error
+        assert r.metadata.get("needs_configuration") == "ZAPIER_NLA_KEY"
 
     def test_sandboxed_job_disabled_by_default(self, monkeypatch):
         monkeypatch.delenv("SANDBOXED_JOB_ENABLED", raising=False)

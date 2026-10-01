@@ -6,7 +6,7 @@ this tool opens a short subscription, collects N position reports inside an
 optional bounding box and ship-type filter, then closes the connection and
 returns a structured snapshot.
 
-Set AISSTREAM_API_KEY on the agent-runtime pod. Free key:
+AISSTREAM_API_KEY is set under Admin -> Tool Configuration. Free key:
 https://aisstream.io.
 
 Common ship-type codes:
@@ -24,16 +24,25 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 _WS_URL = "wss://stream.aisstream.io/v0/stream"
 
 
 class AisStreamTool(BaseTool):
     name = "ais_stream"
+    config_fields = (
+        ConfigField(
+            "AISSTREAM_API_KEY",
+            label="API key",
+            kind="secret",
+            required=True,
+            group="AISStream",
+            signup_url="https://aisstream.io",
+        ),
+    )
     description = (
         "Sample live vessel positions from the global AIS feed (AISStream.io). "
         "Returns up to N most-recent PositionReport / ShipStaticData messages "
@@ -42,7 +51,7 @@ class AisStreamTool(BaseTool):
         "VesselFinder for verification. Use ship_types=[80,84] for LPG/tanker "
         "traffic, [70,71,72,73,74,75,76,77,78,79] for cargo. The call opens a "
         "short subscription (default 8s) and closes — it does NOT keep streaming. "
-        "Set AISSTREAM_API_KEY on the runtime pod."
+        "An admin sets AISSTREAM_API_KEY under Admin -> Tool Configuration."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -85,17 +94,7 @@ class AisStreamTool(BaseTool):
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        api_key = (os.environ.get("AISSTREAM_API_KEY") or "").strip()
-        if not api_key:
-            return ToolResult(
-                content=(
-                    "AISSTREAM_API_KEY not set. Register a free key at "
-                    "https://aisstream.io and inject it via the runtime pod's "
-                    "Secret. Until then the tool cannot connect."
-                ),
-                is_error=True,
-            )
-
+        api_key = (self.cfg("AISSTREAM_API_KEY", required=True) or "").strip()
         try:
             import websockets  # local import — only needed when this tool runs
         except ImportError:

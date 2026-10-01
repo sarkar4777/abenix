@@ -45,7 +45,9 @@ SDK is missing a method and that is the thing to add.
 ## Where a change goes
 
 **A new tool an agent can call.** `apps/agent-runtime/engine/tools/`, then
-register it. See [Add a new tool](01-add-a-tool.md).
+register it. See [Add a new tool](01-add-a-tool.md). If it needs a key,
+declare the key as a `ConfigField` on the class and it shows up under
+Admin -> Tool Configuration by itself, see [Tool configuration](08-tool-configuration.md).
 
 **A new agent, or a change to one.** `packages/db/seeds/agents/*.yaml`. These
 are data, not code. The seeder upserts by slug, so editing the YAML and

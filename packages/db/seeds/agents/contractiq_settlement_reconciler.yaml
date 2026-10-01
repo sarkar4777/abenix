@@ -75,3 +75,7 @@ input_variables:
 
 example_prompts:
   - "Reconcile invoice INV-2026-03 for contract abc-123"
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - ENTSOE_API_KEY

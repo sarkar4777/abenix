@@ -2,18 +2,49 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 _BASE = "https://api.twilio.com/2010-04-01"
 
 
 class TwilioSmsTool(BaseTool):
     name = "twilio_sms"
+    config_fields = (
+        ConfigField(
+            "TWILIO_ACCOUNT_SID",
+            label="Account SID",
+            kind="string",
+            required=True,
+            group="Twilio",
+            signup_url="https://console.twilio.com",
+        ),
+        ConfigField(
+            "TWILIO_AUTH_TOKEN",
+            label="Auth token",
+            kind="secret",
+            required=True,
+            group="Twilio",
+            signup_url="https://console.twilio.com",
+        ),
+        ConfigField(
+            "TWILIO_FROM_NUMBER",
+            label="From number",
+            kind="string",
+            required=True,
+            group="Twilio",
+        ),
+        ConfigField(
+            "TWILIO_WHATSAPP_FROM",
+            label="WhatsApp from",
+            kind="string",
+            required=False,
+            group="Twilio",
+        ),
+    )
     description = (
         "Send SMS or WhatsApp messages via Twilio. Requires "
         "TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN; sender controlled by "
@@ -53,34 +84,14 @@ class TwilioSmsTool(BaseTool):
         if not to or not body:
             return ToolResult(content="to and body are required", is_error=True)
 
-        sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
-        token = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+        sid = self.cfg("TWILIO_ACCOUNT_SID", required=True).strip()
+        token = self.cfg("TWILIO_AUTH_TOKEN", required=True).strip()
         if channel == "whatsapp":
-            from_ = os.environ.get("TWILIO_WHATSAPP_FROM", "").strip()
+            from_ = self.cfg("TWILIO_WHATSAPP_FROM", required=True).strip()
             if to and not to.startswith("whatsapp:"):
                 to = f"whatsapp:{to}"
         else:
-            from_ = os.environ.get("TWILIO_FROM_NUMBER", "").strip()
-
-        if not (sid and token and from_):
-            # Graceful no-op so dev pipelines don't break.
-            return ToolResult(
-                content=(
-                    f"[twilio_sms not configured] Would have sent {channel.upper()} to {to}:\n"
-                    f"  {body[:240]}{'…' if len(body) > 240 else ''}"
-                ),
-                metadata={
-                    "skipped": True,
-                    "reason": "TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / "
-                    "TWILIO_FROM_NUMBER (or TWILIO_WHATSAPP_FROM) not set",
-                    "queued": {
-                        "to": to,
-                        "from": from_,
-                        "body": body,
-                        "channel": channel,
-                    },
-                },
-            )
+            from_ = self.cfg("TWILIO_FROM_NUMBER", required=True).strip()
 
         payload = {"From": from_, "To": to, "Body": body}
         if media_url:

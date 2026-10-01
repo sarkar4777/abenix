@@ -8,6 +8,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from engine import credentials
 from engine.tools.email_sender import EmailSenderTool
 
 
@@ -25,7 +26,7 @@ class TestEmailSenderTool:
         with patch.dict(
             os.environ,
             {"SMTP_HOST": "", "EXPORT_DIR": str(tmp_path)},
-        ), patch("engine.tools.email_sender.SMTP_HOST", ""), patch(
+        ), credentials.override({"SMTP_HOST": ""}), patch(
             "engine.tools.email_sender.EXPORT_DIR", str(tmp_path)
         ):
             result = await tool.execute(
@@ -70,7 +71,7 @@ class TestEmailSenderTool:
         self, tool: EmailSenderTool, tmp_path: pytest.TempPathFactory
     ) -> None:
         """Sending with format='html' succeeds and records the format."""
-        with patch("engine.tools.email_sender.SMTP_HOST", ""), patch(
+        with credentials.override({"SMTP_HOST": ""}), patch(
             "engine.tools.email_sender.EXPORT_DIR", str(tmp_path)
         ):
             result = await tool.execute(
@@ -96,7 +97,7 @@ class TestEmailSenderTool:
         self, tool: EmailSenderTool, tmp_path: pytest.TempPathFactory
     ) -> None:
         """Comma-separated recipients are split into a list."""
-        with patch("engine.tools.email_sender.SMTP_HOST", ""), patch(
+        with credentials.override({"SMTP_HOST": ""}), patch(
             "engine.tools.email_sender.EXPORT_DIR", str(tmp_path)
         ):
             result = await tool.execute(
@@ -118,7 +119,7 @@ class TestEmailSenderTool:
         self, tool: EmailSenderTool, tmp_path: pytest.TempPathFactory
     ) -> None:
         """The JSON output contains the required keys: status, recipients, subject, mode."""
-        with patch("engine.tools.email_sender.SMTP_HOST", ""), patch(
+        with credentials.override({"SMTP_HOST": ""}), patch(
             "engine.tools.email_sender.EXPORT_DIR", str(tmp_path)
         ):
             result = await tool.execute(
@@ -156,17 +157,7 @@ class TestEmailSenderSmtp:
                 "SMTP_PASS": "password123",
                 "SMTP_FROM": "noreply@test.com",
             },
-        ), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), patch(
-            "engine.tools.email_sender.SMTP_PORT", 587
-        ), patch(
-            "engine.tools.email_sender.SMTP_USER", "user@test.com"
-        ), patch(
-            "engine.tools.email_sender.SMTP_PASS", "password123"
-        ), patch(
-            "engine.tools.email_sender.SMTP_FROM", "noreply@test.com"
-        ), patch(
-            "aiosmtplib.send", new_callable=AsyncMock
-        ) as mock_send:
+        ), patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = ({}, "OK")
             result = await tool.execute(
                 {
@@ -195,17 +186,7 @@ class TestEmailSenderSmtp:
                 "SMTP_PASS": "bad_pass",
                 "SMTP_FROM": "noreply@test.com",
             },
-        ), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), patch(
-            "engine.tools.email_sender.SMTP_PORT", 587
-        ), patch(
-            "engine.tools.email_sender.SMTP_USER", "bad_user"
-        ), patch(
-            "engine.tools.email_sender.SMTP_PASS", "bad_pass"
-        ), patch(
-            "engine.tools.email_sender.SMTP_FROM", "noreply@test.com"
-        ), patch(
-            "aiosmtplib.send", new_callable=AsyncMock
-        ) as mock_send:
+        ), patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
             mock_send.side_effect = Exception(
                 "SMTP Authentication failed: (535, 'Authentication credentials invalid')"
             )
@@ -232,17 +213,7 @@ class TestEmailSenderSmtp:
                 "SMTP_HOST": "smtp.unreachable.com",
                 "SMTP_PORT": "587",
             },
-        ), patch("engine.tools.email_sender.SMTP_HOST", "smtp.unreachable.com"), patch(
-            "engine.tools.email_sender.SMTP_PORT", 587
-        ), patch(
-            "engine.tools.email_sender.SMTP_USER", ""
-        ), patch(
-            "engine.tools.email_sender.SMTP_PASS", ""
-        ), patch(
-            "engine.tools.email_sender.SMTP_FROM", "noreply@test.com"
-        ), patch(
-            "aiosmtplib.send", new_callable=AsyncMock
-        ) as mock_send:
+        ), patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
             mock_send.side_effect = ConnectionRefusedError(
                 "Connection refused by smtp.unreachable.com:587"
             )
@@ -271,17 +242,7 @@ class TestEmailSenderSmtp:
                 "SMTP_PASS": "password123",
                 "SMTP_FROM": "noreply@test.com",
             },
-        ), patch("engine.tools.email_sender.SMTP_HOST", "smtp.test.com"), patch(
-            "engine.tools.email_sender.SMTP_PORT", 587
-        ), patch(
-            "engine.tools.email_sender.SMTP_USER", "user@test.com"
-        ), patch(
-            "engine.tools.email_sender.SMTP_PASS", "password123"
-        ), patch(
-            "engine.tools.email_sender.SMTP_FROM", "noreply@test.com"
-        ), patch(
-            "aiosmtplib.send", new_callable=AsyncMock
-        ) as mock_send:
+        ), patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = ({}, "OK")
             result = await tool.execute(
                 {

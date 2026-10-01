@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertTriangle, Loader2, RefreshCw, Play, ChevronDown, ChevronRight, Inbox,
+  AlertTriangle, Loader2, RefreshCw, Play, ChevronDown, ChevronRight, Inbox, ExternalLink,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 
@@ -14,8 +14,11 @@ interface DlqRow {
   failure_code: string;
   error_message: string | null;
   original_input: Record<string, unknown>;
+  runtime_pool: string;
+  is_pipeline: boolean;
   replay_count: number;
   last_replay_at: string | null;
+  replay_execution_id: string | null;
   resolved: boolean;
   created_at: string | null;
 }
@@ -45,15 +48,28 @@ function DlqCard({ row, onReplay, busy }: { row: DlqRow; onReplay: (id: string) 
             <span className="text-[10px] px-2 py-0.5 rounded-full border bg-rose-500/15 text-rose-300 border-rose-500/40 uppercase tracking-wider">
               {row.failure_code}
             </span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full border bg-slate-500/15 text-slate-300 border-slate-500/40 font-mono">
+              pool: {row.runtime_pool || 'default'}
+            </span>
+            {row.is_pipeline && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full border bg-violet-500/15 text-violet-300 border-violet-500/40 uppercase tracking-wider">pipeline</span>
+            )}
             {row.resolved && (
               <span className="text-[10px] px-2 py-0.5 rounded-full border bg-emerald-500/15 text-emerald-300 border-emerald-500/40 uppercase tracking-wider">resolved</span>
             )}
           </div>
           <div className="flex flex-wrap gap-3 text-[11px] text-slate-500">
             <span>Failed {relTime(row.created_at)}</span>
-            <span className="font-mono text-slate-600">exec {row.execution_id.slice(0, 8)}</span>
+            <a href={`/executions/${row.execution_id}`} className="font-mono text-slate-400 hover:text-white inline-flex items-center gap-1">
+              exec {row.execution_id.slice(0, 8)} <ExternalLink className="w-2.5 h-2.5" />
+            </a>
             <span>Replays: {row.replay_count}</span>
             {row.last_replay_at && <span>Last replay {relTime(row.last_replay_at)}</span>}
+            {row.replay_execution_id && (
+              <a href={`/executions/${row.replay_execution_id}`} className="font-mono text-cyan-400 hover:text-cyan-200 inline-flex items-center gap-1">
+                replay {row.replay_execution_id.slice(0, 8)} <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+            )}
           </div>
           {row.error_message && (
             <p className="mt-2 text-[12px] text-rose-200/80 line-clamp-2">{row.error_message}</p>

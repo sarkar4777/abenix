@@ -55,7 +55,7 @@ The old version's Atlas edges get `valid_to = supersede_time` so they become his
 | `cognify_jobs` | `id`, `kb_id`, `mode` (`incremental`/`full`/`selective`), `document_ids`, `status`, `cost_usd_estimate`, `cost_usd_actual` | Default mode is `incremental` — only docs where `cognified_at IS NULL OR updated_at > cognified_at` |
 | `cognify_reports` | `job_id`, `entities_by_type`, `top_entities`, `relationship_histogram`, `accepted_count`, `queued_for_review_count`, `conflict_count` | One per job |
 | `graph_entities`, `graph_relationships` | `job_id`, `status` (`proposed` / `accepted` / `rejected`), `confidence`, `target_node_id` | Auto-accept above `cognify_configs.auto_accept_threshold` |
-| `cognify_configs` *(v2.0)* | `tenant_id`, `auto_accept_threshold`, `conflict_action`, `max_parallel_docs`, `daily_budget_usd`, `is_default` | One row per tenant; surfaced at `/settings/cognify` |
+| `cognify_configs` *(v2.0)* | `tenant_id`, `auto_accept_threshold`, `conflict_action`, `max_parallel_docs`, `daily_budget_usd`, `is_default` | One row per tenant, surfaced at `/settings/cognify` |
 | `cognify_conflicts` *(v2.0)* | `id`, `entity_id`, `property`, `source_a`, `source_b`, `status` (`open`/`resolved`/`split`/`auto-flagged`) | Triggered when an accepted proposal disagrees with an existing node |
 
 ### Auto-accept gate decision
@@ -78,7 +78,7 @@ flowchart LR
 | Table | Key columns | Notes |
 |---|---|---|
 | `atlas_graphs` | `id`, `tenant_id`, `kb_id`, `ontology_schema_id` | One per tenant-owned graph |
-| `atlas_nodes` | `id`, `graph_id`, `node_type`, `properties`, `valid_from`, `valid_to`, `recorded_at`, `source_anchors` | Postgres is the audit + ACL surface; Neo4j holds the actual graph properties |
+| `atlas_nodes` | `id`, `graph_id`, `node_type`, `properties`, `valid_from`, `valid_to`, `recorded_at`, `source_anchors` | Postgres is the audit and ACL surface, while Neo4j holds the actual graph properties |
 | `atlas_edges` | `id`, `graph_id`, `from_node_id`, `to_node_id`, `edge_type`, `valid_from`, `valid_to`, `recorded_at`, `source_anchors` | Same bi-temporal columns as nodes |
 | `ontology_schemas` | `id`, `name`, `entity_types`, `relationship_types`, `is_starter` | Five starters ship: FIBO Core, FIX Protocol, EMIR, ISDA, ETRM EOD |
 
@@ -106,7 +106,7 @@ Encryption uses a per-tenant DEK derived as `HMAC-SHA256(KEK, tenant_id)`. `key_
 | Code | File |
 |---|---|
 | SQLAlchemy models | [`atlas.py`](../../packages/db/models/atlas.py), [`knowledge_base.py`](../../packages/db/models/knowledge_base.py), [`cognify_config.py`](../../packages/db/models/cognify_config.py), [`document_grant.py`](../../packages/db/models/document_grant.py), [`gdpr_purge_log.py`](../../packages/db/models/gdpr_purge_log.py), [`meeting.py`](../../packages/db/models/meeting.py) |
-| Migration (v2.0) | [`b8c9d0e1f2g3_v2_knowledge_atlas_persona.py`](../../packages/db/alembic/versions/b8c9d0e1f2g3_v2_knowledge_atlas_persona.py) — backwards-compatible; every new column nullable or server-defaulted |
+| Migration (v2.0) | [`b8c9d0e1f2g3_v2_knowledge_atlas_persona.py`](../../packages/db/alembic/versions/b8c9d0e1f2g3_v2_knowledge_atlas_persona.py) — backwards-compatible, with every new column nullable or server-defaulted |
 | Services | [`document_access.py`](../../apps/api/app/services/document_access.py), [`gdpr_purge.py`](../../apps/api/app/services/gdpr_purge.py), [`reranker.py`](../../apps/api/app/services/reranker.py), [`crypto.py`](../../apps/api/app/core/crypto.py), [`extractors/`](../../apps/api/app/services/extractors/) |
 | Routers | [`knowledge_v2.py`](../../apps/api/app/routers/knowledge_v2.py), [`document_grants.py`](../../apps/api/app/routers/document_grants.py), [`gdpr.py`](../../apps/api/app/routers/gdpr.py) |
 | Workers | [`kb_reembed.py`](../../apps/worker/worker/tasks/kb_reembed.py), [`pinecone_vacuum.py`](../../apps/worker/worker/tasks/pinecone_vacuum.py) |

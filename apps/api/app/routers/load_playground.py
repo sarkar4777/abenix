@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import sys
 import tempfile
 import uuid
@@ -327,20 +328,29 @@ async def execute_load_script(
             )
             db.add(key)
             await db.commit()
+            key_id = key.id
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'message': f'Failed to mint API key: {e}'})}\n\n"
             return
 
         yield f"event: status\ndata: {json.dumps({'message': 'API key minted, writing script'})}\n\n"
 
-        # Write script to temp file
-        script_path = Path(tempfile.mkstemp(prefix="loadtest_", suffix=".py")[1])
+        from app.routers.sdk_playground import (
+            build_sandbox_env,
+            playground_api_url,
+            revoke_playground_key,
+        )
+
+        home_dir = tempfile.mkdtemp(prefix="load_home_")
+        script_path = Path(home_dir) / "loadtest.py"
         script_path.write_text(body.code, encoding="utf-8")
 
-        env = os.environ.copy()
-        env.update(body.env or {})
-        env["ABENIX_API_KEY"] = raw_key
-        env.setdefault("ABENIX_API_URL", "http://localhost:8000")
+        env = build_sandbox_env(
+            api_key=raw_key,
+            base_url=playground_api_url(),
+            home=home_dir,
+            user_env=body.env,
+        )
 
         yield f"event: status\ndata: {json.dumps({'message': f'Executing {script_path.name}'})}\n\n"
 
@@ -350,6 +360,7 @@ async def execute_load_script(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=env,
+            cwd=home_dir,
         )
         assert proc.stdout
         try:
@@ -365,8 +376,9 @@ async def execute_load_script(
             proc.kill()
             yield f"event: error\ndata: {json.dumps({'message': 'Execution timed out after 10 minutes'})}\n\n"
         finally:
+            await revoke_playground_key(key_id)
             try:
-                script_path.unlink()
+                shutil.rmtree(home_dir, ignore_errors=True)
             except Exception:
                 pass
 

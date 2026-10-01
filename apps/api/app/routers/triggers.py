@@ -240,6 +240,231 @@ async def update_trigger(
     return success({"updated": True})
 
 
+# Reasons stored in agent_triggers.last_status (20 chars max) when a
+# trigger is auto-deactivated. The UI lists them next to the trigger.
+DEACTIVATION_REASONS = {
+    "agent_deleted": "the agent was deleted",
+    "agent_inactive": "the agent is no longer active",
+    "owner_missing": "the trigger owner no longer exists",
+    "owner_inactive": "the trigger owner is deactivated",
+    "access_revoked": "the trigger owner lost execute access to the agent",
+}
+
+
+async def check_trigger_eligibility(
+    db: AsyncSession,
+    trigger: AgentTrigger,
+    agent: Agent | None,
+    owner: Any,
+) -> str | None:
+    """Return a DEACTIVATION_REASONS key when the trigger must not fire."""
+    from app.core.permissions import accessible_resource_ids, is_admin
+    from models.resource_share import SharePermission
+
+    if agent is None or agent.status == AgentStatus.ARCHIVED:
+        return "agent_deleted"
+    if agent.status != AgentStatus.ACTIVE:
+        return "agent_inactive"
+    if owner is None:
+        return "owner_missing"
+    if not getattr(owner, "is_active", True):
+        return "owner_inactive"
+    if agent.agent_type == AgentType.OOB:
+        return None
+    if agent.tenant_id != owner.tenant_id:
+        return "access_revoked"
+    if is_admin(owner) or agent.creator_id == owner.id:
+        return None
+    shared = await accessible_resource_ids(
+        db, owner, kind="agent", minimum_permission=SharePermission.EXECUTE
+    )
+    if agent.id in shared:
+        return None
+    return "access_revoked"
+
+
+async def deactivate_trigger(
+    db: AsyncSession,
+    trigger: AgentTrigger,
+    reason: str,
+    *,
+    owner: Any = None,
+) -> None:
+    """Switch the trigger off, record why, tell the owner."""
+    trigger.is_active = False
+    trigger.last_status = reason[:20]
+    await db.commit()
+    notify_user_id = owner.id if owner is not None else trigger.created_by
+    if not notify_user_id:
+        return
+    try:
+        from app.core.notifications import create_notification
+        from models.notification import NotificationType
+
+        await create_notification(
+            db,
+            tenant_id=trigger.tenant_id,
+            user_id=notify_user_id,
+            type=NotificationType.SYSTEM_ALERT.value,
+            title="Trigger deactivated",
+            message=(
+                f"Trigger '{trigger.name}' was switched off because "
+                f"{DEACTIVATION_REASONS.get(reason, reason)}."
+            ),
+            link="/triggers",
+            metadata={
+                "trigger_id": str(trigger.id),
+                "agent_id": str(trigger.agent_id),
+                "reason": reason,
+            },
+        )
+        await db.commit()
+    except Exception as exc:
+        import logging
+
+        logging.getLogger("abenix.triggers").warning(
+            "trigger %s deactivation notice failed: %s", trigger.id, exc
+        )
+
+
+def _model_for(agent: Agent) -> str:
+    cfg = agent.model_config_ or {}
+    if cfg.get("mode") == "pipeline":
+        return "pipeline"
+    return cfg.get("model", "claude-sonnet-4-5-20250929")
+
+
+async def dispatch_execution(
+    db: AsyncSession,
+    *,
+    agent: Agent,
+    user: Any,
+    message: str,
+    context: dict[str, Any],
+    trigger_id: str | None = None,
+    parent_execution_id: uuid.UUID | None = None,
+    execution: Any = None,
+) -> tuple[Any, bool]:
+    """Create (or take) a RUNNING execution and hand it to the runtime.
+
+    Mirrors POST /api/agents/{id}/execute: when scaling.execRemote is on the
+    job goes to the agent's pool on the queue backend, otherwise it runs in
+    this process. Returns (execution, dispatched). On a queue failure the
+    execution is marked FAILED so nothing is left RUNNING.
+    """
+    from app.core.config import settings
+    from models.execution import Execution, ExecutionStatus
+
+    model_cfg = agent.model_config_ or {}
+    is_pipeline = model_cfg.get("mode") == "pipeline"
+    pool = getattr(agent, "runtime_pool", None) or "default"
+
+    if execution is None:
+        execution = Execution(
+            tenant_id=user.tenant_id,
+            agent_id=agent.id,
+            user_id=user.id,
+            input_message=message,
+            status=ExecutionStatus.RUNNING,
+            model_used=_model_for(agent),
+            model_requested=_model_for(agent),
+            started_at=datetime.now(timezone.utc),
+            parent_execution_id=parent_execution_id,
+        )
+        db.add(execution)
+        await db.commit()
+        await db.refresh(execution)
+
+    if settings.scaling_exec_remote and pool != "inline":
+        try:
+            runtime_path = Path(__file__).resolve().parents[3] / "agent-runtime"
+            if str(runtime_path) not in sys.path and runtime_path.exists():
+                sys.path.insert(0, str(runtime_path))
+            from engine.queue_backend import get_queue_backend  # type: ignore
+
+            await get_queue_backend().submit(
+                pool,
+                {
+                    "execution_id": str(execution.id),
+                    "agent_id": str(agent.id),
+                    "tenant_id": str(execution.tenant_id),
+                    "user_id": str(user.id),
+                    "api_key_id": None,
+                    "message": message,
+                    "context": context or {},
+                    "is_pipeline": is_pipeline,
+                    "trigger_id": trigger_id,
+                },
+            )
+            return execution, True
+        except Exception as exc:
+            from app.core.failure_codes import classify_exception
+
+            execution.status = ExecutionStatus.FAILED
+            execution.error_message = f"queue submit failed: {exc}"[:2000]
+            execution.failure_code = classify_exception(exc)
+            execution.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            if trigger_id:
+                try:
+                    await _notify_trigger_failure(
+                        db,
+                        tenant_id=execution.tenant_id,
+                        user_id=user.id,
+                        trigger_id=trigger_id,
+                        execution_id=str(execution.id),
+                        error=str(exc),
+                    )
+                    await db.commit()
+                except Exception:
+                    pass
+            return execution, False
+
+    _t = asyncio.create_task(
+        _execute_triggered_agent(
+            execution_id=str(execution.id),
+            agent=agent,
+            user=user,
+            message=message,
+            context=context or {},
+            trigger_id=trigger_id,
+            db_url=str(_get_db_url()),
+        )
+    )
+    _BACKGROUND_TASKS.add(_t)
+    _t.add_done_callback(_BACKGROUND_TASKS.discard)
+    return execution, True
+
+
+async def _notify_trigger_failure(
+    db: AsyncSession,
+    *,
+    tenant_id: Any,
+    user_id: Any,
+    trigger_id: str,
+    execution_id: str,
+    error: str,
+) -> None:
+    """Route trigger failures through create_notification (WS + Slack + email)."""
+    from app.core.notifications import create_notification
+    from models.notification import NotificationType
+
+    await create_notification(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        type=NotificationType.EXECUTION_FAILED.value,
+        title="Scheduled trigger failed",
+        message=f"Trigger {trigger_id[:8]} failed: {error[:400]}",
+        link=f"/executions/{execution_id}",
+        metadata={
+            "execution_id": execution_id,
+            "trigger_id": trigger_id,
+            "reason": "trigger_exception",
+        },
+    )
+
+
 @router.post("/webhook/{token}")
 async def receive_webhook(
     token: str,
@@ -274,58 +499,37 @@ async def receive_webhook(
     )
     context = {**default_ctx, **payload_ctx}
 
-    # Get the agent
     agent_result = await db.execute(select(Agent).where(Agent.id == trigger.agent_id))
     agent = agent_result.scalar_one_or_none()
-    if not agent or agent.status != AgentStatus.ACTIVE:
-        return error("Agent not available", 400)
 
-    # Get the user who created the trigger (for execution context)
     from models.user import User as UserModel
 
     user_result = await db.execute(
         select(UserModel).where(UserModel.id == trigger.created_by)
     )
     trigger_user = user_result.scalar_one_or_none()
-    if not trigger_user:
-        return error("Trigger owner not found", 400)
 
-    # Create execution (non-streaming, returns immediately with execution_id)
-    from models.execution import Execution, ExecutionStatus
+    reason = await check_trigger_eligibility(db, trigger, agent, trigger_user)
+    if reason:
+        await deactivate_trigger(db, trigger, reason, owner=trigger_user)
+        return error(f"Trigger deactivated: {DEACTIVATION_REASONS[reason]}", 400)
 
-    execution = Execution(
-        tenant_id=trigger.tenant_id,
-        agent_id=trigger.agent_id,
-        user_id=trigger.created_by,
-        input_message=message,
-        status=ExecutionStatus.RUNNING,
-        model_used=(
-            agent.model_config_.get("model", "claude-sonnet-4-5-20250929")
-            if agent.model_config_
-            else "claude-sonnet-4-5-20250929"
-        ),
-    )
-    db.add(execution)
-
-    # Update trigger stats
     trigger.run_count = (trigger.run_count or 0) + 1
     trigger.last_run_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(execution)
 
-    _t = asyncio.create_task(
-        _execute_triggered_agent(
-            execution_id=str(execution.id),
-            agent=agent,
-            user=trigger_user,
-            message=message,
-            context=context,
-            trigger_id=str(trigger.id),
-            db_url=str(_get_db_url()),
-        )
+    execution, dispatched = await dispatch_execution(
+        db,
+        agent=agent,
+        user=trigger_user,
+        message=message,
+        context=context,
+        trigger_id=str(trigger.id),
     )
-    _BACKGROUND_TASKS.add(_t)
-    _t.add_done_callback(_BACKGROUND_TASKS.discard)
+    if not dispatched:
+        trigger.last_status = "failed"
+        await db.commit()
+        return error("Trigger execution could not be queued", 503)
 
     return success(
         {
@@ -352,7 +556,7 @@ async def _execute_triggered_agent(
     user: Any,
     message: str,
     context: dict[str, Any],
-    trigger_id: str,
+    trigger_id: str | None,
     db_url: str,
 ) -> None:
     """Background task: execute the agent and update results."""
@@ -406,19 +610,16 @@ async def _execute_triggered_agent(
                 result.duration_ms,
                 execution_id,
             )
-            # Update trigger status
-            await conn.execute(
-                "UPDATE agent_triggers SET last_status = 'completed' WHERE id = $1::uuid",
-                trigger_id,
-            )
+            if trigger_id:
+                await conn.execute(
+                    "UPDATE agent_triggers SET last_status = 'completed' WHERE id = $1::uuid",
+                    trigger_id,
+                )
         finally:
             await conn.close()
 
     except Exception as e:
-        # Mark execution as failed + fire an in-app notification so the
-        # owner of the trigger hears about the failure instead of having
-        # to poll the dashboard. Without this, a broken scheduled trigger
-        # would silently keep accumulating failures forever.
+        row = None
         try:
             import asyncpg
 
@@ -432,54 +633,33 @@ async def _execute_triggered_agent(
                 str(e)[:1000],
                 execution_id,
             )
-            await conn.execute(
-                "UPDATE agent_triggers SET last_status = 'failed' WHERE id = $1::uuid",
-                trigger_id,
-            )
-            # Pull user_id + tenant from the trigger so we know whom to notify.
-            row = await conn.fetchrow(
-                "SELECT created_by, tenant_id FROM agent_triggers WHERE id = $1::uuid",
-                trigger_id,
-            )
+            if trigger_id:
+                await conn.execute(
+                    "UPDATE agent_triggers SET last_status = 'failed' WHERE id = $1::uuid",
+                    trigger_id,
+                )
+                row = await conn.fetchrow(
+                    "SELECT created_by, tenant_id FROM agent_triggers WHERE id = $1::uuid",
+                    trigger_id,
+                )
             await conn.close()
         except Exception:
             row = None
-        # Notification wiring lives outside the raw SQL block — any issue
-        # here must not mask the real error we already logged.
+        # Notification goes through create_notification so Slack and email
+        # fire alongside the in-app bell.
         try:
-            if row and row["created_by"]:
-                from models.notification import Notification, NotificationType
-                from app.core.deps import async_session
-                from app.core.ws_manager import ws_manager
+            if trigger_id and row and row["created_by"]:
+                from app.core.deps import fresh_session
 
-                async with async_session() as ndb:
-                    n = Notification(
+                async with fresh_session() as ndb:
+                    await _notify_trigger_failure(
+                        ndb,
                         tenant_id=row["tenant_id"],
                         user_id=row["created_by"],
-                        type=NotificationType.EXECUTION_FAILED,
-                        title="Scheduled trigger failed",
-                        message=f"Trigger {trigger_id[:8]} failed: {str(e)[:400]}",
-                        link="/triggers",
-                        metadata_={
-                            "execution_id": execution_id,
-                            "trigger_id": trigger_id,
-                            "reason": "trigger_exception",
-                        },
+                        trigger_id=trigger_id,
+                        execution_id=execution_id,
+                        error=str(e),
                     )
-                    ndb.add(n)
                     await ndb.commit()
-                try:
-                    await ws_manager.send_to_user(
-                        row["created_by"],
-                        "notification",
-                        {
-                            "type": "execution_failed",
-                            "title": "Scheduled trigger failed",
-                            "message": str(e)[:200],
-                            "link": "/triggers",
-                        },
-                    )
-                except Exception:
-                    pass
         except Exception:
             pass

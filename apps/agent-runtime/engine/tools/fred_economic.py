@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import csv
 import io
-import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 _BASE = "https://api.stlouisfed.org/fred"
 _CSV_BASE = "https://fred.stlouisfed.org/graph/fredgraph.csv"
@@ -34,6 +33,38 @@ _SERIES_ALIASES = {
 
 class FredEconomicTool(BaseTool):
     name = "fred_economic"
+    config_fields = (
+        ConfigField(
+            "FRED_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="FRED",
+            signup_url="https://fred.stlouisfed.org/docs/api/api_key.html",
+        ),
+    )
+
+    @classmethod
+    async def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        from engine.tools._config_probe import probe
+
+        ok, msg = await probe(
+            "GET",
+            f"{_BASE}/series",
+            params={
+                "series_id": "GDP",
+                "api_key": values.get("FRED_API_KEY", ""),
+                "file_type": "json",
+            },
+            accepted="FRED accepted the key",
+        )
+        # FRED answers a bad key with HTTP 400 and a message naming api_key
+        if not ok and "api_key" in msg:
+            return False, "FRED rejected the key"
+        return ok, msg
+
     description = (
         "US macroeconomic time-series from FRED (St. Louis Fed) — "
         "interest rates, CPI, unemployment, GDP, oil/gas/gold prices. "
@@ -79,7 +110,7 @@ class FredEconomicTool(BaseTool):
         end = arguments.get("end_date")
         limit = int(arguments.get("limit", 50))
 
-        api_key = os.environ.get("FRED_API_KEY", "").strip()
+        api_key = self.cfg("FRED_API_KEY").strip()
         try:
             if api_key:
                 params: dict[str, Any] = {
@@ -139,6 +170,12 @@ class FredEconomicTool(BaseTool):
             values = [float(o["value"]) for o in obs]
         except ValueError:
             values = []
+        warnings: list[str] = []
+        if not api_key:
+            warnings.append(
+                "FRED_API_KEY is not configured, served from the public CSV which covers popular "
+                "series only, an admin can add the key under Tool Configuration"
+            )
         lines = [
             f"FRED — {series} (source: {source})",
             f"Observations: {len(obs)}",
@@ -154,5 +191,10 @@ class FredEconomicTool(BaseTool):
 
         return ToolResult(
             content="\n".join(lines),
-            metadata={"series_id": series, "source": source, "observations": obs},
+            metadata={
+                "series_id": series,
+                "source": source,
+                "observations": obs,
+                "warnings": warnings,
+            },
         )

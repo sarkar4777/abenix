@@ -98,7 +98,7 @@
         },
         {
           "slug": "02-runtime/12-ml-models",
-          "title": "ML models \u2014 upload, deploy, invoke"
+          "title": "ML models — upload, deploy, invoke"
         },
         {
           "slug": "02-runtime/13-moderation-gate",
@@ -256,7 +256,7 @@
         },
         {
           "slug": "07-standalone-apps/05-pharmavigil",
-          "title": "PharmaVigil \u2014 drug safety"
+          "title": "PharmaVigil — drug safety"
         }
       ]
     },
@@ -295,6 +295,10 @@
         {
           "slug": "08-howto/07-finding-your-way-around",
           "title": "Finding your way around"
+        },
+        {
+          "slug": "08-howto/08-tool-configuration",
+          "title": "Tool configuration"
         }
       ]
     },

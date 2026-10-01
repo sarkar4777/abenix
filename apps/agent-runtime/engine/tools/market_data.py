@@ -3,18 +3,69 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 from urllib.parse import urlencode
 
-from engine.tools.base import BaseTool, ToolResult
-
-ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY", "")
-EIA_API_KEY = os.environ.get("EIA_API_KEY", "")
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 class MarketDataTool(BaseTool):
     name = "market_data"
+    config_fields = (
+        ConfigField(
+            "ALPHA_VANTAGE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Alpha Vantage",
+            signup_url="https://www.alphavantage.co/support/#api-key",
+        ),
+        ConfigField(
+            "EIA_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="EIA",
+            signup_url="https://www.eia.gov/opendata/register.php",
+        ),
+    )
+
+    @classmethod
+    async def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        if key != "ALPHA_VANTAGE_API_KEY":
+            return None
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(
+                    "https://www.alphavantage.co/query",
+                    params={
+                        "function": "GLOBAL_QUOTE",
+                        "symbol": "IBM",
+                        "apikey": values.get(key, ""),
+                    },
+                )
+        except httpx.HTTPError as exc:
+            return False, f"could not reach Alpha Vantage: {exc.__class__.__name__}"
+        body = (
+            r.json()
+            if r.headers.get("content-type", "").startswith("application/json")
+            else {}
+        )
+        # Alpha Vantage answers 200 for everything and puts the verdict in the body
+        if "Error Message" in body or "Invalid API call" in str(body):
+            return False, "Alpha Vantage rejected the key"
+        if "Information" in body or "Note" in body:
+            return True, "accepted, but the free tier is rate limited right now"
+        return bool(body.get("Global Quote")), (
+            "Alpha Vantage accepted the key"
+            if body.get("Global Quote")
+            else f"unexpected answer: {str(body)[:120]}"
+        )
+
     description = (
         "Fetch real-time and historical market data including stock prices, "
         "commodities (oil, gas, metals), energy market prices (electricity, "
@@ -96,13 +147,13 @@ class MarketDataTool(BaseTool):
         if not symbol:
             return {"error": "symbol is required"}
 
-        if not ALPHA_VANTAGE_KEY:
+        if not self.cfg("ALPHA_VANTAGE_API_KEY"):
             return self._mock_stock_quote(symbol)
 
         params = {
             "function": "GLOBAL_QUOTE",
             "symbol": symbol,
-            "apikey": ALPHA_VANTAGE_KEY,
+            "apikey": self.cfg("ALPHA_VANTAGE_API_KEY"),
         }
         url = f"https://www.alphavantage.co/query?{urlencode(params)}"
         data = await self._fetch_url(url)
@@ -129,7 +180,7 @@ class MarketDataTool(BaseTool):
         if not symbol:
             return {"error": "symbol is required"}
 
-        if not ALPHA_VANTAGE_KEY:
+        if not self.cfg("ALPHA_VANTAGE_API_KEY"):
             return self._mock_stock_history(symbol, period)
 
         functions = {
@@ -140,7 +191,7 @@ class MarketDataTool(BaseTool):
         params = {
             "function": functions.get(period, "TIME_SERIES_DAILY"),
             "symbol": symbol,
-            "apikey": ALPHA_VANTAGE_KEY,
+            "apikey": self.cfg("ALPHA_VANTAGE_API_KEY"),
             "outputsize": "compact",
         }
         url = f"https://www.alphavantage.co/query?{urlencode(params)}"
@@ -172,14 +223,14 @@ class MarketDataTool(BaseTool):
         from_currency = parts[0] if parts else "EUR"
         to_currency = parts[1] if len(parts) > 1 else "USD"
 
-        if not ALPHA_VANTAGE_KEY:
+        if not self.cfg("ALPHA_VANTAGE_API_KEY"):
             return self._mock_forex(from_currency, to_currency)
 
         params = {
             "function": "CURRENCY_EXCHANGE_RATE",
             "from_currency": from_currency,
             "to_currency": to_currency,
-            "apikey": ALPHA_VANTAGE_KEY,
+            "apikey": self.cfg("ALPHA_VANTAGE_API_KEY"),
         }
         url = f"https://www.alphavantage.co/query?{urlencode(params)}"
         data = await self._fetch_url(url)
@@ -210,14 +261,14 @@ class MarketDataTool(BaseTool):
             "COFFEE": "COFFEE",
         }
 
-        if not ALPHA_VANTAGE_KEY:
+        if not self.cfg("ALPHA_VANTAGE_API_KEY"):
             return self._mock_commodity(symbol)
 
         function = commodity_functions.get(symbol, symbol)
         params = {
             "function": function,
             "interval": "monthly",
-            "apikey": ALPHA_VANTAGE_KEY,
+            "apikey": self.cfg("ALPHA_VANTAGE_API_KEY"),
         }
         url = f"https://www.alphavantage.co/query?{urlencode(params)}"
         data = await self._fetch_url(url)
@@ -236,10 +287,10 @@ class MarketDataTool(BaseTool):
     async def _energy_price(self, args: dict[str, Any]) -> dict[str, Any]:
         series_id = args.get("series_id", "ELEC.PRICE.US-ALL.M")
 
-        if not EIA_API_KEY:
+        if not self.cfg("EIA_API_KEY"):
             return self._mock_energy_price(series_id)
 
-        url = f"https://api.eia.gov/v2/electricity/retail-sales/data/?api_key={EIA_API_KEY}&frequency=monthly&data[0]=price&sort[0][column]=period&sort[0][direction]=desc&length=12"
+        url = f"https://api.eia.gov/v2/electricity/retail-sales/data/?api_key={self.cfg("EIA_API_KEY")}&frequency=monthly&data[0]=price&sort[0][column]=period&sort[0][direction]=desc&length=12"
         data = await self._fetch_url(url)
 
         response_data = data.get("response", {}).get("data", [])
@@ -260,7 +311,7 @@ class MarketDataTool(BaseTool):
     async def _economic_indicator(self, args: dict[str, Any]) -> dict[str, Any]:
         symbol = args.get("symbol", "GDP").upper()
 
-        if not ALPHA_VANTAGE_KEY:
+        if not self.cfg("ALPHA_VANTAGE_API_KEY"):
             return self._mock_economic(symbol)
 
         indicator_map = {
@@ -273,7 +324,7 @@ class MarketDataTool(BaseTool):
         }
 
         function = indicator_map.get(symbol, symbol)
-        params = {"function": function, "apikey": ALPHA_VANTAGE_KEY}
+        params = {"function": function, "apikey": self.cfg("ALPHA_VANTAGE_API_KEY")}
         url = f"https://www.alphavantage.co/query?{urlencode(params)}"
         data = await self._fetch_url(url)
 

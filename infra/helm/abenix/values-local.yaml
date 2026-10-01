@@ -65,6 +65,10 @@ api:
     limits:
       cpu: "2"
       memory: 2Gi
+  # Local only. scripts/uat.sh seeds the RBAC viewer through
+  # POST /api/team/dev-create-member, which is off by default.
+  env:
+    ALLOW_DEV_CREATE_MEMBER: "true"
   envFrom:
     - secretRef:
         name: abenix-secrets

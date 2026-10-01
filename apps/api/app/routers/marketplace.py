@@ -19,6 +19,7 @@ from app.core.stripe import (
     PLATFORM_FEE_PERCENT,
 )
 from app.schemas.marketplace import SubscribeRequest
+from app.services.agent_share import public_model_config
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
@@ -31,6 +32,14 @@ from models.user import User
 router = APIRouter(prefix="/api/marketplace", tags=["marketplace"])
 
 
+def _listed_clause():
+    # Only reviewed marketplace agents and platform OOB agents are listable.
+    return (
+        or_(Agent.is_published.is_(True), Agent.agent_type == AgentType.OOB),
+        Agent.status == AgentStatus.ACTIVE,
+    )
+
+
 def _serialize_listing(
     a: Agent,
     avg_rating: float | None,
@@ -38,6 +47,8 @@ def _serialize_listing(
     creator_name: str | None,
     subscriber_count: int = 0,
 ) -> dict[str, Any]:
+    # Public allowlist. Never system_prompt, tool_config or raw model_config.
+    cfg = public_model_config(a.model_config_)
     return {
         "id": str(a.id),
         "name": a.name,
@@ -47,7 +58,11 @@ def _serialize_listing(
         "category": a.category,
         "icon_url": a.icon_url,
         "version": a.version,
-        "model_config": a.model_config_,
+        "model": cfg.get("model"),
+        "tools": cfg.get("tools", []),
+        "example_prompts": cfg.get("example_prompts")
+        or getattr(a, "example_prompts", None),
+        "model_config": cfg,
         "marketplace_price": float(a.marketplace_price) if a.marketplace_price else 0,
         "is_free": a.marketplace_price is None or float(a.marketplace_price) == 0,
         "creator_name": creator_name,
@@ -79,13 +94,7 @@ async def browse_marketplace(
         .outerjoin(Review, Review.agent_id == Agent.id)
         .outerjoin(Subscription, Subscription.agent_id == Agent.id)
         .join(User, User.id == Agent.creator_id)
-        .where(
-            or_(
-                Agent.is_published.is_(True),
-                Agent.agent_type == AgentType.OOB,
-            ),
-            Agent.status == AgentStatus.ACTIVE,
-        )
+        .where(*_listed_clause())
         .group_by(Agent.id, User.full_name)
     )
 
@@ -149,10 +158,7 @@ async def get_marketplace_agent(
         .outerjoin(Review, Review.agent_id == Agent.id)
         .outerjoin(Subscription, Subscription.agent_id == Agent.id)
         .join(User, User.id == Agent.creator_id)
-        .where(
-            Agent.id == agent_id,
-            Agent.status == AgentStatus.ACTIVE,
-        )
+        .where(Agent.id == agent_id, *_listed_clause())
         .group_by(Agent.id, User.full_name)
     )
     row = result.one_or_none()
@@ -171,7 +177,6 @@ async def get_marketplace_agent(
     is_subscribed = sub_result.scalar_one_or_none() is not None
 
     data = _serialize_listing(agent, avg_r, rev_c, creator, sub_c)
-    data["system_prompt"] = agent.system_prompt
     data["is_subscribed"] = is_subscribed
 
     return success(data)
@@ -185,10 +190,7 @@ async def subscribe_to_agent(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     result = await db.execute(
-        select(Agent).where(
-            Agent.id == agent_id,
-            Agent.status == AgentStatus.ACTIVE,
-        )
+        select(Agent).where(Agent.id == agent_id, *_listed_clause())
     )
     agent = result.scalar_one_or_none()
     if not agent:

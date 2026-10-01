@@ -107,3 +107,7 @@ input_variables:
 example_prompts:
   - "Stress test contract abc-123 with 1000 iterations"
   - "Run portfolio stress test with -30% power, +15% FX shocks"
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - ENTSOE_API_KEY

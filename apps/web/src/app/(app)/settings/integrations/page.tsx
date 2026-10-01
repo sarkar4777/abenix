@@ -15,10 +15,11 @@ import { apiFetch } from '@/lib/api-client';
  * Integrations dashboard.
  *
  * Lists every external integration the platform exposes via tools.
- * The actual env-var configuration lives at the deployment level
- * (helm secret in k8s, .env in dev-local) — this page is the
- * read-only "what's wired up?" view + an explainer of how to
- * configure each one.
+ * Tool credentials come from GET /api/integrations/tools, which the
+ * tools generate from their own config_fields, so a new tool is
+ * listed here with no change to this file. Admins set live values on
+ * /admin/tool-config. The static list below only keeps rows no tool
+ * declares (SSO, observability, infrastructure).
  *
  * The UI inferring config-state from the live cluster is best-effort:
  * we GET /api/integrations/status (added separately) which checks
@@ -32,11 +33,53 @@ type IntegrationStatus = 'configured' | 'missing' | 'error' | 'unknown';
 interface Integration {
   id: string;
   name: string;
-  category: 'llm' | 'search' | 'observability' | 'comms' | 'storage' | 'data' | 'kyc' | 'meeting' | 'identity';
+  category: 'tools' | 'llm' | 'search' | 'observability' | 'comms' | 'storage' | 'data' | 'kyc' | 'meeting' | 'identity';
   description: string;
   envVars: string[];
   unlocks: string;          // which tools/features this integration unlocks
   docsUrl?: string;
+  /** rows derived from the tools carry their status with them */
+  status?: IntegrationStatus;
+  /** the first key that is not set, for the deep link */
+  firstMissing?: string;
+}
+
+interface ToolKey {
+  key: string;
+  label: string;
+  kind: string;
+  required: boolean;
+  description: string;
+  signup_url: string;
+  tools: string[];
+  source: string;
+  is_set: boolean;
+}
+
+interface ToolCatalogue {
+  groups: { group: string; keys: ToolKey[] }[];
+  propagation_seconds: number;
+}
+
+function rowsFromTools(cat: ToolCatalogue): Integration[] {
+  return cat.groups.map((g) => {
+    const required = g.keys.filter((k) => k.required);
+    const anySet = g.keys.some((k) => k.is_set);
+    const requiredMissing = required.some((k) => !k.is_set);
+    const status: IntegrationStatus = requiredMissing ? 'missing' : anySet || required.length ? 'configured' : 'missing';
+    const tools = Array.from(new Set(g.keys.flatMap((k) => k.tools))).sort();
+    return {
+      id: `tool:${g.group}`,
+      name: g.group,
+      category: 'tools',
+      description: g.keys.map((k) => k.description).filter(Boolean)[0] || `Credentials declared by ${tools.join(', ')}.`,
+      envVars: g.keys.map((k) => k.key),
+      unlocks: tools.join(', '),
+      docsUrl: g.keys.map((k) => k.signup_url).filter(Boolean)[0],
+      status,
+      firstMissing: (g.keys.find((k) => !k.is_set) || g.keys[0])?.key,
+    };
+  });
 }
 
 const INTEGRATIONS: Integration[] = [
@@ -226,6 +269,7 @@ const INTEGRATIONS: Integration[] = [
 ];
 
 const CATEGORY_LABEL: Record<string, string> = {
+  tools: 'Tool credentials',
   llm: 'LLM providers',
   identity: 'Identity provider (SSO)',
   search: 'Web search',
@@ -256,14 +300,7 @@ function setupSnippets(envVars: string[]) {
   const cleaned = envVars.map(v => v.split(' ')[0].split('(')[0].trim()).filter(Boolean);
   const localExport = cleaned.map(v => `export ${v}=<value>`).join('\n');
   const dotEnv = cleaned.map(v => `${v}=<value>`).join('\n');
-  const kubectl = `kubectl create secret generic abenix-secrets -n abenix \\
-  ${cleaned.map(v => `--from-literal=${v}=<value>`).join(' \\\n  ')} \\
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl rollout restart deployment/abenix-api deployment/abenix-agent-runtime-default -n abenix`;
-  const helmSet = `helm upgrade abenix infra/helm/abenix \\
-  ${cleaned.map(v => `--set secrets.${v.toLowerCase()}=<value>`).join(' \\\n  ')} \\
-  --reuse-values`;
-  return { localExport, dotEnv, kubectl, helmSet };
+  return { localExport, dotEnv };
 }
 
 interface McpSummary { connections: number; registry: number; }
@@ -275,6 +312,8 @@ export default function IntegrationsPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [mcp, setMcp] = useState<McpSummary>({ connections: 0, registry: 0 });
   const [isAdmin, setIsAdmin] = useState(false);
+  const [toolRows, setToolRows] = useState<Integration[] | null>(null);
+  const [propagation, setPropagation] = useState(30);
 
   const copyToClipboard = useCallback((text: string, key: string) => {
     if (typeof navigator === 'undefined' || !navigator.clipboard) return;
@@ -290,6 +329,13 @@ export default function IntegrationsPage() {
       try {
         const r = await apiFetch<Record<string, IntegrationStatus>>('/api/integrations/status');
         if (!cancelled && r && r.data) setStatuses(r.data);
+      } catch {}
+      try {
+        const tR = await apiFetch<ToolCatalogue>('/api/integrations/tools');
+        if (!cancelled && tR?.data?.groups) {
+          setToolRows(rowsFromTools(tR.data));
+          setPropagation(tR.data.propagation_seconds || 30);
+        }
       } catch {}
       try {
         const ssoR = await apiFetch<{ providers?: string[] }>('/api/auth/oidc/providers');
@@ -321,7 +367,12 @@ export default function IntegrationsPage() {
     return () => { cancelled = true; };
   }, []);
 
-  const filtered = INTEGRATIONS.filter(i => {
+  // A static row disappears once every key it names is declared by a tool.
+  // tool rows come from the API, the static list only keeps identity and observability
+  const statics = INTEGRATIONS.filter(i => ['identity', 'observability'].includes(i.category) || (!i.envVars.length && !toolRows));
+  const all = [...(toolRows || []), ...statics];
+
+  const filtered = all.filter(i => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -351,7 +402,12 @@ export default function IntegrationsPage() {
           )}
         </div>
         <p className="text-slate-400 max-w-3xl">
-          External services the platform can talk to via its built-in tools. Click any row to see the exact command for local dev (<code className="text-cyan-300">.env</code>) AND for production (<code className="text-cyan-300">kubectl</code> / <code className="text-cyan-300">helm</code>). Only admins can change live values.
+          External services the platform can talk to via its built-in tools. Tool credentials are declared by the tools themselves, so this list stays complete as tools are added.{' '}
+          {isAdmin ? (
+            <>Set live values on <Link href="/admin/tool-config" className="text-cyan-300 hover:underline" data-testid="integrations-admin-link">Admin -&gt; Tool Configuration</Link>. Agents pick them up within {propagation} seconds.</>
+          ) : (
+            <>Only an admin can change live values, under Admin -&gt; Tool Configuration.</>
+          )}
         </p>
       </header>
 
@@ -390,7 +446,7 @@ export default function IntegrationsPage() {
             </h2>
             <ul className="divide-y divide-slate-800/50">
               {grouped[cat].map(i => {
-                const st: IntegrationStatus = statuses[i.id] || 'unknown';
+                const st: IntegrationStatus = i.status || statuses[i.id] || 'unknown';
                 const isOpen = !!expanded[i.id];
                 const snip = setupSnippets(i.envVars);
                 return (
@@ -469,21 +525,19 @@ export default function IntegrationsPage() {
                           </div>
                           <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-emerald-300 overflow-x-auto">{snip.dotEnv}</pre>
                         </div>
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="text-slate-400">
-                              Kubernetes (production) {!isAdmin && <span className="text-slate-500 ml-2">— admin role required to apply</span>}
-                            </div>
-                            <button onClick={() => copyToClipboard(snip.kubectl, `${i.id}-k8s`)} className="text-[10px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded">{copied === `${i.id}-k8s` ? '✓ copied' : 'Copy'}</button>
-                          </div>
-                          <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-cyan-200 overflow-x-auto">{snip.kubectl}</pre>
-                        </div>
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="text-slate-400">Helm upgrade {!isAdmin && <span className="text-slate-500 ml-2">— admin role required</span>}</div>
-                            <button onClick={() => copyToClipboard(snip.helmSet, `${i.id}-helm`)} className="text-[10px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded">{copied === `${i.id}-helm` ? '✓ copied' : 'Copy'}</button>
-                          </div>
-                          <pre className="bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] text-cyan-200 overflow-x-auto">{snip.helmSet}</pre>
+                        <div className="rounded border border-slate-800 bg-slate-950 p-2" data-testid={`integration-live-${i.id}`}>
+                          <div className="text-slate-400 mb-1">Running cluster</div>
+                          {i.category === 'tools' ? (
+                            isAdmin ? (
+                              <Link href={`/admin/tool-config#${i.firstMissing || i.envVars[0]}`} className="text-cyan-300 hover:underline">
+                                Set it on Admin -&gt; Tool Configuration, live within {propagation} seconds, no redeploy →
+                              </Link>
+                            ) : (
+                              <span className="text-slate-300">Ask an admin to add it under Admin -&gt; Tool Configuration.</span>
+                            )
+                          ) : (
+                            <span className="text-slate-300">Set by the deployment (helm values or the cluster secret), see the environment reference in Help.</span>
+                          )}
                         </div>
                       </div>
                     )}

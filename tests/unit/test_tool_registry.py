@@ -83,6 +83,7 @@ def test_list_all_serializes_each_tool():
                 "properties": {"who": {"type": "string"}},
                 "required": ["who"],
             },
+            "config_fields": [],
         }
     ]
 
@@ -107,10 +108,20 @@ async def test_defaulted_tool_injects_defaults_at_call_time():
 
 
 @pytest.mark.asyncio
-async def test_defaulted_tool_lets_caller_override_default():
-    """Caller-supplied args must win over defaults — a user explicitly
-    setting `who='alice'` should not be silently overwritten."""
+async def test_defaulted_tool_pinned_default_wins_over_caller():
+    """The agent author pinned `who`, so a model-supplied value must not
+    replace it."""
     wrapped = _DefaultedTool(_PingTool(), defaults={"who": "operator"})
+    result = await wrapped.execute({"who": "alice"})
+    assert result.content == "pong:operator"
+
+
+@pytest.mark.asyncio
+async def test_defaulted_tool_unlocked_lets_caller_override_default():
+    """With locked_defaults=False the author opts in to model overrides."""
+    wrapped = _DefaultedTool(
+        _PingTool(), defaults={"who": "operator"}, locked_defaults=False
+    )
     result = await wrapped.execute({"who": "alice"})
     assert result.content == "pong:alice"
 

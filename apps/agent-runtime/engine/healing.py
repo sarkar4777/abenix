@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import traceback as _tb
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -73,12 +74,52 @@ def _infer_shape(value: Any, depth: int = 0) -> Any:
     return type(value).__name__
 
 
+def _redact_text(text: str) -> str:
+    """Mask PII with the shared DLP patterns, regex fallback if unavailable."""
+    if not text:
+        return text
+    try:
+        from engine.dlp import scan_text
+
+        return scan_text(text).masked_text
+    except Exception:
+        pass
+    out = _FALLBACK_EMAIL.sub("[EMAIL_MASKED]", text)
+    out = _FALLBACK_CARD.sub("[CARD_MASKED]", out)
+    return _FALLBACK_PHONE.sub("[PHONE_MASKED]", out)
+
+
+_FALLBACK_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_FALLBACK_PHONE = re.compile(
+    r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
+)
+_FALLBACK_CARD = re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b")
+
+
+def redact_sample(value: Any, depth: int = 0) -> Any:
+    """Walk a JSON-ish value and mask PII in every string leaf and key."""
+    if depth > 12:
+        return value
+    if isinstance(value, str):
+        return _redact_text(value)
+    if isinstance(value, dict):
+        return {
+            (_redact_text(k) if isinstance(k, str) else k): redact_sample(v, depth + 1)
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [redact_sample(v, depth + 1) for v in value]
+    return value
+
+
 async def _count_recent(
     conn: Any, pipeline_id: UUID, status: str, since: datetime
 ) -> int:
+    # The enum column stores member names, so compare case-insensitively.
     row = await conn.fetchrow(
         "SELECT COUNT(*) AS c FROM executions "
-        "WHERE agent_id = $1 AND status = $2 AND created_at >= $3",
+        "WHERE agent_id = $1 AND LOWER(status::text) = LOWER($2) "
+        "AND created_at >= $3",
         pipeline_id,
         status,
         since,
@@ -101,13 +142,24 @@ async def capture_failure(
     upstream_inputs: dict[str, Any] | None,
     observed_sample: Any | None,
     last_success_sample: Any | None = None,
+    exc: BaseException | None = None,
 ) -> str | None:
     """Persist a `pipeline_run_diff` row and return its UUID, or None on error.
 
+    `last_success_sample` feeds expected_shape/expected_sample. `exc` fills
+    error_traceback when the caller has the exception but no formatted text.
+    Samples, inputs, message and traceback are DLP-redacted before insert.
     Best-effort.  Failures are logged and swallowed.
     """
     if not db_url:
         return None
+    if error_traceback is None and exc is not None:
+        error_traceback = safe_traceback(exc)
+    error_message = _redact_text(error_message or "")
+    error_traceback = _redact_text(error_traceback) if error_traceback else None
+    observed_sample = redact_sample(observed_sample)
+    last_success_sample = redact_sample(last_success_sample)
+    upstream_inputs = redact_sample(upstream_inputs)
     try:
         import asyncpg
     except ImportError:

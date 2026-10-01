@@ -44,18 +44,22 @@ interface ExecutionDetail {
   actual_model?: string;
   fallback_reason?: string;
   trace_id?: string | null;
-  tool_calls?: Array<{ name: string; arguments: Record<string, unknown>; result?: string; duration_ms?: number }>;
+  // a list on current rows, an object {total} on rows written before 2.5
+  tool_calls?: Array<{ name: string; arguments?: Record<string, unknown>; result?: string; result_preview?: string; is_error?: boolean; duration_ms?: number; node_id?: string }> | { total?: number };
   confidence_score?: number;
-  node_results?: Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown }>;
+  failure_code?: string | null;
+  // a dict keyed by node id on the wire
+  node_results?: Record<string, { node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }> | Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
   execution_trace?: {
-    steps?: Array<{ type: string; name?: string; input?: unknown; output?: unknown; duration_ms?: number; tokens?: number }>;
+    steps?: Array<{ node_type?: string; type?: string; tool?: string; node_id?: string; name?: string; status?: string; input?: unknown; output?: unknown; output_preview?: string; duration_ms?: number; tokens?: number; is_error?: boolean; error?: string | null }>;
     tool_calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
+    warnings?: string[];
     confidence_score?: number;
     pipeline_status?: string;
     execution_path?: string[];
     failed_nodes?: string[];
     skipped_nodes?: string[];
-    node_results?: Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown }>;
+    node_results?: Record<string, { node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }> | Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
   };
   error_message?: string;
   created_at: string;
@@ -207,11 +211,11 @@ function LineageGraph({
   executionPath,
   nodeResults,
 }: {
-  toolCalls: Array<{ name: string; arguments?: Record<string, unknown>; result?: string; duration_ms?: number }>;
+  toolCalls: Array<{ name: string; arguments?: Record<string, unknown>; result?: string; result_preview?: string; is_error?: boolean; duration_ms?: number; node_id?: string }>;
   inputMessage: string;
   outputMessage?: string;
   executionPath?: string[];
-  nodeResults?: Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown }>;
+  nodeResults?: Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -239,7 +243,7 @@ function LineageGraph({
         toolName: nr.tool_name,
         durationMs: nr.duration_ms,
         status: nr.status,
-        result: nr.output ? JSON.stringify(nr.output).slice(0, 500) : undefined,
+        result: nr.output ? (typeof nr.output === 'string' ? nr.output : JSON.stringify(nr.output)).slice(0, 500) : nr.error ? `error: ${nr.error}` : undefined,
         stepNumber: i + 1,
       });
       edges.push({ from: prev, to: nr.node_id });
@@ -256,7 +260,8 @@ function LineageGraph({
         toolName: tc.name,
         durationMs: tc.duration_ms,
         arguments: tc.arguments,
-        result: tc.result?.slice(0, 500),
+        result: (tc.result ?? tc.result_preview)?.slice(0, 500),
+        status: tc.is_error ? 'failed' : 'completed',
         stepNumber: i + 1,
       });
       edges.push({ from: prev, to: nid });
@@ -477,27 +482,33 @@ export default function ExecutionDetailPage() {
   }
 
   const totalDuration = execution.duration_ms || 1;
-  const toolCalls: Array<{ name: string; arguments?: Record<string, unknown>; result?: string; duration_ms?: number }> = execution.tool_calls || [];
+  const toolCalls: Array<{ name: string; arguments?: Record<string, unknown>; result?: string; result_preview?: string; is_error?: boolean; duration_ms?: number; node_id?: string }> = Array.isArray(execution.tool_calls) ? execution.tool_calls : [];
   const trace = execution.execution_trace;
   const steps = trace?.steps || [];
+  // node_results is a dict keyed by node id, older rows may hold a list
+  const rawNodeResults = trace?.node_results ?? execution.node_results;
+  const nodeResults = Array.isArray(rawNodeResults) ? rawNodeResults : rawNodeResults ? Object.values(rawNodeResults) : [];
+  const hasRealDurations = toolCalls.some((tc) => typeof tc.duration_ms === 'number');
 
-  // Build waterfall data from tool calls
+  // Waterfall from measured durations. Rows without them get a hairline, never an invented split.
   let cumulativeMs = 0;
   const waterfallItems = toolCalls.map((tc, i) => {
-    const dur = tc.duration_ms || (totalDuration / Math.max(toolCalls.length, 1));
+    const dur = typeof tc.duration_ms === 'number' ? tc.duration_ms : 0;
     const start = cumulativeMs;
     cumulativeMs += dur;
     return {
       name: tc.name,
       startPct: (start / totalDuration) * 100,
-      widthPct: (dur / totalDuration) * 100,
+      widthPct: Math.max((dur / totalDuration) * 100, 0.5),
       durationMs: Math.round(dur),
+      measured: typeof tc.duration_ms === 'number',
+      isError: Boolean(tc.is_error),
       color: tc.name.includes('llm') || tc.name.includes('agent') ? '#8b5cf6' :
              tc.name.includes('search') ? '#06b6d4' :
              tc.name.includes('memory') ? '#f59e0b' :
              tc.name.includes('human') ? '#ef4444' : '#10b981',
       arguments: tc.arguments,
-      result: tc.result,
+      result: tc.result ?? tc.result_preview,
     };
   });
 
@@ -516,6 +527,11 @@ export default function ExecutionDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-bold text-white">Execution Flight Recorder</h1>
             <StatusBadge status={execution.status} />
+            {execution.failure_code && (
+              <span className="px-2 py-0.5 text-[10px] font-mono rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300" data-testid="execution-failure-code">
+                {execution.failure_code}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500 mt-0.5 font-mono flex items-center gap-2 flex-wrap">
             <span>{executionId.slice(0, 12)}... | {execution.model_used} | {new Date(execution.created_at).toLocaleString()}</span>
@@ -541,10 +557,28 @@ export default function ExecutionDetailPage() {
             </a>
           );
         })()}
+        <Link
+          href={`/agents/${execution.agent_id}/chat?prefill=${encodeURIComponent(execution.input_message || '')}`}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-600/60 bg-slate-800/40 text-slate-200 text-xs font-semibold hover:bg-slate-700/60"
+          title="Open the agent with this run's input filled in"
+          data-testid="execution-rerun"
+        >
+          <RotateCcw className="w-3.5 h-3.5" /> Re-run
+        </Link>
         {execution.confidence_score != null && (
           <ConfidenceRing score={execution.confidence_score} />
         )}
       </div>
+      {execution.error_message && execution.status !== 'completed' && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-xs text-red-200" data-testid="execution-error">
+          {execution.error_message}
+        </div>
+      )}
+      {trace?.warnings && trace.warnings.length > 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200 space-y-1" data-testid="execution-warnings">
+          {trace.warnings.map((w) => <p key={w}>{w}</p>)}
+        </div>
+      )}
 
       {/* KPI Strip */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -677,12 +711,17 @@ export default function ExecutionDetailPage() {
               <div key={i} className="space-y-1">
                 <div className="flex items-center gap-2 text-xs">
                   <span className="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] text-slate-400 font-mono">{i + 1}</span>
-                  <span className="font-medium text-cyan-400">{tc.name}</span>
-                  {tc.duration_ms && <span className="text-slate-600">{tc.duration_ms}ms</span>}
+                  <span className={`font-medium ${tc.is_error ? 'text-red-400' : 'text-cyan-400'}`}>{tc.name}</span>
+                  {tc.is_error && <span className="text-[10px] px-1.5 rounded bg-red-500/10 text-red-300">error</span>}
+                  {typeof tc.duration_ms === 'number' ? <span className="text-slate-600">{tc.duration_ms}ms</span> : <span className="text-slate-700">duration not recorded</span>}
                 </div>
                 <div className="ml-7 space-y-1">
                   <DataPanel title="Arguments" data={tc.arguments} isJson />
-                  {tc.result && <DataPanel title="Result" data={tc.result} />}
+                  {(tc.result ?? tc.result_preview) ? (
+                    <DataPanel title={tc.result ? 'Result' : 'Result (first 500 chars)'} data={tc.result ?? tc.result_preview} />
+                  ) : (
+                    <p className="text-[10px] text-slate-600" data-testid="tool-result-missing">No result was recorded for this call.</p>
+                  )}
                 </div>
               </div>
             ))}
@@ -746,7 +785,7 @@ export default function ExecutionDetailPage() {
           )}
 
           {/* Node detail table */}
-          {execution.execution_trace.node_results && execution.execution_trace.node_results.length > 0 && (
+          {nodeResults.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -758,7 +797,7 @@ export default function ExecutionDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {execution.execution_trace.node_results.map((nr) => (
+                  {nodeResults.map((nr) => (
                     <tr key={nr.node_id} className="border-b border-slate-700/30">
                       <td className="text-[10px] text-slate-300 font-mono py-1.5">{nr.node_id}</td>
                       <td className="text-[10px] text-slate-400 py-1.5">{nr.tool_name}</td>
@@ -771,7 +810,7 @@ export default function ExecutionDetailPage() {
                           <Clock className="w-3 h-3 text-slate-500 inline" />
                         )}
                       </td>
-                      <td className="text-right text-[10px] text-slate-400 py-1.5">
+                      <td className="text-right text-[10px] text-slate-400 py-1.5" title={nr.error || undefined}>
                         {nr.duration_ms ? `${nr.duration_ms}ms` : '-'}
                       </td>
                     </tr>
@@ -784,14 +823,45 @@ export default function ExecutionDetailPage() {
       )}
 
       {/* ── Data Lineage Graph ──────────────────────────────────── */}
-      {toolCalls.length > 0 && (
+      {(toolCalls.length > 0 || nodeResults.length > 0) && (
         <LineageGraph
           toolCalls={toolCalls}
           inputMessage={execution.input_message}
           outputMessage={execution.output_message}
           executionPath={trace?.execution_path}
-          nodeResults={trace?.node_results}
+          nodeResults={nodeResults}
         />
+      )}
+
+      {/* Step replay: every node in the order it ran */}
+      {steps.length > 0 && (
+        <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-xl p-4" data-testid="execution-steps">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase mb-3 flex items-center gap-2">
+            <RotateCcw className="w-3.5 h-3.5 text-cyan-400" /> Step replay ({steps.length} steps)
+          </h3>
+          <ol className="space-y-2">
+            {steps.map((st, i) => {
+              const failed = st.is_error || st.status === 'failed';
+              const label = st.tool || st.name || st.node_id || st.node_type || st.type || 'step';
+              return (
+                <li key={i} className="flex items-start gap-3 text-xs">
+                  <span className="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">{i + 1}</span>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`font-medium ${failed ? 'text-red-400' : 'text-cyan-300'}`}>{label}</span>
+                      {st.node_id && st.tool && <span className="text-slate-600 font-mono">{st.node_id}</span>}
+                      {typeof st.duration_ms === 'number' && <span className="text-slate-600">{st.duration_ms}ms</span>}
+                      {failed && <span className="text-[10px] px-1.5 rounded bg-red-500/10 text-red-300">failed</span>}
+                    </div>
+                    {st.input !== undefined && <DataPanel title="Input" data={st.input} isJson />}
+                    {(st.output_preview || st.output !== undefined) && <DataPanel title="Output" data={st.output_preview ?? st.output} isJson={st.output_preview === undefined} />}
+                    {st.error && <p className="text-[10px] text-red-300">{st.error}</p>}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
       )}
 
       {/* Input / Output */}

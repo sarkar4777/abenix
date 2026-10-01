@@ -65,6 +65,10 @@ web:
 # ── API (FastAPI) ──────────────────────────────────────────────────────────
 api:
   replicaCount: 1
+  # The UAT gate seeds its RBAC viewer through POST /api/team/dev-create-member.
+  # The route is admin-only on top of this switch.
+  env:
+    ALLOW_DEV_CREATE_MEMBER: "true"
   # Multi-node AKS: every pod gets its own pod-local /data overlay, so
   # without an azurefile-backed PVC the ml_model tool on the runtime
   # pool can't read pickles the api just wrote. Toggling this on +

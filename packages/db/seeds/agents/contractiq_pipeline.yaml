@@ -509,3 +509,7 @@ pipeline_config:
     x: 0
     y: 0
     zoom: 0.8
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - ENTSOE_API_KEY

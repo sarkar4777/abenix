@@ -3,14 +3,45 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 class CloudStorageTool(BaseTool):
     name = "cloud_storage"
+    config_fields = (
+        ConfigField(
+            "AWS_ACCESS_KEY_ID",
+            label="Access key id",
+            kind="secret",
+            required=False,
+            group="AWS",
+            signup_url="https://console.aws.amazon.com/iam",
+        ),
+        ConfigField(
+            "AWS_SECRET_ACCESS_KEY",
+            label="Secret access key",
+            kind="secret",
+            required=False,
+            group="AWS",
+        ),
+        ConfigField(
+            "AWS_REGION",
+            label="Region",
+            kind="string",
+            required=False,
+            group="AWS",
+            default="us-east-1",
+        ),
+        ConfigField(
+            "AZURE_STORAGE_CONNECTION_STRING",
+            label="Storage connection string",
+            kind="secret",
+            required=False,
+            group="Azure",
+        ),
+    )
     description = (
         "Perform operations on cloud storage: S3, GCS, Azure Blob, or local filesystem. "
         "Supports list, read, write, and delete operations. "
@@ -84,7 +115,12 @@ class CloudStorageTool(BaseTool):
             bucket = parts[0]
             key = parts[1] if len(parts) > 1 else ""
 
-            s3 = boto3.client("s3")
+            s3 = boto3.client(
+                "s3",
+                region_name=self.cfg("AWS_REGION") or None,
+                aws_access_key_id=self.cfg("AWS_ACCESS_KEY_ID") or None,
+                aws_secret_access_key=self.cfg("AWS_SECRET_ACCESS_KEY") or None,
+            )
 
             if operation == "list_objects":
                 prefix = args.get("prefix", key)
@@ -267,7 +303,7 @@ class CloudStorageTool(BaseTool):
         try:
             from azure.storage.blob import BlobServiceClient
 
-            conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
+            conn_str = self.cfg("AZURE_STORAGE_CONNECTION_STRING")
             if not conn_str:
                 return ToolResult(
                     content="Error: AZURE_STORAGE_CONNECTION_STRING not set",

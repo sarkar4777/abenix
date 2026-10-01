@@ -19,12 +19,11 @@ Common series_id shortcuts:
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 _BASE_URL = "https://api.eia.gov/v2"
 
@@ -177,6 +176,30 @@ _SHORTCUTS: dict[str, dict[str, Any]] = {
 
 class EiaOpenDataTool(BaseTool):
     name = "eia_open_data"
+    config_fields = (
+        ConfigField(
+            "EIA_API_KEY",
+            label="API key",
+            kind="secret",
+            required=True,
+            group="EIA",
+            signup_url="https://www.eia.gov/opendata/register.php",
+        ),
+    )
+
+    @classmethod
+    async def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        from engine.tools._config_probe import probe
+
+        return await probe(
+            "GET",
+            f"{_BASE_URL}/",
+            params={"api_key": values.get("EIA_API_KEY", "")},
+            accepted="EIA accepted the key",
+        )
+
     description = (
         "Fetch energy market time series from the US Energy Information "
         "Administration (EIA) Open Data API v2. Use one of the shortcut "
@@ -220,7 +243,7 @@ class EiaOpenDataTool(BaseTool):
         if not series_id:
             return ToolResult(content="Error: series_id is required", is_error=True)
 
-        api_key = os.environ.get("EIA_API_KEY", "").strip()
+        api_key = self.cfg("EIA_API_KEY", required=True).strip()
 
         shortcut = _SHORTCUTS.get(series_id)
         if shortcut:
@@ -253,7 +276,7 @@ class EiaOpenDataTool(BaseTool):
                             "EIA API rejected anonymous request (HTTP 403). Set "
                             "EIA_API_KEY — register a free key at "
                             "https://www.eia.gov/opendata/register.php and pass "
-                            "it as an env var on the agent-runtime pod."
+                            "it under Admin -> Tool Configuration."
                         ),
                         is_error=True,
                     )

@@ -603,20 +603,6 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
       { name: "cognify", type: "boolean", required: false, description: "Whether to also run Cognify to extract entities into the knowledge graph", default: false },
     ],
   },
-  contract_portfolio: {
-    category: "Energy Market",
-    name: "Contract Portfolio",
-    description: "Query E&C-Copilot contract portfolio for structured data. Supports listing contracts, getting details, searching clauses, viewing risks, discovering fields, querying extracted data, and comparing fields across contracts.",
-    parameters: [
-      { name: "operation", type: "string", required: true, description: "Operation to perform", enum: ["list_contracts", "get_contract_detail", "search_clauses", "get_risks", "get_extracted_data", "get_portfolio_summary", "get_events", "discover_fields", "query_extracted", "compare_field"] },
-      { name: "contract_id", type: "string", required: false, description: "Contract UUID for detail operations" },
-      { name: "query", type: "string", required: false, description: "Search text for clauses or extracted data" },
-      { name: "clause_type", type: "string", required: false, description: "Filter by clause type" },
-      { name: "field_name", type: "string", required: false, description: "Field name for compare_field" },
-      { name: "section", type: "string", required: false, description: "Extraction section filter" },
-      { name: "limit", type: "integer", required: false, description: "Max results", default: 20 },
-    ],
-  },
   graph_explorer: {
     category: "Knowledge Graph",
     name: "Graph Explorer",
@@ -627,21 +613,6 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
       { name: "entity_type", type: "string", required: false, description: "Entity type filter (ORGANIZATION, PERSON, LOCATION, etc.)" },
       { name: "target_entity", type: "string", required: false, description: "Target entity for path finding" },
       { name: "max_hops", type: "integer", required: false, description: "Max relationship hops", default: 2 },
-    ],
-  },
-  market_monitor: {
-    category: "Energy Market",
-    name: "Market Monitor",
-    description: "System-level tool for E&C-Copilot market monitoring. Loads contracts with pricing terms, writes market alerts, updates risk scores, and retrieves recent alerts for deduplication.",
-    parameters: [
-      { name: "operation", type: "string", required: true, description: "Operation", enum: ["get_all_contracts_with_pricing", "write_market_alert", "update_risk_score", "get_latest_alerts"] },
-      { name: "contract_id", type: "string", required: false, description: "Contract UUID" },
-      { name: "alert_type", type: "string", required: false, description: "Alert type" },
-      { name: "severity", type: "string", required: false, description: "Alert severity", enum: ["info", "warning", "critical"] },
-      { name: "title", type: "string", required: false, description: "Alert title" },
-      { name: "description", type: "string", required: false, description: "Alert description" },
-      { name: "market_risk_score", type: "number", required: false, description: "Updated risk score (0-100)" },
-      { name: "hours", type: "integer", required: false, description: "Hours to look back for recent alerts", default: 24 },
     ],
   },
   web_search: {

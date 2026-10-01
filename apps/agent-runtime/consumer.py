@@ -275,6 +275,43 @@ async def _pipeline_timeout() -> int:
         return DEFAULT_PIPELINE_TIMEOUT_SECONDS
 
 
+def _merge_tool_trace(tool_calls: list[dict[str, Any]], trace: dict[str, Any]) -> None:
+    """Attach a node_trace's result to the tool_call entry it belongs to."""
+    if (trace.get("node_type") or "") != "tool_call":
+        return
+    name = trace.get("tool") or ""
+    for tc in tool_calls:
+        if tc.get("name") == name and "duration_ms" not in tc:
+            tc["result_preview"] = trace.get("output_preview") or ""
+            tc["is_error"] = bool(trace.get("is_error"))
+            tc["duration_ms"] = trace.get("duration_ms")
+            if trace.get("output_summary"):
+                tc["output_summary"] = trace["output_summary"]
+            return
+
+
+def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Tool nodes as tool_call entries so the Flight Recorder renders a pipeline like an agent run."""
+    out: list[dict[str, Any]] = []
+    for nid, nr in (node_results or {}).items():
+        if not isinstance(nr, dict) or not nr.get("tool_name"):
+            continue
+        preview = nr.get("output")
+        if not isinstance(preview, str):
+            preview = json.dumps(preview, default=str) if preview is not None else ""
+        out.append(
+            {
+                "name": nr["tool_name"],
+                "node_id": nid,
+                "arguments": nr.get("resolved_arguments") or {},
+                "result_preview": preview[:500],
+                "is_error": nr.get("status") == "failed",
+                "duration_ms": nr.get("duration_ms"),
+            }
+        )
+    return out
+
+
 async def _mark_done(
     execution_id: str,
     status: str,
@@ -289,6 +326,9 @@ async def _mark_done(
     node_results: dict[str, Any] | None = None,
     execution_trace: dict[str, Any] | list[Any] | None = None,
     duration_ms: int | None = None,
+    failure_code: str | None = None,
+    model_used: str | None = None,
+    confidence_score: float | None = None,
 ) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import select, update
@@ -322,6 +362,12 @@ async def _mark_done(
         values["execution_trace"] = execution_trace
     if duration_ms is not None:
         values["duration_ms"] = duration_ms
+    if model_used:
+        values["model_used"] = model_used
+    if confidence_score is not None:
+        values["confidence_score"] = confidence_score
+    if failure_code:
+        values["failure_code"] = failure_code
     if trace_id:
         values["trace_id"] = trace_id
     else:
@@ -335,7 +381,7 @@ async def _mark_done(
             pass
     # On failure, classify the error_message into a stable failure_code so
     # /alerts can group it and the Surgeon has something to act on.
-    if target_status == ExecutionStatus.FAILED and error:
+    if target_status == ExecutionStatus.FAILED and error and not failure_code:
         try:
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
             from app.core.failure_codes import classify_exception  # type: ignore
@@ -471,6 +517,8 @@ async def _run_one(payload: dict) -> None:
         },
     )
 
+    _agg_tool_calls: list[dict[str, Any]] = []
+    _mcp_clients: list[Any] = []
     try:
         if is_pipeline:
             from engine.pipeline import (
@@ -553,9 +601,22 @@ async def _run_one(payload: dict) -> None:
             )
             # Inject execution_id into context so the executor's healing
             # capture path can attribute the diff back to this run.
+            # declared input_variables defaults sit under what the caller sent
+            _defaults = {
+                v["name"]: v["default"]
+                for v in ((loaded.get("model_cfg") or {}).get("input_variables") or [])
+                if isinstance(v, dict)
+                and v.get("name")
+                and v.get("default") not in (None, "")
+            }
             result = await executor.execute(
                 nodes,
-                {"user_message": message, "__execution_id": execution_id, **context},
+                {
+                    "user_message": message,
+                    "__execution_id": execution_id,
+                    **_defaults,
+                    **context,
+                },
             )
             serialized = serialize_pipeline_result(result)
             final_text = ""
@@ -610,8 +671,19 @@ async def _run_one(payload: dict) -> None:
                 final_text,
                 err_text,
                 node_results=serialized.get("node_results"),
-                execution_trace=serialized,
-                duration_ms=serialized.get("duration_ms"),
+                tool_calls=_pipeline_tool_calls(serialized.get("node_results")) or None,
+                execution_trace={
+                    "pipeline_status": serialized.get("status"),
+                    "execution_path": serialized.get("execution_path"),
+                    "failed_nodes": serialized.get("failed_nodes"),
+                    "skipped_nodes": serialized.get("skipped_nodes"),
+                    "node_results": serialized.get("node_results"),
+                    "steps": serialized.get("steps") or [],
+                },
+                duration_ms=serialized.get("total_duration_ms"),
+                failure_code=(
+                    None if pipeline_status == "completed" else "PIPELINE_NODE_FAILED"
+                ),
             )
             # Debit api_keys / users so customer quotas stay enforced on
             # queue-routed pipeline runs. Pipelines aggregate token counts
@@ -650,19 +722,60 @@ async def _run_one(payload: dict) -> None:
             )
             from engine.llm_router import LLMRouter
 
-            registry = build_tool_registry(
-                loaded["tool_names"],
+            from engine.tool_config_prompt import (
+                append_mcp_warnings,
+                build_tool_config_prompt,
+            )
+            from engine.tool_resolver import (
+                load_agent_mcp_connections,
+                resolve_tools,
+            )
+
+            _registry_kwargs: dict[str, Any] = dict(
                 agent_id=loaded["agent_id"],
                 tenant_id=tenant_id,
                 execution_id=execution_id,
                 agent_name=agent_name,
                 db_url=os.environ.get("DATABASE_URL", ""),
                 model_config=loaded.get("model_cfg") or {},
-                kb_ids=loaded.get("kb_ids") or [],
+            )
+            # Same MCP resolution as the inline API path, read straight from the DB.
+            _mcp_conns: list[dict[str, Any]] = []
+            try:
+                _Session = await _get_session_factory()
+                async with _Session() as _mcp_db:
+                    _mcp_conns = await load_agent_mcp_connections(
+                        _mcp_db, loaded["agent_id"], tenant_id
+                    )
+            except Exception:
+                logger.exception(
+                    "Could not load MCP connections for agent %s", loaded["agent_id"]
+                )
+            if _mcp_conns:
+                registry, _mcp_clients, _ = await resolve_tools(
+                    loaded["tool_names"],
+                    _mcp_conns,
+                    kb_ids=loaded.get("kb_ids") or [],
+                    **_registry_kwargs,
+                )
+            else:
+                registry = build_tool_registry(
+                    loaded["tool_names"],
+                    kb_ids=loaded.get("kb_ids") or [],
+                    **_registry_kwargs,
+                )
+            _system_prompt = append_mcp_warnings(
+                build_tool_config_prompt(
+                    loaded["system_prompt"],
+                    loaded["model_cfg"].get("tool_config") or {},
+                ),
+                getattr(registry, "mcp_warnings", []),
             )
             llm_router = LLMRouter()
             _tool_cfg = loaded["model_cfg"].get("tool_config") or {}
-            _asset_schemas = await resolve_asset_schemas(_tool_cfg)
+            _asset_schemas = await resolve_asset_schemas(
+                _tool_cfg, tenant_id=str(tenant_id or "")
+            )
             # Pull the grounded-response contract and the moderation gate
             # for queue-routed runs too. Without this, RUNTIME_MODE=remote
             # plus QUEUE_BACKEND=nats silently bypassed both controls.
@@ -673,7 +786,7 @@ async def _run_one(payload: dict) -> None:
             executor = AgentExecutor(
                 llm_router=llm_router,
                 tool_registry=registry,
-                system_prompt=loaded["system_prompt"],
+                system_prompt=_system_prompt,
                 model=loaded["model_cfg"].get("model", "claude-sonnet-4-5-20250929"),
                 temperature=loaded["model_cfg"].get("temperature", 0.7),
                 max_iterations=loaded["model_cfg"].get("max_iterations", 10),
@@ -686,6 +799,7 @@ async def _run_one(payload: dict) -> None:
                 tool_config=_tool_cfg,
                 asset_schemas=_asset_schemas,
                 require_knowledge_search=_require_kb,
+                require_tools=list(loaded["model_cfg"].get("require_tools") or []),
                 moderation_gate=_moderation_gate,
             )
             # Stream so per-iteration events reach Redis pub/sub live; invoke() only emits start+done.
@@ -699,6 +813,7 @@ async def _run_one(payload: dict) -> None:
             # tool. Filled from `node_trace` events, which carry the full
             # ToolResult.metadata.
             _tool_runs: list[dict[str, Any]] = []
+            _node_traces: list[dict[str, Any]] = []
             _last_done: dict[str, Any] = {}
             async for _ev in executor.stream(message):
                 if _ev.event == "done" and isinstance(_ev.data, dict):
@@ -710,8 +825,23 @@ async def _run_one(payload: dict) -> None:
                 else:
                     _evt["data"] = _ev.data
                 await _publish(execution_id, _evt)
-                if _ev.event == "token" and isinstance(_ev.data, str):
-                    _full_text_parts.append(_ev.data)
+                if (
+                    _ev.event == "moderation"
+                    and isinstance(_ev.data, dict)
+                    and _ev.data.get("source") == "post_llm"
+                    and _ev.data.get("content") is not None
+                ):
+                    _full_text_parts[:] = [str(_ev.data["content"])]
+                if _ev.event == "token":
+                    _tok = (
+                        _ev.data
+                        if isinstance(_ev.data, str)
+                        else (_ev.data or {}).get("content")
+                        or (_ev.data or {}).get("text")
+                        or ""
+                    )
+                    if _tok:
+                        _full_text_parts.append(_tok)
                 elif _ev.event == "tool_call" and isinstance(_ev.data, dict):
                     _agg_tool_calls.append(_ev.data)
                     try:
@@ -721,6 +851,8 @@ async def _run_one(payload: dict) -> None:
                     except Exception as _ape:
                         logger.debug("append_tool_call failed: %s", _ape)
                 elif _ev.event == "node_trace" and isinstance(_ev.data, dict):
+                    _merge_tool_trace(_agg_tool_calls, _ev.data)
+                    _node_traces.append(_ev.data)
                     # node_trace fires per tool with the real result.metadata
                     # attached — exactly what the post-processor needs to
                     # reconstruct the canonical anchor. Prefer the new
@@ -831,24 +963,46 @@ async def _run_one(payload: dict) -> None:
             )
             if not _tid_done:
                 _tid_done = getattr(executor, "_trace_id_for_log", None)
-            _exec_trace: dict[str, Any] | None = None
-            try:
-                _exec_trace = {
-                    "steps": (
-                        executor.get_trace_summary()
-                        if hasattr(executor, "get_trace_summary")
-                        else []
-                    ),
-                    "tool_calls": _agg_tool_calls,
-                }
-            except Exception as _te:
-                logger.debug("trace summary unavailable: %s", _te)
-                _exec_trace = None
+            _exec_trace: dict[str, Any] | None = {
+                "steps": _node_traces,
+                "tool_calls": _agg_tool_calls,
+                "warnings": list(_last_done.get("warnings") or []),
+                "model": _last_done.get("effective_model") or _last_done.get("model"),
+            }
+            # a done payload carrying an error is a failed run, not a completed one
+            _rt_error = _last_done.get("error")
+            _final_status = "completed"
+            _final_error: str | None = None
+            _final_code: str | None = None
+            if _rt_error == "grounding_required_violation" or _last_done.get(
+                "grounding_violation"
+            ):
+                _final_status = "failed"
+                _final_code = (
+                    _last_done.get("failure_code") or "GROUNDING_REQUIRED_VIOLATION"
+                )
+                _final_error = "required tools not called: " + ", ".join(
+                    _last_done.get("missing_tools") or ["knowledge_search"]
+                )
+            elif _rt_error == "moderation_blocked" or _last_done.get(
+                "moderation_blocked"
+            ):
+                _final_status = "failed"
+                _final_code = "MODERATION_BLOCKED"
+                _final_error = (
+                    full_output_str[:2000] or "Moderation policy blocked the request"
+                )
+            elif _rt_error:
+                _final_status = "failed"
+                _final_error = str(_rt_error)[:2000]
+                _final_code = (
+                    "SANDBOX_TIMEOUT" if "timed out" in str(_rt_error).lower() else None
+                )
             await _mark_done(
                 execution_id,
-                "completed",
+                _final_status,
                 full_output_str,
-                None,
+                _final_error,
                 input_tokens=getattr(result, "input_tokens", None),
                 output_tokens=getattr(result, "output_tokens", None),
                 cost=getattr(result, "cost", None),
@@ -856,6 +1010,9 @@ async def _run_one(payload: dict) -> None:
                 trace_id=_tid_done,
                 execution_trace=_exec_trace,
                 duration_ms=getattr(result, "duration_ms", None) or None,
+                failure_code=_final_code,
+                model_used=_last_done.get("effective_model") or _last_done.get("model"),
+                confidence_score=_last_done.get("confidence_score"),
             )
             # Debit api_keys / users counters — the inline path does this
             # via app.core.usage.update_user_usage; queue-routed runs need
@@ -868,13 +1025,16 @@ async def _run_one(payload: dict) -> None:
                 float(getattr(result, "cost", 0.0) or 0.0),
             )
             _emit_outcome(
-                outcome="SUCCESS",
-                failure_code="",
+                outcome="SUCCESS" if _final_status == "completed" else "FAILED",
+                failure_code=_final_code
+                or ("" if _final_status == "completed" else "UNKNOWN_ERROR"),
                 agent_type="agent",
                 tenant_id=str(tenant_id) if tenant_id else "",
             )
             _done_evt: dict[str, Any] = {
-                "event": "done",
+                "event": "done" if _final_status == "completed" else "error",
+                "error": _final_error,
+                "failure_code": _final_code,
                 "execution_id": execution_id,
                 "output": full_output_str,
                 "input_tokens": getattr(result, "input_tokens", None),
@@ -892,7 +1052,12 @@ async def _run_one(payload: dict) -> None:
         except Exception:
             pass
         await _mark_done(
-            execution_id, "failed", None, str(e)[:2000], trace_id=_tid_fail
+            execution_id,
+            "failed",
+            None,
+            str(e)[:2000],
+            trace_id=_tid_fail,
+            tool_calls=_agg_tool_calls or None,
         )
         # Classify + emit the runtime-side terminal outcome. Without this,
         # every remote-runtime failure left active_executions stuck +1
@@ -905,6 +1070,28 @@ async def _run_one(payload: dict) -> None:
             _failure_code = classify_exception(e)
         except Exception:
             pass
+        try:
+            from app.services.dlq import dead_letter  # type: ignore
+
+            async with (await _get_session_factory())() as _db:
+                await dead_letter(
+                    _db,
+                    execution_id,
+                    reason=str(e)[:2000],
+                    failure_code=_failure_code,
+                    payload={
+                        "message": message,
+                        "context": context,
+                        "is_pipeline": is_pipeline,
+                        "api_key_id": api_key_id,
+                        "runtime_pool": os.environ.get("RUNTIME_POOL", ""),
+                    },
+                )
+                await _db.commit()
+        except Exception as _dlq_exc:  # noqa: BLE001
+            logger.warning(
+                "dead letter write failed for %s: %s", execution_id, _dlq_exc
+            )
         _emit_outcome(
             outcome="FAILED",
             failure_code=_failure_code,
@@ -912,6 +1099,12 @@ async def _run_one(payload: dict) -> None:
             tenant_id=str(tenant_id) if tenant_id else "",
         )
         await _publish(execution_id, {"event": "error", "error": str(e)[:2000]})
+    finally:
+        for _c in _mcp_clients:
+            try:
+                await _c.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def _serve_health(port: int = 8001) -> None:

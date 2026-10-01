@@ -13,6 +13,7 @@ from app.core.responses import error, success
 from app.services.archiver import (
     ARCHIVABLE_TABLES,
     DEFAULT_RETENTION_DAYS,
+    is_under_archive_root,
     run_archive,
 )
 from models.archive import ArchiveRun, RetentionPolicy
@@ -34,7 +35,7 @@ async def list_archive_runs(
 ) -> JSONResponse:
     if not _is_admin(user):
         return error("Admin only", 403)
-    q = select(ArchiveRun)
+    q = select(ArchiveRun).where(ArchiveRun.tenant_id == user.tenant_id)
     if table:
         q = q.where(ArchiveRun.source_table == table)
     q = q.order_by(ArchiveRun.created_at.desc()).limit(limit)
@@ -74,7 +75,9 @@ async def trigger_archive(
     table = (body or {}).get("table")
     if not table or table not in ARCHIVABLE_TABLES:
         return error(f"table must be one of {ARCHIVABLE_TABLES}", 400)
-    run = await run_archive(db, table, triggered_by=user.id, is_manual=True)
+    run = await run_archive(
+        db, table, tenant_id=user.tenant_id, triggered_by=user.id, is_manual=True
+    )
     return success(
         {
             "id": str(run.id),
@@ -98,7 +101,17 @@ async def list_retention_policies(
 ) -> JSONResponse:
     if not _is_admin(user):
         return error("Admin only", 403)
-    rows = (await db.execute(select(RetentionPolicy))).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(RetentionPolicy).where(
+                    RetentionPolicy.tenant_id == user.tenant_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     by_table = {r.source_table: r for r in rows}
     items = []
     for t in ARCHIVABLE_TABLES:
@@ -140,7 +153,10 @@ async def update_retention_policy(
     description = ((body or {}).get("description") or "").strip() or None
     existing = (
         await db.execute(
-            select(RetentionPolicy).where(RetentionPolicy.source_table == table)
+            select(RetentionPolicy).where(
+                RetentionPolicy.tenant_id == user.tenant_id,
+                RetentionPolicy.source_table == table,
+            )
         )
     ).scalar_one_or_none()
     if existing:
@@ -151,6 +167,7 @@ async def update_retention_policy(
         existing.updated_by = user.id
     else:
         existing = RetentionPolicy(
+            tenant_id=user.tenant_id,
             source_table=table,
             retention_days=days,
             enabled=enabled,
@@ -178,11 +195,17 @@ async def download_archive_file(
     if not _is_admin(user):
         return error("Admin only", 403)
     run = (
-        await db.execute(select(ArchiveRun).where(ArchiveRun.id == run_id))
+        await db.execute(
+            select(ArchiveRun).where(
+                ArchiveRun.id == run_id, ArchiveRun.tenant_id == user.tenant_id
+            )
+        )
     ).scalar_one_or_none()
     if not run or not run.file_uri:
         return error("Archive not found", 404)
     p = Path(run.file_uri)
+    if not is_under_archive_root(p):
+        return error("Archive not found", 404)
     if not p.exists():
         return error("Archive file missing on disk", 410)
     return FileResponse(

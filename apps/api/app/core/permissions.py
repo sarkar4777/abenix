@@ -212,3 +212,65 @@ def assert_can_delete(
     if creator_id is not None and creator_id == user.id:
         return True
     return is_admin(user)
+
+
+_PERM_RANK = {
+    SharePermission.VIEW: 0,
+    SharePermission.EXECUTE: 1,
+    SharePermission.EDIT: 2,
+}
+
+AGENT_VISIBILITIES = ("tenant", "specific", "public")
+
+
+def _enum_value(v: Any) -> str:
+    return (v.value if hasattr(v, "value") else str(v or "")).lower()
+
+
+def is_platform_agent(agent: Any) -> bool:
+    # Seeded OOB agents belong to every tenant member.
+    return (
+        _enum_value(getattr(agent, "agent_type", None)) == "oob"
+        or getattr(agent, "creator_id", None) is None
+    )
+
+
+def can_access_agent(
+    agent: Any,
+    user: User,
+    *,
+    accessible_ids: Iterable[uuid.UUID] | None = None,
+    permission_required: SharePermission = SharePermission.VIEW,
+    subscribed: bool = False,
+) -> bool:
+    """Owner, tenant admin, OOB, a ResourceShare at the level, or an active
+    marketplace subscription (published agents, view/execute only)."""
+    if is_platform_agent(agent):
+        return True
+    same_tenant = getattr(agent, "tenant_id", None) == user.tenant_id
+    if same_tenant:
+        if getattr(agent, "creator_id", None) == user.id or is_admin(user):
+            return True
+        if agent.id in set(accessible_ids or []):
+            return True
+    if (
+        subscribed
+        and bool(getattr(agent, "is_published", False))
+        and _enum_value(getattr(agent, "status", None)) == "active"
+        and _PERM_RANK[permission_required] <= _PERM_RANK[SharePermission.EXECUTE]
+    ):
+        return True
+    return False
+
+
+def can_publish_agent(agent: Any, user: User, visibility: str) -> tuple[bool, str]:
+    """Owner or admin may activate or share. Marketplace needs the feature."""
+    if visibility not in AGENT_VISIBILITIES:
+        return False, f"visibility must be one of {', '.join(AGENT_VISIBILITIES)}"
+    if getattr(agent, "tenant_id", None) != user.tenant_id:
+        return False, "Agent not found"
+    if getattr(agent, "creator_id", None) != user.id and not is_admin(user):
+        return False, "Only the agent creator or an admin can publish this agent"
+    if visibility == "public" and not features_for(user).get("publish_to_marketplace"):
+        return False, "Your role cannot publish to the marketplace"
+    return True, ""

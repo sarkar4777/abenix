@@ -94,7 +94,8 @@ class TestAgentStepTool:
                 }
             )
 
-        mock_build.assert_called_once_with(["web_search", "calculator"])
+        mock_build.assert_called_once()
+        assert mock_build.call_args.args[0] == ["web_search", "calculator"]
 
     @pytest.mark.asyncio
     async def test_agent_respects_max_iterations(self, tool: AgentStepTool) -> None:

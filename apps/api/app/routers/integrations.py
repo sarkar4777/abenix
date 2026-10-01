@@ -84,3 +84,15 @@ async def status(user: User = Depends(get_current_user)) -> JSONResponse:
         else:
             out[key] = "missing"
     return success(out)
+
+
+@router.get("/tools")
+async def tool_integrations(user: User = Depends(get_current_user)) -> JSONResponse:
+    """Every credential a tool declares, with its status and never its value.
+
+    Generated from the tools, so a new tool is listed with no change here.
+    Admins change values under /api/admin/tool-config.
+    """
+    from app.services import tool_config
+
+    return success(await tool_config.catalogue(include_values=False, force=False))
