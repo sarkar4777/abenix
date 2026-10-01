@@ -52,6 +52,11 @@ _RULES: list[tuple[str, str]] = [
     (r"rate.?limit.*user|too.*many.*requests", "RATE_LIMITED"),
     # Infra
     (r"connection\s*(refused|reset)|broken.*pipe|server\s*disconnect", "INFRA_CRASH"),
+    # a rejected LLM credential is a configuration problem, not a cluster one
+    (
+        r"authentication_error|oauth access token|invalid.*api[ _-]?key|incorrect api key|api key.*(invalid|revoked|expired)",
+        "LLM_AUTH_ERROR",
+    ),
     (r"unauthorized|forbidden|401|403", "INFRA_AUTH_ERROR"),
 ]
 

@@ -239,8 +239,20 @@ async def test_notification_channel(
         f"Test send from tenant={user.tenant_id} by {user.email} via channel={channel}"
     )
     if channel == "slack":
+        from models.tenant import Tenant
+
+        t_res = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+        webhook = _notif.tenant_slack_webhook(t_res.scalar_one_or_none())
+        if not webhook:
+            return success(
+                {
+                    "channel": "slack",
+                    "delivered": False,
+                    "reason": "no webhook configured",
+                }
+            )
         ok = await _notif._post_slack(
-            tenant_id=user.tenant_id, title=sample_title, body=sample_body
+            webhook, title=sample_title, message=sample_body, link=None
         )
         return success({"channel": "slack", "delivered": bool(ok)})
     if channel == "email":

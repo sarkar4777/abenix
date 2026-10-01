@@ -1,3 +1,4 @@
+# tool-registry: exempt internal adapter the pipeline engine wraps agents in, not a tool a user picks
 """Pipeline-as-Tool — wraps a saved pipeline agent as a callable tool for agents."""
 
 from __future__ import annotations

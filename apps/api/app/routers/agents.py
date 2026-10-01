@@ -35,11 +35,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
 
 from models.agent import Agent, AgentStatus, AgentType
-from models.agent_share import AgentShare, SharePermission
+from models.resource_share import ResourceShare, SharePermission
 from models.agent_revision import AgentRevision
 from models.execution import Execution, ExecutionStatus
-from models.marketplace import Subscription
-from models.mcp_connection import AgentMCPTool, UserMCPConnection
 from models.user import User
 
 logger = logging.getLogger(__name__)
@@ -116,6 +114,52 @@ async def _drift_enabled(agent: Agent | None) -> bool:
     return env not in ("0", "false", "no", "off")
 
 
+def _merge_tool_trace(tool_calls: list[dict[str, Any]], trace: dict[str, Any]) -> None:
+    """Attach a node_trace's result to the tool_call entry it belongs to."""
+    if not isinstance(trace, dict) or (trace.get("node_type") or "") != "tool_call":
+        return
+    name = trace.get("tool") or ""
+    for tc in tool_calls:
+        if tc.get("name") == name and "duration_ms" not in tc:
+            tc["result_preview"] = trace.get("output_preview") or ""
+            tc["is_error"] = bool(trace.get("is_error"))
+            tc["duration_ms"] = trace.get("duration_ms")
+            if trace.get("output_summary"):
+                tc["output_summary"] = trace["output_summary"]
+            return
+
+
+def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Tool nodes as tool_call entries so the Flight Recorder renders a pipeline like an agent run."""
+    out: list[dict[str, Any]] = []
+    for nid, nr in (node_results or {}).items():
+        if not isinstance(nr, dict) or not nr.get("tool_name"):
+            continue
+        preview = nr.get("output")
+        if not isinstance(preview, str):
+            preview = json.dumps(preview, default=str) if preview is not None else ""
+        out.append(
+            {
+                "name": nr["tool_name"],
+                "node_id": nid,
+                "arguments": nr.get("resolved_arguments") or {},
+                "result_preview": preview[:500],
+                "is_error": nr.get("status") == "failed",
+                "duration_ms": nr.get("duration_ms"),
+            }
+        )
+    return out
+
+
+def _input_defaults(model_cfg: dict[str, Any] | None) -> dict[str, Any]:
+    """Declared input_variables defaults, applied under whatever the caller sent."""
+    return {
+        v["name"]: v["default"]
+        for v in ((model_cfg or {}).get("input_variables") or [])
+        if isinstance(v, dict) and v.get("name") and v.get("default") not in (None, "")
+    }
+
+
 def _finalize_execution_timing(execution: Execution) -> None:
     """Backfill started_at and compute duration_ms on terminal transition.
 
@@ -160,34 +204,9 @@ def _build_effective_system_prompt(
     tool_config: dict[str, Any] | None,
 ) -> str:
     """Append per-tool usage guidelines to the system prompt when tool_config is set."""
-    if not tool_config:
-        return base_prompt
+    from engine.tool_config_prompt import build_tool_config_prompt
 
-    lines: list[str] = []
-    for tool_name, tc in tool_config.items():
-        parts: list[str] = []
-        instructions = tc.get("usage_instructions", "").strip()
-        if instructions:
-            parts.append(instructions)
-        max_calls = tc.get("max_calls", 0)
-        if max_calls and max_calls > 0:
-            parts.append(f"Maximum {max_calls} calls per execution.")
-        if tc.get("require_approval"):
-            parts.append(
-                "Requires human approval before each call — explain why you need it."
-            )
-        defaults = tc.get("parameter_defaults", {})
-        if defaults:
-            defaults_str = ", ".join(f"{k}={v}" for k, v in defaults.items())
-            parts.append(f"Default parameters: {defaults_str}")
-        if parts:
-            lines.append(f"- **{tool_name}**: {' '.join(parts)}")
-
-    if not lines:
-        return base_prompt
-
-    section = "\n\n## Tool Usage Guidelines\n" + "\n".join(lines)
-    return (base_prompt or "").rstrip() + section
+    return build_tool_config_prompt(base_prompt, tool_config)
 
 
 def _slugify(name: str) -> str:
@@ -448,24 +467,29 @@ async def export_agent(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Export agent as JSON template for sharing/importing."""
+    from app.services.agent_share import resolve_agent_access, visible_agent_clause
+    from app.services.share_export import sanitize_for_export
+
     result = await db.execute(
-        select(Agent).where(
-            Agent.id == agent_id,
-            or_(Agent.tenant_id == user.tenant_id, Agent.agent_type == AgentType.OOB),
-        )
+        select(Agent).where(Agent.id == agent_id, visible_agent_clause(user))
     )
     agent = result.scalar_one_or_none()
     if not agent:
         return error("Agent not found", 404)
+    if not await resolve_agent_access(db, user, agent):
+        return error("You do not have access to this agent", 403)
+    # Credentials and tenant-bound resource ids never leave in a template.
+    clean_cfg, stripped = sanitize_for_export(agent.model_config_)
     return success(
         {
             "format": "abenix-template-v1",
             "exported_at": datetime.now(timezone.utc).isoformat(),
+            "stripped": stripped,
             "agent": {
                 "name": agent.name,
                 "description": agent.description,
                 "system_prompt": agent.system_prompt,
-                "model_config": agent.model_config_,
+                "model_config": clean_cfg,
                 "category": agent.category,
                 "icon_url": agent.icon_url,
             },
@@ -481,8 +505,68 @@ async def import_agent(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Import agent from exported JSON template."""
+    from app.services.share_export import (
+        drop_unknown_refs,
+        referenced_resource_ids,
+        strip_credentials,
+    )
+
     template = body.get("agent") or body
+    if not isinstance(template, dict):
+        return error("Template must be an object", 400)
     name = template.get("name", f"Imported Agent {uuid.uuid4().hex[:6]}")
+    icon_url = template.get("icon_url")
+    if icon_url is not None and not is_safe_url(str(icon_url)):
+        return error("Invalid icon URL", 400)
+    raw_cfg = template.get("model_config")
+    if raw_cfg is None:
+        raw_cfg = {
+            "model": "claude-sonnet-4-5-20250929",
+            "temperature": 0.7,
+            "tools": [],
+        }
+    if not isinstance(raw_cfg, dict):
+        return error("model_config must be an object", 400)
+
+    warnings: list[str] = []
+    cfg, secret_keys = strip_credentials(raw_cfg)
+    if secret_keys:
+        warnings.append(f"dropped credential-looking keys: {', '.join(secret_keys)}")
+
+    # Referenced resources must exist in the importer's tenant.
+    refs = referenced_resource_ids(cfg)
+    invalid: set[str] = set()
+    if refs:
+        from models.code_asset import CodeAsset
+        from models.connector import Connector
+        from models.knowledge_base import KnowledgeBase
+        from models.ml_model import MLModel
+
+        tables = {
+            "code_asset": CodeAsset,
+            "ml_model": MLModel,
+            "knowledge_collection": KnowledgeBase,
+            "connector": Connector,
+        }
+        for kind, ids in refs.items():
+            model = tables.get(kind)
+            if model is None:
+                invalid |= ids
+                continue
+            rows = await db.execute(
+                select(model.id).where(
+                    model.tenant_id == user.tenant_id,
+                    model.id.in_([uuid.UUID(i) for i in ids]),
+                )
+            )
+            present = {str(r[0]) for r in rows.all()}
+            invalid |= ids - present
+    cfg, dropped = drop_unknown_refs(cfg, invalid)
+    if dropped:
+        warnings.append(
+            f"dropped references to resources outside your tenant: {', '.join(dropped)}"
+        )
+
     agent = Agent(
         tenant_id=user.tenant_id,
         creator_id=user.id,
@@ -490,14 +574,11 @@ async def import_agent(
         slug=_slugify(name) + "-" + uuid.uuid4().hex[:6],
         description=template.get("description", ""),
         system_prompt=template.get("system_prompt", ""),
-        model_config_=template.get(
-            "model_config",
-            {"model": "claude-sonnet-4-5-20250929", "temperature": 0.7, "tools": []},
-        ),
+        model_config_=cfg,
         agent_type=AgentType.CUSTOM,
         status=AgentStatus.DRAFT,
         category=template.get("category"),
-        icon_url=template.get("icon_url"),
+        icon_url=icon_url,
     )
     db.add(agent)
     await db.commit()
@@ -513,7 +594,9 @@ async def import_agent(
         resource_id=str(agent.id),
     )
     await db.commit()
-    return success(_serialize_agent(agent), status_code=201)
+    data = _serialize_agent(agent)
+    data["import_warnings"] = warnings
+    return success(data, status_code=201)
 
 
 @router.get("/{agent_id}")
@@ -522,14 +605,10 @@ async def get_agent(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.services.agent_share import resolve_agent_access, visible_agent_clause
+
     result = await db.execute(
-        select(Agent).where(
-            Agent.id == agent_id,
-            or_(
-                Agent.tenant_id == user.tenant_id,
-                Agent.agent_type == AgentType.OOB,
-            ),
-        )
+        select(Agent).where(Agent.id == agent_id, visible_agent_clause(user))
     )
     agent = result.scalar_one_or_none()
     if not agent:
@@ -539,6 +618,9 @@ async def get_agent(
     # Admins can still recover by querying /api/agents?status=archived.
     if agent.status == AgentStatus.ARCHIVED and agent.agent_type != AgentType.OOB:
         return error("Agent not found", 404)
+    # Owner, admin, OOB, a VIEW share, or an active marketplace subscription.
+    if not await resolve_agent_access(db, user, agent):
+        return error("You do not have access to this agent", 403)
 
     return success(_serialize_agent(agent))
 
@@ -824,10 +906,11 @@ async def update_agent(
 
     if agent.creator_id != user.id and user.role.value != "admin":
         share_check = await db.execute(
-            select(AgentShare).where(
-                AgentShare.agent_id == agent_id,
-                AgentShare.shared_with_user_id == user.id,
-                AgentShare.permission == SharePermission.EDIT,
+            select(ResourceShare).where(
+                ResourceShare.resource_type == "agent",
+                ResourceShare.resource_id == agent_id,
+                ResourceShare.shared_with_user_id == user.id,
+                ResourceShare.permission == SharePermission.EDIT,
             )
         )
         if not share_check.scalar_one_or_none():
@@ -924,10 +1007,11 @@ async def update_agent(
 
         # Notify collaborators (shared users with edit permission)
         share_result = await db.execute(
-            select(AgentShare.shared_with_user_id).where(
-                AgentShare.agent_id == agent_id,
-                AgentShare.shared_with_user_id.isnot(None),
-                AgentShare.shared_with_user_id != user.id,
+            select(ResourceShare.shared_with_user_id).where(
+                ResourceShare.resource_type == "agent",
+                ResourceShare.resource_id == agent_id,
+                ResourceShare.shared_with_user_id.isnot(None),
+                ResourceShare.shared_with_user_id != user.id,
             )
         )
         collab_ids = [row[0] for row in share_result.all()]
@@ -1138,6 +1222,8 @@ async def publish_agent(
     if not agent:
         return error("Agent not found", 404)
 
+    from app.core.permissions import can_publish_agent
+
     if agent.agent_type == AgentType.OOB:
         return error("Cannot publish pre-built agents", 403)
 
@@ -1145,13 +1231,18 @@ async def publish_agent(
         return error("Agent must have a name and system prompt to publish", 400)
 
     visibility = "tenant"
+    if body and body.visibility:
+        visibility = str(body.visibility).strip().lower()
+    allowed, why = can_publish_agent(agent, user, visibility)
+    if not allowed:
+        return error(why, 400 if why.startswith("visibility") else 403)
     if body:
         if body.marketplace_price is not None:
+            if body.marketplace_price < 0:
+                return error("marketplace_price cannot be negative", 400)
             agent.marketplace_price = body.marketplace_price
         if body.category is not None:
-            agent.category = body.category
-        if body.visibility:
-            visibility = body.visibility
+            agent.category = sanitize_input(body.category)
 
     if visibility == "public":
         # Marketplace publish — requires admin review
@@ -1168,9 +1259,11 @@ async def publish_agent(
         )
         await db.commit()
     else:
-        # Tenant or specific-user publish — activate immediately (no marketplace review needed)
+        # Tenant or specific-user publish activates the agent. Only review
+        # approval may set is_published. "specific" grants come from
+        # POST /api/agents/{id}/share (ResourceShare rows).
         agent.status = AgentStatus.ACTIVE
-        agent.is_published = visibility != "tenant"  # True for specific-user sharing
+        agent.is_published = False
         await db.commit()
         await db.refresh(agent)
         await log_action(
@@ -1527,33 +1620,21 @@ async def execute_agent(
         agent_id = uuid.UUID(agent_id_or_slug)
     except (ValueError, AttributeError):
         agent_id = None
+    from app.services.agent_share import resolve_agent_access, visible_agent_clause
+
     if agent_id is None:
         _slug_lookup = await db.execute(
-            select(Agent).where(
-                Agent.slug == agent_id_or_slug,
-                or_(
-                    Agent.tenant_id == user.tenant_id,
-                    Agent.agent_type == AgentType.OOB,
-                    Agent.id.in_(
-                        select(Subscription.agent_id).where(
-                            Subscription.user_id == user.id,
-                            Subscription.status == "active",
-                        )
-                    ),
-                    Agent.id.in_(
-                        select(AgentShare.agent_id).where(
-                            AgentShare.shared_with_user_id == user.id,
-                            AgentShare.permission.in_(
-                                [SharePermission.EXECUTE, SharePermission.EDIT]
-                            ),
-                        )
-                    ),
-                ),
-            )
+            select(Agent)
+            .where(Agent.slug == agent_id_or_slug, visible_agent_clause(user))
+            .order_by((Agent.tenant_id == user.tenant_id).desc())
         )
-        agent = _slug_lookup.scalar_one_or_none()
+        agent = _slug_lookup.scalars().first()
         if agent is None:
             return error("Agent not found", 404)
+        if not await resolve_agent_access(
+            db, user, agent, permission_required=SharePermission.EXECUTE
+        ):
+            return error("You do not have access to this agent", 403)
         agent_id = agent.id
 
     idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get(
@@ -1631,33 +1712,16 @@ async def execute_agent(
     # fetch by UUID when we haven't picked one up yet.
     if agent is None:
         result = await db.execute(
-            select(Agent).where(
-                Agent.id == agent_id,
-                or_(
-                    Agent.tenant_id == user.tenant_id,
-                    Agent.agent_type == AgentType.OOB,
-                    # Subscribers can execute published agents from other tenants
-                    Agent.id.in_(
-                        select(Subscription.agent_id).where(
-                            Subscription.user_id == user.id,
-                            Subscription.status == "active",
-                        )
-                    ),
-                    # Shared agents with execute or edit permission
-                    Agent.id.in_(
-                        select(AgentShare.agent_id).where(
-                            AgentShare.shared_with_user_id == user.id,
-                            AgentShare.permission.in_(
-                                [SharePermission.EXECUTE, SharePermission.EDIT]
-                            ),
-                        )
-                    ),
-                ),
-            )
+            select(Agent).where(Agent.id == agent_id, visible_agent_clause(user))
         )
         agent = result.scalar_one_or_none()
         if not agent:
             return error("Agent not found", 404)
+        # Owner, admin, OOB, EXECUTE/EDIT share, or an active subscription.
+        if not await resolve_agent_access(
+            db, user, agent, permission_required=SharePermission.EXECUTE
+        ):
+            return error("You do not have access to this agent", 403)
 
     if agent.status not in (AgentStatus.ACTIVE, AgentStatus.DRAFT):
         return error("Agent is not in an executable state", 400)
@@ -2035,7 +2099,10 @@ async def execute_agent(
                     tool_names=tool_names,
                     pipeline_config=pipeline_config,
                     db=db,
-                    context=user_context,
+                    context={
+                        **_input_defaults(agent.model_config_),
+                        **(user_context or {}),
+                    },
                     tenant_id=str(user.tenant_id),
                     agent_id=str(agent.id),
                     agent_name=agent.name,
@@ -2057,6 +2124,7 @@ async def execute_agent(
             context=user_context,
             tenant_id=str(user.tenant_id),
             agent_name=agent.name,
+            input_defaults=_input_defaults(agent.model_config_),
         )
 
     # Enterprise context for tools and monitoring
@@ -2152,6 +2220,7 @@ async def execute_agent(
         cache_enabled=agent_cache_enabled,
         tool_config=model_cfg.get("tool_config") or {},
         require_knowledge_search=bool(model_cfg.get("require_knowledge_search", False)),
+        require_tools=list(model_cfg.get("require_tools") or []),
     )
 
 
@@ -2493,9 +2562,7 @@ async def _stream_pipeline_execution(
             execution.output_tokens = total_output_tokens or None
             # Zero is a real cost; NULL would read as "never recorded".
             execution.cost = round(total_cost, 6)
-            execution.tool_calls = (
-                {"total": total_tool_calls} if total_tool_calls > 0 else None
-            )
+            execution.tool_calls = _pipeline_tool_calls(node_results_data) or None
 
             # Store pipeline data for flight recorder
             execution.node_results = node_results_data
@@ -2505,7 +2572,18 @@ async def _stream_pipeline_execution(
                 "failed_nodes": pr.failed_nodes,
                 "skipped_nodes": getattr(pr, "skipped_nodes", []),
                 "node_results": node_results_data,
+                "steps": serialized_result.get("steps") or [],
             }
+            if pr.status != "completed":
+                execution.failure_code = (
+                    execution.failure_code or "PIPELINE_NODE_FAILED"
+                )
+                _errs = [
+                    f"{nid}: {nr.get('error')}"
+                    for nid, nr in (node_results_data or {}).items()
+                    if isinstance(nr, dict) and nr.get("error")
+                ]
+                execution.error_message = ("; ".join(_errs) or "pipeline failed")[:2000]
             await db.commit()
         # Complete live state
         await complete_state(str(execution_id), tenant_id)
@@ -2522,6 +2600,7 @@ async def _non_stream_pipeline_execution(
     context: dict[str, Any] | None = None,
     tenant_id: str = "",
     agent_name: str = "",
+    input_defaults: dict[str, Any] | None = None,
 ) -> JSONResponse:
     """Execute pipeline and return JSON result."""
     from app.core.execution_state import publish_state, complete_state, fail_state
@@ -2593,7 +2672,8 @@ async def _non_stream_pipeline_execution(
             "request": message,
         }
         result = await executor.execute(
-            pipeline_nodes, {**base_context, **(context or {})}
+            pipeline_nodes,
+            {**base_context, **(input_defaults or {}), **(context or {})},
         )
     except Exception as e:
         execution.status = ExecutionStatus.FAILED
@@ -2665,12 +2745,14 @@ async def _non_stream_pipeline_execution(
 
     # Store node_results and execution_trace for the flight recorder
     execution.node_results = serialized.get("node_results")
+    execution.tool_calls = _pipeline_tool_calls(serialized.get("node_results")) or None
     execution.execution_trace = {
         "pipeline_status": result.status,
         "execution_path": result.execution_path,
         "failed_nodes": result.failed_nodes,
         "skipped_nodes": getattr(result, "skipped_nodes", []),
         "node_results": serialized.get("node_results"),
+        "steps": serialized.get("steps") or [],
     }
     await db.commit()
 
@@ -2733,39 +2815,13 @@ async def _fetch_mcp_connections(
     agent_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> list[dict[str, Any]]:
-    result = await db.execute(
-        select(AgentMCPTool).where(AgentMCPTool.agent_id == agent_id)
+    # Secrets are stored encrypted, the MCP server needs the plaintext.
+    from app.routers.mcp import _decrypt_auth_config
+    from engine.tool_resolver import load_agent_mcp_connections
+
+    return await load_agent_mcp_connections(
+        db, agent_id, tenant_id, decrypt=_decrypt_auth_config
     )
-    agent_tools = result.scalars().all()
-    if not agent_tools:
-        return []
-
-    conn_ids = {t.mcp_connection_id for t in agent_tools}
-    conn_result = await db.execute(
-        select(UserMCPConnection).where(
-            UserMCPConnection.id.in_(conn_ids),
-            UserMCPConnection.tenant_id == tenant_id,
-            UserMCPConnection.is_enabled,
-        )
-    )
-    connections = {c.id: c for c in conn_result.scalars().all()}
-
-    mcp_conns: dict[str, dict[str, Any]] = {}
-    for tool in agent_tools:
-        conn = connections.get(tool.mcp_connection_id)
-        if not conn:
-            continue
-        key = str(conn.id)
-        if key not in mcp_conns:
-            mcp_conns[key] = {
-                "server_url": conn.server_url,
-                "auth_type": conn.auth_type,
-                "auth_config": conn.auth_config or {},
-                "tools": [],
-            }
-        mcp_conns[key]["tools"].append(tool.tool_name)
-
-    return list(mcp_conns.values())
 
 
 async def _stream_execution(
@@ -2822,6 +2878,9 @@ async def _stream_execution(
 
     full_output = ""
     all_tool_calls: list[dict[str, Any]] = []
+    node_traces: list[dict[str, Any]] = []
+    _stream_error: str | None = None
+    _persisted = False
     final_data: dict[str, Any] = {}
     mcp_clients: list = []
 
@@ -2849,6 +2908,7 @@ async def _stream_execution(
             require_knowledge_search=bool(
                 agent_model_config.get("require_knowledge_search", False)
             ),
+            require_tools=list(agent_model_config.get("require_tools") or []),
             user_id=str(enterprise_ctx.get("user_id") or ""),
         )
         event_source = stream_agent(exec_config)
@@ -2857,10 +2917,14 @@ async def _stream_execution(
 
         if mcp_connections:
             from engine.tool_resolver import resolve_tools
+            from engine.tool_config_prompt import append_mcp_warnings
             from engine.agent_executor import AgentExecutor
 
             tool_registry, mcp_clients, _sec_ctx = await resolve_tools(
-                tool_names, mcp_connections
+                tool_names, mcp_connections, kb_ids=kb_ids, **registry_kwargs
+            )
+            system_prompt = append_mcp_warnings(
+                system_prompt, getattr(tool_registry, "mcp_warnings", [])
             )
         else:
             from engine.agent_executor import AgentExecutor, build_tool_registry
@@ -2903,7 +2967,7 @@ async def _stream_execution(
         from engine.agent_executor import resolve_asset_schemas as _ras
 
         _tool_cfg = agent_model_config.get("tool_config") or {}
-        _asset_schemas = await _ras(_tool_cfg)
+        _asset_schemas = await _ras(_tool_cfg, tenant_id=tenant_id)
 
         _exec_kwargs = dict(
             llm_router=llm_router,
@@ -2931,6 +2995,7 @@ async def _stream_execution(
             require_knowledge_search=bool(
                 agent_model_config.get("require_knowledge_search", False)
             ),
+            require_tools=list(agent_model_config.get("require_tools") or []),
         )
         if max_iterations:
             _exec_kwargs["max_iterations"] = int(max_iterations)
@@ -2977,9 +3042,21 @@ async def _stream_execution(
                     )
                 except Exception:
                     pass
+            elif event_type == "moderation":
+                # a post-LLM redaction replaces the text already streamed
+                if (
+                    isinstance(event_data, dict)
+                    and event_data.get("source") == "post_llm"
+                    and event_data.get("content") is not None
+                ):
+                    full_output = str(event_data["content"])
+                yield f"event: moderation\ndata: {json.dumps(event_data, default=str)}\n\n"
             elif event_type == "tool_result":
                 yield f"event: tool_result\ndata: {json.dumps(event_data, default=str)}\n\n"
             elif event_type == "node_trace":
+                if isinstance(event_data, dict):
+                    _merge_tool_trace(all_tool_calls, event_data)
+                    node_traces.append(event_data)
                 yield f"event: node_trace\ndata: {json.dumps(event_data, default=str)}\n\n"
             elif event_type == "done":
                 final_data = event_data if isinstance(event_data, dict) else {}
@@ -3019,6 +3096,7 @@ async def _stream_execution(
                     if isinstance(event_data, dict)
                     else str(event_data)
                 )
+                _stream_error = err_msg
                 yield f"event: error\ndata: {json.dumps({'message': err_msg})}\n\n"
 
         # Cleanup MCP clients if embedded mode
@@ -3054,6 +3132,13 @@ async def _stream_execution(
             _grounding_violation = bool(final_data.get("grounding_violation")) or (
                 final_data.get("error") == "grounding_required_violation"
             )
+            # a timeout or a runtime error arrives as done.error, or as an error event with no done
+            _runtime_error = None
+            if not _mod_blocked and not _grounding_violation:
+                _runtime_error = final_data.get("error") or (
+                    _stream_error if not final_data else None
+                )
+            _persisted = True
             if _mod_blocked:
                 from app.core.failure_codes import emit_outcome_metric
 
@@ -3078,14 +3163,47 @@ async def _stream_execution(
                     )
                 except Exception:
                     pass
+            elif _runtime_error:
+                from app.core.failure_codes import (
+                    classify_exception,
+                    emit_outcome_metric,
+                )
+
+                execution.status = ExecutionStatus.FAILED
+                execution.failure_code = (
+                    "SANDBOX_TIMEOUT"
+                    if "timed out" in str(_runtime_error).lower()
+                    else classify_exception(Exception(str(_runtime_error)))
+                )
+                execution.error_message = str(_runtime_error)[:2000]
+                execution.output_message = full_output
+                execution.input_tokens = final_data.get("input_tokens") or 0
+                execution.output_tokens = final_data.get("output_tokens") or 0
+                execution.cost = float(final_data.get("cost") or 0.0)
+                execution.duration_ms = final_data.get("duration_ms")
+                execution.tool_calls = all_tool_calls if all_tool_calls else None
+                _finalize_execution_timing(execution)
+                try:
+                    emit_outcome_metric(
+                        outcome="FAILED",
+                        failure_code=execution.failure_code,
+                        agent_type="agent",
+                        tenant_id=str(tenant_id) if tenant_id else "",
+                    )
+                except Exception:
+                    pass
             elif _grounding_violation:
                 from app.core.failure_codes import emit_outcome_metric
 
                 execution.status = ExecutionStatus.FAILED
-                execution.failure_code = "GROUNDING_REQUIRED_VIOLATION"
+                execution.failure_code = (
+                    final_data.get("failure_code") or "GROUNDING_REQUIRED_VIOLATION"
+                )
+                _missing = final_data.get("missing_tools") or ["knowledge_search"]
                 execution.error_message = (
-                    "Grounded-response agent completed without invoking "
-                    "knowledge_search; output cannot be certified as grounded."
+                    "Agent completed without calling required tools: "
+                    + ", ".join(_missing)
+                    + ". The output cannot be certified."
                 )
                 execution.output_message = full_output
                 execution.input_tokens = final_data.get("input_tokens") or 0
@@ -3097,7 +3215,7 @@ async def _stream_execution(
                 try:
                     emit_outcome_metric(
                         outcome="FAILED",
-                        failure_code="GROUNDING_REQUIRED_VIOLATION",
+                        failure_code=execution.failure_code,
                         agent_type="agent",
                         tenant_id=str(tenant_id) if tenant_id else "",
                     )
@@ -3140,8 +3258,12 @@ async def _stream_execution(
             if hasattr(execution, "execution_trace"):
                 execution.execution_trace = {
                     "tool_calls": all_tool_calls,
+                    "steps": node_traces,
+                    "warnings": list(final_data.get("warnings") or []),
                     "confidence_score": final_data.get("confidence_score"),
-                    "model": model,
+                    "model": final_data.get("effective_model")
+                    or final_data.get("model")
+                    or model,
                     "temperature": temperature,
                 }
 
@@ -3223,6 +3345,8 @@ async def _stream_execution(
         if execution:
             execution.status = ExecutionStatus.FAILED
             execution.error_message = str(e)
+            execution.tool_calls = all_tool_calls or None
+            _persisted = True
             # Classify + emit outcome so the dashboards see this terminal
             # path. Earlier this branch updated the DB row but never
             # touched executions_failed_total / active_executions, which
@@ -3244,6 +3368,21 @@ async def _stream_execution(
                 pass
             _finalize_execution_timing(execution)
             await db.commit()
+            try:
+                from app.services.dlq import dead_letter
+
+                await dead_letter(
+                    db,
+                    execution,
+                    reason=str(e),
+                    failure_code=execution.failure_code or "UNKNOWN_ERROR",
+                    payload={"context": user_context, "is_pipeline": False},
+                )
+                await db.commit()
+            except Exception as _dlq_exc:  # noqa: BLE001
+                logger.warning(
+                    "dead letter write failed for %s: %s", execution_id, _dlq_exc
+                )
 
             # Mark live execution failed
             try:
@@ -3260,6 +3399,41 @@ async def _stream_execution(
     finally:
         for client in mcp_clients:
             await client.close()
+        if not _persisted:
+            # the consumer went away before done, close the row out of band
+            import asyncio as _aio
+
+            _aio.get_event_loop().create_task(
+                _mark_abandoned(execution_id, tenant_id, all_tool_calls)
+            )
+
+
+async def _mark_abandoned(
+    execution_id: Any, tenant_id: str, tool_calls: list[dict[str, Any]]
+) -> None:
+    """Close a streaming run whose client disconnected before the done event."""
+    from app.core.deps import async_session as _session_factory
+    from app.core.execution_state import fail_state
+
+    try:
+        async with _session_factory() as _db:
+            row = (
+                await _db.execute(select(Execution).where(Execution.id == execution_id))
+            ).scalar_one_or_none()
+            if row is None or row.status != ExecutionStatus.RUNNING:
+                return
+            row.status = ExecutionStatus.FAILED
+            row.failure_code = "CLIENT_DISCONNECTED"
+            row.error_message = "The client disconnected before the run finished"
+            row.tool_calls = tool_calls or None
+            _finalize_execution_timing(row)
+            await _db.commit()
+        try:
+            await fail_state(str(execution_id), tenant_id, "client disconnected")
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not close abandoned execution %s: %s", execution_id, exc)
 
 
 async def _non_stream_execution(
@@ -3307,10 +3481,14 @@ async def _non_stream_execution(
     mcp_clients = []
     if mcp_connections:
         from engine.tool_resolver import resolve_tools
+        from engine.tool_config_prompt import append_mcp_warnings
         from engine.agent_executor import AgentExecutor
 
         tool_registry, mcp_clients, _sec_ctx = await resolve_tools(
-            tool_names, mcp_connections
+            tool_names, mcp_connections, kb_ids=kb_ids, **registry_kwargs
+        )
+        system_prompt = append_mcp_warnings(
+            system_prompt, getattr(tool_registry, "mcp_warnings", [])
         )
     else:
         from engine.agent_executor import AgentExecutor, build_tool_registry
@@ -3332,7 +3510,7 @@ async def _non_stream_execution(
     from engine.agent_executor import resolve_asset_schemas as _ras
 
     _tc_nonstream = tool_config or {}
-    _asset_schemas_ns = await _ras(_tc_nonstream)
+    _asset_schemas_ns = await _ras(_tc_nonstream, tenant_id=tenant_id)
 
     _exec_kwargs2 = dict(
         llm_router=llm_router,

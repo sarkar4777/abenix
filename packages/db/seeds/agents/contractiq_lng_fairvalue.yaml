@@ -240,3 +240,7 @@ example_prompts:
   - '{"hub": "JKM", "tenor_months": 12}'
   - '{"hub": "FOB_USGC", "tenor_months": 12}'
   - '{"hub": "DES_NWE", "tenor_months": 6}'
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - EIA_API_KEY

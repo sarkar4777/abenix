@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from engine import credentials
 import json
 import logging
-import os
 from typing import Optional
 
 import httpx
@@ -23,7 +23,7 @@ async def elevenlabs_tts_pcm(
     sample_rate: int = 16_000,
 ) -> bytes:
     """Return raw 16-bit mono PCM at `sample_rate`. Empty bytes on any failure."""
-    api_key = api_key or os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    api_key = api_key or credentials.get("ELEVENLABS_API_KEY").strip()
     if not (api_key and voice_id and text):
         return b""
 
@@ -65,7 +65,7 @@ async def elevenlabs_clone_voice(
     api_key: Optional[str] = None,
 ) -> Optional[str]:
     """Upload a reference clip, return new voice_id. Returns None on failure."""
-    api_key = api_key or os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    api_key = api_key or credentials.get("ELEVENLABS_API_KEY").strip()
     if not api_key or not reference_audio_bytes:
         return None
     try:
@@ -115,7 +115,7 @@ async def elevenlabs_clone_voice(
 async def elevenlabs_delete_voice(
     *, voice_id: str, api_key: Optional[str] = None
 ) -> bool:
-    api_key = api_key or os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    api_key = api_key or credentials.get("ELEVENLABS_API_KEY").strip()
     if not (api_key and voice_id):
         return False
     try:

@@ -17,6 +17,34 @@ interface FailureGroup {
   sample_message: string;
 }
 
+interface PlatformAlert {
+  name: string;
+  state: 'firing' | 'pending' | 'inactive' | string;
+  severity: string;
+  active_since: string | null;
+  summary: string | null;
+  description: string | null;
+  runbook: string | null;
+  labels: Record<string, string>;
+}
+
+interface PlatformAlertsResponse {
+  alerts: PlatformAlert[];
+  counts: Record<string, number>;
+  prometheus_url: string;
+}
+
+interface Permissions {
+  is_admin: boolean;
+}
+
+const ALERT_SEV_STYLES: Record<string, string> = {
+  critical: 'bg-red-500/10 border-red-500/40 text-red-300',
+  error: 'bg-red-500/10 border-red-500/40 text-red-300',
+  warning: 'bg-amber-500/10 border-amber-500/40 text-amber-300',
+  info: 'bg-slate-500/10 border-slate-500/40 text-slate-300',
+};
+
 interface LiveStats {
   active_executions: number;
   today_failed: number;
@@ -40,6 +68,7 @@ const CODE_DESCRIPTIONS: Record<string, string> = {
   RATE_LIMITED: 'Per-user request rate limit triggered. Tune RATE_LIMIT_USER_REQ_PER_MIN.',
   STALE_SWEEP: 'Execution was stuck in RUNNING; sweeper marked it FAILED. Owning pod likely crashed.',
   INFRA_CRASH: 'Connection refused / reset / disconnect. Usually a downstream service is down.',
+  LLM_AUTH_ERROR: 'The LLM provider rejected the credential. A rotated Claude subscription token is the usual cause: run scripts/sync-claude-subscription.sh, or update the provider key under Admin -> Tool Configuration.',
   INFRA_AUTH_ERROR: '401/403 against an internal service (k8s API, S3, etc.). Check service-account RBAC.',
   MODERATION_BLOCKED: 'Tenant moderation policy blocked the request or response. Check /moderation for policy + recent events.',
   UNKNOWN_ERROR: 'Couldn\u2019t classify this exception. Open the execution to see the raw error.',
@@ -59,6 +88,7 @@ const CODE_SEVERITY: Record<string, 'high' | 'med' | 'low'> = {
   RATE_LIMITED: 'med',
   STALE_SWEEP: 'high',
   INFRA_CRASH: 'high',
+  LLM_AUTH_ERROR: 'high',
   INFRA_AUTH_ERROR: 'high',
   MODERATION_BLOCKED: 'med',
   UNKNOWN_ERROR: 'med',
@@ -88,6 +118,12 @@ export default function AlertsPage() {
     useApi<LiveStats>('/api/analytics/live-stats');
   const { data: groups, mutate: refreshGroups } =
     useApi<FailureGroup[]>(`/api/analytics/failures?hours=${hours}`);
+  const { data: perms } = useApi<Permissions>('/api/me/permissions', { dedupingInterval: 60_000 });
+  const isAdmin = Boolean(perms?.is_admin);
+  // Only admins may read /api/admin/alerts, a null key skips the fetch.
+  const { data: platform, error: platformError, mutate: refreshPlatform } =
+    useApi<PlatformAlertsResponse>(isAdmin ? '/api/admin/alerts' : null, { refreshInterval: 60_000 });
+  const firing = (platform?.alerts || []).filter(a => a.state === 'firing');
 
   const totalFailures = (groups || []).reduce((s, g) => s + g.count, 0);
   const failureRate = stats && stats.today_executions > 0
@@ -124,7 +160,7 @@ export default function AlertsPage() {
               <option value="168">Last week</option>
             </select>
             <button
-              onClick={() => { refreshStats(); refreshGroups(); }}
+              onClick={() => { refreshStats(); refreshGroups(); refreshPlatform(); }}
               className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Refresh
@@ -159,6 +195,57 @@ export default function AlertsPage() {
             icon={<Bell className="w-4 h-4" />}
           />
         </div>
+
+        {/* Platform alerts (admin only) */}
+        {isAdmin && (
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-white">Platform alerts</h2>
+                <p className="text-xs text-slate-500">
+                  Firing Prometheus rules. Admins get these in-app and on Slack as they fire.
+                </p>
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${firing.length > 0 ? 'bg-red-500/10 border-red-500/40 text-red-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'}`}>
+                {firing.length} firing
+              </span>
+            </div>
+            {platformError && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+                Prometheus unavailable: {platformError}
+              </div>
+            )}
+            {!platformError && firing.length === 0 && (
+              <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 text-xs text-slate-400">
+                No platform alerts firing.
+              </div>
+            )}
+            {firing.map(a => {
+              const sev = (a.severity || 'info').toLowerCase();
+              return (
+                <div key={`${a.name}-${JSON.stringify(a.labels)}`} className={`rounded-xl border ${ALERT_SEV_STYLES[sev] || ALERT_SEV_STYLES.info} p-4 flex flex-wrap items-start gap-3`}>
+                  <div className="flex-1 min-w-[200px]">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-semibold">{a.name}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 uppercase tracking-wider">{sev}</span>
+                    </div>
+                    {(a.summary || a.description) && (
+                      <p className="text-xs text-slate-400 mt-0.5">{a.summary || a.description}</p>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0 text-[11px] text-slate-400">
+                    <div>since {relTime(a.active_since)}</div>
+                    {a.runbook && (
+                      <a href={a.runbook} target="_blank" rel="noopener" className="text-cyan-400 hover:underline inline-flex items-center gap-1">
+                        runbook <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        )}
 
         {/* Failure groups */}
         <div className="space-y-2">

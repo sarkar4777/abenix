@@ -17,18 +17,27 @@ Auth env:
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 _NLA_BASE = "https://nla.zapier.com/api/v1"
 
 
 class ZapierPassThroughTool(BaseTool):
     name = "zapier_pass_through"
+    config_fields = (
+        ConfigField(
+            "ZAPIER_NLA_KEY",
+            label="NLA key",
+            kind="secret",
+            required=True,
+            group="Zapier",
+            signup_url="https://nla.zapier.com/credentials/",
+        ),
+    )
     description = (
         "Pass-through to Zapier — list / run AI Actions (any of 6,000+ "
         "connector apps the user has exposed), or fire a Zapier 'Catch "
@@ -98,17 +107,7 @@ class ZapierPassThroughTool(BaseTool):
                 return ToolResult(content=f"Webhook error: {e}", is_error=True)
 
         # NLA operations need the bearer token.
-        key = os.environ.get("ZAPIER_NLA_KEY", "").strip()
-        if not key:
-            return ToolResult(
-                content=(
-                    "[zapier_pass_through not configured] ZAPIER_NLA_KEY not set. "
-                    "Get one at https://nla.zapier.com/credentials/ and expose the "
-                    "actions you want this agent to use."
-                ),
-                metadata={"skipped": True, "operation": op},
-            )
-
+        key = self.cfg("ZAPIER_NLA_KEY", required=True).strip()
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=30, headers=headers) as c:

@@ -121,34 +121,11 @@ async def _resolve_agents_by_slug(
     return list(rows.scalars().all())
 
 
-async def _grant_agent(
-    db: AsyncSession,
-    *,
-    agent_id: uuid.UUID,
-    collection_id: uuid.UUID,
-    permission: CollectionPermission,
-    granted_by: uuid.UUID,
-) -> None:
-    """Idempotent agent grant — UPSERT semantics."""
-    existing = await db.execute(
-        select(AgentCollectionGrant).where(
-            AgentCollectionGrant.agent_id == agent_id,
-            AgentCollectionGrant.collection_id == collection_id,
-        )
-    )
-    g = existing.scalar_one_or_none()
-    if g is None:
-        db.add(
-            AgentCollectionGrant(
-                agent_id=agent_id,
-                collection_id=collection_id,
-                permission=permission,
-                granted_by=granted_by,
-            )
-        )
-    elif g.permission != permission:
-        g.permission = permission
-        g.granted_by = granted_by
+# Moved to app.services.collection_access so knowledge.py and the grant
+# router share it. Kept under the old name for the call sites below.
+from app.services.collection_access import (
+    grant_agent_collection as _grant_agent,
+)  # noqa: E402
 
 
 @router.post("/bootstrap")

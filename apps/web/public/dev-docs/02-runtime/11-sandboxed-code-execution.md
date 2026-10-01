@@ -10,7 +10,7 @@ A user uploads a zip of Python (or Node, Go, Rust, Ruby, Java), Abenix analyzes 
 | REST API | [`apps/api/app/routers/code_assets.py`](../../apps/api/app/routers/code_assets.py) |
 | Analyzer | `apps/api/app/services/code_analyzer.py` — extracts entry points, input/output schemas, language version |
 | Runtime sandbox | `sandboxed_job` tool in `apps/agent-runtime/engine/tools/sandboxed_job.py` |
-| Storage | `code_assets` table; binary at `/data/code-assets/<id>.tar.gz` |
+| Storage | `code_assets` table, with the binary at `/data/code-assets/<id>.tar.gz` |
 | Audit | `code_asset_invocations` — one row per call |
 
 Five languages ship: **Python**, **Node.js**, **Go**, **Rust**, **Ruby**, **Java**. Adding a sixth is one Dockerfile.

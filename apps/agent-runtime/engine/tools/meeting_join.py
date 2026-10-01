@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 from engine.tools.meeting_adapter import JoinRequest, get_adapter
 from engine.tools import _meeting_session as sessmod
 
@@ -16,6 +16,68 @@ logger = logging.getLogger(__name__)
 
 class MeetingJoinTool(BaseTool):
     name = "meeting_join"
+    config_fields = (
+        ConfigField(
+            "LIVEKIT_API_KEY",
+            label="API key",
+            kind="secret",
+            required=True,
+            group="LiveKit",
+        ),
+        ConfigField(
+            "LIVEKIT_API_SECRET",
+            label="API secret",
+            kind="secret",
+            required=True,
+            group="LiveKit",
+        ),
+        ConfigField(
+            "TEAMS_GRAPH_TENANT_ID",
+            label="Graph tenant id",
+            kind="string",
+            group="Microsoft Teams",
+            dynamic=True,
+        ),
+        ConfigField(
+            "TEAMS_GRAPH_CLIENT_ID",
+            label="Graph client id",
+            kind="string",
+            group="Microsoft Teams",
+            dynamic=True,
+        ),
+        ConfigField(
+            "TEAMS_GRAPH_CLIENT_SECRET",
+            label="Graph client secret",
+            kind="secret",
+            group="Microsoft Teams",
+            dynamic=True,
+        ),
+        ConfigField(
+            "TEAMS_BOT_CERT_PATH",
+            label="Bot certificate path",
+            kind="string",
+            group="Microsoft Teams",
+            dynamic=True,
+        ),
+        ConfigField(
+            "ZOOM_SDK_KEY", label="SDK key", kind="secret", group="Zoom", dynamic=True
+        ),
+        ConfigField(
+            "ZOOM_SDK_SECRET",
+            label="SDK secret",
+            kind="secret",
+            group="Zoom",
+            dynamic=True,
+        ),
+        ConfigField(
+            "LIVEKIT_URL",
+            label="Server URL",
+            kind="url",
+            required=True,
+            group="LiveKit",
+            signup_url="https://cloud.livekit.io",
+        ),
+    )
     description = (
         "Join a meeting on the user's behalf via LiveKit (or Teams / Zoom "
         "where enabled). The join plays a consent disclosure, records the "

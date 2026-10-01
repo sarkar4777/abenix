@@ -434,6 +434,26 @@ async def list_gateway_agents(
         )
 
 
+@router.delete("/gateways/{gateway_pk}")
+async def delete_gateway(
+    gateway_pk: str = PathParam(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JSONResponse:
+    """Forget a gateway. The edge runtime re-registers on its next start."""
+    try:
+        pk = uuid.UUID(gateway_pk)
+    except ValueError:
+        raise HTTPException(404, "gateway not found")
+    res = await db.execute(select(EdgeGateway).where(EdgeGateway.id == pk))
+    g = res.scalar_one_or_none()
+    if g is None or g.tenant_id != user.tenant_id:
+        raise HTTPException(404, "gateway not found")
+    await db.delete(g)
+    await db.commit()
+    return success({"deleted": True, "gateway_id": g.gateway_id})
+
+
 @router.post("/agents/{agent_id}/compile")
 async def compile_agent(
     agent_id: str = PathParam(...),

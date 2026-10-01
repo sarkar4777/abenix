@@ -4,7 +4,7 @@ Companies House publishes a JSON REST API covering UK-incorporated entities:
 filings index, officer list, beneficial owners, accounting periods. Free
 with API-key (signup at developer.company-information.service.gov.uk).
 
-If $COMPANIES_HOUSE_API_KEY is unset, the tool returns
+If COMPANIES_HOUSE_API_KEY is unset, the tool returns
 status=needs_configuration with the instructions — never a mock.
 """
 
@@ -13,13 +13,12 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 logger = logging.getLogger(__name__)
@@ -31,11 +30,37 @@ REQUEST_TIMEOUT = 30.0
 
 class CompaniesHouseTool(BaseTool):
     name = "companies_house"
+    config_fields = (
+        ConfigField(
+            "COMPANIES_HOUSE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=True,
+            group="Companies House",
+            signup_url="https://developer.company-information.service.gov.uk/",
+        ),
+    )
+
+    @classmethod
+    async def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        from engine.tools._config_probe import probe
+
+        return await probe(
+            "GET",
+            f"{CH_API_BASE}/search/companies",
+            params={"q": "test", "items_per_page": 1},
+            auth=(values.get("COMPANIES_HOUSE_API_KEY", ""), ""),
+            headers={"User-Agent": USER_AGENT},
+            accepted="Companies House accepted the key",
+        )
+
     description = (
         "Look up a UK-incorporated counterparty in Companies House. "
         "Returns the company profile (incorporation date, status, SIC codes, "
         "registered office) and filing index for recent annual accounts. "
-        "Requires $COMPANIES_HOUSE_API_KEY (free signup at "
+        "Needs COMPANIES_HOUSE_API_KEY, set under Admin -> Tool Configuration (free signup at "
         "developer.company-information.service.gov.uk); returns "
         "needs_configuration if unset — never mocked data."
     )
@@ -54,26 +79,7 @@ class CompaniesHouseTool(BaseTool):
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        api_key = os.environ.get("COMPANIES_HOUSE_API_KEY", "").strip()
-        if not api_key:
-            return ToolResult(
-                content=json.dumps(
-                    {
-                        "status": "needs_configuration",
-                        "tool": "companies_house",
-                        "instructions": (
-                            "Set COMPANIES_HOUSE_API_KEY in platform Integrations. "
-                            "Free key: register at developer.company-information.service.gov.uk, "
-                            "create an application, paste the API key into the platform secrets store. "
-                            "Without this key the tool will not call the API — no mocked data."
-                        ),
-                        "signup_url": "https://developer.company-information.service.gov.uk/",
-                    }
-                ),
-                is_error=False,
-                metadata={"status": "needs_configuration"},
-            )
-
+        api_key = self.cfg("COMPANIES_HOUSE_API_KEY", required=True).strip()
         company_number = (arguments.get("company_number") or "").strip()
         legal_name = (arguments.get("legal_name") or "").strip()
 

@@ -57,6 +57,8 @@ The gate fans out work:
 2. **Custom-pattern scan** (parallel). Each pattern's regex runs over the text.
 3. **Decision merger**. Each match becomes an action. If any action is `block`, the highest-priority block wins. If any action is `mask`, the spans are merged and the masked text becomes the new input/output.
 
+On the streamed path the tokens have already reached the client when the post-LLM step runs, so a redaction is sent as a `moderation` event carrying the replacement text and the chat swaps it in. A blocked answer is withdrawn the same way. The execution row keeps the redacted text, never the original. The chat shows a notice above the composer naming the stage, the outcome and the categories, with a link to the policy.
+
 All decisions emit a `ModerationEvent` row with `outcome ∈ {allowed, masked, blocked}` and the matching categories + scores. The `/moderation` page is the audit surface — filter by event type, by user, by category.
 
 ## The custom-pattern slot

@@ -13,7 +13,8 @@ from google import genai as google_genai
 from google.genai import types as google_types
 import openai
 
-from engine import claude_subscription
+from engine import claude_subscription, credentials
+from engine.provider_credentials import PROVIDER_KEYS
 from engine.langfuse_tracer import get_langfuse_tracer
 from engine.metrics import (
     llm_errors_total,
@@ -556,7 +557,9 @@ class AnthropicProvider(LLMProvider):
     DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 
     def __init__(self) -> None:
-        self.client = anthropic.AsyncAnthropic()
+        self.client = anthropic.AsyncAnthropic(
+            api_key=credentials.get("ANTHROPIC_API_KEY") or None
+        )
 
     def _cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
         """Per-call $ cost. Overridden by the subscription provider, where
@@ -841,7 +844,9 @@ class OpenAIProvider(LLMProvider):
     DEFAULT_MODEL = "gpt-4o"
 
     def __init__(self) -> None:
-        self.client = openai.AsyncOpenAI()
+        self.client = openai.AsyncOpenAI(
+            api_key=credentials.get("OPENAI_API_KEY") or None
+        )
 
     async def complete(
         self,
@@ -993,7 +998,11 @@ class GoogleProvider(LLMProvider):
     DEFAULT_MODEL = "gemini-2.0-flash"
 
     def __init__(self) -> None:
-        self.client = google_genai.Client()
+        self.client = google_genai.Client(
+            api_key=credentials.get("GOOGLE_API_KEY")
+            or credentials.get("GEMINI_API_KEY")
+            or None
+        )
 
     def _build_contents(
         self, messages: list[dict[str, Any]], system: str | None
@@ -1218,13 +1227,15 @@ class AzureOpenAIProvider(OpenAIProvider):
     DEFAULT_MODEL = "azure-gpt-4o"
 
     def __init__(self) -> None:
-        endpoint = _os.environ.get("AZURE_OPENAI_API_BASE", "").rstrip("/")
+        endpoint = credentials.get("AZURE_OPENAI_API_BASE").rstrip("/")
         if endpoint.endswith("/openai/deployments"):
             endpoint = endpoint[: -len("/openai/deployments")]
         if endpoint.endswith("/openai"):
             endpoint = endpoint[: -len("/openai")]
-        api_key = _os.environ.get("AZURE_OPENAI_API_KEY", "")
-        api_version = _os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-01-preview")
+        api_key = credentials.get("AZURE_OPENAI_API_KEY")
+        api_version = credentials.get(
+            "AZURE_OPENAI_API_VERSION", default="2024-10-01-preview"
+        )
         self.client = openai.AsyncAzureOpenAI(
             azure_endpoint=endpoint or "https://placeholder.invalid",
             api_key=api_key or "placeholder",
@@ -1283,11 +1294,10 @@ PROVIDER_MAP: dict[str, type[LLMProvider]] = {
 
 # Env vars that make an API-key provider usable. Mirrors _PROVIDER_ENV in
 # apps/api/app/routers/llm_models.py.
+# Declared in engine.provider_credentials so the admin screen lists them.
 _PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
-    "anthropic": ("ANTHROPIC_API_KEY",),
-    "openai": ("OPENAI_API_KEY",),
-    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
-    "azure": ("AZURE_OPENAI_API_KEY",),
+    name: tuple(k for k in keys if k.endswith("_KEY"))
+    for name, keys in PROVIDER_KEYS.items()
 }
 
 _KEY_PLACEHOLDERS = {"", "placeholder", "dev", "changeme", "none", "null"}
@@ -1298,7 +1308,7 @@ def _provider_configured(name: str) -> bool:
     if name == "claude_subscription":
         return claude_subscription.get_config().usable
     for env_name in _PROVIDER_ENV_KEYS.get(name, ()):
-        val = _os.environ.get(env_name, "")
+        val = credentials.get(env_name)
         if val and val.strip().lower() not in _KEY_PLACEHOLDERS:
             return True
     return False
@@ -1330,12 +1340,24 @@ class LLMRouter:
         self._providers: dict[str, LLMProvider] = {}
 
     def _get_provider(self, name: str) -> LLMProvider:
-        if name not in self._providers:
+        # A provider's client is built with the key the resolver had at the
+        # time. When an admin saves a different one the client is rebuilt.
+        fp = tuple(credentials.get(k) for k in PROVIDER_KEYS.get(name, ()))
+        cached = self._providers.get(name)
+        # tests inject providers directly, those carry no fingerprint and are kept as they are
+        prev = (
+            vars(cached).get("_credential_fp")
+            if cached is not None and hasattr(cached, "__dict__")
+            else None
+        )
+        if cached is None or (isinstance(prev, tuple) and prev != fp):
             cls = PROVIDER_MAP.get(name)
             if not cls:
                 raise ValueError(f"Unknown provider: {name}")
-            self._providers[name] = cls()
-        return self._providers[name]
+            cached = cls()
+            cached._credential_fp = fp  # type: ignore[attr-defined]
+            self._providers[name] = cached
+        return cached
 
     def _native_provider_name(self, model: str) -> str:
         """Provider that owns this model id, ignoring subscription mode."""
@@ -1427,6 +1449,9 @@ class LLMRouter:
         temperature: float = 0.7,
         max_tokens: int = 4096,
     ) -> LLMResponse | AsyncGenerator[StreamEvent, None]:
+        # An agent with no tools never trips the tool wrapper's refresh, so the
+        # router refreshes the credential snapshot itself.
+        await credentials.ensure_fresh()
         requested_model = model
         fallback_reason: str | None = None
         try:

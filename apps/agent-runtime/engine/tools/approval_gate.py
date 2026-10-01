@@ -18,6 +18,28 @@ import httpx
 from engine.tools.base import BaseTool, ToolResult
 
 
+async def _mark_waiting(execution_id: str | None, timeout: int) -> None:
+    if not execution_id:
+        return
+    try:
+        from engine.tools.human_approval import mark_waiting
+
+        await mark_waiting(str(execution_id), timeout)
+    except Exception:
+        pass
+
+
+async def _clear_waiting(execution_id: str | None) -> None:
+    if not execution_id:
+        return
+    try:
+        from engine.tools.human_approval import clear_waiting
+
+        await clear_waiting(str(execution_id))
+    except Exception:
+        pass
+
+
 def _api_base_url() -> str:
     return (
         os.environ.get("INTERNAL_API_URL")
@@ -128,6 +150,7 @@ class ApprovalGateTool(BaseTool):
             return ToolResult(content=f"approval create error: {e}", is_error=True)
 
         deadline = time.monotonic() + expires_seconds + 5
+        await _mark_waiting(agent_execution_id, expires_seconds + 5)
         async with httpx.AsyncClient(timeout=10.0) as client:
             while time.monotonic() < deadline:
                 try:
@@ -137,6 +160,7 @@ class ApprovalGateTool(BaseTool):
                     a = (r.json() or {}).get("data") or {}
                     status = a.get("status") or "pending"
                     if status != "pending":
+                        await _clear_waiting(agent_execution_id)
                         return ToolResult(
                             content=json.dumps(
                                 {
@@ -152,6 +176,7 @@ class ApprovalGateTool(BaseTool):
                     pass
                 await asyncio.sleep(self.POLL_INTERVAL_SECONDS)
 
+        await _clear_waiting(agent_execution_id)
         return ToolResult(
             content=json.dumps(
                 {"status": "expired", "approval_id": approval_id, "signoffs": []}

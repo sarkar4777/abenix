@@ -106,6 +106,7 @@ Connect agents to the systems enterprise ops actually run on, without burning a 
 | Primitive | What it lets an agent do |
 |---|---|
 | **Connector framework + 8 presets** | Call SAP PM / ServiceNow / Maximo / Workday / Sensitech / Carrier Lynx / DTN Weather / BNEF with one tool node + secret-ref auth + `/test` button. |
+| **Self-describing tool configuration** | Every tool declares the keys it needs on its class. `/admin/tool-config` is generated from those declarations: one card per provider, save a key and agents use it within 30 seconds, no redeploy, encrypted at rest. A lint in CI fails any tool that reads the environment privately, so the screen is complete by construction. `/tools` and the builder show a badge per tool, and a missing key comes back to the user as one sentence naming the key and the screen. |
 | **Multi-signoff approval gates** | Block a $40k claim until N humans sign off, with a TTL enforced and a real inbox at `/approvals`. |
 | **Time-series + MQTT** | TimescaleDB hypertable, mosquitto broker, plus `tsdb_query` · `mqtt_publish` · `subscribed_feed` · `windowed_state` palette tools. |
 | **Idempotency + DLQ + audit** | Replay-safe execute, dead-letter inbox, integrity-hashed audit log per tenant. |
@@ -254,6 +255,8 @@ Same accounts work on both.
 ### Required env vars
 
 At least one LLM key — Anthropic (recommended), OpenAI, or Google. The full list lives in `.env.example`. For Kubernetes, set the same keys in `infra/helm/abenix/values-*.yaml`.
+
+Every other key a tool needs can be added later, at run time, by an admin under **Admin -> Tool Configuration**. The screen lists them all, grouped by provider, with a signup link and a Test button, and says which tools each one unlocks. Nothing has to be redeployed. Reference: [`docs/08-howto/08-tool-configuration.md`](docs/08-howto/08-tool-configuration.md).
 
 ---
 

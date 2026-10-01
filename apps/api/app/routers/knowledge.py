@@ -18,6 +18,7 @@ from app.core.deps import get_current_user, get_db
 from app.core.responses import error, success
 from app.core.sanitize import sanitize_input
 from app.schemas.knowledge import CreateKnowledgeBaseRequest, UpdateKnowledgeBaseRequest
+from app.services.collection_access import grant_agent_collection
 from app.services.kb_access import (
     accessible_collection_ids,
     user_can_access_collection,
@@ -32,6 +33,7 @@ from models.collection_grant import (
     CollectionPermission,
     UserCollectionGrant,
 )
+from models.agent import Agent  # noqa: E402
 from models.user import User
 
 router = APIRouter(prefix="/api/knowledge-bases", tags=["knowledge"])
@@ -326,6 +328,14 @@ async def create_knowledge_base(
             agent_uuid = uuid.UUID(body.agent_id)
         except ValueError:
             return error("Invalid agent_id", 400)
+        if not (
+            await db.execute(
+                select(Agent).where(
+                    Agent.id == agent_uuid, Agent.tenant_id == user.tenant_id
+                )
+            )
+        ).scalar_one_or_none():
+            return error("Agent not found", 404)
 
     # v2: collections live in a project. If the caller didn't supply
     # one, find-or-create the tenant's Default. Validate that any
@@ -383,6 +393,17 @@ async def create_knowledge_base(
             granted_by=user.id,
         )
     )
+    # Binding an agent here used to set kb.agent_id and nothing else. The
+    # runtime registers knowledge_search from the grant table only, so the
+    # agent answered that it had no search tool. Write the grant too.
+    if agent_uuid is not None:
+        await grant_agent_collection(
+            db,
+            agent_id=agent_uuid,
+            collection_id=kb.id,
+            permission=CollectionPermission.READ,
+            granted_by=user.id,
+        )
     await db.commit()
     await db.refresh(kb)
     return success(_serialize_kb(kb), status_code=201)
@@ -436,6 +457,21 @@ async def update_knowledge_base(
             kb.agent_id = uuid.UUID(body.agent_id)
         except ValueError:
             return error("Invalid agent_id", 400)
+        if not (
+            await db.execute(
+                select(Agent).where(
+                    Agent.id == kb.agent_id, Agent.tenant_id == user.tenant_id
+                )
+            )
+        ).scalar_one_or_none():
+            return error("Agent not found", 404)
+        await grant_agent_collection(
+            db,
+            agent_id=kb.agent_id,
+            collection_id=kb.id,
+            permission=CollectionPermission.READ,
+            granted_by=user.id,
+        )
 
     await db.commit()
     await db.refresh(kb)

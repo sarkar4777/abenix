@@ -133,3 +133,38 @@ async def assert_collection_access(
         )
     )
     return grant.first() is not None
+
+
+async def grant_agent_collection(
+    db: AsyncSession,
+    *,
+    agent_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    permission: CollectionPermission,
+    granted_by: uuid.UUID,
+) -> None:
+    """Give an agent access to a collection. Idempotent, does not commit.
+
+    This is the row the runtime checks when it decides whether to register
+    knowledge_search for an agent. Setting KnowledgeBase.agent_id alone is not
+    enough for queue-routed runs, which read only this table.
+    """
+    existing = await db.execute(
+        select(AgentCollectionGrant).where(
+            AgentCollectionGrant.agent_id == agent_id,
+            AgentCollectionGrant.collection_id == collection_id,
+        )
+    )
+    g = existing.scalar_one_or_none()
+    if g is None:
+        db.add(
+            AgentCollectionGrant(
+                agent_id=agent_id,
+                collection_id=collection_id,
+                permission=permission,
+                granted_by=granted_by,
+            )
+        )
+    elif g.permission != permission:
+        g.permission = permission
+        g.granted_by = granted_by

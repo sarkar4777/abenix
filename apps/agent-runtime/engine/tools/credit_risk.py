@@ -5,13 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +37,16 @@ def _fmt(value: float | None, decimals: int = 4) -> float | None:
 
 class CreditRiskTool(BaseTool):
     name = "credit_risk"
+    config_fields = (
+        ConfigField(
+            "FMP_API_KEY",
+            label="API key",
+            kind="secret",
+            required=True,
+            group="Financial Modeling Prep",
+            signup_url="https://financialmodelingprep.com/developer",
+        ),
+    )
     description = (
         "Assess counterparty credit risk for publicly-listed companies. "
         "Uses the Financial Modeling Prep (FMP) API to fetch credit ratings "
@@ -45,7 +54,7 @@ class CreditRiskTool(BaseTool):
         "coverage, net debt/EBITDA, ROE), balance sheet and income statement "
         "data. Computes Altman Z-Score (Safe/Grey/Distress zones) and "
         "probability of default. Returns a comprehensive credit risk report. "
-        "Requires FMP_API_KEY env var (free tier: 250 calls/day at "
+        "Needs FMP_API_KEY, set under Admin -> Tool Configuration (free tier: 250 calls/day at "
         "financialmodelingprep.com)."
     )
     input_schema: dict[str, Any] = {
@@ -79,17 +88,7 @@ class CreditRiskTool(BaseTool):
                 is_error=True,
             )
 
-        api_key = os.environ.get("FMP_API_KEY", "")
-        if not api_key:
-            return ToolResult(
-                content=(
-                    "Error: FMP_API_KEY environment variable is not set. "
-                    "Get a free key at https://financialmodelingprep.com/ "
-                    "and set it with: export FMP_API_KEY=your_key"
-                ),
-                is_error=True,
-            )
-
+        api_key = self.cfg("FMP_API_KEY", required=True)
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 # 1. Resolve company name -> ticker

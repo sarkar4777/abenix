@@ -161,6 +161,8 @@ class NodeResult:
     tool_name: str = ""
     resolved_arguments: dict[str, Any] = field(default_factory=dict)
     attempt: int = 1
+    # warnings, sources_skipped and the like from the tool's ToolResult
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -673,7 +675,13 @@ class PipelineExecutor:
                         failed_nodes.append(nid)
                         # Self-healing capture — best-effort, fire-and-forget
                         # so a slow DB never delays the user-visible error.
-                        if self._db_url and self._tenant_id and self._agent_id:
+                        # no execution id means no row to attach to, the insert would only fail on the FK
+                        if (
+                            self._db_url
+                            and self._tenant_id
+                            and self._agent_id
+                            and context.get("__execution_id")
+                        ):
                             try:
                                 from engine.healing import (
                                     capture_failure,
@@ -1104,31 +1112,15 @@ class PipelineExecutor:
                 resolved_arguments=resolved_args,
             )
 
-        # Find and execute the tool
+        # Find and execute the tool. An unknown name fails the node, no code is synthesized for it.
         tool = self.tool_registry.get(node.tool_name)
-        if tool is None:
-            # Try dynamic tool generation as last resort
-            try:
-                from engine.tools.dynamic_tool import generate_dynamic_tool
-
-                dyn = await generate_dynamic_tool(
-                    f"A tool called '{node.tool_name}' that performs: {node.tool_name.replace('_', ' ')}",
-                    node.tool_name,
-                )
-                if dyn:
-                    self.tool_registry.register(dyn)
-                    tool = dyn
-                    logger.info("Generated dynamic tool: %s", node.tool_name)
-            except Exception:
-                pass
-
         if tool is None:
             return NodeResult(
                 node_id=node.id,
                 status="failed",
-                error=f"Unknown tool: {node.tool_name}",
-                error_message=f"Unknown tool: {node.tool_name}",
-                error_type="validation",
+                error=f"Unknown tool '{node.tool_name}'",
+                error_message=f"Unknown tool '{node.tool_name}'",
+                error_type="tool_error",
                 tool_name=node.tool_name,
                 resolved_arguments=resolved_args,
                 duration_ms=int((time.monotonic() - node_start) * 1000),
@@ -1190,6 +1182,7 @@ class PipelineExecutor:
                         else "Tool returned error"
                     ),
                     error_type="tool_error",
+                    metadata=dict(getattr(result, "metadata", None) or {}),
                     tool_name=node.tool_name,
                     resolved_arguments=resolved_args,
                     duration_ms=duration,
@@ -1203,10 +1196,23 @@ class PipelineExecutor:
             except (json.JSONDecodeError, TypeError):
                 parsed = result.content
 
+            # A downstream llm_call only sees the node output, so a warning
+            # kept in metadata alone would never reach it.
+            md = dict(getattr(result, "metadata", None) or {})
+            notes = list(md.get("warnings") or [])
+            if md.get("sources_skipped"):
+                notes.append(
+                    "sources not queried: "
+                    + ", ".join(str(x) for x in md["sources_skipped"])
+                )
+            if notes and isinstance(parsed, dict):
+                parsed.setdefault("_warnings", notes)
+
             return NodeResult(
                 node_id=node.id,
                 status="completed",
                 output=parsed,
+                metadata=md,
                 tool_name=node.tool_name,
                 resolved_arguments=resolved_args,
                 duration_ms=duration,
@@ -1769,6 +1775,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
             "condition_met": nr.condition_met,
             "error": nr.error,
             "attempt": nr.attempt,
+            "metadata": nr.metadata,
         }
         # Include output for completed nodes (truncate large outputs).
         # Bumped from 10K→128K to keep multi-stage briefs (synthesiser,
@@ -1793,9 +1800,41 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
         elif nr.status == "skipped":
             node_results[nid]["output"] = None
 
+    # one row per node in run order, what the Flight Recorder and replay read
+    steps: list[dict[str, Any]] = []
+    order = list(result.execution_path or []) + [
+        n for n in result.node_results if n not in (result.execution_path or [])
+    ]
+    for nid in order:
+        nr = result.node_results.get(nid)
+        if nr is None:
+            continue
+        preview = node_results.get(nid, {}).get("output")
+        if not isinstance(preview, str):
+            try:
+                preview = json.dumps(preview, default=str)
+            except (TypeError, ValueError):
+                preview = str(preview)
+        steps.append(
+            {
+                "node_type": "pipeline_node",
+                "node_id": nid,
+                "tool": nr.tool_name,
+                "status": nr.status,
+                "duration_ms": nr.duration_ms,
+                "input": nr.resolved_arguments,
+                "output_preview": (preview or "")[:500],
+                "is_error": nr.status == "failed",
+                "error": nr.error,
+                "metadata": nr.metadata,
+                "attempt": nr.attempt,
+            }
+        )
+
     return {
         "status": result.status,
         "node_results": node_results,
+        "steps": steps,
         "execution_path": result.execution_path,
         "skipped_nodes": result.skipped_nodes,
         "failed_nodes": result.failed_nodes,

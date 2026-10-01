@@ -58,6 +58,75 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sdk-playground", tags=["sdk-playground"])
 
 ROOT = Path(__file__).resolve().parents[4]
+SDK_PYTHON_PATH = str(ROOT / "packages" / "sdk" / "python")
+
+# User code runs in the API pod, so the inherited environment never reaches it
+_BLOCKED_USER_ENV_RE = re.compile(
+    r"DATABASE|REDIS|SECRET|TOKEN|PASSWORD|KEY|URL", re.IGNORECASE
+)
+_USER_ENV_ALLOWLIST = frozenset({"ABENIX_API_URL", "ABENIX_BASE_URL"})
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Windows needs these for the interpreter to start and open sockets
+_WINDOWS_PASSTHROUGH = ("SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP", "WINDIR")
+
+
+def playground_api_url() -> str:
+    return os.environ.get("PLAYGROUND_INTERNAL_API_URL", "http://localhost:8000")
+
+
+def build_sandbox_env(
+    *,
+    api_key: str,
+    base_url: str,
+    home: str,
+    user_env: dict | None = None,
+) -> dict[str, str]:
+    """Minimal subprocess environment: toolchain basics plus the playground's own key."""
+    env: dict[str, str] = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": home,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONPATH": SDK_PYTHON_PATH,
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "ABENIX_API_KEY": api_key,
+        "ABENIX_BASE_URL": base_url,
+        "ABENIX_API_URL": base_url,
+    }
+    if os.name == "nt":
+        env["USERPROFILE"] = home
+        for name in _WINDOWS_PASSTHROUGH:
+            if name in os.environ:
+                env[name] = os.environ[name]
+    protected = set(env)
+    for raw_name, value in (user_env or {}).items():
+        name = str(raw_name)
+        if not _ENV_NAME_RE.match(name) or name in protected:
+            continue
+        if name not in _USER_ENV_ALLOWLIST and _BLOCKED_USER_ENV_RE.search(name):
+            continue
+        env[name] = str(value)
+    return env
+
+
+async def revoke_playground_key(key_id) -> None:
+    """Kill the ephemeral key as soon as the run ends, on a fresh session."""
+    try:
+        from sqlalchemy import update as _sa_update
+        from app.core.deps import async_session
+        from models.api_key import ApiKey
+
+        async with async_session() as session:
+            await session.execute(
+                _sa_update(ApiKey)
+                .where(ApiKey.id == key_id)
+                .values(is_active=False, expires_at=datetime.now(timezone.utc))
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning("playground key revoke failed for %s: %s", key_id, e)
 
 
 class AssetRef(BaseModel):
@@ -866,7 +935,7 @@ async def execute_code(
 
         yield f"event: status\ndata: {json.dumps({'message': 'Starting execution...'})}\n\n"
 
-        # Mint a temporary API key for the user (read-only, 1 hour TTL)
+        # Mint a temporary API key for the user, revoked again when the run ends
         try:
             import hashlib
             import secrets
@@ -885,6 +954,7 @@ async def execute_code(
             )
             db.add(key)
             await db.commit()
+            key_id = key.id
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'message': f'Failed to mint key: {e}'})}\n\n"
             return
@@ -892,9 +962,13 @@ async def execute_code(
         yield f"event: status\ndata: {json.dumps({'message': 'Sandbox ready, running code...'})}\n\n"
 
         # Execute via subprocess for safety
+        import asyncio
+        import shutil
+        import tempfile
+
+        home_dir = tempfile.mkdtemp(prefix="pg_home_")
+        tmp_path = ""
         try:
-            import asyncio
-            import tempfile
 
             # Defence in depth: strip any non-ASCII from user-edited code
             # too, so the "Run" button works even on code the LLM didn't
@@ -909,25 +983,17 @@ async def execute_code(
                 suffix=".py",
                 delete=False,
                 encoding="utf-8",
+                dir=home_dir,
             ) as f:
-                # Inject env vars at top
-                f.write("import os\n")
-                f.write(f'os.environ["ABENIX_API_KEY"] = "{raw_key}"\n')
-                f.write('os.environ["ABENIX_BASE_URL"] = "http://localhost:8000"\n')
                 f.write(safe_code)
                 tmp_path = f.name
 
-            # Run with timeout
-            sdk_path = str(ROOT / "packages" / "sdk" / "python")
-            # Force UTF-8 I/O in the subprocess so print() of any unicode
-            # string (should be impossible after sanitize, but fail-safe)
-            # doesn't crash with UnicodeEncodeError on Windows cp1252.
-            env = {
-                **os.environ,
-                "PYTHONPATH": sdk_path,
-                "PYTHONIOENCODING": "utf-8",
-                "PYTHONUTF8": "1",
-            }
+            env = build_sandbox_env(
+                api_key=raw_key,
+                base_url=playground_api_url(),
+                home=home_dir,
+                user_env=body.env_overrides,
+            )
 
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
@@ -935,6 +1001,7 @@ async def execute_code(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                cwd=home_dir,
             )
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -957,15 +1024,17 @@ async def execute_code(
             status = "success" if proc.returncode == 0 else "error"
             yield f"event: done\ndata: {json.dumps({'status': status, 'exit_code': proc.returncode})}\n\n"
 
-            # Cleanup
-            try:
-                Path(tmp_path).unlink(missing_ok=True)
-            except Exception:
-                pass
-
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
             yield f"event: done\ndata: {json.dumps({'status': 'error'})}\n\n"
+        finally:
+            await revoke_playground_key(key_id)
+            try:
+                if tmp_path:
+                    Path(tmp_path).unlink(missing_ok=True)
+                shutil.rmtree(home_dir, ignore_errors=True)
+            except Exception:
+                pass
 
     return StreamingResponse(stream_execution(), media_type="text/event-stream")
 

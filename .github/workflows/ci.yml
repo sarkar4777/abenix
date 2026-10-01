@@ -79,6 +79,10 @@ jobs:
       # so the CVE patches went to one set and the images actually serving
       # traffic kept every finding. Nothing compared them until this ran.
       - run: python scripts/check-dockerfile-hardening.py
+      # Every value a tool needs is declared on the tool, so the admin screen,
+      # the catalogue badges and the Integrations page can be generated from it.
+      # A tool that reads the environment directly is invisible to all three.
+      - run: python scripts/check-tool-config.py
 
   web-lint-typecheck-build:
     runs-on: ubuntu-latest

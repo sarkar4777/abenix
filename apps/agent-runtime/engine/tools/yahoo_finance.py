@@ -8,7 +8,8 @@ import os
 import time
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,16 @@ COMMODITY_ALIASES: dict[str, str] = {
 
 class YahooFinanceTool(BaseTool):
     name = "yahoo_finance"
+    config_fields = (
+        ConfigField(
+            "FRED_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="FRED",
+            signup_url="https://fred.stlouisfed.org/docs/api/api_key.html",
+        ),
+    )
     description = (
         "Generic Yahoo Finance reader. One tool, every instrument: equities, "
         "indices, futures, FX, ETFs, FRED macro series. Use action="
@@ -700,15 +711,16 @@ class YahooFinanceTool(BaseTool):
 
     @staticmethod
     async def _fred_indicator(series_id: str, period: str) -> ToolResult:
-        fred_key = os.environ.get("FRED_API_KEY", "")
+        fred_key = credentials.get("FRED_API_KEY")
         if not fred_key:
             return ToolResult(
                 content=(
-                    "Error: FRED_API_KEY environment variable is not set. "
-                    "Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html "
-                    "and set it with: export FRED_API_KEY=your_key"
+                    "FRED_API_KEY is not configured. An admin can add it under "
+                    "Admin -> Tool Configuration. Get a key at "
+                    "https://fred.stlouisfed.org/docs/api/api_key.html"
                 ),
                 is_error=True,
+                metadata={"needs_configuration": "FRED_API_KEY"},
             )
 
         try:

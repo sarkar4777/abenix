@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+from engine import credentials
 from typing import AsyncIterator
 
 from engine.tools.meeting_adapter import (
@@ -15,7 +15,7 @@ from engine.tools.meeting_adapter import (
 
 
 def _missing_creds() -> str:
-    missing = [k for k in ("ZOOM_SDK_KEY", "ZOOM_SDK_SECRET") if not os.environ.get(k)]
+    missing = [k for k in ("ZOOM_SDK_KEY", "ZOOM_SDK_SECRET") if not credentials.get(k)]
     return ", ".join(missing) if missing else ""
 
 
@@ -28,7 +28,7 @@ class ZoomAdapter(MeetingAdapter):
             ok=False,
             error=(
                 "Zoom adapter requires Zoom Meeting SDK credentials. "
-                f"Missing env vars: {missing}. Zoom raw-audio also requires "
+                f"Not configured: {missing}. An admin can add them under Admin -> Tool Configuration. Zoom raw-audio also requires "
                 "marketplace app review. Use provider='livekit' for the "
                 "demo/dev path."
             ),

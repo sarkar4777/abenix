@@ -91,3 +91,7 @@ input_variables:
 example_prompts:
   - "Build renewal packet for contract abc-123, focus on price"
   - "Generate negotiation packet for the SunPower PPA"
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - ENTSOE_API_KEY

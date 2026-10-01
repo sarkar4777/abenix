@@ -1,5 +1,64 @@
 # Changelog
 
+## v2.5.0 — 2026-10-01
+
+### Added
+
+- Admin -> Tool Configuration. Every API key and setting a built-in tool needs, on one screen, generated from the tools' own declarations. Save a value and agents use it within 30 seconds with no redeploy. Rows say where the value comes from, a Test button checks it with the provider, and values are encrypted at rest when the cluster key is set.
+- Tools declare their configuration as `config_fields` on the class and read it through `self.cfg()`. A lint in CI and in the deploy fails any tool that reads the environment privately, so the admin screen is complete by construction. Adding a tool is documented end to end in docs/08-howto/01-add-a-tool.md.
+- The LLM provider keys sit on the same screen and the router rebuilds its clients when one changes.
+- `/tools`, the builder palette and the agent panel show a credential badge per tool, with a Configure link for admins and an ask-your-admin line for everyone else. The Integrations page lists the same keys and no longer prints kubectl snippets.
+- The Flight Recorder keeps every tool call's result, error flag and measured duration, for agent runs and pipelines, on the inline and the queued path. A Step replay panel lists the nodes in run order and a Re-run button opens the agent with the same input.
+- `model_config.require_tools` fails a run that finishes without calling the listed tools, with `REQUIRED_TOOLS_VIOLATION`. A run that calls no tool at all while having some is flagged on the row.
+- Pipeline `input_variables` defaults are applied to the context, and the chat page sends typed input variables as context, so a seeded pipeline runs on what you type.
+- The seed lint requires a `requires_credentials` list on any seed whose tools cannot run without a key, and the deploy prints which seeded agents still need one.
+### Changed
+
+- A missing key now produces one answer across every tool, naming the key and the admin screen, instead of four different behaviours. A key the provider rejects is an error, never an empty result. Tools that run with fewer sources say which they skipped, and the model sees that note.
+- Agents bound to a knowledge collection at creation are granted access to it at the same time, and a seed backfills older ones.
+- The pricing catalogue is seeded on every deploy, so a fresh install reports real spend.
+- The deploy verifies the Claude subscription token after seeding and warns loudly when it is rejected.
+- Container scanning reports only findings that have a fix. A scan of the base image alone turns up 156 Debian vulnerabilities with no fixed version released, which buried the handful that could be acted on.
+- Each image's scan results are filed under their own category. All four shared one before, so they overwrote each other and three of the four went stale without being looked at.
+
+- The published tree no longer carries the dependabot config. This repository is generated and republished on each release, so a PR raised against it can never land. Dependency updates happen upstream and arrive with a release. Security alerts are a repository setting and are unaffected.
+
+### Security
+
+- The post-LLM moderation gate now runs on the streamed chat path too. A redacted answer replaces the streamed text in the chat and on the execution row, a blocked answer is withdrawn, and the chat shows a moderation notice naming the categories with a link to the policy. Before this, response filtering only applied to non-streamed runs.
+- The marketplace no longer returns unpublished agents, their system prompts or their full configuration to users in other tenants, and a subscription needs a published, active listing.
+- Reading, exporting and running an agent now follow one rule: owner, admin, platform agent, or an explicit share. Shares live in one table, the share dialog posts to the endpoint that exists, and only the owner or an admin can grant them. Publishing to the marketplace needs the feature and the owner, and visibility is validated.
+- Tool code an agent generates at run time runs in a restricted sandbox: a fixed set of pure modules, no introspection builtins, no dunder access, a wall-clock timeout and a capped result. A pipeline node naming a tool that does not exist fails instead of having code written for it. Generated tools saved by the AI Builder wait for approval before an agent can load them.
+- The SDK and load-test playgrounds run user code with a minimal environment instead of the API pod's, and the key minted for a run is revoked when the run ends.
+- Archives and retention policies are scoped to a tenant. Deleting archived rows removes dependent rows in order and the download works with the bearer token.
+- Tenant Slack webhooks and approval webhook secrets are encrypted at rest and masked in responses. Notifications no longer fall back to the operator's Slack channel.
+- MCP credentials reach the runtime decrypted, so MCP tools work on queued runs too, and a server that is down is reported to the model instead of silently dropping its tools. Per-tool approval and call caps set on an MCP connection are enforced.
+- `tool_config.max_calls` and `require_approval` are enforced by the runtime, not only described in the prompt, and pinned parameter defaults win over the model's arguments.
+- Code asset and ML model schema lookups are tenant-filtered.
+
+### Operations
+
+- A `human_approval` gate inside an agent run appears on the Approvals page, can be approved there, and is no longer killed by the stale-run sweeper while it waits. Only admins and creators can sign off, and a sign-off on your own request is recorded as self-approved.
+- Failed runs land in the dead-letter queue, and replay keeps the pool, the pipeline flag and the input, and links back to the original.
+- Scheduled triggers are claimed with a row lock so three API replicas fire them once, and the run is queued rather than kept in the API process. A trigger whose agent is gone or whose owner lost access is deactivated with a notice.
+- Platform alerts from Prometheus are polled and delivered to tenant admins and Slack, and shown on the alerts page.
+- Drift detection uses a relative noise floor so cost, confidence and failure-rate drift can alert, and refreshes its baseline. The Pipeline Surgeon's patches target the real config shape, are validated against an allow-list, apply with a compare-and-swap and leave an audit row.
+- The Test Slack button works.
+
+### Fixed
+
+- Clients that poll on a reused connection no longer get a dropped socket every few seconds. The API's keep-alive timeout was 5 seconds, it is 75 now.
+- A rejected LLM credential is classified as `LLM_AUTH_ERROR` with a hint to re-sync the subscription token or fix the key under Tool Configuration, instead of reading as a cluster RBAC problem.
+- Tool descriptions and errors no longer tell a web user to set environment variables on a pod.
+- A timeout or a runtime error during a streamed run was saved as completed. It is saved as failed with a failure code, and a client that disconnects mid-run no longer leaves the row running forever.
+- The Flight Recorder crashed on streamed pipelines and never rendered the node table, because the API stored a count where the page expected a list and a dict where it expected an array.
+- A tool another tool merely prefers was shown as unable to run when the first tool required the same key.
+- The Repository Analyzer ignored the owner and repo typed on the chat page.
+- Edge gateways can be deleted.
+- Multi-stage images no longer carry the base image's old package metadata. COPY merges into the destination rather than replacing it, so the previous pip's dist-info survived beside the upgraded one and got reported.
+- PyPDF2 is gone from the dependency declarations, not just the imports. The worker and agent-runtime images were still installing it and never declared pypdf at all, and one app still called PyPDF2 directly.
+- setuptools is upgraded alongside pip in every image build.
+
 ## v2.4.1 — 2026-09-28
 
 ### Added

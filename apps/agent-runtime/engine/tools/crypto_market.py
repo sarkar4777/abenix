@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 _BASE = "https://api.coingecko.com/api/v3"
 
 
 def _headers() -> dict[str, str]:
     h = {"Accept": "application/json"}
-    key = os.environ.get("COINGECKO_API_KEY", "").strip()
+    key = credentials.get("COINGECKO_API_KEY").strip()
     if key:
         h["x-cg-pro-api-key"] = key
     return h
@@ -22,6 +22,16 @@ def _headers() -> dict[str, str]:
 
 class CryptoMarketTool(BaseTool):
     name = "crypto_market"
+    config_fields = (
+        ConfigField(
+            "COINGECKO_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="CoinGecko",
+            signup_url="https://www.coingecko.com/en/api/pricing",
+        ),
+    )
     description = (
         "Crypto market data from CoinGecko: spot price, 24h change, market "
         "cap, and OHLC history for any coin. Free tier (~30 req/min). "

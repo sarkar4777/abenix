@@ -6,14 +6,23 @@ Supports: MP3, MP4, WAV, M4A, WebM. Max 25MB file size.
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 class SpeechToTextTool(BaseTool):
     name = "speech_to_text"
+    config_fields = (
+        ConfigField(
+            "OPENAI_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenAI",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+    )
     description = (
         "Transcribe audio files to text using OpenAI Whisper. "
         "Supports MP3, WAV, M4A, WebM. Returns transcription with timestamps."
@@ -40,7 +49,7 @@ class SpeechToTextTool(BaseTool):
         if not audio_url:
             return ToolResult(content="Error: audio_url is required", is_error=True)
 
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = self.cfg("OPENAI_API_KEY")
         if not api_key:
             return ToolResult(
                 content="Error: OPENAI_API_KEY required for speech-to-text",

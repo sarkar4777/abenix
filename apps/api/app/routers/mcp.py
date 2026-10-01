@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import re
 import secrets
 import sys
 import uuid
@@ -66,6 +67,13 @@ _SECRET_KEYS = (
     "bearer",
 )
 
+# app.core.crypto writes "v1:<b64>", so a plain token starting with "v" is not ciphertext.
+_ENC_RE = re.compile(r"^v\d+:")
+
+
+def _is_encrypted(value: Any) -> bool:
+    return isinstance(value, str) and bool(_ENC_RE.match(value))
+
 
 def _encrypt_auth_config(
     tenant_id: Any, cfg: dict[str, Any] | None
@@ -80,7 +88,7 @@ def _encrypt_auth_config(
             isinstance(v, str)
             and v
             and k.lower() in _SECRET_KEYS
-            and not v.startswith("v")
+            and not _is_encrypted(v)
         ):
             out[k] = _crypto.encrypt(tenant_id, v)
         else:
@@ -97,7 +105,7 @@ def _decrypt_auth_config(
 
     out: dict[str, Any] = {}
     for k, v in cfg.items():
-        if isinstance(v, str) and v.startswith("v") and k.lower() in _SECRET_KEYS:
+        if _is_encrypted(v) and k.lower() in _SECRET_KEYS:
             out[k] = _crypto.decrypt(tenant_id, v)
         else:
             out[k] = v
@@ -437,6 +445,21 @@ async def discover_tools(
     conn.discovered_tools = discovered
     conn.health_status = "healthy"
     conn.last_health_check = datetime.now(timezone.utc)
+
+    # Attached tool rows whose name the server no longer offers are dead, drop them.
+    live_names = {t["name"] for t in discovered}
+    stale_result = await db.execute(
+        select(AgentMCPTool).where(AgentMCPTool.mcp_connection_id == connection_id)
+    )
+    removed_agent_tools: list[dict[str, Any]] = []
+    for row in stale_result.scalars().all():
+        if row.tool_name in live_names:
+            continue
+        removed_agent_tools.append(
+            {"agent_id": str(row.agent_id), "tool_name": row.tool_name}
+        )
+        await db.delete(row)
+
     await db.commit()
     await db.refresh(conn)
 
@@ -446,6 +469,7 @@ async def discover_tools(
             "server_name": conn.server_name,
             "tools": discovered,
             "tools_count": len(discovered),
+            "removed_agent_tools": removed_agent_tools,
         }
     )
 

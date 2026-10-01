@@ -313,3 +313,7 @@ pipeline_config:
     - { source: write_results, target: summary }
 
   viewport: { x: 0, y: 0, zoom: 0.6 }
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - ENTSOE_API_KEY

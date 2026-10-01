@@ -353,19 +353,23 @@ class TestGitHubTool:
 
     @pytest.mark.asyncio
     async def test_missing_token_returns_error(self) -> None:
-        """When GITHUB_TOKEN is not set, the tool returns an error."""
-        with patch.dict(os.environ, {"GITHUB_TOKEN": ""}, clear=False):
+        """A write without GITHUB_TOKEN names the key and the admin screen. Public reads run unauthenticated."""
+        from engine import credentials
+
+        with credentials.override({"GITHUB_TOKEN": ""}):
             tool = GitHubTool()
             result = await tool.execute(
                 {
-                    "operation": "get_repo",
+                    "operation": "create_issue",
                     "owner": "owner",
                     "repo": "abenix",
+                    "title": "probe",
                 }
             )
 
         assert result.is_error
         assert "GITHUB_TOKEN" in result.content
+        assert "Tool Configuration" in result.content
 
     @pytest.mark.asyncio
     async def test_api_error_returns_error(self, tool: GitHubTool) -> None:

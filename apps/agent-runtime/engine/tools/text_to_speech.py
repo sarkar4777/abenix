@@ -4,14 +4,23 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 class TextToSpeechTool(BaseTool):
     name = "text_to_speech"
+    config_fields = (
+        ConfigField(
+            "OPENAI_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenAI",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+    )
     description = (
         "Generate speech audio from text using OpenAI TTS. "
         "Voices: alloy, echo, fable, onyx, nova, shimmer. "
@@ -47,7 +56,7 @@ class TextToSpeechTool(BaseTool):
         if len(text) > 4096:
             text = text[:4096]
 
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = self.cfg("OPENAI_API_KEY")
         if not api_key:
             return ToolResult(
                 content="Error: OPENAI_API_KEY required for text-to-speech",

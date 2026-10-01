@@ -9,13 +9,12 @@ mocked rating.
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 REQUEST_TIMEOUT = 30.0
@@ -24,9 +23,25 @@ USER_AGENT = "AgentForge issuer-rating-refresh contact@agentforge.local"
 
 class MoodysApiTool(BaseTool):
     name = "moodys_api"
+    config_fields = (
+        ConfigField(
+            "MOODYS_API_KEY",
+            label="API key",
+            kind="secret",
+            required=True,
+            group="Moody's",
+        ),
+        ConfigField(
+            "MOODYS_API_URL",
+            label="API URL",
+            kind="url",
+            required=True,
+            group="Moody's",
+        ),
+    )
     description = (
         "Fetch current issuer credit rating + outlook from Moody's Investors "
-        "Service. Requires $MOODYS_API_KEY and $MOODYS_API_URL. Without keys "
+        "Service. Needs MOODYS_API_KEY and MOODYS_API_URL, set under Admin -> Tool Configuration. Without them "
         "returns needs_configuration; never returns mocked data."
     )
     input_schema = {
@@ -39,28 +54,8 @@ class MoodysApiTool(BaseTool):
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        api_key = os.environ.get("MOODYS_API_KEY", "").strip()
-        api_url = os.environ.get("MOODYS_API_URL", "").strip()
-        if not api_key or not api_url:
-            return ToolResult(
-                content=json.dumps(
-                    {
-                        "status": "needs_configuration",
-                        "tool": "moodys_api",
-                        "instructions": (
-                            "Moody's Issuer Ratings requires a paid contract. "
-                            "Set MOODYS_API_KEY and MOODYS_API_URL (e.g. "
-                            "https://api.moodys.com/ratings/v1) in platform "
-                            "Integrations. Without the keys this tool returns "
-                            "no ratings — never a mocked value."
-                        ),
-                        "vendor_url": "https://www.moodys.com/insights",
-                    }
-                ),
-                is_error=False,
-                metadata={"status": "needs_configuration"},
-            )
-
+        api_key = self.cfg("MOODYS_API_KEY", required=True).strip()
+        api_url = self.cfg("MOODYS_API_URL", required=True).strip()
         legal_name = (arguments.get("legal_name") or "").strip()
         ticker = (arguments.get("ticker") or "").strip()
         lei = (arguments.get("lei") or "").strip()

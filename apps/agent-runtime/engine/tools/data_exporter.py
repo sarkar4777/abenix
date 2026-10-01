@@ -8,23 +8,76 @@ import json
 import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
-SMTP_HOST = os.environ.get("SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", "agent@abenix.dev")
-
-AWS_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID", "")
-AWS_SECRET_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
 
 
 class DataExporterTool(BaseTool):
     name = "data_exporter"
+    config_fields = (
+        ConfigField(
+            "SMTP_HOST",
+            label="SMTP host",
+            kind="string",
+            required=False,
+            group="Email (SMTP)",
+        ),
+        ConfigField(
+            "SMTP_PORT",
+            label="SMTP port",
+            kind="int",
+            required=False,
+            group="Email (SMTP)",
+            default="587",
+        ),
+        ConfigField(
+            "SMTP_USER",
+            label="SMTP user",
+            kind="string",
+            required=False,
+            group="Email (SMTP)",
+        ),
+        ConfigField(
+            "SMTP_PASS",
+            label="SMTP password",
+            kind="secret",
+            required=False,
+            group="Email (SMTP)",
+        ),
+        ConfigField(
+            "SMTP_FROM",
+            label="From address",
+            kind="string",
+            required=False,
+            group="Email (SMTP)",
+            default="agent@abenix.dev",
+        ),
+        ConfigField(
+            "AWS_ACCESS_KEY_ID",
+            label="Access key id",
+            kind="secret",
+            required=False,
+            group="AWS",
+            signup_url="https://console.aws.amazon.com/iam",
+        ),
+        ConfigField(
+            "AWS_SECRET_ACCESS_KEY",
+            label="Secret access key",
+            kind="secret",
+            required=False,
+            group="AWS",
+        ),
+        ConfigField(
+            "AWS_REGION",
+            label="Region",
+            kind="string",
+            required=False,
+            group="AWS",
+            default="us-east-1",
+        ),
+    )
     description = (
         "Export and deliver data to various destinations: save as file (JSON, CSV, TXT, "
         "Markdown, HTML, XLSX Excel, PDF report), send via email with attachments, upload "
@@ -482,7 +535,7 @@ class DataExporterTool(BaseTool):
         if not email_to:
             return {"error": "email_to is required"}
 
-        if not SMTP_HOST:
+        if not self.cfg("SMTP_HOST"):
             file_result = await self._export_file(data, args)
             return {
                 "status": "mock",
@@ -499,7 +552,7 @@ class DataExporterTool(BaseTool):
         from email import encoders
 
         msg = MIMEMultipart()
-        msg["From"] = SMTP_FROM
+        msg["From"] = self.cfg("SMTP_FROM")
         msg["To"] = email_to
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
@@ -520,11 +573,11 @@ class DataExporterTool(BaseTool):
         attachment.add_header("Content-Disposition", f"attachment; filename={filename}")
         msg.attach(attachment)
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        with smtplib.SMTP(self.cfg("SMTP_HOST"), int(self.cfg("SMTP_PORT"))) as server:
             server.starttls()
-            if SMTP_USER and SMTP_PASS:
-                server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_FROM, email_to.split(","), msg.as_string())
+            if self.cfg("SMTP_USER") and self.cfg("SMTP_PASS"):
+                server.login(self.cfg("SMTP_USER"), self.cfg("SMTP_PASS"))
+            server.sendmail(self.cfg("SMTP_FROM"), email_to.split(","), msg.as_string())
 
         return {
             "status": "success",
@@ -542,7 +595,7 @@ class DataExporterTool(BaseTool):
         if not bucket or not key:
             return {"error": "s3_bucket and s3_key are required"}
 
-        if not AWS_ACCESS_KEY:
+        if not self.cfg("AWS_ACCESS_KEY_ID"):
             file_result = await self._export_file(data, args)
             return {
                 "status": "mock",
@@ -554,7 +607,12 @@ class DataExporterTool(BaseTool):
         import boto3
 
         content = self._format_data(data, fmt)
-        s3 = boto3.client("s3", region_name=AWS_REGION)
+        s3 = boto3.client(
+            "s3",
+            region_name=self.cfg("AWS_REGION"),
+            aws_access_key_id=self.cfg("AWS_ACCESS_KEY_ID") or None,
+            aws_secret_access_key=self.cfg("AWS_SECRET_ACCESS_KEY") or None,
+        )
         s3.put_object(Bucket=bucket, Key=key, Body=content.encode("utf-8"))
 
         return {

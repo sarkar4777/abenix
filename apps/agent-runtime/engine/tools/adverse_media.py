@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import time
 import unicodedata
@@ -16,7 +15,8 @@ from urllib.parse import quote_plus
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +268,7 @@ def _recency_bucket(published_iso: str | None) -> str:
 async def _tavily_adverse(
     name: str, depth: str
 ) -> tuple[list[dict[str, Any]], str | None]:
-    api_key = os.environ.get("TAVILY_API_KEY", "")
+    api_key = credentials.get("TAVILY_API_KEY")
     if not api_key:
         return [], "TAVILY_API_KEY not set"
     query = f'"{name}" (lawsuit OR fraud OR investigation OR bribery OR sanctions OR penalty OR scandal OR laundering OR corruption)'
@@ -483,6 +483,16 @@ async def _gather(name: str, depth: str) -> tuple[list[dict[str, Any]], list[str
 
 class AdverseMediaTool(BaseTool):
     name = "adverse_media"
+    config_fields = (
+        ConfigField(
+            "TAVILY_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Tavily",
+            signup_url="https://app.tavily.com",
+        ),
+    )
     description = (
         "Adverse-media / negative-news screening for KYC and third-party due "
         "diligence. Fuses four independent sources so it still delivers when "

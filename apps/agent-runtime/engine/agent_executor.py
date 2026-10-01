@@ -95,6 +95,42 @@ def _truncate_tool_result(content: str, max_chars: int = MAX_TOOL_RESULT_CHARS) 
     )
 
 
+def _model_visible_content(result: Any) -> str:
+    """The text the model is shown for a tool result.
+
+    A tool that skipped a keyed source, fell back to a weaker provider or
+    could not run puts that in metadata, which the model never sees. Append
+    it to the content so the answer can say so instead of inventing a reason.
+    """
+    content = str(getattr(result, "content", "") or "")
+    md = getattr(result, "metadata", None) or {}
+    notes: list[str] = [str(w) for w in (md.get("warnings") or [])]
+    skipped = md.get("sources_skipped") or []
+    if skipped:
+        notes.append("sources not queried: " + ", ".join(str(x) for x in skipped))
+    key = md.get("needs_configuration")
+    if key and "Tool Configuration" not in content:
+        notes.append(
+            f"{key} is not configured, an admin can add it under Admin -> Tool Configuration"
+        )
+    if md.get("skipped") and md.get("reason") and str(md["reason"]) not in content:
+        notes.append(str(md["reason"]))
+    if notes:
+        content += "\n\n[tool notes] " + " | ".join(dict.fromkeys(notes))
+    # the model paraphrases and drops the key name, so it is told what to repeat
+    if key:
+        content += (
+            f"\n\n[instruction] Tell the user word for word: {key} is not configured. "
+            "An admin can add it under Admin -> Tool Configuration. Do not suggest shell commands or environment variables."
+        )
+    elif notes:
+        content += (
+            "\n\n[instruction] Mention each note above to the user, naming the configuration value "
+            "and that an admin can add it under Admin -> Tool Configuration."
+        )
+    return _truncate_tool_result(content)
+
+
 def _build_output_summary(metadata: Any, is_error: bool) -> dict[str, Any]:
     """Compact tool-result projection that survives the SDK round-trip.
 
@@ -154,16 +190,23 @@ GROUNDING_REQUIRED_ERROR = (
 )
 
 
+def _required_tools_missing(
+    required: list[str], tool_calls: list[dict[str, Any]]
+) -> list[str]:
+    """Required tools the run never called, in declaration order."""
+    if not required:
+        return []
+    called = {tc.get("name") for tc in (tool_calls or []) if isinstance(tc, dict)}
+    return [t for t in required if t not in called]
+
+
 def _grounding_violated(
     require_knowledge_search: bool, tool_calls: list[dict[str, Any]]
 ) -> bool:
     """True when the agent required a knowledge_search call and never made one."""
     if not require_knowledge_search:
         return False
-    for tc in tool_calls or []:
-        if isinstance(tc, dict) and tc.get("name") == GROUNDING_REQUIRED_TOOL:
-            return False
-    return True
+    return bool(_required_tools_missing([GROUNDING_REQUIRED_TOOL], tool_calls))
 
 
 class AgentState(dict):
@@ -260,6 +303,7 @@ class AgentExecutor:
         asset_schemas: dict[str, dict[str, Any]] | None = None,
         tenant_id: str = "",
         require_knowledge_search: bool = False,
+        require_tools: list[str] | None = None,
     ) -> None:
         self.llm_router = llm_router
         self.tool_registry = tool_registry
@@ -286,6 +330,15 @@ class AgentExecutor:
         # failure_code=GROUNDING_REQUIRED_VIOLATION and reject the
         # output. No auto-retry — the caller decides what to do.
         self.require_knowledge_search = bool(require_knowledge_search)
+        # model_config.require_tools, plus knowledge_search when the grounding flag is on
+        self.require_tools: list[str] = list(
+            dict.fromkeys(
+                [str(t) for t in (require_tools or []) if t]
+                + ([GROUNDING_REQUIRED_TOOL] if self.require_knowledge_search else [])
+            )
+        )
+        # node traces of the last stream() so the caller can persist them
+        self._node_traces: list[dict[str, Any]] = []
         if sandbox is None:
             from engine.sandbox import SandboxPolicy
 
@@ -302,6 +355,15 @@ class AgentExecutor:
             else:
                 sandbox = ExecutionSandbox()
         self.sandbox = sandbox
+
+    def _missing_required(self, tool_calls: list[dict[str, Any]]) -> list[str]:
+        return _required_tools_missing(self.require_tools, tool_calls)
+
+    def _grounding_violated(self, tool_calls: list[dict[str, Any]]) -> bool:
+        return bool(self._missing_required(tool_calls))
+
+    def get_trace_summary(self) -> list[dict[str, Any]]:
+        return list(self._node_traces)
 
     async def invoke(self, input_message: str) -> ExecutionResult:
         from engine.tracing import get_tracer, current_trace_id
@@ -400,9 +462,7 @@ class AgentExecutor:
                 # requires grounding, we must fail the cache hit too.
                 # Otherwise the guardrail silently passes warm-cache
                 # answers that bypass the grounding contract.
-                _ground_cache = _grounding_violated(
-                    self.require_knowledge_search, all_tool_calls
-                )
+                _ground_cache = self._grounding_violated(all_tool_calls)
                 return ExecutionResult(
                     output=(
                         GROUNDING_REQUIRED_ERROR
@@ -423,9 +483,7 @@ class AgentExecutor:
             if not self.sandbox.check_timeout():
                 duration = int((time.monotonic() - start) * 1000)
                 agent_execution_duration_seconds.observe(duration / 1000)
-                _ground_to = _grounding_violated(
-                    self.require_knowledge_search, all_tool_calls
-                )
+                _ground_to = self._grounding_violated(all_tool_calls)
                 return ExecutionResult(
                     output=(
                         GROUNDING_REQUIRED_ERROR
@@ -615,9 +673,7 @@ class AgentExecutor:
                         tenant_id=self.tenant_id,
                     )
 
-                grounding_violation = _grounding_violated(
-                    self.require_knowledge_search, all_tool_calls
-                )
+                grounding_violation = self._grounding_violated(all_tool_calls)
                 return ExecutionResult(
                     output=(
                         GROUNDING_REQUIRED_ERROR if grounding_violation else output_text
@@ -754,7 +810,7 @@ class AgentExecutor:
                 )
 
                 # Truncate large tool results to prevent context overflow
-                context_content = _truncate_tool_result(result.content)
+                context_content = _model_visible_content(result)
                 tool_results_content.append(
                     {
                         "type": "tool_result",
@@ -788,9 +844,7 @@ class AgentExecutor:
 
         duration = int((time.monotonic() - start) * 1000)
         agent_execution_duration_seconds.observe(duration / 1000)
-        grounding_violation = _grounding_violated(
-            self.require_knowledge_search, all_tool_calls
-        )
+        grounding_violation = self._grounding_violated(all_tool_calls)
         return ExecutionResult(
             output=(
                 GROUNDING_REQUIRED_ERROR
@@ -860,6 +914,16 @@ class AgentExecutor:
                     source="pre_llm",
                     outcome=_mod_pre.outcome,
                 ).inc()
+                if _mod_pre.outcome == "redacted":
+                    yield ExecutionEvent(
+                        event="moderation",
+                        data={
+                            "source": "pre_llm",
+                            "outcome": "redacted",
+                            "categories": list(_mod_pre.triggered_categories),
+                            "message": "Your message was redacted by the moderation policy before the agent saw it.",
+                        },
+                    )
             except ModerationBlocked as mb:
                 moderation_decisions_total.labels(
                     source="pre_llm",
@@ -890,6 +954,7 @@ class AgentExecutor:
         messages: list[dict[str, Any]] = [{"role": "user", "content": input_message}]
         tools = self.tool_registry.list_all()
         all_tool_calls: list[dict[str, Any]] = []
+        self._node_traces = []
         total_input = 0
         total_output = 0
         total_cost = 0.0
@@ -989,7 +1054,64 @@ class AgentExecutor:
                 agent_execution_duration_seconds.observe(duration / 1000)
                 agent_active_streams.dec()
 
-                if self.cache:
+                # Post-LLM gate on the streamed answer. The tokens are already out,
+                # so a redaction goes to the client as a replacement it applies.
+                _post_redacted = False
+                if self.moderation_gate is not None:
+                    try:
+                        _checked, _mod_post = await moderation_check(
+                            full_text,
+                            source="post_llm",
+                            config=self.moderation_gate,
+                            execution_id=self.execution_id,
+                        )
+                        moderation_decisions_total.labels(
+                            source="post_llm", outcome=_mod_post.outcome
+                        ).inc()
+                        if _mod_post.outcome == "redacted" and _checked != full_text:
+                            full_text = _checked
+                            _post_redacted = True
+                            yield ExecutionEvent(
+                                event="moderation",
+                                data={
+                                    "source": "post_llm",
+                                    "outcome": "redacted",
+                                    "categories": list(_mod_post.triggered_categories),
+                                    "content": full_text,
+                                    "message": "The answer was redacted by the moderation policy.",
+                                },
+                            )
+                    except ModerationBlocked as mb:
+                        moderation_decisions_total.labels(
+                            source="post_llm", outcome="blocked"
+                        ).inc()
+                        yield ExecutionEvent(
+                            event="moderation",
+                            data={
+                                "source": "post_llm",
+                                "outcome": "blocked",
+                                "content": _moderation_block_text(mb, "Response"),
+                                "message": "The answer was blocked by the moderation policy.",
+                            },
+                        )
+                        yield ExecutionEvent(
+                            event="done",
+                            data={
+                                "total_tokens": total_input + total_output,
+                                "input_tokens": total_input,
+                                "output_tokens": total_output,
+                                "cost": round(total_cost, 6),
+                                "duration_ms": duration,
+                                "model": self.model,
+                                "effective_model": effective_model or self.model,
+                                "error": "moderation_blocked",
+                                "moderation_blocked": True,
+                                "moderation_block_source": "post_llm",
+                            },
+                        )
+                        return
+
+                if self.cache and not _post_redacted:
                     response_data = {
                         "content": full_text,
                         "model": self.model,
@@ -1006,9 +1128,7 @@ class AgentExecutor:
                         tenant_id=self.tenant_id,
                     )
 
-                _grounding_failed = _grounding_violated(
-                    self.require_knowledge_search, all_tool_calls
-                )
+                _grounding_failed = self._grounding_violated(all_tool_calls)
                 _done_payload: dict[str, Any] = {
                     "total_tokens": total_input + total_output,
                     "input_tokens": total_input,
@@ -1021,15 +1141,31 @@ class AgentExecutor:
                     "effective_model": effective_model or self.model,
                     "fallback_reason": effective_fallback_reason,
                 }
+                _missing_early = self._missing_required(all_tool_calls)
                 if _grounding_failed:
                     _done_payload["error"] = "grounding_required_violation"
                     _done_payload["grounding_violation"] = True
-                    _done_payload["grounding_block_source"] = (
-                        "no_knowledge_search_invocation"
-                    )
-                    yield ExecutionEvent(
-                        event="token", data=f"\n\n{GROUNDING_REQUIRED_ERROR}"
-                    )
+                    _done_payload["missing_tools"] = _missing_early
+                    if _missing_early == [GROUNDING_REQUIRED_TOOL]:
+                        _done_payload["grounding_block_source"] = (
+                            "no_knowledge_search_invocation"
+                        )
+                        yield ExecutionEvent(
+                            event="token", data=f"\n\n{GROUNDING_REQUIRED_ERROR}"
+                        )
+                    else:
+                        _done_payload["failure_code"] = "REQUIRED_TOOLS_VIOLATION"
+                        _done_payload["grounding_block_source"] = (
+                            "missing: " + ", ".join(_missing_early)
+                        )
+                        yield ExecutionEvent(
+                            event="token",
+                            data=f"\n\n[required tools not called: {', '.join(_missing_early)}]",
+                        )
+                elif not all_tool_calls and self.tool_registry.names():
+                    _done_payload["warnings"] = [
+                        "completed without calling any tool although tools were available"
+                    ]
                 yield ExecutionEvent(event="done", data=_done_payload)
                 return
 
@@ -1131,22 +1267,25 @@ class AgentExecutor:
                     data={"name": tc["name"], "result": result.content},
                 )
 
-                yield ExecutionEvent(
-                    event="node_trace",
-                    data={
-                        "node_type": "tool_call",
-                        "tool": tc["name"],
-                        "duration_ms": tool_dur,
-                        "input": tc["arguments"],
-                        "output_preview": result.content[:500],
-                        "is_error": result.is_error,
-                        "metadata": result.metadata,
-                        "output_summary": tc["output_summary"],
-                    },
-                )
+                _trace = {
+                    "node_type": "tool_call",
+                    "tool": tc["name"],
+                    "duration_ms": tool_dur,
+                    "input": tc["arguments"],
+                    "output_preview": result.content[:500],
+                    "is_error": result.is_error,
+                    "metadata": result.metadata,
+                    "output_summary": tc["output_summary"],
+                }
+                # the tool_call event went out before the tool ran, so the result rides on the trace
+                tc["result_preview"] = result.content[:500]
+                tc["is_error"] = bool(result.is_error)
+                tc["duration_ms"] = tool_dur
+                self._node_traces.append(_trace)
+                yield ExecutionEvent(event="node_trace", data=_trace)
 
                 # Truncate large tool results to prevent context overflow
-                context_content = _truncate_tool_result(result.content)
+                context_content = _model_visible_content(result)
                 tool_results_content.append(
                     {
                         "type": "tool_result",
@@ -1176,9 +1315,7 @@ class AgentExecutor:
         duration = int((time.monotonic() - start) * 1000)
         agent_execution_duration_seconds.observe(duration / 1000)
         agent_active_streams.dec()
-        _grounding_failed = _grounding_violated(
-            self.require_knowledge_search, all_tool_calls
-        )
+        _grounding_failed = self._grounding_violated(all_tool_calls)
         _done_payload2: dict[str, Any] = {
             "total_tokens": total_input + total_output,
             "input_tokens": total_input,
@@ -1191,11 +1328,31 @@ class AgentExecutor:
             "effective_model": effective_model or self.model,
             "fallback_reason": effective_fallback_reason,
         }
+        _missing = self._missing_required(all_tool_calls)
         if _grounding_failed:
             _done_payload2["error"] = "grounding_required_violation"
             _done_payload2["grounding_violation"] = True
-            _done_payload2["grounding_block_source"] = "no_knowledge_search_invocation"
-            yield ExecutionEvent(event="token", data=f"\n\n{GROUNDING_REQUIRED_ERROR}")
+            _done_payload2["missing_tools"] = _missing
+            if _missing == [GROUNDING_REQUIRED_TOOL]:
+                _done_payload2["grounding_block_source"] = (
+                    "no_knowledge_search_invocation"
+                )
+                yield ExecutionEvent(
+                    event="token", data=f"\n\n{GROUNDING_REQUIRED_ERROR}"
+                )
+            else:
+                _done_payload2["failure_code"] = "REQUIRED_TOOLS_VIOLATION"
+                _done_payload2["grounding_block_source"] = "missing: " + ", ".join(
+                    _missing
+                )
+                yield ExecutionEvent(
+                    event="token",
+                    data=f"\n\n[required tools not called: {', '.join(_missing)}]",
+                )
+        elif not all_tool_calls and self.tool_registry.names():
+            _done_payload2["warnings"] = [
+                "completed without calling any tool although tools were available"
+            ]
         yield ExecutionEvent(event="done", data=_done_payload2)
 
 
@@ -1554,6 +1711,7 @@ def _ensure_tool_classes() -> None:
 
 async def resolve_asset_schemas(
     tool_config: dict[str, dict[str, Any]] | None,
+    tenant_id: str = "",
 ) -> dict[str, dict[str, Any]]:
     """For every tool with parameter_defaults that points at an uploaded"""
     out: dict[str, dict[str, Any]] = {}
@@ -1578,22 +1736,29 @@ async def resolve_asset_schemas(
                     asset_id = defaults.get("code_asset_id")
                     model_id = defaults.get("model_id") or defaults.get("ml_model_id")
                     row = None
+                    # Scope to the tenant whenever the caller knows it.
+                    tenant_clause = (
+                        " AND tenant_id = CAST(:tid AS uuid)" if tenant_id else ""
+                    )
+                    params: dict[str, Any] = (
+                        {"tid": str(tenant_id)} if tenant_id else {}
+                    )
                     if asset_id:
                         r = await conn.execute(
                             _sql_text(
                                 "SELECT input_schema FROM code_assets "
-                                "WHERE id = CAST(:id AS uuid)"
+                                "WHERE id = CAST(:id AS uuid)" + tenant_clause
                             ),
-                            {"id": str(asset_id)},
+                            {"id": str(asset_id), **params},
                         )
                         row = r.first()
                     elif model_id:
                         r = await conn.execute(
                             _sql_text(
                                 "SELECT input_schema FROM ml_models "
-                                "WHERE id = CAST(:id AS uuid)"
+                                "WHERE id = CAST(:id AS uuid)" + tenant_clause
                             ),
-                            {"id": str(model_id)},
+                            {"id": str(model_id), **params},
                         )
                         row = r.first()
                     if row and row[0]:
@@ -1747,6 +1912,7 @@ def build_tool_registry(
         )
 
     registry = ToolRegistry()
+    unknown_tools: list[str] = []
     for name in tool_names:
         # Check context tools first (need constructor args)
         if name in context_tools:
@@ -1754,7 +1920,39 @@ def build_tool_registry(
         elif name in available:
             registry.register(available[name]())
         else:
-            logger.warning("Unknown tool requested: %s", name)
+            unknown_tools.append(name)
+
+    if unknown_tools:
+        # Names outside the registry may be saved tools. Only approved rows load, into the sandbox.
+        from engine.tools.dynamic_tool import DynamicTool, fetch_saved_tools
+
+        saved = fetch_saved_tools(str(tenant_id or ""), db_url, unknown_tools)
+        for name in unknown_tools:
+            row = saved.get(name)
+            if row is None:
+                logger.warning(
+                    "Unknown tool requested: %s (agent %s)", name, agent_id or "-"
+                )
+            elif row.get("status") != "approved":
+                logger.warning(
+                    "Saved tool %s is %s, not approved, skipped (agent %s)",
+                    name,
+                    row.get("status") or "pending",
+                    agent_id or "-",
+                )
+            else:
+                registry.register(
+                    DynamicTool(
+                        tool_name=name,
+                        tool_description=row.get("description") or "",
+                        tool_code=row.get("code") or "",
+                        permissions=row.get("permissions") or {},
+                        input_schema=row.get("input_schema") or {},
+                    )
+                )
+                logger.info(
+                    "Loaded approved saved tool %s (agent %s)", name, agent_id or "-"
+                )
 
     # Each tool is tenant-scoped; if the agent's model_config carries
     # `atlas_graphs: ["uuid", ...]`, that list further restricts which

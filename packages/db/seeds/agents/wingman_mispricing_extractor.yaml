@@ -268,3 +268,8 @@ input_variables:
 example_prompts:
   - '{"corridor": {"id": "USGC-NWE", "label": "US Gulf Coast -> North West Europe", "origin_port": "Houston", "destination_port": "Rotterdam", "eia_origin_series": "PROPANE_USGC_MB", "yahoo_forward_ticker": "B0=F", "open_meteo_destination_hub": "NWE_ROTTERDAM", "baltic_route": "BLPG2", "vessel_class": "VLGC"}}'
   - '{"corridor": {"id": "USAC-CONT", "label": "US Atlantic -> Continent gasoline (TC14)", "origin_port": "New York", "destination_port": "Rotterdam", "eia_origin_series": "GASOLINE_USGC", "yahoo_forward_ticker": "RB=F", "open_meteo_destination_hub": "NWE_ROTTERDAM", "worldscale_route": "TC14", "vessel_class": "MR2"}}'
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - AISSTREAM_API_KEY
+  - EIA_API_KEY

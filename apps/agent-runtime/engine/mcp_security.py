@@ -59,6 +59,17 @@ class MCPSecurityContext:
     def approve_tool(self, tool_name: str) -> None:
         self._approved_tools.add(tool_name)
 
+    def is_approved(self, tool_name: str) -> bool:
+        return tool_name in self._approved_tools
+
+    def needs_gate(self, tool: MCPTool) -> bool:
+        """True when this call would be blocked without a human approval first."""
+        return (
+            self.policy.block_unapproved_destructive
+            and self.requires_approval(tool)
+            and not self.is_approved(tool.name)
+        )
+
     def check_call_allowed(self, tool: MCPTool) -> tuple[bool, str]:
         if self.call_count >= self.policy.max_calls_per_execution:
             return False, "MCP tool call limit ({}) exceeded for this execution".format(

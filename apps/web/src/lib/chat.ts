@@ -37,8 +37,17 @@ export interface PipelineNodeCompleteData {
   duration_ms: number;
 }
 
+export interface ModerationData {
+  source: string;
+  outcome: string;
+  categories?: string[];
+  content?: string;
+  message?: string;
+}
+
 interface StreamCallbacks {
   onToken: (text: string) => void;
+  onModeration?: (data: ModerationData) => void;
   onToolCall: (data: ToolCallData) => void;
   onToolResult: (data: ToolResultData) => void;
   onDone: (data: DoneData) => void;
@@ -51,6 +60,7 @@ export function connectToAgentStream(
   agentId: string,
   message: string,
   callbacks: StreamCallbacks,
+  context?: Record<string, unknown>,
 ): AbortController {
   const controller = new AbortController();
   const token = localStorage.getItem('access_token');
@@ -63,7 +73,7 @@ export function connectToAgentStream(
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ message, stream: true }),
+        body: JSON.stringify(context && Object.keys(context).length ? { message, stream: true, context } : { message, stream: true }),
         signal: controller.signal,
       });
 
@@ -111,6 +121,12 @@ export function connectToAgentStream(
                 break;
               case 'error':
                 callbacks.onError(data.message);
+                break;
+              case 'moderation':
+                callbacks.onModeration?.(data as ModerationData);
+                break;
+              case 'moderation_block':
+                callbacks.onModeration?.({ source: data.source || 'pre_llm', outcome: 'blocked', message: data.message } as ModerationData);
                 break;
               case 'node_start':
                 callbacks.onNodeStart?.(data as PipelineNodeStartData);

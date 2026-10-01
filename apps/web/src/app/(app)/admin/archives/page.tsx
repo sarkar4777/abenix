@@ -7,6 +7,33 @@ import {
 } from 'lucide-react';
 import { apiFetch, API_URL } from '@/lib/api-client';
 
+// Plain <a href> drops the bearer token, so fetch the dump and hand it over as a blob
+async function downloadArchive(run: ArchiveRun): Promise<string | null> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  const res = await fetch(`${API_URL}/api/admin/archives/${run.id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      detail = body?.error?.message || body?.detail || detail;
+    } catch {/* non-json body */}
+    return detail;
+  }
+  const blob = await res.blob();
+  const name = run.file_uri?.split(/[\/]/).pop() || `${run.source_table}-${run.id}.jsonl.gz`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return null;
+}
+
 interface ArchiveRun {
   id: string;
   source_table: string;
@@ -219,6 +246,15 @@ function PolicyRow({ policy, onSave, saving }: { policy: RetentionPolicy; onSave
 }
 
 function RunRow({ run }: { run: ArchiveRun }) {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadErr, setDownloadErr] = useState<string | null>(null);
+  const onDownload = async () => {
+    setDownloading(true);
+    setDownloadErr(null);
+    const err = await downloadArchive(run).catch((e: unknown) => (e instanceof Error ? e.message : 'Download failed'));
+    if (err) setDownloadErr(err);
+    setDownloading(false);
+  };
   const StatusIcon = run.status === 'completed' ? CheckCircle2 :
                      run.status === 'failed' ? XCircle :
                      Clock;
@@ -237,16 +273,21 @@ function RunRow({ run }: { run: ArchiveRun }) {
           <span className="text-rose-300 font-mono">{run.rows_deleted.toLocaleString()} deleted</span>
           <span className="text-slate-400 font-mono">{fmtBytes(run.file_size_bytes)}</span>
           {run.file_uri && (
-            <a
-              href={`${API_URL}/api/admin/archives/${run.id}/download`}
-              className="text-cyan-400 hover:underline flex items-center gap-1"
-              target="_blank" rel="noreferrer"
+            <button
+              type="button"
+              onClick={onDownload}
+              disabled={downloading}
+              className="text-cyan-400 hover:underline flex items-center gap-1 disabled:opacity-50"
+              data-testid={`archive-download-${run.id}`}
             >
-              <Download className="w-3 h-3" /> dump
-            </a>
+              {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />} dump
+            </button>
           )}
         </span>
       </div>
+      {downloadErr && (
+        <p className="mt-1 ml-7 text-[10px] text-rose-300">{downloadErr}</p>
+      )}
       {run.error_message && (
         <pre className="mt-2 ml-7 text-rose-200 bg-rose-500/10 border border-rose-500/30 rounded p-2 text-[10px] whitespace-pre-wrap max-h-24 overflow-auto">{run.error_message}</pre>
       )}

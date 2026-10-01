@@ -2,19 +2,41 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
-PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
-PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 
 class VectorSearchTool(BaseTool):
     name = "vector_search"
+    config_fields = (
+        ConfigField(
+            "PINECONE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Pinecone",
+            signup_url="https://app.pinecone.io",
+        ),
+        ConfigField(
+            "PINECONE_INDEX_NAME",
+            label="Index name",
+            kind="string",
+            required=False,
+            group="Pinecone",
+            default="agentforge-knowledge",
+        ),
+        ConfigField(
+            "OPENAI_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenAI",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+    )
     description = (
         "Search the agent's knowledge base for relevant information. "
         "Returns the most relevant document chunks matching the query."
@@ -45,7 +67,7 @@ class VectorSearchTool(BaseTool):
         if not query.strip():
             return ToolResult(content="No query provided", is_error=True)
 
-        if not PINECONE_API_KEY or not OPENAI_API_KEY:
+        if not self.cfg("PINECONE_API_KEY") or not self.cfg("OPENAI_API_KEY"):
             return ToolResult(
                 content="Vector search not configured (missing API keys)",
                 is_error=True,
@@ -88,7 +110,7 @@ class VectorSearchTool(BaseTool):
     async def _embed_query(self, query: str) -> list[float]:
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        client = AsyncOpenAI(api_key=self.cfg("OPENAI_API_KEY"))
         response = await client.embeddings.create(model=EMBEDDING_MODEL, input=[query])
         return response.data[0].embedding
 
@@ -97,8 +119,8 @@ class VectorSearchTool(BaseTool):
     ) -> list[dict[str, Any]]:
         from pinecone import Pinecone
 
-        pc = Pinecone(api_key=PINECONE_API_KEY)
-        index = pc.Index(PINECONE_INDEX_NAME)
+        pc = Pinecone(api_key=self.cfg("PINECONE_API_KEY"))
+        index = pc.Index(self.cfg("PINECONE_INDEX_NAME"))
 
         response = index.query(
             vector=embedding,

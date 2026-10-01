@@ -17,18 +17,18 @@ Notes on what this actually provides (as of April 2026):
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 _BASE_URL = "https://api.ember-energy.org/v1"
 
 
 def _get_api_key() -> str:
-    return os.environ.get("EMBER_API_KEY", "").strip()
+    return credentials.get("EMBER_API_KEY").strip()
 
 
 async def _get(path: str, params: dict[str, Any], api_key: str) -> dict[str, Any]:
@@ -42,6 +42,16 @@ async def _get(path: str, params: dict[str, Any], api_key: str) -> dict[str, Any
 
 class EmberClimateTool(BaseTool):
     name = "ember_climate"
+    config_fields = (
+        ConfigField(
+            "EMBER_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Ember",
+            signup_url="https://ember-energy.org/data/api/",
+        ),
+    )
     description = (
         "Fetch power-sector data from Ember's API (api.ember-energy.org): "
         "electricity generation mix by source, carbon intensity (gCO2/kWh), "
@@ -99,9 +109,9 @@ class EmberClimateTool(BaseTool):
         if not api_key:
             return ToolResult(
                 content=(
-                    "Error: EMBER_API_KEY environment variable is not set. "
+                    "EMBER_API_KEY is not configured. An admin can add it under Admin -> Tool Configuration. "
                     "Register for a free key at https://ember-energy.org/data/api/ "
-                    "and export EMBER_API_KEY=<your-key>."
+                    ""
                 ),
                 is_error=True,
             )

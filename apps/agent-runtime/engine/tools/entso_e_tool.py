@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 _BASE_URL = "https://web-api.tp.entsoe.eu/api"
 
@@ -48,6 +47,16 @@ _DOC_TYPES: dict[str, str] = {
 
 class EntsoETool(BaseTool):
     name = "entso_e"
+    config_fields = (
+        ConfigField(
+            "ENTSOE_API_KEY",
+            label="Security token",
+            kind="secret",
+            required=True,
+            group="ENTSO-E",
+            signup_url="https://transparency.entsoe.eu/",
+        ),
+    )
     description = (
         "Fetch European electricity market data from ENTSO-E Transparency Platform. "
         "Day-ahead prices, wind/solar generation, load forecasts."
@@ -83,17 +92,7 @@ class EntsoETool(BaseTool):
     }
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        api_key = os.environ.get("ENTSOE_API_KEY", "")
-        if not api_key:
-            return ToolResult(
-                content=(
-                    "Error: ENTSOE_API_KEY environment variable is not set. "
-                    "Register at https://transparency.entsoe.eu/ to obtain an API token, "
-                    "then set it with: export ENTSOE_API_KEY=your_token"
-                ),
-                is_error=True,
-            )
-
+        api_key = self.cfg("ENTSOE_API_KEY", required=True)
         data_type = arguments.get("data_type", "")
         area = arguments.get("area", "DE_LU").upper()
         date_from = arguments.get("date_from", "")

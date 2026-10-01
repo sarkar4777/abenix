@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, Numeric, String, func
+from sqlalchemy import DateTime, Enum, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -33,10 +33,8 @@ class Tenant(UUIDMixin, Base):
     settings: Mapped[dict | None] = mapped_column(
         MutableDict.as_mutable(JSONB), nullable=True, default=dict
     )
-    # Per-tenant Slack webhook for outbound notifications. Falls back to
-    # ABENIX_SLACK_WEBHOOK_URL env var when NULL — see
-    # apps/api/app/core/notifications.py.
-    slack_webhook_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Per-tenant Slack webhook, stored encrypted via app.core.crypto
+    slack_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

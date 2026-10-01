@@ -107,31 +107,9 @@ async def list_pending_approvals(
     user: User = Depends(get_current_user),
 ) -> JSONResponse:
     """List all pending HITL approval requests for the tenant."""
-    # Import here to avoid circular dependency with agent-runtime
-    import importlib
+    from app.core.hitl import list_pending_hitl
 
-    try:
-        hitl = importlib.import_module("engine.tools.human_approval")
-        approvals = await hitl.list_pending_approvals(str(user.tenant_id))
-    except ImportError:
-        # Agent runtime not on path — use Redis directly
-        import redis.asyncio as aioredis
-        from app.core.config import settings as app_cfg
-
-        r = aioredis.from_url(app_cfg.redis_url, decode_responses=True)
-        members = await r.smembers(f"hitl:pending:{user.tenant_id}")
-        await r.aclose()
-        approvals = []
-        for m in members:
-            data = json.loads(m)
-            # Check if already decided
-            check_r = aioredis.from_url(app_cfg.redis_url, decode_responses=True)
-            decided = await check_r.get(
-                f"hitl:approval:{data['execution_id']}:{data['gate_id']}"
-            )
-            await check_r.aclose()
-            if not decided:
-                approvals.append(data)
+    approvals = await list_pending_hitl(str(user.tenant_id))
     return success(approvals)
 
 
@@ -143,6 +121,8 @@ async def approve_execution_gate(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.core.hitl import approver_denial, write_hitl_decision
+
     if body.decision not in ("approved", "rejected"):
         return error("Decision must be 'approved' or 'rejected'", 400)
 
@@ -157,24 +137,19 @@ async def approve_execution_gate(
     if not exec_row:
         return error("Execution not found", 404)
 
-    import time
-    import redis.asyncio as aioredis
-    from app.core.config import settings as app_cfg
+    denial = await approver_denial(db, user, exec_row.user_id)
+    if denial:
+        return error(denial, 403)
 
-    r = aioredis.from_url(app_cfg.redis_url, decode_responses=True)
-    approval_key = f"hitl:approval:{execution_id}:{gate_id}"
-    payload = json.dumps(
-        {
-            "decision": body.decision,
-            "reviewer": user.full_name or user.email,
-            "reviewer_id": str(user.id),
-            "tenant_id": str(user.tenant_id),
-            "comment": body.comment,
-            "decided_at": time.time(),
-        }
+    set_ok = await write_hitl_decision(
+        execution_id=str(execution_id),
+        gate_id=gate_id,
+        decision=body.decision,
+        reviewer=user.full_name or user.email,
+        reviewer_id=str(user.id),
+        tenant_id=str(user.tenant_id),
+        comment=body.comment,
     )
-    set_ok = await r.set(approval_key, payload, ex=7200, nx=True)
-    await r.aclose()
     if not set_ok:
         return error("Gate already decided", 409)
 
@@ -666,15 +641,35 @@ async def get_execution_replay(
         return error("Execution not found", 404)
 
     trace = getattr(execution, "execution_trace", None) or {}
+    steps = list(trace.get("steps") or [])
+    if not steps:
+        # rows written before steps were persisted still have the tool calls
+        steps = (
+            [
+                {
+                    "node_type": "tool_call",
+                    "tool": tc.get("name"),
+                    "input": tc.get("arguments"),
+                    "output_preview": tc.get("result_preview") or tc.get("result"),
+                    "duration_ms": tc.get("duration_ms"),
+                    "is_error": tc.get("is_error"),
+                }
+                for tc in (execution.tool_calls or [])
+                if isinstance(tc, dict)
+            ]
+            if isinstance(execution.tool_calls, list)
+            else []
+        )
     return success(
         {
             "execution": _serialize_execution(execution),
             "trace": trace,
-            "steps": trace.get("steps", []),
-            "total_steps": len(trace.get("steps", [])),
+            "steps": steps,
+            "total_steps": len(steps),
             "confidence_score": (
                 float(execution.confidence_score)
-                if hasattr(execution, "confidence_score") and execution.confidence_score
+                if hasattr(execution, "confidence_score")
+                and execution.confidence_score is not None
                 else None
             ),
         }
@@ -741,7 +736,7 @@ def _serialize_execution(e: Execution) -> dict:
     # New fields from migration e5f6a7b8c9d0
     if hasattr(e, "confidence_score"):
         data["confidence_score"] = (
-            float(e.confidence_score) if e.confidence_score else None
+            float(e.confidence_score) if e.confidence_score is not None else None
         )
     if hasattr(e, "parent_execution_id"):
         data["parent_execution_id"] = (

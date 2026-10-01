@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from engine import credentials
 import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 # Provider configuration: name -> (env var for API key, base URL)
 _PROVIDERS = [
@@ -18,6 +19,58 @@ _PROVIDERS = [
 
 class TavilySearchTool(BaseTool):
     name = "tavily_search"
+    # One field per provider in _PROVIDERS. Any one of them unlocks the tool,
+    # and with none set it falls back to DuckDuckGo and says so.
+    config_fields = tuple(
+        ConfigField(
+            env,
+            label=f"{prov.title()} API key",
+            kind="secret",
+            group=prov.title(),
+            dynamic=True,
+        )
+        for prov, env, _url in _PROVIDERS
+    )
+
+    @classmethod
+    async def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        from engine.tools._config_probe import probe
+
+        v = values.get(key or "", "")
+        if key == "TAVILY_API_KEY":
+            return await probe(
+                "POST",
+                "https://api.tavily.com/search",
+                json={"api_key": v, "query": "ping", "max_results": 1},
+                accepted="Tavily accepted the key",
+            )
+        if key == "BRAVE_SEARCH_API_KEY":
+            return await probe(
+                "GET",
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": "ping", "count": 1},
+                headers={"X-Subscription-Token": v, "Accept": "application/json"},
+                accepted="Brave accepted the key",
+            )
+        if key == "SERPAPI_API_KEY":
+            return await probe(
+                "GET",
+                "https://serpapi.com/account.json",
+                params={"api_key": v},
+                accepted="SerpAPI accepted the key",
+            )
+        if key == "SERPER_API_KEY":
+            return await probe(
+                "POST",
+                "https://google.serper.dev/search",
+                json={"q": "ping", "num": 1},
+                headers={"X-API-KEY": v},
+                accepted="Serper accepted the key",
+            )
+        return None
+
     description = (
         "Advanced web search with AI-generated answers. "
         "Supports Tavily, Brave, SerpAPI, and Serper providers."
@@ -70,7 +123,7 @@ class TavilySearchTool(BaseTool):
         ordered = self._build_provider_order(preferred)
 
         for provider_name, env_key, url in ordered:
-            api_key = os.environ.get(env_key, "")
+            api_key = credentials.get(env_key)
             if not api_key:
                 continue
             try:
@@ -299,7 +352,15 @@ class TavilySearchTool(BaseTool):
 
             return ToolResult(
                 content="\n".join(lines),
-                metadata={"provider": "duckduckgo", "result_count": len(results)},
+                metadata={
+                    "provider": "duckduckgo",
+                    "result_count": len(results),
+                    "warnings": [
+                        "No search provider key is configured (TAVILY_API_KEY, "
+                        "BRAVE_SEARCH_API_KEY, SERPAPI_API_KEY or SERPER_API_KEY), "
+                        "so this used DuckDuckGo, which returns fewer and older results."
+                    ],
+                },
             )
         except Exception as e:
             return ToolResult(

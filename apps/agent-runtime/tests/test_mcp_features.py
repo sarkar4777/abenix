@@ -372,7 +372,31 @@ class TestResolveTools:
             assert result_registry is registry
             assert clients == []
             assert sec_ctx is None
-            mock_build.assert_called_once_with(["calculator"])
+            mock_build.assert_called_once_with(["calculator"], kb_ids=None)
+            assert result_registry.mcp_warnings == []
+
+    @pytest.mark.asyncio
+    async def test_resolve_forwards_registry_context(self):
+        """tenant/agent/execution context must reach build_tool_registry."""
+        with patch("engine.agent_executor.build_tool_registry") as mock_build:
+            mock_build.return_value = ToolRegistry()
+            await resolve_tools(
+                ["code_asset"],
+                [],
+                kb_ids=["kb-1"],
+                tenant_id="t-1",
+                agent_id="a-1",
+                execution_id="e-1",
+                db_url="postgresql://x",
+            )
+            mock_build.assert_called_once_with(
+                ["code_asset"],
+                kb_ids=["kb-1"],
+                tenant_id="t-1",
+                agent_id="a-1",
+                execution_id="e-1",
+                db_url="postgresql://x",
+            )
 
     @pytest.mark.asyncio
     async def test_resolve_with_mcp_connection(self):
@@ -434,10 +458,15 @@ class TestResolveTools:
                 assert clients == []
                 assert registry.names() == []
                 mock_instance.close.assert_awaited_once()
+                # The model must be told the server is missing this run.
+                assert len(registry.mcp_warnings) == 1
+                assert "dead-server" in registry.mcp_warnings[0]
+                assert "not available this run" in registry.mcp_warnings[0]
 
     @pytest.mark.asyncio
-    async def test_resolve_tool_name_conflict_skips_mcp(self):
-        """When a built-in tool has the same name as an MCP tool, the MCP tool is skipped."""
+    async def test_resolve_tool_name_conflict_prefixes_mcp(self):
+        """When a built-in tool has the same name as an MCP tool, the MCP tool is
+        registered under a server-prefixed name instead of being dropped."""
         builtin_registry = ToolRegistry()
         # Simulate a built-in tool already registered with name "calculator"
         fake_builtin = MagicMock(spec=BaseTool)
@@ -463,8 +492,12 @@ class TestResolveTools:
                     ],
                 )
 
-                # The original built-in should remain; MCP duplicate should be skipped
+                # The original built-in should remain; MCP duplicate gets a prefix
                 assert registry.get("calculator") is fake_builtin
+                prefixed = registry.get("mcp__calculator")
+                assert isinstance(prefixed, MCPToolWrapper)
+                # The server is still called by the tool's real name.
+                assert prefixed._mcp_tool.name == "calculator"
 
     @pytest.mark.asyncio
     async def test_resolve_filters_allowed_tools(self):
