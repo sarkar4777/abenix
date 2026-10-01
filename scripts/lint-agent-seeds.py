@@ -85,6 +85,60 @@ def check_knowledge_grants(yaml_files: list[Path]) -> list[tuple[str, str]]:
     return problems
 
 
+def _required_keys_by_tool() -> dict[str, list[str]]:
+    """tool slug -> keys the tool itself marks required, from the runtime classes."""
+    import importlib
+
+    root = Path(__file__).resolve().parents[1]
+    for sub in ("apps/agent-runtime", "apps/api", "packages/db"):
+        p = str(root / sub)
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    try:
+        tool_config = importlib.import_module("app.services.tool_config")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[lint-agent-seeds] WARN: tool declarations unavailable ({exc.__class__.__name__}), credential check skipped")
+        return {}
+    tool_config.declarations()
+    out: dict[str, list[str]] = {}
+    for slug, keys in (tool_config._BY_TOOL or {}).items():
+        req = [k for k, r in keys.items() if r]
+        if req:
+            out[slug] = req
+    return out
+
+
+def check_keyed_tool_credentials(yaml_files: list[Path]) -> list[tuple[str, str]]:
+    """A seed using a tool that cannot run without a key must say so in requires_credentials."""
+    required = _required_keys_by_tool()
+    if not required:
+        return []
+    failures: list[tuple[str, str]] = []
+    for f in yaml_files:
+        try:
+            data = yaml.safe_load(f.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        tools = set((data.get("model_config") or {}).get("tools") or [])
+        for node in ((data.get("pipeline_config") or {}).get("nodes") or []):
+            if isinstance(node, dict) and node.get("tool_name"):
+                tools.add(node["tool_name"])
+        needed = sorted({k for t in tools for k in required.get(t, [])})
+        if not needed:
+            continue
+        declared = set(data.get("requires_credentials") or [])
+        missing = [k for k in needed if k not in declared]
+        if missing:
+            failures.append((
+                f.name,
+                "uses tools that need " + ", ".join(missing)
+                + ", add them under a top-level requires_credentials: list",
+            ))
+    return failures
+
+
 def main() -> int:
     if not SEEDS_DIR.is_dir():
         print(f"[lint-agent-seeds] no seed dir at {SEEDS_DIR}")
@@ -107,6 +161,7 @@ def main() -> int:
             failures.append((f.name, str(e)))
 
     failures.extend(check_knowledge_grants(yaml_files))
+    failures.extend(check_keyed_tool_credentials(yaml_files))
 
     if failures:
         print(f"[lint-agent-seeds] FAIL: {len(failures)}/{len(yaml_files)} broken")

@@ -34,9 +34,15 @@ export default function ShareDialog({ open, onClose, agentId, agentName }: Props
     fetch(`${API_URL}/api/agents/${agentId}/shares`, {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then(r => r.json())
-      .then(b => setShares(b.data || []))
-      .catch(() => {});
+      .then(async r => {
+        const b = await r.json().catch(() => null);
+        if (!r.ok) {
+          setError(b?.error?.message || 'Could not load shares');
+          return;
+        }
+        setShares(b?.data || []);
+      })
+      .catch(() => setError('Could not load shares'));
   }, [open, agentId, token]);
 
   if (!open) return null;
@@ -54,7 +60,7 @@ export default function ShareDialog({ open, onClose, agentId, agentName }: Props
       if (resp.ok) {
         setSuccess(`Shared with ${email}`);
         setEmail('');
-        setShares(prev => [...prev, body.data]);
+        setShares(prev => [...prev.filter(s => s.id !== body.data.id), body.data]);
       } else {
         setError(body.error?.message || 'Failed to share');
       }
@@ -63,11 +69,19 @@ export default function ShareDialog({ open, onClose, agentId, agentName }: Props
   };
 
   const revoke = async (shareId: string) => {
-    await fetch(`${API_URL}/api/agents/${agentId}/shares/${shareId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setShares(prev => prev.filter(s => s.id !== shareId));
+    setError(null);
+    try {
+      const r = await fetch(`${API_URL}/api/agents/${agentId}/shares/${shareId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) {
+        const b = await r.json().catch(() => null);
+        setError(b?.error?.message || 'Failed to revoke');
+        return;
+      }
+      setShares(prev => prev.filter(s => s.id !== shareId));
+    } catch { setError('Network error'); }
   };
 
   const permColors = { view: 'text-slate-400', execute: 'text-cyan-400', edit: 'text-amber-400' };

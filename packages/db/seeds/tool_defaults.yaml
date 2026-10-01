@@ -1,0 +1,12 @@
+# Defaults for tool configuration values.
+#
+# A tool reads each value it needs through engine.credentials, in this order:
+# a value an admin saved under Admin -> Tool Configuration, then the process
+# environment, then this file, then the default the tool itself declares.
+#
+# Put non-secret defaults here, such as a self-hosted service URL or a
+# region. Keys are the same names the tools use. Leave secrets out of this
+# file, they belong in the admin screen or the deployment's Secret.
+#
+#   LIBRETRANSLATE_URL: http://libretranslate.tools.svc.cluster.local:5000
+#   AWS_REGION: eu-west-1

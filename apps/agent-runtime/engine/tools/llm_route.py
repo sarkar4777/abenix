@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from engine.provider_credentials import PROVIDER_CONFIG_FIELDS
 from engine.tools.base import BaseTool, ToolResult
 
 
 class LLMRouteTool(BaseTool):
+    # The LLM provider keys, declared here so they sit on the admin screen.
+    config_fields = PROVIDER_CONFIG_FIELDS
     name = "llm_route"
     description = (
         "Use an LLM to analyze input and route to one of N named branches. "

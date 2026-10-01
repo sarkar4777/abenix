@@ -28,7 +28,11 @@ test.describe.serial('Wingman — full browser UAT', () => {
   test('shell renders, sidebar exposes the surface links', async ({ page }) => {
     await gotoOk(page, '/');
     expect(page.url()).toMatch(/\/(home|workbench)$/);
-    for (const label of ['Arbitrage Workbench', 'Broker Inbox', 'Operations Watch', 'Strategy Lab', 'Knowledge Graph', 'Forward Scenarios', 'Approvals']) {
+    // A cold pod takes a while to serve its first page after a deploy. Give
+    // the first label the long wait, the rest are already on screen by then.
+    const labels = ['Arbitrage Workbench', 'Broker Inbox', 'Operations Watch', 'Strategy Lab', 'Knowledge Graph', 'Forward Scenarios', 'Approvals'];
+    await expect(page.getByText(labels[0]).first()).toBeVisible({ timeout: 45_000 });
+    for (const label of labels.slice(1)) {
       await expect(page.getByText(label).first()).toBeVisible({ timeout: 10_000 });
     }
   });

@@ -59,7 +59,7 @@
 | `/settings/webhooks` | outbound webhook config |
 | `/settings/profile` | display name, avatar, password |
 | `/settings/cognify` *(v2.0)* | Cognify acceptance + conflict policy: `auto_accept_threshold`, `conflict_action`, `max_parallel_docs`, `daily_budget_usd`. Lists open conflicts with per-row Accept-A / Accept-B resolution |
-| `/settings/gdpr` *(v2.0)* | Trigger the five-store cascade purge for a user; shows the per-store audit receipts from `gdpr_purge_log` |
+| `/settings/gdpr` *(v2.0)* | Trigger the five-store cascade purge for a user, showing the per-store audit receipts from `gdpr_purge_log` |
 
 ---
 

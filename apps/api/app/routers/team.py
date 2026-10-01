@@ -85,7 +85,7 @@ async def dev_create_member(
     """Admin-only: synchronously create a member in the caller's tenant."""
     import os
 
-    if os.environ.get("ALLOW_DEV_CREATE_MEMBER", "true").lower() != "true":
+    if os.environ.get("ALLOW_DEV_CREATE_MEMBER", "false").lower() != "true":
         return error("dev-create-member is disabled in this environment", 403)
     if user.role not in (UserRole.ADMIN,):
         return error("Only admins can create members", 403)

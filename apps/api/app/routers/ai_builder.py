@@ -924,6 +924,7 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
                                 "parameters": tool_params,
                                 "input_schema": dyn_tool.input_schema,
                                 "generated": True,
+                                "status": "pending",
                             }
                         )
                         valid_tools.add(tool_name)
@@ -946,7 +947,7 @@ be sent back for repair. Before you emit your JSON, MENTALLY CHECK each one:
                                     code=dyn_tool._code,
                                     input_schema=dyn_tool.input_schema,
                                     created_by=user.id,
-                                    status="approved",  # AI-generated as part of build — auto-approve
+                                    status="pending",  # runtime loads it only once an admin approves
                                     permissions={
                                         "network": False,
                                         "filesystem_read": False,

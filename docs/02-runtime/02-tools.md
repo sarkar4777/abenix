@@ -51,6 +51,8 @@ Three things every tool defines:
 And one method:
 - **`async def execute(arguments)`** — does the work. returns a `ToolResult`.
 
+A tool that needs an API key or a setting declares a fourth thing, `config_fields`. See [Configuration and credentials](#configuration-and-credentials) below. A tool with no `config_fields` reads nothing from the environment, and the lint holds it to that.
+
 ---
 
 ## ToolResult
@@ -171,6 +173,46 @@ The shims live in [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-r
 
 ---
 
+## Configuration and credentials
+
+A tool never reads `os.environ`. It declares what it needs on the class and reads it through the resolver:
+
+```python
+from engine.tools.base import BaseTool, ConfigField, ToolResult
+
+
+class CompaniesHouseTool(BaseTool):
+    name = "companies_house"
+    config_fields = (
+        ConfigField("COMPANIES_HOUSE_API_KEY", label="API key", kind="secret", required=True,
+                    group="Companies House",
+                    signup_url="https://developer.company-information.service.gov.uk/"),
+    )
+
+    async def execute(self, arguments):
+        api_key = self.cfg("COMPANIES_HOUSE_API_KEY", required=True)
+```
+
+| Field | Meaning |
+|---|---|
+| `key` | The name, also the environment variable name. Storage is per key, so a key several tools share is entered once. |
+| `kind` | `secret`, `string`, `url`, `int`, `bool` or `select`. Drives the input the admin sees and the validation on save. |
+| `required` | The tool cannot run without it. `cfg(key, required=True)` raises and the base class answers with one standard sentence naming the key and the admin screen. Say it only for single-provider tools. |
+| `group` | The provider name the admin screen groups by. |
+| `description`, `signup_url` | Shown on the row. |
+| `default` | Used when nothing else provides a value. |
+| `dynamic` | The key is read under a name built at run time, so the lint does not expect a literal `cfg("KEY")`. |
+
+The resolver (`engine/credentials.py`) checks, in order, a value an admin saved under **Admin -> Tool Configuration**, the process environment, `packages/db/seeds/tool_defaults.yaml`, then the declared default. Reads are synchronous against an in-memory snapshot refreshed every 30 seconds, so `execute` never waits on the database.
+
+The declaration is what the platform knows about tool configuration. The API reads `config_fields` off the runtime classes the same way it reads `input_schema`, and from that builds the admin screen, the badges on `/tools` and in the builder palette, and the Integrations page. A tool that declares its fields is on all of them with no further change. The lint `scripts/check-tool-config.py`, run by CI and `deploy.sh`, fails any tool that reads the environment privately or reads a key it did not declare, which is what makes the screen complete.
+
+An optional `config_test(values, key)` classmethod gives the admin a Test button for the key. Degraded modes go in `ToolResult.metadata["warnings"]` and skipped sources in `metadata["sources_skipped"]`, both of which the runtime appends to what the model sees.
+
+The full walkthrough is [08-howto/01-add-a-tool](../08-howto/01-add-a-tool.md), the admin and operator view is [08-howto/08-tool-configuration](../08-howto/08-tool-configuration.md).
+
+---
+
 ## Per-agent configuration overrides
 
 An agent's `model_config.tool_config[tool_slug]` can override behaviour without changing the tool's code:
@@ -181,6 +223,13 @@ An agent's `model_config.tool_config[tool_slug]` can override behaviour without 
 | `parameter_defaults` | Default args merged with whatever the LLM provided. The LLM's args win on conflict. |
 | `max_calls` | Cap on how many times this agent can invoke this tool per execution. |
 | `require_approval` | When true, each call pauses on the approval gate. |
+
+Two agent-level fields sit beside `tool_config`:
+
+| Field | Effect |
+|---|---|
+| `require_tools` | A list of tool slugs the run must call. A run that finishes without calling every one of them is marked failed with `REQUIRED_TOOLS_VIOLATION`, on the inline and the queued path alike. `require_knowledge_search: true` is the same thing for `knowledge_search`. |
+| `input_variables[].default` | Applied into the pipeline context under what the caller sends, so a seeded pipeline runs with no input and a typed value from the chat page replaces the default. |
 
 ```yaml
 # Example: in an agent's yaml
@@ -340,6 +389,9 @@ logger.info("processing %s widgets for tenant %s", count, self.tenant_id)
 ```
 Log lines flow into Loki and are tagged with the OTel trace_id automatically.
 
+### 7. Never read `os.environ`
+Declare the value in `config_fields` and read it with `self.cfg()`. The lint fails the build otherwise, and the admin has no way to set a value the tool reads privately.
+
 ### 6. Idempotency
 If your tool is mutating, design for at-least-once invocation. The runtime *will* retry on certain network failures, and the agent itself may call the same tool twice in different iterations.
 
@@ -377,5 +429,6 @@ The runtime container that hosts the sandbox is `docker/Dockerfile.code-sandbox`
 ## See also
 
 - [08-howto/01-add-a-tool](../08-howto/01-add-a-tool.md) — step-by-step walkthrough
+- [08-howto/08-tool-configuration](../08-howto/08-tool-configuration.md) — credentials, the admin screen, the lint
 - [02-runtime/03-mcp](03-mcp.md) — MCP servers as a tool source
 - [02-runtime/00-agent-execution](00-agent-execution.md) — where tools fit in the loop

@@ -1,13 +1,13 @@
-﻿"""Persona-scoped retrieval."""
+"""Persona-scoped retrieval."""
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 from engine.tools import _meeting_session as sessmod
 
 logger = logging.getLogger(__name__)
@@ -15,6 +15,32 @@ logger = logging.getLogger(__name__)
 
 class PersonaRagTool(BaseTool):
     name = "persona_rag"
+    config_fields = (
+        ConfigField(
+            "OPENAI_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenAI",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+        ConfigField(
+            "PINECONE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Pinecone",
+            signup_url="https://app.pinecone.io",
+        ),
+        ConfigField(
+            "PINECONE_INDEX_NAME",
+            label="Index name",
+            kind="string",
+            required=False,
+            group="Pinecone",
+            default="agentforge-knowledge",
+        ),
+    )
     description = (
         "Retrieve from the user's persona-scoped knowledge. Use this when "
         "the agent needs to answer AS the user (their meeting notes, "
@@ -141,9 +167,9 @@ async def _persona_vector_search(
         from pinecone import Pinecone
     except ImportError:
         return []
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    pinecone_key = os.environ.get("PINECONE_API_KEY", "").strip()
-    index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
+    api_key = credentials.get("OPENAI_API_KEY").strip()
+    pinecone_key = credentials.get("PINECONE_API_KEY").strip()
+    index_name = credentials.get("PINECONE_INDEX_NAME", default="agentforge-knowledge")
     if not (api_key and pinecone_key):
         return []
 

@@ -366,3 +366,8 @@ example_prompts:
   - '{"region": "NORDICS", "horizon_months": 12}'
   - '{"region": "ERCOT", "horizon_months": 12}'
   - '{"region": "PJM", "horizon_months": 6}'
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - EIA_API_KEY
+  - ENTSOE_API_KEY

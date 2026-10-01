@@ -9,7 +9,8 @@ import os
 import time
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 from engine.tools import _meeting_session as sessmod
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ def _get_tts_openai_client() -> Any:
         from openai import AsyncOpenAI
     except ImportError:
         return None
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    api_key = credentials.get("OPENAI_API_KEY").strip()
     if not api_key:
         return None
     if _TTS_OPENAI_CLIENT is not None and _TTS_OPENAI_CLIENT_KEY == api_key:
@@ -43,6 +44,24 @@ def _get_tts_openai_client() -> Any:
 
 class MeetingSpeakTool(BaseTool):
     name = "meeting_speak"
+    config_fields = (
+        ConfigField(
+            "ELEVENLABS_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="ElevenLabs",
+            signup_url="https://elevenlabs.io",
+        ),
+        ConfigField(
+            "OPENAI_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenAI",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+    )
     description = (
         "Speak text into the joined meeting. Supports OpenAI neutral voices "
         "OR ElevenLabs cloned voices (if the user has a consented voice_id). "
@@ -104,7 +123,7 @@ class MeetingSpeakTool(BaseTool):
         # Provider selection + consent gate
         provider = "openai"
         cloned_fallback = False
-        if voice_id and os.environ.get("ELEVENLABS_API_KEY", "").strip():
+        if voice_id and self.cfg("ELEVENLABS_API_KEY").strip():
             if await _consent_ok(voice_id, sess.user_id):
                 provider = "elevenlabs"
             else:

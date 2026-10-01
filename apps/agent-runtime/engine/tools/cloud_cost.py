@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from datetime import date
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 def _month_window() -> tuple[str, str]:
@@ -16,11 +16,11 @@ def _month_window() -> tuple[str, str]:
 
 
 async def _aws_summary() -> dict[str, Any]:
-    if not os.environ.get("AWS_ACCESS_KEY_ID"):
+    if not credentials.get("AWS_ACCESS_KEY_ID"):
         return {
             "provider": "aws",
             "skipped": True,
-            "reason": "AWS_ACCESS_KEY_ID env var not set",
+            "reason": "AWS_ACCESS_KEY_ID is not configured, an admin can add it under Admin -> Tool Configuration",
         }
     try:
         import boto3  # type: ignore
@@ -28,7 +28,12 @@ async def _aws_summary() -> dict[str, Any]:
         return {"provider": "aws", "skipped": True, "reason": "boto3 not installed"}
     start, end = _month_window()
     try:
-        client = boto3.client("ce")
+        client = boto3.client(
+            "ce",
+            aws_access_key_id=credentials.get("AWS_ACCESS_KEY_ID") or None,
+            aws_secret_access_key=credentials.get("AWS_SECRET_ACCESS_KEY") or None,
+            region_name=credentials.get("AWS_REGION") or None,
+        )
         resp = client.get_cost_and_usage(
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
@@ -56,8 +61,8 @@ async def _aws_summary() -> dict[str, Any]:
 
 
 async def _gcp_summary() -> dict[str, Any]:
-    project = os.environ.get("GCP_BILLING_PROJECT", "").strip()
-    dataset = os.environ.get("GCP_BILLING_BQ_DATASET", "").strip()
+    project = credentials.get("GCP_BILLING_PROJECT").strip()
+    dataset = credentials.get("GCP_BILLING_BQ_DATASET").strip()
     if not (project and dataset):
         return {
             "provider": "gcp",
@@ -93,7 +98,7 @@ async def _gcp_summary() -> dict[str, Any]:
 
 
 async def _azure_summary() -> dict[str, Any]:
-    sub = os.environ.get("AZURE_SUBSCRIPTION_ID", "").strip()
+    sub = credentials.get("AZURE_SUBSCRIPTION_ID").strip()
     if not sub:
         return {
             "provider": "azure",
@@ -151,6 +156,52 @@ def _format(s: dict[str, Any]) -> str:
 
 class CloudCostTool(BaseTool):
     name = "cloud_cost"
+    config_fields = (
+        ConfigField(
+            "AWS_ACCESS_KEY_ID",
+            label="Access key id",
+            kind="secret",
+            required=False,
+            group="AWS",
+            signup_url="https://console.aws.amazon.com/iam",
+        ),
+        ConfigField(
+            "AWS_SECRET_ACCESS_KEY",
+            label="Secret access key",
+            kind="secret",
+            required=False,
+            group="AWS",
+        ),
+        ConfigField(
+            "AWS_REGION",
+            label="Region",
+            kind="string",
+            required=False,
+            group="AWS",
+            default="us-east-1",
+        ),
+        ConfigField(
+            "AZURE_SUBSCRIPTION_ID",
+            label="Subscription id",
+            kind="string",
+            required=False,
+            group="Azure",
+        ),
+        ConfigField(
+            "GCP_BILLING_BQ_DATASET",
+            label="Billing dataset",
+            kind="string",
+            required=False,
+            group="Google Cloud",
+        ),
+        ConfigField(
+            "GCP_BILLING_PROJECT",
+            label="Billing project",
+            kind="string",
+            required=False,
+            group="Google Cloud",
+        ),
+    )
     description = (
         "Read current-month cloud spend grouped by service from AWS Cost "
         "Explorer, GCP BigQuery billing export, and Azure Consumption. "

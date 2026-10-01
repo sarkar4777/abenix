@@ -443,21 +443,23 @@ async def get_tenant_settings(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.core.notifications import mask_webhook, tenant_slack_webhook
+
     t_q = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
     tenant = t_q.scalars().first()
     if tenant is None:
         return error("tenant not found", 404)
+    webhook = tenant_slack_webhook(tenant)
+    # Admins see a masked tail, everyone else only learns whether one is set
+    masked = mask_webhook(webhook) if user.role == UserRole.ADMIN else ""
     return success(
         {
             "tenant_id": str(tenant.id),
             "name": tenant.name,
             "slug": tenant.slug,
-            "slack_webhook_url": getattr(tenant, "slack_webhook_url", None) or "",
-            "slack_webhook_url_source": (
-                "tenant"
-                if getattr(tenant, "slack_webhook_url", None)
-                else "env_fallback"
-            ),
+            "slack_webhook_url": masked,
+            "slack_webhook_is_set": bool(webhook),
+            "slack_webhook_url_source": "tenant" if webhook else "unset",
         }
     )
 
@@ -477,15 +479,22 @@ async def update_tenant_settings(
         return error("tenant not found", 404)
 
     if "slack_webhook_url" in body:
+        from app.core import crypto
+
         url = (body.get("slack_webhook_url") or "").strip() or None
         # Best-effort URL validation — Slack URLs are always
         # https://hooks.slack.com/services/.../.../...
-        if url is not None:
+        if url is not None and "…" in url:
+            url = "__keep__"  # the masked value came back unchanged
+        if url is not None and url != "__keep__":
             if not url.lower().startswith("https://"):
                 return error("slack_webhook_url must use https://", 400)
             if len(url) > 500:
                 return error("slack_webhook_url too long (max 500 chars)", 400)
-        tenant.slack_webhook_url = url
+        if url is None:
+            tenant.slack_webhook_url = None
+        elif url != "__keep__":
+            tenant.slack_webhook_url = crypto.encrypt(tenant.id, url)
 
     db.add(
         ActivityLog(

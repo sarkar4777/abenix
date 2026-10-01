@@ -102,3 +102,7 @@ model_config:
     - financial_calculator
     - current_time
     - web_search
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - FMP_API_KEY

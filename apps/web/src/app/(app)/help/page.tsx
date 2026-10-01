@@ -269,7 +269,7 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
               <li><code>BUDGET_EXCEEDED</code> · <code>RATE_LIMITED</code> — quota</li>
               <li><code>STALE_SWEEP</code> — owning pod crashed, sweeper marked the run failed</li>
               <li><code>MODERATION_BLOCKED</code> — moderation gate refused the input/output</li>
-              <li><code>INFRA_CRASH</code> · <code>INFRA_AUTH_ERROR</code> · <code>UNKNOWN_ERROR</code></li>
+              <li><code>INFRA_CRASH</code> · <code>INFRA_AUTH_ERROR</code> · <code>LLM_AUTH_ERROR</code> (provider rejected the key, re-sync the subscription token or fix it under Tool Configuration) · <code>UNKNOWN_ERROR</code></li>
             </ul>
           </div>
         ),
@@ -1376,7 +1376,7 @@ if (result.isPaused()) {
             <p><strong className="text-white">Pro tips:</strong></p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li>The filter pill row supports <code>status</code>, <code>agent</code>, <code>trigger</code>, <code>failure_code</code>, and free-text in the input/output.</li>
-              <li>Use the <em>Replay</em> button to re-run an execution with the same input — handy for fix-then-verify cycles.</li>
+              <li>Use the <em>Re-run</em> button to open the agent with the same input filled in, handy for fix-then-verify cycles. The <em>Step replay</em> panel lists every node in the order it ran with its input, output and duration.</li>
               <li>Use the <em>Export NDJSON</em> button to pull the trace into a notebook for ad-hoc analysis.</li>
             </ul>
           </div>
@@ -1987,6 +1987,7 @@ spec:
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><code>/admin/llm-pricing</code> — provider × model price overrides. The router multiplies these by <code>tokens_in × cost_in + tokens_out × cost_out</code> and writes per-execution cost.</li>
               <li><code>/admin/llm-settings</code> — which models are exposed to which agents. Disable expensive models tenant-wide, force a fallback to cheaper ones.</li>
+              <li><code>/admin/tool-config</code> — every API key and setting a built-in tool needs, grouped by provider and generated from the tools themselves. Save a value and agents use it within 30 seconds, no redeploy. Rows show where the value comes from (saved here, environment, defaults file) and a Test button checks the key with the provider. A tool that is missing a required key tells the user so, and names this screen.</li>
             </ul>
             <Hero src={SS('24-admin-llm-settings.png')} alt="Model selection" />
           </div>

@@ -39,8 +39,30 @@ interface PatchRow {
   triggering_diff_id: string | null;
   triggering_execution_id: string | null;
   decided_at: string | null;
+  decided_by: string | null;
   rolled_back_at: string | null;
   created_at: string;
+}
+
+interface Envelope<T> {
+  data: T | null;
+  error: { message?: string; code?: number } | null;
+  meta: { can_edit?: boolean; user_id?: string } | null;
+}
+
+async function readEnvelope<T>(res: Response): Promise<Envelope<T>> {
+  let json: Envelope<T> | null = null;
+  try {
+    json = (await res.json()) as Envelope<T>;
+  } catch {
+    json = null;
+  }
+  if (!res.ok) {
+    const msg = json?.error?.message || `${res.status} ${res.statusText}`.trim();
+    throw new Error(msg || 'Request failed');
+  }
+  if (!json) throw new Error('Empty response');
+  return json;
 }
 
 function authHeaders(): HeadersInit {
@@ -82,22 +104,35 @@ export default function HealingPage() {
   const [diagnosing, setDiagnosing] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
   const [expandedPatch, setExpandedPatch] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [dRes, pRes] = await Promise.all([
         fetch(`${API_URL}/api/pipelines/${pipelineId}/diffs?limit=15`, { headers: authHeaders() }),
         fetch(`${API_URL}/api/pipelines/${pipelineId}/patches`, { headers: authHeaders() }),
       ]);
-      const dJson = await dRes.json();
-      const pJson = await pRes.json();
-      setDiffs(Array.isArray(dJson?.data) ? dJson.data : []);
-      setPatches(Array.isArray(pJson?.data) ? pJson.data : []);
+      const dJson = await readEnvelope<DiffRow[]>(dRes);
+      const pJson = await readEnvelope<PatchRow[]>(pRes);
+      setDiffs(Array.isArray(dJson.data) ? dJson.data : []);
+      setPatches(Array.isArray(pJson.data) ? pJson.data : []);
+      setCanEdit(Boolean(pJson.meta?.can_edit));
+      setUserId(pJson.meta?.user_id ?? null);
+    } catch (e: unknown) {
+      setDiffs([]);
+      setPatches([]);
+      setCanEdit(false);
+      setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, [pipelineId]);
+
+  const canRollback = (p: PatchRow) => canEdit || (!!userId && p.decided_by === userId);
 
   useEffect(() => { void loadAll(); }, [loadAll]);
 
@@ -109,15 +144,11 @@ export default function HealingPage() {
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const json = await res.json();
-      if (json?.error) {
-        toastError('Surgeon failed', json.error.message || 'Could not propose a patch');
-      } else {
-        toastSuccess('Patch drafted', json?.data?.title || 'New proposal added');
-      }
+      const json = await readEnvelope<{ title?: string }>(res);
+      toastSuccess('Patch drafted', json.data?.title || 'New proposal added');
       await loadAll();
     } catch (e: unknown) {
-      toastError('Surgeon failed', String(e));
+      toastError('Surgeon failed', e instanceof Error ? e.message : String(e));
     } finally {
       setDiagnosing(false);
     }
@@ -130,13 +161,11 @@ export default function HealingPage() {
         method: 'POST',
         headers: authHeaders(),
       });
-      const json = await res.json();
-      if (json?.error) {
-        toastError(`${action} failed`, json.error.message || '');
-      } else {
-        toastSuccess(`Patch ${action === 'apply' ? 'applied' : action === 'reject' ? 'rejected' : 'rolled back'}`);
-      }
+      await readEnvelope<unknown>(res);
+      toastSuccess(`Patch ${action === 'apply' ? 'applied' : action === 'reject' ? 'rejected' : 'rolled back'}`);
       await loadAll();
+    } catch (e: unknown) {
+      toastError(`${action} failed`, e instanceof Error ? e.message : String(e));
     } finally {
       setActing(null);
     }
@@ -172,17 +201,32 @@ export default function HealingPage() {
         </p>
       </div>
 
+      {loadError && (
+        <div className="mb-6 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div>
+            <div className="font-medium">Could not load healing data</div>
+            <div className="text-red-400/80 mt-0.5">{loadError}</div>
+            <button onClick={() => void loadAll()} className="mt-2 underline hover:text-red-200">Retry</button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-6">
         <button
           onClick={diagnose}
-          disabled={diagnosing || diffs.length === 0}
+          disabled={diagnosing || diffs.length === 0 || !canEdit || !!loadError}
+          title={canEdit ? undefined : 'Only admins or the pipeline owner can run the surgeon'}
           className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium rounded-lg text-sm disabled:opacity-50"
         >
           {diagnosing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
           Diagnose latest failure
         </button>
-        {diffs.length === 0 && !loading && (
+        {diffs.length === 0 && !loading && !loadError && (
           <span className="text-xs text-slate-500">No failures recorded yet — run the pipeline first.</span>
+        )}
+        {!canEdit && !loading && !loadError && (
+          <span className="text-xs text-slate-500">Read-only: only admins or the pipeline owner can act on patches.</span>
         )}
       </div>
 
@@ -216,6 +260,7 @@ export default function HealingPage() {
                       </div>
                       <p className="text-xs text-slate-400 mt-1">{p.rationale}</p>
                     </div>
+                    {canEdit && (
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={() => act(p.id, 'apply')}
@@ -233,6 +278,7 @@ export default function HealingPage() {
                         <X className="w-3 h-3" /> Reject
                       </button>
                     </div>
+                    )}
                   </div>
                   <button
                     onClick={() => setExpandedPatch(expandedPatch === p.id ? null : p.id)}
@@ -277,7 +323,7 @@ export default function HealingPage() {
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{p.rationale}</p>
                 </div>
-                {!p.rolled_back_at && (
+                {!p.rolled_back_at && canRollback(p) && (
                   <button
                     onClick={() => act(p.id, 'rollback')}
                     disabled={!!acting}
@@ -301,6 +347,8 @@ export default function HealingPage() {
           <div className="flex items-center justify-center py-6">
             <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
           </div>
+        ) : loadError ? (
+          <div className="text-xs text-red-400 py-3">Failures could not be loaded.</div>
         ) : diffs.length === 0 ? (
           <div className="text-xs text-slate-500 py-3">No failures recorded.  Run the pipeline to populate.</div>
         ) : (

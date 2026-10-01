@@ -10,19 +10,53 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
-SMTP_HOST = os.environ.get("SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", "agent@abenix.dev")
 
 EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
 
 
 class EmailSenderTool(BaseTool):
     name = "email_sender"
+    config_fields = (
+        ConfigField(
+            "SMTP_HOST",
+            label="SMTP host",
+            kind="string",
+            required=False,
+            group="Email (SMTP)",
+        ),
+        ConfigField(
+            "SMTP_PORT",
+            label="SMTP port",
+            kind="int",
+            required=False,
+            group="Email (SMTP)",
+            default="587",
+        ),
+        ConfigField(
+            "SMTP_USER",
+            label="SMTP user",
+            kind="string",
+            required=False,
+            group="Email (SMTP)",
+        ),
+        ConfigField(
+            "SMTP_PASS",
+            label="SMTP password",
+            kind="secret",
+            required=False,
+            group="Email (SMTP)",
+        ),
+        ConfigField(
+            "SMTP_FROM",
+            label="From address",
+            kind="string",
+            required=False,
+            group="Email (SMTP)",
+            default="agent@abenix.dev",
+        ),
+    )
     description = (
         "Send emails to one or more recipients with plain text or HTML content. "
         "Supports SMTP delivery in production and falls back to local file logging "
@@ -70,7 +104,7 @@ class EmailSenderTool(BaseTool):
         recipients = [addr.strip() for addr in to.split(",") if addr.strip()]
 
         try:
-            if SMTP_HOST:
+            if self.cfg("SMTP_HOST"):
                 return await self._send_smtp(recipients, subject, body, fmt)
             else:
                 return await self._log_to_file(recipients, subject, body, fmt)
@@ -88,7 +122,7 @@ class EmailSenderTool(BaseTool):
         import aiosmtplib
 
         message = EmailMessage()
-        message["From"] = SMTP_FROM
+        message["From"] = self.cfg("SMTP_FROM")
         message["To"] = ", ".join(recipients)
         message["Subject"] = subject
 
@@ -98,13 +132,13 @@ class EmailSenderTool(BaseTool):
             message.set_content(body)
 
         send_kwargs: dict[str, Any] = {
-            "hostname": SMTP_HOST,
-            "port": SMTP_PORT,
+            "hostname": self.cfg("SMTP_HOST"),
+            "port": int(self.cfg("SMTP_PORT")),
             "start_tls": True,
         }
-        if SMTP_USER and SMTP_PASS:
-            send_kwargs["username"] = SMTP_USER
-            send_kwargs["password"] = SMTP_PASS
+        if self.cfg("SMTP_USER") and self.cfg("SMTP_PASS"):
+            send_kwargs["username"] = self.cfg("SMTP_USER")
+            send_kwargs["password"] = self.cfg("SMTP_PASS")
 
         await aiosmtplib.send(message, **send_kwargs)
 
@@ -147,7 +181,8 @@ class EmailSenderTool(BaseTool):
         filepath.write_text(json.dumps(email_record, indent=2), encoding="utf-8")
 
         result = {
-            "status": "logged",
+            "status": "not_sent",
+            "note": "NOT SENT. SMTP_HOST is not configured, so the email was written to a file for review.",
             "recipients": recipients,
             "subject": subject,
             "format": fmt,
@@ -156,5 +191,11 @@ class EmailSenderTool(BaseTool):
         }
         return ToolResult(
             content=json.dumps(result, indent=2),
-            metadata={"mode": "dev", "file": str(filepath)},
+            metadata={
+                "mode": "dev",
+                "warnings": [
+                    "Email not sent, SMTP is not configured, written to a file instead"
+                ],
+                "file": str(filepath),
+            },
         )

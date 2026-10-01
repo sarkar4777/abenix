@@ -1,15 +1,63 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 class NewsFeedTool(BaseTool):
     name = "news_feed"
+    config_fields = (
+        ConfigField(
+            "MEDIASTACK_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="MediaStack",
+            signup_url="https://mediastack.com/signup",
+        ),
+        ConfigField(
+            "NEWS_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="NewsAPI",
+            signup_url="https://newsapi.org/register",
+        ),
+    )
+
+    @classmethod
+    async def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        from engine.tools._config_probe import probe
+
+        v = values.get(key or "", "")
+        if key == "NEWS_API_KEY":
+            if len(v) > 30 and "-" in v:
+                return await probe(
+                    "GET",
+                    "https://eventregistry.org/api/v1/article/getArticles",
+                    params={"apiKey": v, "keyword": "ping", "articlesCount": 1},
+                    accepted="newsapi.ai accepted the key",
+                )
+            return await probe(
+                "GET",
+                "https://newsapi.org/v2/top-headlines",
+                params={"apiKey": v, "country": "us", "pageSize": 1},
+                accepted="newsapi.org accepted the key",
+            )
+        if key == "MEDIASTACK_API_KEY":
+            return await probe(
+                "GET",
+                "http://api.mediastack.com/v1/news",
+                params={"access_key": v, "limit": 1},
+                accepted="MediaStack accepted the key",
+            )
+        return None
+
     description = (
         "Search recent news articles from multiple providers. "
         "Use for current events, market news, and trend monitoring."
@@ -53,19 +101,23 @@ class NewsFeedTool(BaseTool):
         sort_by = arguments.get("sort_by", "relevancy")
 
         # Try NewsAPI.ai (Event Registry) first — uses the same NEWS_API_KEY env var
-        news_api_key = os.environ.get("NEWS_API_KEY", "")
+        # A rejected key used to be swallowed by a bare except and the user was
+        # told there was no news. A 401 or 403 is a configuration problem and
+        # is reported as one. Other failures still fall through.
+        rejected: list[str] = []
+        errors: list[str] = []
+
+        news_api_key = self.cfg("NEWS_API_KEY")
         if news_api_key:
-            # Detect if it's a newsapi.ai key (UUID format) vs newsapi.org key (short hex)
+            # newsapi.ai keys are UUIDs, newsapi.org keys are short hex
             is_event_registry = len(news_api_key) > 30 and "-" in news_api_key
-            try:
-                if is_event_registry:
-                    return await self._newsapi_ai(
-                        news_api_key,
-                        query,
-                        language,
-                        max_results,
-                    )
-                else:
+            order = ("ai", "org") if is_event_registry else ("org", "ai")
+            for fmt in order:
+                try:
+                    if fmt == "ai":
+                        return await self._newsapi_ai(
+                            news_api_key, query, language, max_results
+                        )
                     return await self._newsapi(
                         news_api_key,
                         query,
@@ -75,45 +127,61 @@ class NewsFeedTool(BaseTool):
                         max_results,
                         sort_by,
                     )
-            except Exception:
-                # Try the other format as fallback
-                try:
-                    if is_event_registry:
-                        return await self._newsapi(
-                            news_api_key,
-                            query,
-                            category,
-                            language,
-                            from_date,
-                            max_results,
-                            sort_by,
-                        )
-                    else:
-                        return await self._newsapi_ai(
-                            news_api_key,
-                            query,
-                            language,
-                            max_results,
-                        )
-                except Exception:
-                    pass
+                except httpx.HTTPStatusError as exc:
+                    code = exc.response.status_code
+                    if code in (401, 403):
+                        rejected.append(f"NewsAPI rejected NEWS_API_KEY (HTTP {code})")
+                        break
+                    errors.append(f"NewsAPI {fmt}: HTTP {code}")
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"NewsAPI {fmt}: {exc.__class__.__name__}")
 
-        # Try MediaStack
-        mediastack_key = os.environ.get("MEDIASTACK_API_KEY", "")
+        mediastack_key = self.cfg("MEDIASTACK_API_KEY")
         if mediastack_key:
             try:
                 return await self._mediastack(
-                    mediastack_key,
-                    query,
-                    category,
-                    language,
-                    max_results,
+                    mediastack_key, query, category, language, max_results
                 )
-            except Exception:
-                pass
+            except httpx.HTTPStatusError as exc:
+                code = exc.response.status_code
+                if code in (401, 403):
+                    rejected.append(
+                        f"MediaStack rejected MEDIASTACK_API_KEY (HTTP {code})"
+                    )
+                else:
+                    errors.append(f"MediaStack: HTTP {code}")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"MediaStack: {exc.__class__.__name__}")
 
-        # Fallback to DuckDuckGo news
-        return await self._ddg_news(query, max_results)
+        if rejected:
+            return ToolResult(
+                content=(
+                    "; ".join(rejected)
+                    + ". The key is present but the provider does not accept it. "
+                    "An admin can update it under Admin -> Tool Configuration."
+                ),
+                is_error=True,
+                metadata={
+                    "rejected": rejected,
+                    "needs_configuration": (
+                        "NEWS_API_KEY"
+                        if rejected[0].startswith("NewsAPI")
+                        else "MEDIASTACK_API_KEY"
+                    ),
+                },
+            )
+
+        # Fallback to DuckDuckGo news, and say why
+        result = await self._ddg_news(query, max_results)
+        if not (news_api_key or mediastack_key):
+            why = "No news provider key is configured (NEWS_API_KEY or MEDIASTACK_API_KEY)"
+        else:
+            why = "The configured news providers failed: " + "; ".join(errors)
+        if isinstance(result.metadata, dict):
+            result.metadata.setdefault("warnings", []).append(
+                why + ", used DuckDuckGo news instead"
+            )
+        return result
 
     @staticmethod
     def _format_articles(articles: list[dict[str, str]], provider: str) -> ToolResult:

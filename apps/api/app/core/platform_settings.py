@@ -141,9 +141,16 @@ DEFAULTS: dict[str, dict[str, Any]] = {
 SECRET_KEYS: set[str] = {"llm.subscription.token"}
 
 
+def is_secret(key: str) -> bool:
+    """Settings whose value must never be echoed. Tool credentials are stored
+    under tool.credential.<KEY> and are treated as secret here regardless of
+    kind, the tool-config router masks by declared kind itself."""
+    return key in SECRET_KEYS or key.startswith("tool.credential.")
+
+
 def mask(key: str, value: str | None) -> str:
     """Redact a secret setting for display, keeping a recognisable tail."""
-    if key not in SECRET_KEYS:
+    if not is_secret(key):
         return value or ""
     v = (value or "").strip()
     if not v:

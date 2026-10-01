@@ -43,6 +43,9 @@ COPY packages/db/ ./packages/db/
 # small.
 COPY apps/api/app/__init__.py ./apps/api/app/__init__.py
 COPY apps/api/app/core/ ./apps/api/app/core/
+# the consumer writes failed runs to the dead-letter queue through this service
+COPY apps/api/app/services/__init__.py ./apps/api/app/services/__init__.py
+COPY apps/api/app/services/dlq.py ./apps/api/app/services/dlq.py
 # App-owned post-processor modules. The engine itself stays
 # commodity-agnostic; each app drops a runtime/post_processors/ tree
 # here and points POST_PROCESSOR_MODULES at it.

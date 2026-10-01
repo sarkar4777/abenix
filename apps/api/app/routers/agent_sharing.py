@@ -1,4 +1,4 @@
-"""Agent Sharing — granular sharing with view/execute/edit permissions."""
+"""Agent Sharing — view/execute/edit grants, stored on ResourceShare."""
 
 from __future__ import annotations
 
@@ -12,17 +12,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db
 from app.core.notifications import create_notification
 from app.core.responses import error, success
+from app.services.agent_share import (
+    AGENT_KIND,
+    PERMISSION_FROM_API,
+    can_manage_shares,
+    list_agent_shares,
+    serialize_agent_share,
+    upsert_agent_share,
+)
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-from models.agent import Agent
-from models.agent_share import AgentShare, SharePermission
+from models.agent import Agent, AgentStatus
+from models.resource_share import ResourceShare
 from models.user import User
 
 router = APIRouter(prefix="/api/agents", tags=["agent-sharing"])
+
+
+async def _load_managed_agent(
+    db: AsyncSession, agent_id: uuid.UUID, user: User
+) -> tuple[Agent | None, Any]:
+    result = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenant_id == user.tenant_id)
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return None, error("Agent not found", 404)
+    if not can_manage_shares(agent, user):
+        return None, error("Only the agent creator or an admin can manage shares", 403)
+    return agent, None
 
 
 @router.post("/{agent_id}/share")
@@ -32,18 +54,15 @@ async def share_agent(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    """Share an agent with another user."""
-    # Verify ownership
-    result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, Agent.tenant_id == user.tenant_id)
-    )
-    agent = result.scalar_one_or_none()
-    if not agent:
-        return error("Agent not found", 404)
+    """Share an agent with another user in the same tenant."""
+    agent, err = await _load_managed_agent(db, agent_id, user)
+    if err:
+        return err
 
-    email = body.get("email", "").strip()
-    permission = body.get("permission", "view")
-    if permission not in ("view", "execute", "edit"):
+    email = (body.get("email") or "").strip().lower()
+    permission_str = str(body.get("permission") or "view").lower()
+    permission = PERMISSION_FROM_API.get(permission_str)
+    if permission is None:
         return error("permission must be view, execute, or edit", 400)
     if not email:
         return error("email is required", 400)
@@ -55,33 +74,16 @@ async def share_agent(
         )
     )
     target_user = target_result.scalar_one_or_none()
-    if email and not target_user:
+    if not target_user:
         return error("User not found in this tenant", 404)
+    if target_user.id == user.id:
+        return error("You cannot share an agent with yourself", 400)
 
-    # Check for existing share
-    if target_user:
-        existing = await db.execute(
-            select(AgentShare).where(
-                AgentShare.agent_id == agent_id,
-                AgentShare.shared_with_user_id == target_user.id,
-            )
-        )
-        if existing.scalar_one_or_none():
-            return error("Agent already shared with this user", 409)
-
-    share = AgentShare(
-        id=uuid.uuid4(),
-        agent_id=agent_id,
-        shared_with_user_id=target_user.id if target_user else None,
-        shared_with_email=email,
-        permission=SharePermission(permission),
-        shared_by=user.id,
+    share, created = await upsert_agent_share(
+        db, agent=agent, target=target_user, permission=permission, shared_by=user
     )
-    db.add(share)
-    await db.commit()
 
-    # Notify recipient
-    if target_user:
+    if created:
         try:
             await create_notification(
                 db,
@@ -89,11 +91,11 @@ async def share_agent(
                 user_id=target_user.id,
                 type="agent_shared",
                 title="Agent shared with you",
-                message=f"{user.full_name} shared '{agent.name}' with you ({permission} permission)",
+                message=f"{user.full_name} shared '{agent.name}' with you ({permission_str} permission)",
                 link=f"/agents/{agent_id}/chat",
                 metadata={
                     "agent_id": str(agent_id),
-                    "permission": permission,
+                    "permission": permission_str,
                     "shared_by": user.full_name,
                 },
             )
@@ -101,15 +103,9 @@ async def share_agent(
         except Exception:
             pass
 
-    return success(
-        {
-            "id": str(share.id),
-            "agent_id": str(agent_id),
-            "shared_with": email,
-            "permission": permission,
-        },
-        status_code=201,
-    )
+    data = serialize_agent_share(share)
+    data["shared_with"] = email
+    return success(data, status_code=201 if created else 200)
 
 
 @router.get("/{agent_id}/shares")
@@ -119,28 +115,11 @@ async def list_shares(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """List all users this agent is shared with."""
-    agent_check = await db.execute(
-        select(Agent).where(Agent.id == agent_id, Agent.tenant_id == user.tenant_id)
-    )
-    if not agent_check.scalar_one_or_none():
-        return error("Agent not found", 404)
-    result = await db.execute(select(AgentShare).where(AgentShare.agent_id == agent_id))
-    shares = result.scalars().all()
-    return success(
-        [
-            {
-                "id": str(s.id),
-                "email": s.shared_with_email,
-                "user_id": (
-                    str(s.shared_with_user_id) if s.shared_with_user_id else None
-                ),
-                "permission": s.permission.value,
-                "shared_by": str(s.shared_by),
-                "created_at": s.created_at.isoformat() if s.created_at else None,
-            }
-            for s in shares
-        ]
-    )
+    _agent, err = await _load_managed_agent(db, agent_id, user)
+    if err:
+        return err
+    shares = await list_agent_shares(db, agent_id)
+    return success([serialize_agent_share(s) for s in shares])
 
 
 @router.delete("/{agent_id}/shares/{share_id}")
@@ -151,34 +130,29 @@ async def revoke_share(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Revoke a user's access to a shared agent."""
-    agent_check = await db.execute(
-        select(Agent).where(Agent.id == agent_id, Agent.tenant_id == user.tenant_id)
-    )
-    if not agent_check.scalar_one_or_none():
-        return error("Agent not found", 404)
+    agent, err = await _load_managed_agent(db, agent_id, user)
+    if err:
+        return err
     result = await db.execute(
-        select(AgentShare).where(
-            AgentShare.id == share_id, AgentShare.agent_id == agent_id
+        select(ResourceShare).where(
+            ResourceShare.id == share_id,
+            ResourceShare.resource_type == AGENT_KIND,
+            ResourceShare.resource_id == agent_id,
         )
     )
     share = result.scalar_one_or_none()
     if not share:
         return error("Share not found", 404)
 
-    # Notify the user whose access is being revoked
     if share.shared_with_user_id:
         try:
-            agent_result = await db.execute(
-                select(Agent.name).where(Agent.id == agent_id)
-            )
-            agent_name = agent_result.scalar() or "Agent"
             await create_notification(
                 db,
                 tenant_id=user.tenant_id,
                 user_id=share.shared_with_user_id,
                 type="share_revoked",
                 title="Access revoked",
-                message=f"Your access to '{agent_name}' has been revoked",
+                message=f"Your access to '{agent.name}' has been revoked",
             )
         except Exception:
             pass
@@ -195,11 +169,13 @@ async def shared_with_me(
 ) -> Any:
     """List all agents shared with the current user."""
     result = await db.execute(
-        select(AgentShare, Agent)
-        .join(Agent, AgentShare.agent_id == Agent.id)
+        select(ResourceShare, Agent)
+        .join(Agent, ResourceShare.resource_id == Agent.id)
         .where(
-            AgentShare.shared_with_user_id == user.id,
+            ResourceShare.resource_type == AGENT_KIND,
+            ResourceShare.shared_with_user_id == user.id,
             Agent.tenant_id == user.tenant_id,
+            Agent.status != AgentStatus.ARCHIVED,
         )
     )
     rows = result.all()
@@ -211,7 +187,7 @@ async def shared_with_me(
                 "agent_name": agent.name,
                 "agent_slug": agent.slug,
                 "description": agent.description,
-                "permission": share.permission.value,
+                "permission": serialize_agent_share(share)["permission"],
                 "shared_by": str(share.shared_by),
                 "category": agent.category,
             }

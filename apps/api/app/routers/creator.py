@@ -43,8 +43,8 @@ async def onboard_creator(
         account_id = result["account_id"]
         user.stripe_connect_id = account_id
 
-    if user.role not in (UserRole.CREATOR, UserRole.ADMIN):
-        user.role = UserRole.CREATOR
+    # Stripe onboarding never changes role. Publish rights come from
+    # the role an admin assigned, see features_for().
 
     link_result = await create_connect_onboarding_link(
         account_id,

@@ -1,6 +1,6 @@
 # Platform settings
 
-Runtime knobs an admin changes from **Admin -> LLM Settings** without a redeploy.
+Runtime knobs an admin changes from **Admin -> Model Selection** and **Admin -> Tool Configuration** without a redeploy.
 They live in the `platform_settings` table, are declared in
 [`apps/api/app/core/platform_settings.py`](../../apps/api/app/core/platform_settings.py),
 and are read through `get_setting()` or `get_int_setting()`.
@@ -100,6 +100,23 @@ and confirm with `POST /api/admin/settings/subscription/verify`.
 
 ---
 
+## Tool credentials
+
+Keys saved on **Admin -> Tool Configuration** live in the same table under the `tool.credential.` prefix, one row per key, for example `tool.credential.TAVILY_API_KEY`. They are not in `DEFAULTS`. The set of keys is generated from the tools' `config_fields`, so this file never lists them.
+
+| Behaviour | Detail |
+|---|---|
+| Who writes | `PATCH /api/admin/tool-config/{KEY}`, admin only. The generic settings endpoints never return these rows. |
+| Masking | Every `tool.credential.*` key is treated as a secret by `is_secret()`. The tool-config endpoints mask by declared kind and show the last four characters of a secret. |
+| At rest | AES-GCM under `ABENIX_DATA_KEY_KEK_BASE64` when set, otherwise stored as entered. The screen says which. |
+| Reset | `POST /api/admin/settings/reset` leaves `tool.credential.*` rows alone. |
+| Propagation | 30 seconds. The agent-runtime reads the table over `DATABASE_URL` with asyncpg, single-flight, serving the previous snapshot while a refresh runs. |
+| Precedence | A saved value wins over the environment, which wins over `tool_defaults.yaml`, which wins over the tool's declared default. |
+
+How a tool declares a key, and how the screen is generated from that: [08-howto/08-tool-configuration](../08-howto/08-tool-configuration.md).
+
+---
+
 ## Adding a setting
 
 1. Add an entry to `DEFAULTS` in `platform_settings.py` with a `category`, a
@@ -112,6 +129,8 @@ and confirm with `POST /api/admin/settings/subscription/verify`.
    Always pass a fallback. These are read on the execution path and settings I/O
    must never take a run down.
 4. If a secret, add the key to `SECRET_KEYS` so it is masked.
+
+A value a tool needs is not a platform setting. Declare it on the tool as a `ConfigField` instead, and it appears under Tool Configuration with no change here.
 
 ---
 

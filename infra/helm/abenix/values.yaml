@@ -330,6 +330,17 @@ scaling:
     enabled: false
   pools: []
 
+# Platform alert delivery. The API scheduler polls Prometheus for firing
+# alerts and fans them out to tenant admins (in-app + WS) and Slack
+# (ABENIX_SLACK_WEBHOOK_URL / per-tenant webhook). No Alertmanager needed.
+alerting:
+  prometheusUrl: ""  # empty = http://<release>-prometheus.<ns>.svc.cluster.local:9090
+  platformAlerts:
+    enabled: true
+    pollSeconds: 60
+    # Re-notify the same alertname at most once per window.
+    dedupeMinutes: 30
+
 # Progress pub/sub namespacing — overridden per tenant/app deployment.
 # Defaults are generic ("progress:", "parent:") so the engine doesn't
 # carry any app-name baggage. Override e.g. to "wingman:progress:" or
@@ -373,6 +384,10 @@ secrets:
   azureOpenaiApiKey: ""
   azureOpenaiApiBase: ""
   azureOpenaiApiVersion: "2024-10-01-preview"
+  # Cluster KEK, `openssl rand -base64 32`. Encrypts tool credentials saved from
+  # the admin screen and persona memory. Keep it stable, a changed KEK makes
+  # stored values unreadable and they have to be entered again.
+  dataKeyKekBase64: ""
 
 # Azure OpenAI embedding deployment name. Worker + agent-runtime prefer
 # Azure when AZURE_OPENAI_API_KEY + endpoint are set; the direct OpenAI

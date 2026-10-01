@@ -65,9 +65,11 @@ interface ChatState {
   confidenceScore: number | null;
   agentInfo: AgentInfo | null;
   error: string | null;
+  // what the moderation policy did to the last exchange, shown above the composer
+  moderationNotice: string | null;
   abortController: AbortController | null;
 
-  sendMessage: (agentId: string, message: string) => void;
+  sendMessage: (agentId: string, message: string, context?: Record<string, unknown>) => void;
   setAgentInfo: (info: AgentInfo) => void;
   stopStreaming: () => void;
   clearChat: () => void;
@@ -89,9 +91,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   confidenceScore: null,
   agentInfo: null,
   error: null,
+  moderationNotice: null,
   abortController: null,
 
-  sendMessage: (agentId: string, message: string) => {
+  sendMessage: (agentId: string, message: string, context?: Record<string, unknown>) => {
     const userMsg: ChatMessage = {
       id: uid(),
       role: 'user',
@@ -104,6 +107,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: true,
       streamingBlocks: [],
       error: null,
+      moderationNotice: null,
     });
 
     const controller = connectToAgentStream(agentId, message, {
@@ -172,6 +176,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ streamingBlocks: [...blocks] });
       },
 
+      onModeration: (data) => {
+        const cats = data.categories && data.categories.length ? ` (${data.categories.join(', ')})` : '';
+        if (data.source === 'post_llm' && data.outcome === 'blocked') {
+          // the streamed text must not stay on screen
+          set({ streamingBlocks: [{ type: 'text', content: data.content || data.message || 'Response blocked by moderation policy.' }] });
+        } else if (data.source === 'post_llm' && typeof data.content === 'string') {
+          const blocks: ContentBlock[] = get().streamingBlocks.filter((b) => b.type !== 'text');
+          blocks.push({ type: 'text', content: data.content });
+          set({ streamingBlocks: blocks });
+        }
+        set({ moderationNotice: `${data.message || `Moderation policy: ${data.outcome}`}${cats}` });
+      },
+
       onDone: (data: DoneData) => {
         const assistantMsg: ChatMessage = {
           id: uid(),
@@ -211,10 +228,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           isStreaming: false,
           streamingBlocks: [],
           abortController: null,
-          error: message,
+          error: get().moderationNotice && /moderation policy/i.test(message) ? null : message,
         });
       },
-    });
+    }, context);
 
     set({ abortController: controller });
   },

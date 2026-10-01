@@ -4,15 +4,32 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 from pathlib import Path
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 class ImageAnalyzerTool(BaseTool):
     name = "image_analyzer"
+    config_fields = (
+        ConfigField(
+            "ANTHROPIC_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Anthropic",
+            signup_url="https://console.anthropic.com/settings/keys",
+        ),
+        ConfigField(
+            "OPENAI_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenAI",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+    )
     description = (
         "Analyze images using AI vision models. Capabilities: describe content, "
         "extract text (OCR), read charts/graphs, detect objects, analyze diagrams, "
@@ -147,7 +164,7 @@ class ImageAnalyzerTool(BaseTool):
 
         # A Claude subscription is a valid credential here too, so don't
         # bail just because ANTHROPIC_API_KEY is unset.
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = self.cfg("ANTHROPIC_API_KEY")
         if not api_key and not claude_subscription.get_config().usable:
             return None
 
@@ -208,7 +225,7 @@ class ImageAnalyzerTool(BaseTool):
         self, image_url: str, prompt: str, compare_url: str = ""
     ) -> str | None:
         """Analyze image using OpenAI Vision API."""
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = self.cfg("OPENAI_API_KEY")
         if not api_key:
             return None
 

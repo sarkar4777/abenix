@@ -193,3 +193,7 @@ input_variables:
 
 example_prompts:
   - '{"corridor": {"id": "USGC-NWE", "label": "US Gulf Coast → North West Europe", "origin_port": "Houston", "destination_port": "Rotterdam", "eia_origin_series": "PROPANE_USGC_MB", "yahoo_forward_ticker": "B0=F"}, "tenor_months": 12}'
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - EIA_API_KEY

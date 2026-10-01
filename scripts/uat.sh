@@ -27,6 +27,9 @@ cd "${ROOT_DIR}"
 
 export BASE="${BASE:-http://localhost:3000}"
 export API="${API:-http://localhost:8000}"
+# uat_apps_full.spec.ts reads these names, keep them in step with BASE and API
+export BASE_AB="${BASE_AB:-$BASE}"
+export AB_API="${AB_API:-$API}"
 export AF_EMAIL="${AF_EMAIL:-admin@abenix.dev}"
 export AF_PASSWORD="${AF_PASSWORD:-Admin123456}"
 # Second user (low-privilege, lives inside the admin's tenant) used by the

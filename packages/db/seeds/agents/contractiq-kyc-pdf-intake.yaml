@@ -223,3 +223,8 @@ model_config:
     - moodys_api
     - tavily_search
     - current_time
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - MOODYS_API_KEY
+  - MOODYS_API_URL

@@ -362,8 +362,8 @@ export default function BuilderPage() {
           description: `Invokes the registered code asset ${presetAssetId} on the input.`,
           tool_config: {
             code_asset: normalizeToolConfig({
-              parameter_defaults: { asset_id: presetAssetId },
-              usage_instructions: `Call code_asset with asset_id='${presetAssetId}' and the input_data the asset's input_schema expects. Output follows the asset's output_schema.`,
+              parameter_defaults: { code_asset_id: presetAssetId },
+              usage_instructions: `Call code_asset with the \`input\` object the asset's input_schema expects. code_asset_id is pinned to '${presetAssetId}'. Output follows the asset's output_schema.`,
             }),
           },
         };

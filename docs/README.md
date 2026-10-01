@@ -102,6 +102,9 @@ Concrete step-by-step guides for the most common developer tasks.
 - [03 — Add a new UI page](08-howto/03-add-a-page.md)
 - [04 — Debugging (logs, traces, common failure modes)](08-howto/04-debugging.md)
 - [05 — Writing and running tests (unit, e2e, UAT)](08-howto/05-testing.md)
+- [06 — Set up at-rest encryption (KEK)](08-howto/06-encryption-setup.md)
+- [07 — Finding your way around](08-howto/07-finding-your-way-around.md)
+- [08 — Tool configuration (credentials, the admin screen, the lint)](08-howto/08-tool-configuration.md)
 
 ### 9. Reference
 Catalogues and tables you'll look up rather than read end-to-end.

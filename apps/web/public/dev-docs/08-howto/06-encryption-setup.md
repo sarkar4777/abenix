@@ -135,7 +135,7 @@ When you rotate the KEK (annually, or after an incident):
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "encryption disabled" warning on every startup | KEK env var missing | Step 3 again; check namespace + secret name |
+| "encryption disabled" warning on every startup | KEK env var missing | Step 3 again, checking namespace and secret name |
 | "invalid ABENIX_DATA_KEY_KEK_BASE64" + traceback | KEK is b64 but not 32 bytes once decoded | Regenerate with `openssl rand -base64 32` — `head -c 32 /dev/urandom | base64` will produce a 44-char output that decodes to exactly 32 |
 | persona_items rows still look plaintext | Old rows from before KEK was set | Run the backfill (above) |
 | Decrypt fails after rotation with "decrypt failed for v=v1" | Old KEK not present, ciphertext is v1 | Inject `ABENIX_DATA_KEY_KEK_V1_BASE64` alongside the new key, or restore from backup |

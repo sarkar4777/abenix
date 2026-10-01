@@ -1,135 +1,56 @@
-"""Every registry tool must satisfy the BaseTool contract.
+"""Every tool declares what it needs. The lint, run as a test.
 
-atlas_cypher shipped two tools that subclassed BaseTool but implemented `run`
-instead of the abstract `execute`, so neither could be instantiated — every
-call ended as an uncaught TypeError and a bare 500 from the API. Nothing in the
-suite noticed, because nothing asserted the contract itself.
+A tool that reads the environment directly is invisible to the admin screen,
+the catalogue badges and the Integrations page, all of which are generated
+from `config_fields`. CI runs scripts/check-tool-config.py as a step. This
+runs the same check under pytest so a local run catches it before a push.
 """
 
 from __future__ import annotations
 
-import inspect
-import pkgutil
+import importlib.util
+import io
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME = ROOT / "apps" / "agent-runtime"
-for p in (str(RUNTIME), str(ROOT / "apps" / "api")):
-    if p not in sys.path:
-        sys.path.insert(0, p)
-
-from engine.tools.base import BaseTool  # noqa: E402
 
 
-def _tool_classes() -> list[type]:
-    """Import every engine.tools module and collect concrete BaseTool subclasses."""
-    import engine.tools as tools_pkg
-
-    found: dict[str, type] = {}
-    for mod in pkgutil.iter_modules(tools_pkg.__path__):
-        if mod.name.startswith("_"):
-            continue
-        try:
-            module = __import__(f"engine.tools.{mod.name}", fromlist=["*"])
-        except Exception:
-            # A module whose optional third-party import is absent in this
-            # environment is out of scope for a contract check.
-            continue
-        for name, obj in vars(module).items():
-            # Abstract subclasses are deliberately included: filtering them out
-            # here would let a tool that regresses to abstract vanish from the
-            # parametrised list and "pass" by not being tested at all.
-            if (
-                inspect.isclass(obj)
-                and issubclass(obj, BaseTool)
-                and obj is not BaseTool
-                and getattr(obj, "__module__", "").startswith("engine.tools")
-            ):
-                found[f"{obj.__module__}.{name}"] = obj
-    return list(found.values())
+def _load_check():
+    spec = importlib.util.spec_from_file_location("check_tool_config", ROOT / "scripts" / "check-tool-config.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod
 
 
-TOOL_CLASSES = _tool_classes()
+def test_every_tool_declares_its_configuration() -> None:
+    check = _load_check()
+    out = io.StringIO()
+    with redirect_stdout(out):
+        rc = check.main([])
+    assert rc == 0, "\n" + out.getvalue()
 
 
-def test_tool_classes_were_discovered() -> None:
-    assert len(TOOL_CLASSES) > 20, f"only found {len(TOOL_CLASSES)} tool classes"
+def test_a_new_tool_with_a_declaration_is_visible_without_any_other_change() -> None:
+    """The guarantee the admin screen rests on.
 
-
-@pytest.mark.parametrize("cls", TOOL_CLASSES, ids=lambda c: f"{c.__module__}.{c.__name__}")
-def test_tool_implements_execute(cls: type) -> None:
-    """execute must be defined somewhere other than the abstract base."""
-    assert hasattr(cls, "execute"), f"{cls.__name__} has no execute"
-    owner = next(
-        (k for k in cls.__mro__ if "execute" in vars(k)),
-        None,
-    )
-    assert owner is not None and owner is not BaseTool, (
-        f"{cls.__name__} inherits execute only from BaseTool — it defines "
-        f"{[m for m in vars(cls) if not m.startswith('_')]} instead"
-    )
-
-
-@pytest.mark.parametrize("cls", TOOL_CLASSES, ids=lambda c: f"{c.__module__}.{c.__name__}")
-def test_tool_is_not_abstract(cls: type) -> None:
-    """An abstract leftover cannot be constructed, so it can never be called."""
-    assert not inspect.isabstract(cls), (
-        f"{cls.__name__} still has abstract methods: "
-        f"{sorted(getattr(cls, '__abstractmethods__', ()))}"
-    )
-
-
-# Mirrors the kwarg set apps/api/app/routers/tools.py::execute_tool builds, so
-# this checks the shape the endpoint really uses rather than an invented one.
-ENDPOINT_KWARGS = {
-    "tenant_id": "00000000-0000-0000-0000-000000000000",
-    "execution_id": "",
-    "agent_id": "",
-    "api_key": "",
-    "api_base": "",
-    "db_url": "",
-    "kb_ids": [],
-    "kb_id": "",
-}
-
-# Internal plumbing rather than callable registry entries, so none of these is
-# reachable through /api/tools/{slug}/execute: _DefaultedTool wraps another
-# tool, DynamicTool is built from a stored spec, and PipelineAgentTool takes a
-# per-agent pipeline config and names itself "pipeline:<agent>" at runtime
-# rather than owning a static slug.
-NOT_DIRECTLY_EXECUTABLE = {"_DefaultedTool", "DynamicTool", "PipelineAgentTool"}
-
-
-@pytest.mark.parametrize("cls", TOOL_CLASSES, ids=lambda c: f"{c.__module__}.{c.__name__}")
-def test_tool_constructs_the_way_the_endpoint_builds_it(cls: type) -> None:
-    """A tool must be constructible from the kwargs the endpoint supplies.
-
-    Tools that legitimately need more configuration raise ValueError, which the
-    endpoint turns into a 400. A TypeError means the signature does not match
-    how the tool is actually built, which surfaced as a bare 500.
+    Define a tool class, declare a field, and it is listed by the same
+    collection the API uses. No catalogue entry, no UI change.
     """
-    if cls.__name__ in NOT_DIRECTLY_EXECUTABLE:
-        pytest.skip(f"{cls.__name__} is constructed by the registry, not the endpoint")
+    sys.path.insert(0, str(ROOT / "apps" / "agent-runtime"))
+    from engine.tools.base import BaseTool, ConfigField, ToolResult
 
-    try:
-        sig = inspect.signature(cls.__init__)
-        accepted = set(sig.parameters) - {"self"}
-    except (TypeError, ValueError):
-        accepted = set()
-    kwargs = {k: v for k, v in ENDPOINT_KWARGS.items() if not accepted or k in accepted}
+    class ProbeNewTool(BaseTool):
+        name = "probe_new_tool"
+        description = "exists only inside this test"
+        input_schema = {"type": "object", "properties": {}}
+        config_fields = (ConfigField("PROBE_NEW_TOOL_KEY", label="Key", kind="secret", required=True, group="Probe"),)
 
-    for attempt in (kwargs, {"tenant_id": ENDPOINT_KWARGS["tenant_id"]}, {}):
-        try:
-            cls(**attempt)
-            return
-        except ValueError:
-            return  # needs config — the endpoint reports 400, not a crash
-        except TypeError:
-            continue
-    pytest.fail(
-        f"{cls.__name__} rejects every kwarg shape the endpoint tries "
-        f"(accepted params: {sorted(accepted)})"
-    )
+        async def execute(self, arguments):  # type: ignore[override]
+            return ToolResult(content=self.cfg("PROBE_NEW_TOOL_KEY", required=True))
+
+    fields = {f.key: f for f in ProbeNewTool.config_fields}
+    assert fields["PROBE_NEW_TOOL_KEY"].required
+    assert ProbeNewTool().to_dict()["config_fields"][0]["group"] == "Probe"

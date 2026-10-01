@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+from engine import credentials
 from typing import AsyncIterator
 
 from engine.tools.meeting_adapter import (
@@ -23,7 +23,7 @@ def _missing_creds() -> str:
             "TEAMS_GRAPH_CLIENT_SECRET",
             "TEAMS_BOT_CERT_PATH",
         )
-        if not os.environ.get(k)
+        if not credentials.get(k)
     ]
     return ", ".join(missing) if missing else ""
 
@@ -37,7 +37,7 @@ class TeamsAdapter(MeetingAdapter):
             ok=False,
             error=(
                 "Teams adapter requires Azure app registration + certificate. "
-                f"Missing env vars: {missing}. See docs/meetings.md for the "
+                f"Not configured: {missing}. An admin can add them under Admin -> Tool Configuration. See docs/meetings.md for the "
                 "full tenant-consent flow, or use provider='livekit' for the "
                 "demo/dev path."
             ),

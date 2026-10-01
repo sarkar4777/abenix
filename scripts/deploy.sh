@@ -30,6 +30,7 @@ fi
 _build_secrets_flags() {
   local flags=""
   [ -n "${ANTHROPIC_API_KEY:-}" ]  && flags="${flags} --set secrets.anthropicApiKey=${ANTHROPIC_API_KEY}"
+  [ -n "${ABENIX_DATA_KEY_KEK_BASE64:-}" ] && flags="${flags} --set secrets.dataKeyKekBase64=${ABENIX_DATA_KEY_KEK_BASE64}"
   [ -n "${CLAUDE_SUBSCRIPTION_TOKEN:-}" ] && flags="${flags} --set secrets.claudeSubscriptionToken=${CLAUDE_SUBSCRIPTION_TOKEN}"
   [ -n "${OPENAI_API_KEY:-}" ]     && flags="${flags} --set secrets.openaiApiKey=${OPENAI_API_KEY}"
   [ -n "${GOOGLE_API_KEY:-}" ]     && flags="${flags} --set secrets.googleApiKey=${GOOGLE_API_KEY}"
@@ -288,6 +289,11 @@ _should_build_app() { # _should_build_app <registry-key>
 }
 
 build_images() {
+  # A tool shipped without declaring its configuration would be missing from
+  # the admin screen. Cheap, so it runs before any image is built.
+  if ! python "${ROOT_DIR}/scripts/check-tool-config.py" >/dev/null 2>&1; then
+    warn "scripts/check-tool-config.py reports problems — run it to see which tools read the environment directly"
+  fi
   local registry="${1:-localhost:5000/abenix}"
   local push="${2:-false}"
 
@@ -881,7 +887,7 @@ seed_agents() {
   # short — no seed_code_assets and no seed_atlas — so a local cluster came up
   # with an empty Atlas and nothing to explain why, while Azure looked fine.
   for seed in seed_agents seed_users seed_portfolio_schemas seed_ml_models \
-              seed_code_assets seed_kb seed_atlas; do
+              seed_code_assets seed_kb seed_atlas seed_kb_agent_grants seed_llm_pricing seed_backfill_agent_shares; do
     run_seed "${seed}" || failed_seeds="${failed_seeds} ${seed}"
   done
 
@@ -932,6 +938,128 @@ run_seed() {
     sleep 5
   done
   return 1
+}
+
+# ── Verify the Claude subscription once the pods are up ─────────────────────
+# A deploy used to report green while every agent run failed with "OAuth
+# access token has been revoked". The token rotates and nothing checked it
+# after the rollout. Runs inside the API pod, so no token or port-forward
+# passes through the shell. Never fails the deploy, but says so loudly.
+report_tool_credentials() {
+  step "Seeded agents that still need a tool credential"
+  local pod
+  pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "${pod}" ]; then
+    warn "no running API pod, skipping the credential summary"
+    return 0
+  fi
+  local out
+  out=$(kubectl exec -i -n "${NAMESPACE}" "${pod}" -c api -- python - 2>/dev/null <<'PY'
+import asyncio, os, sys
+for p in ("/app/apps/api", "/app/apps/agent-runtime", "/app/packages/db"):
+    sys.path.insert(0, p)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from models.agent import Agent
+from engine import credentials
+from app.services import tool_config
+
+async def run():
+    await credentials.ensure_fresh(force=True)
+    decls = tool_config.declarations()
+    eng = create_async_engine(os.environ["DATABASE_URL"])
+    sf = async_sessionmaker(eng, expire_on_commit=False)
+    async with sf() as db:
+        rows = (await db.execute(select(Agent.slug, Agent.model_config_))).all()
+    await eng.dispose()
+    missing = {}
+    for slug, mc in rows:
+        tools = set((mc or {}).get("tools") or [])
+        for n in (((mc or {}).get("pipeline_config") or {}).get("nodes") or []):
+            if isinstance(n, dict) and n.get("tool_name"):
+                tools.add(n["tool_name"])
+        for t in tools:
+            for key, req in tool_config.required_for_tool(t).items():
+                if req and not credentials.get(key, default=decls[key].default):
+                    missing.setdefault(key, set()).add(slug)
+    if not missing:
+        print("OK every required tool credential is set")
+        return
+    print(f"MISSING {len(missing)}")
+    for key, slugs in sorted(missing.items()):
+        print(f"  {key}: {len(slugs)} agent(s), e.g. {', '.join(sorted(slugs)[:4])}")
+
+asyncio.run(run())
+PY
+)
+  case "${out}" in
+    OK*)      ok "${out#OK }" ;;
+    MISSING*) warn "${out#MISSING } tool credential(s) are not set. Those agents answer with the key they need until an admin adds it under Admin -> Tool Configuration."
+              printf '%s\n' "${out}" | sed -n '2,40p' | while IFS= read -r line; do log "  ${line}"; done ;;
+    *)        log "credential summary unavailable: ${out:-no output}" ;;
+  esac
+  return 0
+}
+
+verify_subscription() {
+  step "Verifying the Claude subscription token"
+  local pod
+  pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "${pod}" ]; then
+    warn "no running API pod, skipping the subscription check"
+    return 0
+  fi
+  local out
+  out=$(kubectl exec -i -n "${NAMESPACE}" "${pod}" -c api -- python - 2>/dev/null <<'PY'
+import asyncio, os, sys
+sys.path.insert(0, "/app/apps/api")
+sys.path.insert(0, "/app/packages/db")
+import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from models.user import User
+from app.core.security import create_access_token
+
+async def run():
+    eng = create_async_engine(os.environ["DATABASE_URL"])
+    sf = async_sessionmaker(eng, expire_on_commit=False)
+    async with sf() as db:
+        u = (await db.execute(
+            select(User).where(User.email.in_(["admin@abenix.dev", "system@abenix.dev"]))
+            .order_by(User.email.desc())
+        )).scalars().first()
+    await eng.dispose()
+    if u is None:
+        print("SKIP no admin user yet"); return
+    role = getattr(u.role, "value", u.role)
+    tok = create_access_token(u.id, u.tenant_id, str(role))
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post("http://localhost:8000/api/admin/settings/subscription/verify",
+                         headers={"Authorization": f"Bearer {tok}"}, json={})
+    if r.status_code == 200:
+        print("OK")
+    elif r.status_code == 400 and "No subscription token" in r.text:
+        print("SKIP no subscription token configured")
+    else:
+        print(f"FAIL {r.status_code} {r.text[:200]}")
+
+asyncio.run(run())
+PY
+)
+  case "${out}" in
+    OK*)   ok "subscription token verified against Anthropic" ;;
+    SKIP*) log "${out#SKIP }" ;;
+    *)
+      warn "SUBSCRIPTION TOKEN REJECTED. Every agent run will fail with INFRA_AUTH_ERROR."
+      warn "  ${out:-no response from the verify endpoint}"
+      warn "  Fix: bash scripts/sync-claude-subscription.sh"
+      ;;
+  esac
+  return 0
 }
 
 deploy_livekit() {
@@ -1289,6 +1417,8 @@ deploy_local() {
   ensure_jwt_keys || true
   run_migrations || true
   seed_agents || true
+  verify_subscription || true
+  report_tool_credentials || true
 
   # EDGE_RUNTIME_VARIANT={python|rust|c} picks which port runs in the cluster.
   # EDGE_RUNTIME_ALL_VARIANTS=true installs all of them side-by-side (soak test).
@@ -1434,6 +1564,8 @@ deploy_local_runtime() {
   ensure_jwt_keys || true
   run_migrations || true
   seed_agents || true
+  verify_subscription || true
+  report_tool_credentials || true
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"
   setup_port_forwards "true"
 
@@ -1499,6 +1631,8 @@ deploy_cloud() {
   wait_for_pods 600 || true
   run_migrations || true
   seed_agents || true
+  verify_subscription || true
+  report_tool_credentials || true
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"
 
   echo ""

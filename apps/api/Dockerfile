@@ -57,4 +57,4 @@ WORKDIR /app/apps/api
 # a pod restart wipes counters; that's fine for cumulative dashboards
 # (rate() handles resets) and avoids needing a writable PVC.
 ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prom-multiproc
-CMD sh -c 'mkdir -p $PROMETHEUS_MULTIPROC_DIR && rm -f $PROMETHEUS_MULTIPROC_DIR/* && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4'
+CMD sh -c 'mkdir -p $PROMETHEUS_MULTIPROC_DIR && rm -f $PROMETHEUS_MULTIPROC_DIR/* && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4 --timeout-keep-alive 75'

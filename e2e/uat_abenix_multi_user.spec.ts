@@ -144,10 +144,10 @@ test.describe('Abenix · Multi-User RBAC', () => {
     const viewIds = (viewList?.data ?? []).map((a: any) => a.id);
     expect(viewIds, 'viewer hidden from rbac agent in list').not.toContain(rbacAgentId);
 
-    // GET-by-id is tenant-wide read in this codebase (see agents.py:524) — so
-    // it returns 200 even for non-share viewer. We document and assert that.
+    // Since 2.5 GET-by-id follows the same access rule as the list: owner,
+    // admin, platform agent, or a share. A viewer with none of those gets 403.
     const getById = await apiFetch(viewer.token, `/api/agents/${rbacAgentId}`);
-    expect(getById.status, 'tenant-wide GET — documented behaviour').toBe(200);
+    expect(getById.status, 'unshared private agent is not readable by a viewer').toBe(403);
 
     // PUT MUST be 403 — viewer is neither creator nor admin nor EDIT-share.
     const patchResp = await apiFetch(viewer.token, `/api/agents/${rbacAgentId}`, {
@@ -258,11 +258,22 @@ test.describe('Abenix · Multi-User RBAC', () => {
       },
       body: JSON.stringify({ message: 'hello', stream: false, wait: true }),
     });
-    // Either the execute succeeded (200) — meaning execute is open to
-    // tenant members — OR the per-user quota declined (429). Both are
-    // acceptable; we only assert it is NOT 403 (which would mean the
-    // delegation header was treated as auth and rejected).
-    expect([200, 429], `actual status ${execResp.status}`).toContain(execResp.status);
+    // Since 2.5 a VIEW share does not allow execution, so the viewer gets 403
+    // here regardless of the header. Grant EXECUTE and the run goes through
+    // (200) or the per-user quota declines (429). Either way the header is
+    // ignored, which is what this scenario is about.
+    expect(execResp.status, 'view share cannot execute').toBe(403);
+    const grant = await apiFetch(admin.token, '/api/me/shares', {
+      method: 'POST',
+      body: JSON.stringify({ resource_type: 'agent', resource_id: sharedAgentId, shared_with_email: VIEWER_EMAIL, permission: 'execute' }),
+    });
+    expect([200, 201]).toContain(grant.status);
+    const execResp2 = await apiFetch(viewer.token, `/api/agents/${sharedAgentId}/execute`, {
+      method: 'POST',
+      headers: { 'X-Abenix-Subject': 'fake-other-user-id', 'X-Abenix-Subject-Type': 'user' },
+      body: JSON.stringify({ message: 'hello', stream: false, wait: true }),
+    });
+    expect([200, 429], `actual status ${execResp2.status}`).toContain(execResp2.status);
   });
 
   // ─── UI smoke: viewer sidebar mounts, admin pages refuse ──────────────

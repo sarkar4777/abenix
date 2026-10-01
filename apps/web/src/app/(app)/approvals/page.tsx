@@ -28,7 +28,12 @@ interface ApprovalRow {
   expires_at: string | null;
   decided_at: string | null;
   created_at: string | null;
+  gate_kind?: string | null;
 }
+
+const GATE_KIND_LABEL: Record<string, string> = {
+  human_approval: 'agent gate',
+};
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
@@ -170,6 +175,15 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
             <span className={`text-[10px] px-2 py-0.5 rounded-full border uppercase tracking-wider ${STATUS_BADGE[row.status]}`}>
               {row.status}
             </span>
+            {row.gate_kind && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 tracking-wide"
+                data-testid="approval-gate-kind"
+                title={row.gate_kind}
+              >
+                {GATE_KIND_LABEL[row.gate_kind] || row.gate_kind}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap gap-3 text-[11px] text-slate-500">
             <span>Created {relTime(row.created_at)}</span>
@@ -282,7 +296,8 @@ export default function ApprovalsPage() {
 
   const handleDecide = async (id: string, decision: 'approve' | 'deny', reason?: string) => {
     setBusyId(id);
-    await apiFetch(`/api/approvals/${id}/signoff`, {
+    // ids are opaque strings, agent gates look like hitl:{execution}:{gate}
+    await apiFetch(`/api/approvals/${encodeURIComponent(id)}/signoff`, {
       method: 'POST',
       body: JSON.stringify({ decision, reason }),
     });

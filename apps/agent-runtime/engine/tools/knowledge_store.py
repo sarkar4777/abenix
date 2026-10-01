@@ -1,4 +1,4 @@
-﻿"""Knowledge Store tool â€” push content into the knowledge base from agents."""
+"""Knowledge Store tool â€” push content into the knowledge base from agents."""
 
 from __future__ import annotations
 
@@ -7,13 +7,40 @@ import os
 import uuid
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
 
 class KnowledgeStoreTool(BaseTool):
     name = "knowledge_store"
+    config_fields = (
+        ConfigField(
+            "OPENAI_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenAI",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+        ConfigField(
+            "PINECONE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Pinecone",
+            signup_url="https://app.pinecone.io",
+        ),
+        ConfigField(
+            "PINECONE_INDEX_NAME",
+            label="Index name",
+            kind="string",
+            required=False,
+            group="Pinecone",
+            default="agentforge-knowledge",
+        ),
+    )
     description = (
         "Store content into the knowledge base for future retrieval. "
         "Use this to save extracted data, analysis results, documents, or any "
@@ -195,7 +222,7 @@ class KnowledgeStoreTool(BaseTool):
     @staticmethod
     async def _embed_chunks(chunks: list[str]) -> list[list[float]]:
         """Embed chunks using OpenAI API."""
-        api_key = os.environ.get("OPENAI_API_KEY", "")
+        api_key = credentials.get("OPENAI_API_KEY")
         if not api_key:
             return []
 
@@ -230,8 +257,10 @@ class KnowledgeStoreTool(BaseTool):
         try:
             from pinecone import Pinecone
 
-            pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY", ""))
-            index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
+            pc = Pinecone(api_key=credentials.get("PINECONE_API_KEY"))
+            index_name = credentials.get(
+                "PINECONE_INDEX_NAME", default="agentforge-knowledge"
+            )
             index = pc.Index(index_name)
 
             vectors = []

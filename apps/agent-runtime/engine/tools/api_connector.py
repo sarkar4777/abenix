@@ -3,22 +3,64 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
-
-SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
-AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "")
-NOTION_API_KEY = os.environ.get("NOTION_API_KEY", "")
-JIRA_URL = os.environ.get("JIRA_URL", "")
-JIRA_EMAIL = os.environ.get("JIRA_EMAIL", "")
-JIRA_TOKEN = os.environ.get("JIRA_TOKEN", "")
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 
 class ApiConnectorTool(BaseTool):
     name = "api_connector"
+    config_fields = (
+        ConfigField(
+            "SLACK_WEBHOOK_URL",
+            label="Incoming webhook URL",
+            kind="url",
+            required=False,
+            group="Slack",
+            signup_url="https://api.slack.com/messaging/webhooks",
+        ),
+        ConfigField(
+            "AIRTABLE_API_KEY",
+            label="Personal access token",
+            kind="secret",
+            required=False,
+            group="Airtable",
+            signup_url="https://airtable.com/create/tokens",
+        ),
+        ConfigField(
+            "GOOGLE_SHEETS_CREDENTIALS",
+            label="Service account JSON",
+            kind="secret",
+            required=False,
+            group="Google Sheets",
+        ),
+        ConfigField(
+            "NOTION_API_KEY",
+            label="Integration token",
+            kind="secret",
+            required=False,
+            group="Notion",
+            signup_url="https://www.notion.so/my-integrations",
+        ),
+        ConfigField(
+            "JIRA_URL", label="Site URL", kind="url", required=False, group="Jira"
+        ),
+        ConfigField(
+            "JIRA_EMAIL",
+            label="Account email",
+            kind="string",
+            required=False,
+            group="Jira",
+        ),
+        ConfigField(
+            "JIRA_TOKEN",
+            label="API token",
+            kind="secret",
+            required=False,
+            group="Jira",
+            signup_url="https://id.atlassian.com/manage-profile/security/api-tokens",
+        ),
+    )
     description = (
         "Connect to popular external services: send Slack messages, read/write "
         "Airtable records, interact with Notion databases, create Jira tickets, "
@@ -84,7 +126,7 @@ class ApiConnectorTool(BaseTool):
     async def _slack_send(self, params: dict[str, Any]) -> dict[str, Any]:
         message = params.get("message", "")
         channel = params.get("channel", "#general")
-        webhook = params.get("webhook_url", SLACK_WEBHOOK_URL)
+        webhook = params.get("webhook_url", self.cfg("SLACK_WEBHOOK_URL"))
 
         if not message:
             return {"error": "message is required"}
@@ -120,7 +162,7 @@ class ApiConnectorTool(BaseTool):
         if not base_id or not table_name:
             return {"error": "base_id and table_name are required"}
 
-        if not AIRTABLE_API_KEY:
+        if not self.cfg("AIRTABLE_API_KEY"):
             return {
                 "status": "mock",
                 "message": "Airtable API key not configured",
@@ -140,7 +182,7 @@ class ApiConnectorTool(BaseTool):
         import aiohttp
 
         url = f"https://api.airtable.com/v0/{base_id}/{table_name}"
-        headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+        headers = {"Authorization": f"Bearer {self.cfg("AIRTABLE_API_KEY")}"}
         query_params: dict[str, Any] = {"maxRecords": max_records}
         if view:
             query_params["view"] = view
@@ -165,7 +207,7 @@ class ApiConnectorTool(BaseTool):
         if not base_id or not table_name or not records:
             return {"error": "base_id, table_name, and records are required"}
 
-        if not AIRTABLE_API_KEY:
+        if not self.cfg("AIRTABLE_API_KEY"):
             return {
                 "status": "mock",
                 "message": "Airtable API key not configured",
@@ -177,7 +219,7 @@ class ApiConnectorTool(BaseTool):
 
         url = f"https://api.airtable.com/v0/{base_id}/{table_name}"
         headers = {
-            "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+            "Authorization": f"Bearer {self.cfg("AIRTABLE_API_KEY")}",
             "Content-Type": "application/json",
         }
         payload = {"records": [{"fields": r} for r in records]}
@@ -196,7 +238,7 @@ class ApiConnectorTool(BaseTool):
         if not database_id:
             return {"error": "database_id is required"}
 
-        if not NOTION_API_KEY:
+        if not self.cfg("NOTION_API_KEY"):
             return {
                 "status": "mock",
                 "message": "Notion API key not configured",
@@ -215,7 +257,7 @@ class ApiConnectorTool(BaseTool):
 
         url = f"https://api.notion.com/v1/databases/{database_id}/query"
         headers = {
-            "Authorization": f"Bearer {NOTION_API_KEY}",
+            "Authorization": f"Bearer {self.cfg("NOTION_API_KEY")}",
             "Notion-Version": "2022-06-28",
             "Content-Type": "application/json",
         }
@@ -236,7 +278,7 @@ class ApiConnectorTool(BaseTool):
         if not database_id or not properties:
             return {"error": "database_id and properties are required"}
 
-        if not NOTION_API_KEY:
+        if not self.cfg("NOTION_API_KEY"):
             return {
                 "status": "mock",
                 "message": "Notion API key not configured",
@@ -248,7 +290,7 @@ class ApiConnectorTool(BaseTool):
 
         url = "https://api.notion.com/v1/pages"
         headers = {
-            "Authorization": f"Bearer {NOTION_API_KEY}",
+            "Authorization": f"Bearer {self.cfg("NOTION_API_KEY")}",
             "Notion-Version": "2022-06-28",
             "Content-Type": "application/json",
         }
@@ -271,7 +313,7 @@ class ApiConnectorTool(BaseTool):
         if not project or not summary:
             return {"error": "project and summary are required"}
 
-        if not JIRA_URL or not JIRA_TOKEN:
+        if not self.cfg("JIRA_URL") or not self.cfg("JIRA_TOKEN"):
             return {
                 "status": "mock",
                 "message": "Jira not configured",
@@ -285,8 +327,10 @@ class ApiConnectorTool(BaseTool):
         import aiohttp
         import base64
 
-        url = f"{JIRA_URL}/rest/api/3/issue"
-        auth = base64.b64encode(f"{JIRA_EMAIL}:{JIRA_TOKEN}".encode()).decode()
+        url = f"{self.cfg("JIRA_URL")}/rest/api/3/issue"
+        auth = base64.b64encode(
+            f"{self.cfg("JIRA_EMAIL")}:{self.cfg("JIRA_TOKEN")}".encode()
+        ).decode()
         headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
         payload = {
             "fields": {
@@ -312,7 +356,7 @@ class ApiConnectorTool(BaseTool):
                 return {
                     "status": "success" if resp.status == 201 else "error",
                     "key": data.get("key"),
-                    "url": f"{JIRA_URL}/browse/{data.get('key')}",
+                    "url": f"{self.cfg("JIRA_URL")}/browse/{data.get('key')}",
                 }
 
     async def _jira_search(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -320,7 +364,7 @@ class ApiConnectorTool(BaseTool):
         if not jql:
             return {"error": "jql query is required"}
 
-        if not JIRA_URL or not JIRA_TOKEN:
+        if not self.cfg("JIRA_URL") or not self.cfg("JIRA_TOKEN"):
             return {
                 "status": "mock",
                 "message": "Jira not configured",
@@ -333,8 +377,10 @@ class ApiConnectorTool(BaseTool):
         import aiohttp
         import base64
 
-        url = f"{JIRA_URL}/rest/api/3/search"
-        auth = base64.b64encode(f"{JIRA_EMAIL}:{JIRA_TOKEN}".encode()).decode()
+        url = f"{self.cfg("JIRA_URL")}/rest/api/3/search"
+        auth = base64.b64encode(
+            f"{self.cfg("JIRA_EMAIL")}:{self.cfg("JIRA_TOKEN")}".encode()
+        ).decode()
         headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
 
         async with aiohttp.ClientSession() as session:
@@ -366,7 +412,7 @@ class ApiConnectorTool(BaseTool):
         if not spreadsheet_id:
             return {"error": "spreadsheet_id is required"}
 
-        if not GOOGLE_SHEETS_CREDENTIALS:
+        if not self.cfg("GOOGLE_SHEETS_CREDENTIALS"):
             return {
                 "status": "mock",
                 "message": "Google Sheets credentials not configured",
@@ -387,7 +433,7 @@ class ApiConnectorTool(BaseTool):
         if not spreadsheet_id or not values:
             return {"error": "spreadsheet_id and values are required"}
 
-        if not GOOGLE_SHEETS_CREDENTIALS:
+        if not self.cfg("GOOGLE_SHEETS_CREDENTIALS"):
             return {
                 "status": "mock",
                 "message": "Google Sheets credentials not configured",

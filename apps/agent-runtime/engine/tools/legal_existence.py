@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -12,7 +11,8 @@ from typing import Any
 
 import httpx
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ async def _gleif_lookup(name: str, country: str | None) -> list[dict[str, Any]]:
 async def _opencorporates_lookup(
     name: str, country: str | None
 ) -> list[dict[str, Any]]:
-    api_token = os.environ.get("OPENCORPORATES_API_KEY", "")
+    api_token = credentials.get("OPENCORPORATES_API_KEY")
     params: dict[str, Any] = {"q": name, "per_page": 5, "format": "json"}
     if country:
         params["jurisdiction_code"] = country.lower()[:2]
@@ -129,7 +129,7 @@ async def _opencorporates_lookup(
 
 
 async def _uk_ch_lookup(name: str) -> list[dict[str, Any]]:
-    api_key = os.environ.get("COMPANIES_HOUSE_API_KEY", "")
+    api_key = credentials.get("COMPANIES_HOUSE_API_KEY")
     if not api_key:
         return []
     try:
@@ -187,7 +187,7 @@ async def _check_address_red_flags(addr: str | None) -> list[str]:
     """Live check: query OpenCorporates for how many other companies share"""
     if not addr:
         return []
-    api_token = os.environ.get("OPENCORPORATES_API_KEY", "")
+    api_token = credentials.get("OPENCORPORATES_API_KEY")
     params: dict[str, Any] = {"q": addr[:120], "per_page": 100, "format": "json"}
     if api_token:
         params["api_token"] = api_token
@@ -225,6 +225,24 @@ def _check_age_red_flag(incorp_date: str | None) -> list[str]:
 
 class LegalExistenceVerifierTool(BaseTool):
     name = "legal_existence_verifier"
+    config_fields = (
+        ConfigField(
+            "COMPANIES_HOUSE_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="Companies House",
+            signup_url="https://developer.company-information.service.gov.uk/",
+        ),
+        ConfigField(
+            "OPENCORPORATES_API_KEY",
+            label="API token",
+            kind="secret",
+            required=False,
+            group="OpenCorporates",
+            signup_url="https://opencorporates.com/api_accounts/new",
+        ),
+    )
     description = (
         "Verify that a counterparty legally exists, is in good standing, and "
         "is not a suspected shell. Cross-references GLEIF (2.3M+ LEI records), "
@@ -279,6 +297,8 @@ class LegalExistenceVerifierTool(BaseTool):
 
         trail: list[dict[str, Any]] = []
         red_flags: list[str] = []
+        warnings: list[str] = []
+        sources_skipped: list[str] = []
 
         # 1. GLEIF
         gleif_hits = await _gleif_lookup(name, country)
@@ -302,6 +322,11 @@ class LegalExistenceVerifierTool(BaseTool):
             )
 
         # 2. OpenCorporates
+        if not credentials.get("OPENCORPORATES_API_KEY"):
+            warnings.append(
+                "OpenCorporates queried without OPENCORPORATES_API_KEY, results are "
+                "limited and may be throttled, an admin can add it under Tool Configuration"
+            )
         oc_hits = await _opencorporates_lookup(name, country)
         if oc_hits:
             trail.append(
@@ -314,7 +339,15 @@ class LegalExistenceVerifierTool(BaseTool):
 
         # 3. UK CH
         uk_hits: list[dict[str, Any]] = []
-        if (country or "").upper() == "GB":
+        if (country or "").upper() == "GB" and not credentials.get(
+            "COMPANIES_HOUSE_API_KEY"
+        ):
+            sources_skipped.append("uk_companies_house")
+            warnings.append(
+                "UK Companies House not queried: COMPANIES_HOUSE_API_KEY is not configured, "
+                "an admin can add it under Tool Configuration"
+            )
+        elif (country or "").upper() == "GB":
             uk_hits = await _uk_ch_lookup(name)
             if uk_hits:
                 trail.append(
@@ -434,6 +467,8 @@ class LegalExistenceVerifierTool(BaseTool):
                     "opencorporates_candidates": oc_hits[:3],
                     "uk_companies_house_candidates": uk_hits[:3],
                     "verification_trail": trail,
+                    "warnings": warnings,
+                    "sources_skipped": sources_skipped,
                     "disclaimer": (
                         "No automated tool replaces a certified copy of the "
                         "counterparty's register extract. If `exists` is true "

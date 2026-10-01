@@ -374,3 +374,7 @@ model_config:
     - tavily_search
     - web_search
     - current_time
+
+# Keys the tools above cannot run without. An admin adds them under Admin -> Tool Configuration.
+requires_credentials:
+  - FMP_API_KEY

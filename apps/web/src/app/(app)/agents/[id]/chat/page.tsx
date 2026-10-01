@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import { useEffect, useRef, useCallback, useState, Suspense, lazy } from 'react';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -94,8 +96,35 @@ export default function AgentChatPage() {
   const inputVars = (agentData?.model_config as Record<string, unknown>)?.input_variables as Array<{
     name: string; type: string; description: string; required: boolean; default?: string; options?: string[];
   }> | undefined;
+  const moderationNotice = useChatStore((st) => st.moderationNotice);
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [showParams, setShowParams] = useState(true);
+
+  // defaults are real values, not placeholders, so a required variable with a default passes the check
+  useEffect(() => {
+    if (!inputVars?.length) return;
+    setParamValues((prev) => {
+      const next = { ...prev };
+      for (const v of inputVars) if (next[v.name] === undefined && v.default != null && v.default !== '') next[v.name] = String(v.default);
+      return next;
+    });
+  }, [inputVars]);
+
+  // ?prefill= from the Flight Recorder's Re-run button
+  const [prefill, setPrefill] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const q = new URLSearchParams(window.location.search).get('prefill');
+    if (q) setPrefill(q);
+  }, []);
+
+  const coerceParam = (type: string, raw: string): unknown => {
+    if (type === 'number') { const n = Number(raw); return Number.isFinite(n) ? n : raw; }
+    if (type === 'boolean') return raw === 'true' || raw === '1';
+    const t = raw.trim();
+    if (t.startsWith('{') || t.startsWith('[')) { try { return JSON.parse(t); } catch { return raw; } }
+    return raw;
+  };
 
   const handleSend = useCallback(
     (message: string) => {
@@ -119,10 +148,16 @@ export default function AgentChatPage() {
         Object.entries(paramValues).filter(([, v]) => v.trim() !== '')
       );
       if (Object.keys(filledParams).length > 0) {
+        // typed context for the pipeline, plus the text block agents relied on before 2.5
+        const context: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(filledParams)) {
+          const decl = inputVars?.find((iv) => iv.name === k);
+          context[k] = coerceParam(decl?.type || 'string', v);
+        }
         const contextStr = Object.entries(filledParams)
           .map(([k, v]) => `${k}: ${v}`)
           .join('\n');
-        sendMessage(agentId, `${message}\n\n[Input Parameters]\n${contextStr}`);
+        sendMessage(agentId, `${message}\n\n[Input Parameters]\n${contextStr}`, context);
       } else {
         sendMessage(agentId, message);
       }
@@ -199,6 +234,15 @@ export default function AgentChatPage() {
             />
           )}
 
+          {moderationNotice && (
+            <div className="flex justify-center">
+              <div className="bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs rounded-lg px-4 py-2 flex items-center gap-2" data-testid="moderation-notice">
+                <span className="uppercase tracking-wider text-[10px] font-semibold">Moderation</span>
+                <span>{moderationNotice}</span>
+                <Link href="/moderation" className="underline hover:text-white">policy</Link>
+              </div>
+            </div>
+          )}
           {error && (
             <div className="flex justify-center">
               <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-2">

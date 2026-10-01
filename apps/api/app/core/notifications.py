@@ -36,6 +36,31 @@ def _settings_allows(prefs: dict | None, type_key: str, channel_key: str) -> boo
     return True
 
 
+def tenant_slack_webhook(tenant: Any) -> str:
+    """Decrypted per-tenant Slack webhook, or empty when none is configured."""
+    if tenant is None:
+        return ""
+    raw = (getattr(tenant, "slack_webhook_url", None) or "").strip()
+    if not raw:
+        return ""
+    from app.core import crypto
+
+    return crypto.decrypt(tenant.id, raw).strip()
+
+
+def mask_webhook(url: str) -> str:
+    """Show only the tail so an admin can recognise the hook without seeing it."""
+    if not url:
+        return ""
+    tail = url[-6:] if len(url) > 6 else url
+    return f"https://hooks.slack.com/…{tail}"
+
+
+def platform_slack_webhook() -> str:
+    """Operator channel for platform-level alerts only."""
+    return (os.environ.get("ABENIX_SLACK_WEBHOOK_URL") or "").strip()
+
+
 async def _post_slack(
     webhook_url: str, *, title: str, message: str, link: str | None
 ) -> bool:
@@ -161,11 +186,8 @@ async def create_notification(
             user_email = (user.email or "").strip()
         t_res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = t_res.scalar_one_or_none()
-        slack_webhook = (
-            (getattr(tenant, "slack_webhook_url", None) or "").strip() if tenant else ""
-        )
-        if not slack_webhook:
-            slack_webhook = (os.environ.get("ABENIX_SLACK_WEBHOOK_URL") or "").strip()
+        # Tenant traffic never falls back to the operator channel
+        slack_webhook = tenant_slack_webhook(tenant)
     except Exception as e:
         logger.debug("notification context load failed: %s", e)
 
@@ -221,3 +243,106 @@ def _serialize_notification(n: Notification) -> dict:
         "metadata": n.metadata_,
         "created_at": n.created_at.isoformat() if n.created_at else None,
     }
+
+
+async def notify_platform_alert(
+    db: AsyncSession,
+    *,
+    name: str,
+    severity: str,
+    summary: str,
+    since: str | None,
+    labels: dict | None = None,
+    link: str = "/alerts",
+) -> int:
+    """Fan a firing Prometheus alert out to every active admin and to Slack.
+
+    In-app rows go through create_notification with push=False and a manual
+    WS push, so one alert produces one Slack post per distinct webhook rather
+    than one per admin. Returns the number of admin notifications written.
+    """
+    from sqlalchemy import select
+    from models.notification import NotificationType
+    from models.tenant import Tenant
+    from models.user import User, UserRole
+
+    sev = (severity or "info").lower()
+    title = f"[{sev.upper()}] {name}"
+    body = summary or f"Prometheus alert {name} is firing."
+    if since:
+        body = f"{body} (since {since})"
+    metadata = {
+        "source": "prometheus",
+        "alertname": name,
+        "severity": sev,
+        "active_since": since,
+        "labels": labels or {},
+    }
+
+    admins = (
+        (
+            await db.execute(
+                select(User).where(
+                    User.role == UserRole.ADMIN, User.is_active.is_(True)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    written = 0
+    tenant_ids = set()
+    for admin in admins:
+        try:
+            n = await create_notification(
+                db,
+                tenant_id=admin.tenant_id,
+                user_id=admin.id,
+                type=NotificationType.SYSTEM_ALERT.value,
+                title=title,
+                message=body,
+                link=link,
+                metadata=metadata,
+                push=False,
+            )
+            written += 1
+            tenant_ids.add(admin.tenant_id)
+            try:
+                await ws_manager.send_to_user(
+                    admin.id, "notification", _serialize_notification(n)
+                )
+            except Exception as e:
+                logger.debug("ws push failed: %s", e)
+        except Exception as e:
+            logger.warning("platform alert notify failed for %s: %s", admin.id, e)
+
+    webhooks: set[str] = set()
+    platform_hook = (os.environ.get("ABENIX_SLACK_WEBHOOK_URL") or "").strip()
+    if platform_hook:
+        webhooks.add(platform_hook)
+    if tenant_ids:
+        try:
+            t_rows = (
+                (await db.execute(select(Tenant).where(Tenant.id.in_(tenant_ids))))
+                .scalars()
+                .all()
+            )
+            for t in t_rows:
+                hook = (getattr(t, "slack_webhook_url", None) or "").strip()
+                if hook:
+                    webhooks.add(hook)
+        except Exception as e:
+            logger.debug("tenant webhook lookup failed: %s", e)
+    frontend = os.environ.get("FRONTEND_URL", "")
+    for hook in webhooks:
+        ok = await _post_slack(
+            hook,
+            title=f"Abenix — {title}",
+            message=body,
+            link=f"{frontend}{link}" if frontend else None,
+        )
+        if ok:
+            _emit_notif_metric(
+                "slack", "error" if sev in ("critical", "error") else "warning"
+            )
+    return written

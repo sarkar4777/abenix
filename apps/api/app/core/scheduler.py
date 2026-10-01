@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 from datetime import datetime, timedelta, timezone
+from typing import AsyncIterator
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from croniter import croniter
@@ -14,6 +17,15 @@ logger = logging.getLogger("abenix.scheduler")
 _BACKGROUND_TASKS: set = set()
 
 _scheduler: AsyncIOScheduler | None = None
+
+# Max triggers one replica claims per tick, the rest wait for the next tick
+# or another replica.
+TRIGGER_CLAIM_BATCH = 100
+
+# pg advisory lock keys (int4, ASCII sentinels) for the singleton jobs.
+QUOTA_LOCK_KEY = 0x51554F54  # "QUOT"
+ARCHIVE_LOCK_KEY = 0x41524348  # "ARCH"
+ALERTS_LOCK_KEY = 0x414C5254  # "ALRT"
 
 
 def get_scheduler() -> AsyncIOScheduler:
@@ -53,93 +65,108 @@ def is_valid_cron(cron_expr: str) -> bool:
         return False
 
 
-async def _check_due_triggers() -> None:
-    """Master job: find and execute all scheduled triggers past their next_run_at."""
-    from sqlalchemy import select, and_
+@contextlib.asynccontextmanager
+async def advisory_lock(key: int) -> AsyncIterator[bool]:
+    """Transaction-scoped pg advisory lock, released when the block exits.
 
-    # Lazy imports to avoid circular dependencies
+    Yields whether this replica holds the lock. Transaction-scoped on
+    purpose: a session-scoped lock survives the connection going back to
+    the pool and ends up pinned to one pooled connection.
+    """
+    from sqlalchemy import text
+
+    from app.core.deps import async_session
+
+    async with async_session() as db:
+        async with db.begin():
+            r = await db.execute(
+                text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": key}
+            )
+            yield bool(r.scalar())
+
+
+def due_trigger_claim_stmt(now: datetime):
+    """Row-locked claim so three API replicas never fire the same trigger."""
+    from sqlalchemy import and_, select
+
+    from models.agent_trigger import AgentTrigger
+
+    return (
+        select(AgentTrigger)
+        .where(
+            and_(
+                AgentTrigger.trigger_type == "schedule",
+                AgentTrigger.is_active.is_(True),
+                AgentTrigger.next_run_at.isnot(None),
+                AgentTrigger.next_run_at <= now,
+            )
+        )
+        .order_by(AgentTrigger.next_run_at)
+        .limit(TRIGGER_CLAIM_BATCH)
+        .with_for_update(skip_locked=True)
+    )
+
+
+def claim_trigger(trigger, now: datetime) -> None:
+    """Advance a locked trigger so no other replica sees it as due."""
+    trigger.last_run_at = now
+    trigger.run_count = (trigger.run_count or 0) + 1
+    if trigger.cron_expression:
+        trigger.next_run_at = next_cron_run(trigger.cron_expression, now)
+    else:
+        trigger.is_active = False  # No cron = one-shot, disable
+
+
+async def _check_due_triggers() -> None:
+    """Master job: claim due scheduled triggers under row locks, then fire them."""
     import sys
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
     from app.core.deps import async_session
-    from models.agent_trigger import AgentTrigger
-    from models.agent import Agent, AgentStatus
 
     now = datetime.now(timezone.utc)
+    claimed: list[tuple[str, str]] = []
 
     try:
         async with async_session() as db:
-            result = await db.execute(
-                select(AgentTrigger, Agent)
-                .join(Agent, AgentTrigger.agent_id == Agent.id)
-                .where(
-                    and_(
-                        AgentTrigger.trigger_type == "schedule",
-                        AgentTrigger.is_active.is_(True),
-                        AgentTrigger.next_run_at.isnot(None),
-                        AgentTrigger.next_run_at <= now,
-                        Agent.status == AgentStatus.ACTIVE,
-                    )
-                )
-            )
-            due_triggers = result.all()
-
-            if due_triggers:
-                logger.info("Found %d due scheduled triggers", len(due_triggers))
-
-            for trigger, agent in due_triggers:
-                logger.info(
-                    "Executing scheduled trigger '%s' (id=%s) for agent '%s'",
-                    trigger.name,
-                    trigger.id,
-                    agent.name,
-                )
-
-                # Spawn background execution task. We pass only the ids — the
-                # task opens its OWN session. Sharing this scope's `db` across
-                # N concurrent tasks races the single asyncpg connection
-                # ("another operation is in progress") and outlives the
-                # `async with` below, leaving the task with a closed session.
-                _task = asyncio.create_task(
-                    _run_trigger(str(trigger.id), str(agent.id)),
-                    name=f"trigger-{trigger.id}",
-                )
-                _BACKGROUND_TASKS.add(_task)
-                _task.add_done_callback(_BACKGROUND_TASKS.discard)
-
-                # Update next_run_at immediately so we don't re-trigger
-                trigger.last_run_at = now
-                trigger.run_count = (trigger.run_count or 0) + 1
-                if trigger.cron_expression:
-                    trigger.next_run_at = next_cron_run(trigger.cron_expression, now)
-                else:
-                    trigger.is_active = False  # No cron = one-shot, disable
-
-            if due_triggers:
-                await db.commit()
-
+            # Locks are held until this transaction commits, which also
+            # publishes the new next_run_at before any other replica can read.
+            async with db.begin():
+                result = await db.execute(due_trigger_claim_stmt(now))
+                for trigger in result.scalars().all():
+                    claim_trigger(trigger, now)
+                    claimed.append((str(trigger.id), str(trigger.agent_id)))
     except Exception as e:
         logger.error("Scheduler check failed: %s", e, exc_info=True)
+        return
+
+    if not claimed:
+        return
+    logger.info("Claimed %d due scheduled triggers", len(claimed))
+    await asyncio.gather(
+        *(_run_trigger(tid, aid) for tid, aid in claimed), return_exceptions=True
+    )
 
 
 async def _run_trigger(trigger_id: str, agent_id: str) -> None:
-    """Execute a single trigger's agent in the background.
+    """Fire one claimed trigger: eligibility check, then dispatch.
 
-    Receives ids (not ORM instances or a session) and opens its OWN session
-    so concurrent triggers don't race the shared asyncpg connection.
+    Opens its OWN session so concurrent triggers never share a connection.
+    run_count / last_run_at were already advanced by the claim.
     """
     try:
-        import asyncio as _asyncio
-
         from sqlalchemy import select as _select
 
         from app.core.deps import fresh_session
-        from app.routers.triggers import _execute_triggered_agent, _get_db_url
+        from app.routers.triggers import (
+            check_trigger_eligibility,
+            deactivate_trigger,
+            dispatch_execution,
+        )
         from models.agent import Agent  # type: ignore
         from models.agent_trigger import AgentTrigger  # type: ignore
-        from models.execution import Execution, ExecutionStatus  # type: ignore
         from models.user import User as UserModel  # type: ignore
 
         async with fresh_session() as db:
@@ -148,81 +175,59 @@ async def _run_trigger(trigger_id: str, agent_id: str) -> None:
                     _select(AgentTrigger).where(AgentTrigger.id == trigger_id)
                 )
             ).scalar_one_or_none()
+            if trigger is None:
+                logger.warning("trigger %s vanished between claim and fire", trigger_id)
+                return
             agent = (
                 await db.execute(_select(Agent).where(Agent.id == agent_id))
             ).scalar_one_or_none()
-            if trigger is None or agent is None:
-                raise RuntimeError(
-                    f"trigger {trigger_id} or agent {agent_id} not found"
-                )
-
-            trigger_user = (
+            owner = (
                 await db.execute(
                     _select(UserModel).where(UserModel.id == trigger.created_by)
                 )
             ).scalar_one_or_none()
-            if trigger_user is None:
-                raise RuntimeError(
-                    f"trigger {trigger.id} owner {trigger.created_by} not found"
-                )
 
-            execution = Execution(
-                tenant_id=trigger.tenant_id,
-                agent_id=agent.id,
-                user_id=trigger.created_by,
-                input_message=trigger.default_message or "Scheduled execution",
-                status=ExecutionStatus.RUNNING,
-                model_used=(
-                    agent.model_config_.get("model", "claude-sonnet-4-5-20250929")
-                    if agent.model_config_
-                    else "claude-sonnet-4-5-20250929"
-                ),
+            reason = await check_trigger_eligibility(db, trigger, agent, owner)
+            if reason:
+                logger.info("trigger %s deactivated: %s", trigger_id, reason)
+                await deactivate_trigger(db, trigger, reason, owner=owner)
+                return
+
+            logger.info(
+                "Executing scheduled trigger '%s' (id=%s) for agent '%s'",
+                trigger.name,
+                trigger.id,
+                agent.name,
             )
-            db.add(execution)
-            trigger.run_count = (trigger.run_count or 0) + 1
-            from datetime import datetime as _dt, timezone as _tz
-
-            trigger.last_run_at = _dt.now(_tz.utc)
-            await db.commit()
-            await db.refresh(execution)
-
-            execution_id = str(execution.id)
-            trigger_uuid = str(trigger.id)
-            default_message = trigger.default_message or "Scheduled execution"
-            default_context = (
-                trigger.default_context
-                if isinstance(trigger.default_context, dict)
-                else {}
-            )
-
-        _t = _asyncio.create_task(
-            _execute_triggered_agent(
-                execution_id=execution_id,
+            _execution, dispatched = await dispatch_execution(
+                db,
                 agent=agent,
-                user=trigger_user,
-                message=default_message,
-                context=default_context,
-                trigger_id=trigger_uuid,
-                db_url=str(_get_db_url()),
+                user=owner,
+                message=trigger.default_message or "Scheduled execution",
+                context=(
+                    trigger.default_context
+                    if isinstance(trigger.default_context, dict)
+                    else {}
+                ),
+                trigger_id=str(trigger.id),
             )
-        )
-        _BACKGROUND_TASKS.add(_t)
-        _t.add_done_callback(_BACKGROUND_TASKS.discard)
-
-        logger.info("Trigger %s executed successfully", trigger_id)
+            if not dispatched:
+                trigger.last_status = "failed"
+                await db.commit()
+                return
+        logger.info("Trigger %s dispatched", trigger_id)
     except Exception as e:
         logger.error("Trigger %s execution failed: %s", trigger_id, e, exc_info=True)
-        # Update last_status via a fresh session
         try:
+            from sqlalchemy import update
+
             from app.core.deps import async_session
+            from models.agent_trigger import AgentTrigger
 
             async with async_session() as fresh_db:
-                from sqlalchemy import update
-                from models.agent_trigger import AgentTrigger
-
                 await fresh_db.execute(
                     update(AgentTrigger)
-                    .where(AgentTrigger.id == trigger.id)
+                    .where(AgentTrigger.id == trigger_id)
                     .values(last_status="failed")
                 )
                 await fresh_db.commit()
@@ -277,6 +282,17 @@ async def sweep_stale_executions() -> None:
                 )
             )
             stale = r.all()
+            if not stale:
+                return
+            # Runs parked on a HITL gate are alive, not stale
+            try:
+                from app.core.hitl import waiting_execution_ids
+
+                waiting = await waiting_execution_ids([str(row[0]) for row in stale])
+            except Exception as e:
+                logger.warning("hitl waiting lookup failed, skipping sweep: %s", e)
+                return
+            stale = [row for row in stale if str(row[0]) not in waiting]
             if not stale:
                 return
             ids = [row[0] for row in stale]
@@ -433,16 +449,20 @@ async def reset_monthly_quotas():
     from models.api_key import ApiKey
 
     try:
-        async with async_session() as db:
-            await db.execute(
-                update(User).values(
-                    tokens_used_this_month=0,
-                    cost_used_this_month=0,
-                    quota_reset_at=datetime.now(timezone.utc),
+        async with advisory_lock(QUOTA_LOCK_KEY) as held:
+            if not held:
+                logger.debug("reset_monthly_quotas: another replica holds the lock")
+                return
+            async with async_session() as db:
+                await db.execute(
+                    update(User).values(
+                        tokens_used_this_month=0,
+                        cost_used_this_month=0,
+                        quota_reset_at=datetime.now(timezone.utc),
+                    )
                 )
-            )
-            await db.execute(update(ApiKey).values(tokens_used=0, cost_used=0))
-            await db.commit()
+                await db.execute(update(ApiKey).values(tokens_used=0, cost_used=0))
+                await db.commit()
         logger.info("Monthly token quotas reset successfully")
     except Exception as e:
         logger.error("Failed to reset monthly quotas: %s", e, exc_info=True)
@@ -523,6 +543,16 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
 
+    scheduler.add_job(
+        poll_platform_alerts,
+        trigger="interval",
+        seconds=max(15, int(os.environ.get("PLATFORM_ALERT_POLL_SECONDS", "60"))),
+        id="poll_platform_alerts",
+        name="Fan out firing Prometheus alerts to admins",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+    )
+
     scheduler.start()
     logger.info("Cron trigger scheduler started (checking every 30 seconds)")
 
@@ -532,9 +562,100 @@ async def _nightly_archive() -> None:
         from app.services.archiver import run_all_archives
         from app.core.deps import async_session
 
-        await run_all_archives(async_session)
+        async with advisory_lock(ARCHIVE_LOCK_KEY) as held:
+            if not held:
+                logger.debug("nightly archive: another replica holds the lock")
+                return
+            await run_all_archives(async_session)
     except Exception as e:
         logger.exception("nightly archive failed: %s", e)
+
+
+def _platform_alerts_enabled() -> bool:
+    return os.environ.get("PLATFORM_ALERTS_ENABLED", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+async def _alert_recently_notified(db, name: str, cutoff: datetime) -> bool:
+    from sqlalchemy import select
+
+    from models.notification import Notification
+
+    r = await db.execute(
+        select(Notification.id)
+        .where(
+            Notification.type == "system_alert",
+            Notification.metadata_["source"].astext == "prometheus",
+            Notification.metadata_["alertname"].astext == name,
+            Notification.created_at > cutoff,
+        )
+        .limit(1)
+    )
+    return r.first() is not None
+
+
+_prom_unreachable_logged = False
+
+
+async def poll_platform_alerts() -> None:
+    """Pull firing alerts from Prometheus and fan them out to admins + Slack.
+
+    Dedupe is DB-backed (last system_alert for the same alertname within
+    PLATFORM_ALERT_DEDUPE_MINUTES), so it holds across replicas and restarts.
+    """
+    global _prom_unreachable_logged
+    if not _platform_alerts_enabled():
+        return
+    dedupe_minutes = int(os.environ.get("PLATFORM_ALERT_DEDUPE_MINUTES", "30"))
+    try:
+        async with advisory_lock(ALERTS_LOCK_KEY) as held:
+            if not held:
+                return
+            from app.routers.admin_alerts import fetch_prometheus_alerts
+
+            try:
+                alerts = await fetch_prometheus_alerts()
+            except Exception as exc:
+                if not _prom_unreachable_logged:
+                    logger.warning("poll_platform_alerts: %s", exc)
+                    _prom_unreachable_logged = True
+                return
+            _prom_unreachable_logged = False
+            firing = [a for a in alerts if a.get("state") == "firing"]
+            if not firing:
+                return
+
+            from app.core.deps import async_session
+            from app.core.notifications import notify_platform_alert
+
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=dedupe_minutes)
+            sent = 0
+            async with async_session() as db:
+                for alert in firing:
+                    name = alert.get("name") or "unknown"
+                    if await _alert_recently_notified(db, name, cutoff):
+                        continue
+                    sent += await notify_platform_alert(
+                        db,
+                        name=name,
+                        severity=alert.get("severity") or "info",
+                        summary=alert.get("summary") or alert.get("description") or "",
+                        since=alert.get("active_since"),
+                        labels=alert.get("labels") or {},
+                    )
+                await db.commit()
+            if sent:
+                logger.info(
+                    "poll_platform_alerts: %d firing, %d notifications sent",
+                    len(firing),
+                    sent,
+                )
+    except Exception as e:
+        logger.error("poll_platform_alerts failed: %s", e, exc_info=True)
 
 
 def stop_scheduler() -> None:

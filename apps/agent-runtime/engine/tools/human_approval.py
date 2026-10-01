@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -37,6 +38,31 @@ def _approval_key(execution_id: str, gate_id: str) -> str:
 
 def _pending_key(tenant_id: str) -> str:
     return f"hitl:pending:{tenant_id}"
+
+
+def _waiting_key(execution_id: str) -> str:
+    return f"hitl:waiting:{execution_id}"
+
+
+async def mark_waiting(execution_id: str, timeout_seconds: int) -> None:
+    """Flag the execution as parked on a gate so the stale sweeper leaves it alone."""
+    if not execution_id:
+        return
+    try:
+        r = await _get_redis()
+        await r.set(_waiting_key(execution_id), "1", ex=max(int(timeout_seconds), 1))
+    except Exception:
+        pass
+
+
+async def clear_waiting(execution_id: str) -> None:
+    if not execution_id:
+        return
+    try:
+        r = await _get_redis()
+        await r.delete(_waiting_key(execution_id))
+    except Exception:
+        pass
 
 
 async def submit_approval(
@@ -120,20 +146,26 @@ class HumanApprovalTool(BaseTool):
         self._execution_id = execution_id
         self._tenant_id = tenant_id
         self._agent_name = agent_name
-        self._gate_counter = 0
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         action = arguments["action"]
         details = arguments.get("details", "")
         risk_level = arguments.get("risk_level", "medium")
-        timeout = min(arguments.get("timeout_seconds", 3600), 7200)  # Cap at 2 hours
+        timeout = min(int(arguments.get("timeout_seconds") or 3600), 7200)
 
-        self._gate_counter += 1
-        gate_id = f"gate-{self._gate_counter}"
+        if not self._execution_id or not self._tenant_id:
+            return ToolResult(
+                content="human_approval needs an execution context (execution_id and tenant_id)",
+                is_error=True,
+                metadata={"decision": "error"},
+            )
+
+        # uuid so a second gate in the same run never reuses a cached decision
+        gate_id = f"gate-{uuid.uuid4().hex}"
 
         r = await _get_redis()
 
-        # Register the pending approval
+        start = time.time()
         pending_data = json.dumps(
             {
                 "execution_id": self._execution_id,
@@ -143,14 +175,20 @@ class HumanApprovalTool(BaseTool):
                 "action": action,
                 "details": details,
                 "risk_level": risk_level,
-                "requested_at": time.time(),
+                "requested_at": start,
+                "expires_at": start + timeout,
             }
         )
-        await r.sadd(_pending_key(self._tenant_id), pending_data)
+        pending_key = _pending_key(self._tenant_id)
+        await r.sadd(pending_key, pending_data)
+        # Sets have no per-member TTL, so keep the set alive at least as long as this gate
+        current_ttl = await r.ttl(pending_key)
+        if current_ttl is None or current_ttl < timeout:
+            await r.expire(pending_key, timeout)
+        await mark_waiting(self._execution_id, timeout)
 
         # Poll for approval
         approval_key = _approval_key(self._execution_id, gate_id)
-        start = time.time()
         poll_interval = 2  # seconds
 
         while (time.time() - start) < timeout:
@@ -158,7 +196,8 @@ class HumanApprovalTool(BaseTool):
             if result:
                 decision = json.loads(result)
                 # Clean up pending
-                await r.srem(_pending_key(self._tenant_id), pending_data)
+                await r.srem(pending_key, pending_data)
+                await clear_waiting(self._execution_id)
 
                 if decision["decision"] == "approved":
                     reviewer = decision.get("reviewer", "unknown")
@@ -190,7 +229,8 @@ class HumanApprovalTool(BaseTool):
             await asyncio.sleep(poll_interval)
 
         # Timeout — clean up and fail
-        await r.srem(_pending_key(self._tenant_id), pending_data)
+        await r.srem(pending_key, pending_data)
+        await clear_waiting(self._execution_id)
         return ToolResult(
             content=f"Approval timed out after {timeout}s. Action '{action}' was not approved.",
             is_error=True,

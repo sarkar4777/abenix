@@ -38,7 +38,7 @@ CREATE TABLE tenants (
 	plan tenant_plan NOT NULL, 
 	stripe_customer_id VARCHAR(255), 
 	settings JSONB, 
-	slack_webhook_url VARCHAR(500), 
+	slack_webhook_url TEXT, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	daily_cost_limit NUMERIC(10, 2), 
 	monthly_cost_limit NUMERIC(10, 2), 
@@ -1063,6 +1063,7 @@ CREATE TABLE dead_letter_executions (
 	replay_count INTEGER NOT NULL, 
 	last_replay_at TIMESTAMP WITH TIME ZONE, 
 	resolved BOOLEAN NOT NULL, 
+	replay_execution_id UUID, 
 	id UUID NOT NULL, 
 	tenant_id UUID NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
@@ -1070,10 +1071,11 @@ CREATE TABLE dead_letter_executions (
 	PRIMARY KEY (id), 
 	FOREIGN KEY(execution_id) REFERENCES executions (id), 
 	FOREIGN KEY(agent_id) REFERENCES agents (id), 
+	FOREIGN KEY(replay_execution_id) REFERENCES executions (id), 
 	FOREIGN KEY(tenant_id) REFERENCES tenants (id)
 );
 
-CREATE INDEX ix_dead_letter_executions_execution_id ON dead_letter_executions (execution_id);
+CREATE UNIQUE INDEX ix_dead_letter_executions_execution_id ON dead_letter_executions (execution_id);
 CREATE INDEX ix_dead_letter_executions_tenant_id ON dead_letter_executions (tenant_id);
 CREATE INDEX ix_dead_letter_executions_agent_id ON dead_letter_executions (agent_id);
 
@@ -1460,6 +1462,8 @@ CREATE TABLE pipeline_patch_proposals (
 	dsl_before JSONB NOT NULL, 
 	json_patch JSONB NOT NULL, 
 	dsl_after JSONB NOT NULL, 
+	dsl_before_sha256 VARCHAR(64), 
+	applied_snapshot JSONB, 
 	status pipeline_patch_status NOT NULL, 
 	decided_by UUID, 
 	decided_at TIMESTAMP WITH TIME ZONE, 

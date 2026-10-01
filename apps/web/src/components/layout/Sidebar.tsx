@@ -143,6 +143,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Pipeline Scaling',  icon: Gauge,       href: '/admin/pipeline-scaling', adminOnly: true },
       { label: 'Archives',          icon: Archive,     href: '/admin/archives',     adminOnly: true },
       { label: 'Model Selection',   icon: Cpu,         href: '/admin/llm-settings', adminOnly: true },
+      { label: 'Tool Configuration', icon: Wrench,     href: '/admin/tool-config',  adminOnly: true },
       { label: 'LLM Pricing',       icon: DollarSign,  href: '/admin/llm-pricing',  adminOnly: true },
       { label: 'Connectors',        icon: Plug,        href: '/admin/connectors',   adminOnly: true },
       { label: 'Dead Letter Queue', icon: Inbox,       href: '/admin/dlq',          adminOnly: true },

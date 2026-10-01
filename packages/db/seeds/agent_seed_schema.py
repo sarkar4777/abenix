@@ -140,6 +140,9 @@ class AgentSeedSchema(BaseModel):
         default_factory=ModelConfigSchema, alias="model_config"
     )
 
+    # Keys the agent's tools cannot run without, checked by scripts/lint-agent-seeds.py
+    requires_credentials: list[str] | None = None
+
     runtime_pool: str | None = None
     min_replicas: int | None = Field(default=None, ge=0, le=200)
     max_replicas: int | None = Field(default=None, ge=0, le=500)

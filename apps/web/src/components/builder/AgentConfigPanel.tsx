@@ -10,6 +10,8 @@ import type { Node } from 'reactflow';
 import { getToolDoc } from '@/lib/tool-docs';
 import ModelPicker from '@/components/ModelPicker';
 import { ModelStatusBanner } from '@/components/ModelStatusBanner';
+import { CredentialBadge, CredentialHint, missingKeys, type ToolConfigInfo } from '@/components/CredentialBadge';
+import { useIsAdmin, useToolConfigMap } from '@/hooks/useToolConfig';
 import {
   ToolConfigFields,
   AgentStepConfig,
@@ -116,6 +118,8 @@ interface AgentConfigPanelProps {
   onConnectMcp?: (registryId: string) => void;
   onAddMcpConnection?: () => void;
   onDisconnectMcp?: (nodeId: string) => void;
+  /** Built-in tool ids on the canvas, for the credential checklist. */
+  selectedTools?: string[];
 }
 
 const CATEGORIES = [
@@ -178,11 +182,15 @@ function ToolConfigPanel({
   toolConfig,
   onToolConfigChange,
   onBack,
+  credentialInfo,
+  isAdmin = false,
 }: {
   node: Node;
   toolConfig: ToolConfig;
   onToolConfigChange: (tc: ToolConfig) => void;
   onBack: () => void;
+  credentialInfo?: ToolConfigInfo;
+  isAdmin?: boolean;
 }) {
   const data = node.data;
   const toolId = node.id.replace('tool-', '');
@@ -222,6 +230,12 @@ function ToolConfigPanel({
             {configured ? 'Configured' : 'Default'}
           </div>
         </div>
+        {credentialInfo && credentialInfo.status !== 'none' && (
+          <div className="mt-2" data-testid="tool-panel-credentials">
+            <CredentialBadge config={credentialInfo} />
+            <CredentialHint config={credentialInfo} isAdmin={isAdmin} />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -341,11 +355,15 @@ function NodePropertiesPanel({
   onBack,
   toolConfig,
   onToolConfigChange,
+  credentialInfo,
+  isAdmin,
 }: {
   node: Node;
   onBack: () => void;
   toolConfig?: ToolConfig;
   onToolConfigChange?: (tc: ToolConfig) => void;
+  credentialInfo?: ToolConfigInfo;
+  isAdmin?: boolean;
 }) {
   const type = node.type;
   const data = node.data;
@@ -358,6 +376,8 @@ function NodePropertiesPanel({
         toolConfig={toolConfig}
         onToolConfigChange={onToolConfigChange}
         onBack={onBack}
+        credentialInfo={credentialInfo}
+        isAdmin={isAdmin}
       />
     );
   }
@@ -529,12 +549,15 @@ export default function AgentConfigPanel({
   onConnectMcp,
   onAddMcpConnection,
   onDisconnectMcp,
+  selectedTools = [],
 }: AgentConfigPanelProps) {
   const [tab, setTab] = useState<Tab>('general');
   // KB collections — declared up here, before any early return, so the
   // hooks-rules linter is happy and the order is stable across renders.
   const [kbCollections, setKbCollections] = useState<KbCollectionRow[] | null>(null);
   const [kbLoading, setKbLoading] = useState(false);
+  const credentialMap = useToolConfigMap();
+  const isAdmin = useIsAdmin();
   useEffect(() => {
     if (tab !== 'knowledge' || kbCollections !== null) return;
     setKbLoading(true);
@@ -571,6 +594,8 @@ export default function AgentConfigPanel({
         onBack={() => onClearSelection?.()}
         toolConfig={selectedNode.type === 'tool' ? selectedToolConfig : undefined}
         onToolConfigChange={selectedNode.type === 'tool' ? handleToolConfigChange : undefined}
+        credentialInfo={credentialMap[selectedToolId]}
+        isAdmin={isAdmin}
       />
     );
   }
@@ -626,18 +651,38 @@ export default function AgentConfigPanel({
           <>
             {/* Completeness indicator */}
             {(() => {
-              const filled = [
+              const checks = [
                 config.name && config.name !== 'New Agent',
                 config.description && config.description.length > 20,
                 config.system_prompt && config.system_prompt.length > 20,
                 config.category,
-              ].filter(Boolean).length;
-              return filled < 4 ? (
-                <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
-                  <p className="text-[10px] text-amber-400 font-medium">Complete your agent setup ({filled}/4)</p>
-                  <p className="text-[9px] text-amber-400/60">Fill in Name, Description, System Prompt, and Category so users know what this agent does and how to use it.</p>
+              ];
+              const filled = checks.filter(Boolean).length;
+              const keyed = (selectedTools || []).filter((t) => credentialMap[t] && credentialMap[t].status !== 'none');
+              const unmet = keyed.filter((t) => credentialMap[t].status === 'missing');
+              const missing = Array.from(new Set(unmet.flatMap((t) => missingKeys(credentialMap[t]).map((f) => f.key))));
+              if (filled >= checks.length && !unmet.length) return null;
+              return (
+                <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2 space-y-1" data-testid="agent-setup-checklist">
+                  {filled < checks.length && (
+                    <>
+                      <p className="text-[10px] text-amber-400 font-medium">Complete your agent setup ({filled}/{checks.length})</p>
+                      <p className="text-[9px] text-amber-400/60">Fill in Name, Description, System Prompt, and Category so users know what this agent does and how to use it.</p>
+                    </>
+                  )}
+                  {keyed.length > 0 && (
+                    <p className={`text-[10px] font-medium ${unmet.length ? 'text-rose-300' : 'text-emerald-300'}`} data-testid="agent-credentials-check">
+                      Tool credentials configured {keyed.length - unmet.length}/{keyed.length}
+                    </p>
+                  )}
+                  {unmet.length > 0 && (
+                    <p className="text-[9px] text-rose-300/80">
+                      {unmet.join(', ')} will not run: <code className="font-mono">{missing.join(', ')}</code> not set.{' '}
+                      {isAdmin ? <a href={`/admin/tool-config#${missing[0]}`} className="underline">Configure</a> : 'Ask an admin to add it under Admin -> Tool Configuration.'}
+                    </p>
+                  )}
                 </div>
-              ) : null;
+              );
             })()}
 
             <div>

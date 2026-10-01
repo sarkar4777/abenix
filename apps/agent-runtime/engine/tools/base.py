@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+import functools
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from engine import credentials
+from engine.credentials import ToolNeedsConfiguration
+
+__all__ = [
+    "BaseTool",
+    "ConfigField",
+    "ToolNeedsConfiguration",
+    "ToolRegistry",
+    "ToolResult",
+    "needs_configuration_result",
+]
 
 
 @dataclass
@@ -12,34 +25,158 @@ class ToolResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ConfigField:
+    """One value a tool needs, declared on the tool class.
+
+    ``key`` is the environment-style name the tool reads, which is also what
+    the admin screen stores it under. ``group`` is the provider the screen
+    groups by. ``dynamic`` marks a field that is read under a name built at
+    run time, so the lint does not expect a literal reference to it.
+    """
+
+    key: str
+    label: str = ""
+    kind: str = "secret"  # secret | string | url | int | bool | select
+    required: bool = False
+    group: str = ""
+    description: str = ""
+    signup_url: str = ""
+    default: str | None = None
+    options: tuple[str, ...] = ()
+    dynamic: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["options"] = list(self.options)
+        return d
+
+
+def needs_configuration_result(tool: Any, exc: ToolNeedsConfiguration) -> ToolResult:
+    """The one message every tool gives when a required value is missing."""
+    fld = None
+    for f in getattr(tool, "config_fields", ()) or ():
+        if f.key == exc.key:
+            fld = f
+            break
+    signup = exc.signup_url or (fld.signup_url if fld else "")
+    text = (
+        f"{exc.key} is not configured. "
+        "An admin can add it under Admin -> Tool Configuration."
+    )
+    if signup:
+        text += f" Get a key at {signup}"
+    return ToolResult(
+        content=text,
+        is_error=True,
+        metadata={
+            "needs_configuration": exc.key,
+            "signup_url": signup,
+            "tool": getattr(tool, "name", ""),
+        },
+    )
+
+
 class BaseTool(ABC):
     name: str
     description: str
     input_schema: dict[str, Any]
+    # What this tool needs to run. Empty for a tool that needs nothing.
+    config_fields: tuple[ConfigField, ...] = ()
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Wrap execute once per class that defines it, so every tool gets the
+        # same two things without touching any call site: a fresh snapshot
+        # before it runs, and the standard result when it raises for a
+        # missing value. Wrappers and dynamic tools are subclasses too.
+        original = cls.__dict__.get("execute")
+        if original is None or getattr(original, "_config_wrapped", False):
+            return
+
+        @functools.wraps(original)
+        async def execute(self: BaseTool, arguments: dict[str, Any]) -> ToolResult:
+            await credentials.ensure_fresh()
+            try:
+                return await original(self, arguments)
+            except ToolNeedsConfiguration as exc:
+                return needs_configuration_result(self, exc)
+
+        execute._config_wrapped = True  # type: ignore[attr-defined]
+        cls.execute = execute  # type: ignore[assignment]
 
     @abstractmethod
     async def execute(self, arguments: dict[str, Any]) -> ToolResult: ...
+
+    @classmethod
+    def config_field(cls, key: str) -> ConfigField | None:
+        for f in cls.config_fields:
+            if f.key == key:
+                return f
+        return None
+
+    def cfg(
+        self, key: str, *, required: bool = False, default: str | None = None
+    ) -> str:
+        """Read a configured value. See engine.credentials for the order."""
+        fld = self.config_field(key)
+        if default is None and fld is not None:
+            default = fld.default
+        try:
+            return credentials.get(key, required=required, default=default)
+        except ToolNeedsConfiguration as exc:
+            if fld is not None:
+                exc.signup_url = exc.signup_url or fld.signup_url
+                exc.label = exc.label or fld.label
+            raise
+
+    @classmethod
+    def config_test(
+        cls, values: dict[str, str], key: str | None = None
+    ) -> tuple[bool, str] | None:
+        """Check the given values against the provider, if the tool knows how.
+
+        Return ``(ok, message)``, or ``None`` when the tool has no test. The
+        admin screen shows a Test button only for tools that return one.
+        """
+        return None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
+            "config_fields": [f.to_dict() for f in self.config_fields],
         }
 
 
 class _DefaultedTool(BaseTool):
-    """Transparent wrapper that HIDES pre-configured parameter keys"""
+    """Transparent wrapper that hides pinned parameter keys and enforces tool_config limits."""
 
     def __init__(
         self,
         inner: BaseTool,
         defaults: dict[str, Any] | None = None,
         asset_input_schema: dict[str, Any] | None = None,
+        *,
+        max_calls: int | None = None,
+        require_approval: bool = False,
+        approval_tool: BaseTool | None = None,
+        locked_defaults: bool = True,
     ) -> None:
         self._inner = inner
         self._defaults = defaults or {}
+        # locked_defaults: pinned values win over model-supplied ones unless the author opts out.
+        self._locked = bool(locked_defaults)
+        try:
+            self._max_calls = max(int(max_calls or 0), 0)
+        except (TypeError, ValueError):
+            self._max_calls = 0
+        self._require_approval = bool(require_approval)
+        self._approval_tool = approval_tool
+        self._calls = 0
         self.name = inner.name
+        self.config_fields = inner.config_fields
         # Build a filtered schema that removes pre-set keys.
         props = dict((inner.input_schema or {}).get("properties") or {})
         required = list((inner.input_schema or {}).get("required") or [])
@@ -69,10 +206,40 @@ class _DefaultedTool(BaseTool):
         self.description = (inner.description or "") + extra
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        # Merge defaults back in. LLM-supplied args WIN if the LLM
-        # somehow decided to override — being permissive so pipelines
-        # that hand-craft args still work.
-        merged = {**self._defaults, **(arguments or {})}
+        if self._max_calls and self._calls >= self._max_calls:
+            return ToolResult(
+                content=f"max_calls ({self._max_calls}) reached for {self.name}",
+                is_error=True,
+                metadata={"max_calls_reached": True, "tool": self.name},
+            )
+        self._calls += 1
+
+        if self._require_approval:
+            if self._approval_tool is None:
+                return ToolResult(
+                    content="require_approval set but human_approval is not in the agent's tools",
+                    is_error=True,
+                    metadata={"tool": self.name},
+                )
+            import json as _json
+
+            gate = await self._approval_tool.execute(
+                {
+                    "action": f"call {self.name}",
+                    "details": _json.dumps(arguments or {}, default=str)[:4000],
+                }
+            )
+            if gate.is_error:
+                return ToolResult(
+                    content=f"approval denied: {gate.content}",
+                    is_error=True,
+                    metadata={"tool": self.name, "approval": gate.metadata},
+                )
+
+        if self._locked:
+            merged = {**(arguments or {}), **self._defaults}
+        else:
+            merged = {**self._defaults, **(arguments or {})}
         return await self._inner.execute(merged)
 
 
@@ -102,12 +269,29 @@ class ToolRegistry:
             return
         tool_config = tool_config or {}
         asset_schemas = asset_schemas or {}
+        approval_tool = self._tools.get("human_approval")
         for name, tool in list(self._tools.items()):
             tc = tool_config.get(name) or {}
             defaults = tc.get("parameter_defaults") or {}
             asset_schema = (asset_schemas.get(name) or {}).get("input_schema")
-            if not defaults and not asset_schema:
+            max_calls = tc.get("max_calls") or 0
+            # The gate cannot gate itself.
+            require_approval = (
+                bool(tc.get("require_approval")) and name != "human_approval"
+            )
+            if (
+                not defaults
+                and not asset_schema
+                and not max_calls
+                and not require_approval
+            ):
                 continue
             self._tools[name] = _DefaultedTool(
-                tool, defaults=defaults, asset_input_schema=asset_schema
+                tool,
+                defaults=defaults,
+                asset_input_schema=asset_schema,
+                max_calls=max_calls,
+                require_approval=require_approval,
+                approval_tool=approval_tool,
+                locked_defaults=tc.get("locked_defaults", True),
             )

@@ -6,12 +6,12 @@ import asyncio
 import io
 import json
 import logging
-import os
 import time
 import wave
 from typing import Any
 
-from engine.tools.base import BaseTool, ToolResult
+from engine import credentials
+from engine.tools.base import BaseTool, ConfigField, ToolResult
 from engine.tools import _meeting_session as sessmod
 from engine.tools._vad import StreamingVAD
 
@@ -78,6 +78,16 @@ def _is_likely_hallucination(text: str) -> bool:
 
 class MeetingListenTool(BaseTool):
     name = "meeting_listen"
+    config_fields = (
+        ConfigField(
+            "OPENAI_API_KEY",
+            label="API key",
+            kind="secret",
+            required=False,
+            group="OpenAI",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+    )
     description = (
         "Stream audio from the joined meeting for a bounded window, run "
         "Whisper STT on utterance boundaries (VAD-based), and return the "
@@ -383,7 +393,7 @@ def _get_openai_client() -> Any:
         from openai import AsyncOpenAI
     except ImportError:
         return None
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    api_key = credentials.get("OPENAI_API_KEY").strip()
     if not api_key:
         return None
     if _OPENAI_CLIENT is not None and _OPENAI_CLIENT_KEY == api_key:

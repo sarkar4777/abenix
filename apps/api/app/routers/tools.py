@@ -29,12 +29,53 @@ router = APIRouter(prefix="/api/tools", tags=["tools"])
 _RUNTIME_SCHEMAS: dict[str, dict[str, Any]] | None = None
 
 
+# Tools the executor builds with execution context, so they are not in
+# _TOOL_CLASSES but still belong in the catalogue.
+LAZY_TOOL_MODULES = [
+    ("engine.tools.knowledge_search", ["KnowledgeSearchTool"]),
+    # Registered the same lazy way as knowledge_search, and missing here
+    # meant it never appeared in the catalogue at all.
+    ("engine.tools.knowledge_store", ["KnowledgeStoreTool"]),
+    ("engine.tools.graph_explorer_tool", ["GraphExplorerTool"]),
+    (
+        "engine.tools.atlas_tools",
+        [
+            "AtlasDescribeTool",
+            "AtlasQueryTool",
+            "AtlasTraverseTool",
+            "AtlasSearchGroundedTool",
+        ],
+    ),
+    ("engine.tools.schema_portfolio_tool", ["SchemaPortfolioTool"]),
+]
+
+
+def _lazy_tool_classes() -> dict[str, type]:
+    import importlib
+
+    out: dict[str, type] = {}
+    for mod_path, class_names in LAZY_TOOL_MODULES:
+        try:
+            mod = importlib.import_module(mod_path)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("lazy tool import failed %s: %s", mod_path, e)
+            continue
+        for cn in class_names:
+            cls = getattr(mod, cn, None)
+            name = getattr(cls, "name", None) if cls else None
+            if cls is not None and name:
+                out[name] = cls
+    return out
+
+
 def _runtime_tool_slugs() -> list[str]:
     """Every tool slug the executor can actually run."""
     try:
         from engine.agent_executor import list_tool_classes  # type: ignore
 
-        return list(list_tool_classes())
+        slugs = list(list_tool_classes())
+        slugs += [n for n in _lazy_tool_classes() if n not in slugs]
+        return slugs
     except Exception as e:  # pragma: no cover — import-environment dependent
         logger.warning("could not enumerate runtime tools: %s", e)
         return []
@@ -45,7 +86,7 @@ def _runtime_tool_description(slug: str) -> str | None:
     try:
         from engine.agent_executor import get_tool_class  # type: ignore
 
-        cls = get_tool_class(slug)
+        cls = get_tool_class(slug) or _lazy_tool_classes().get(slug)
         if cls is None:
             return None
         desc = getattr(cls, "description", None)
@@ -110,20 +151,7 @@ def _load_runtime_schemas() -> dict[str, dict[str, Any]]:
     # need execution context — they're not in _TOOL_CLASSES). Pull their
     # schemas straight off the class so the catalogue still publishes a
     # contract.
-    _LAZY_MODULES = [
-        ("engine.tools.knowledge_search", ["KnowledgeSearchTool"]),
-        ("engine.tools.graph_explorer_tool", ["GraphExplorerTool"]),
-        (
-            "engine.tools.atlas_tools",
-            [
-                "AtlasDescribeTool",
-                "AtlasQueryTool",
-                "AtlasTraverseTool",
-                "AtlasSearchGroundedTool",
-            ],
-        ),
-        ("engine.tools.schema_portfolio_tool", ["SchemaPortfolioTool"]),
-    ]
+    _LAZY_MODULES = LAZY_TOOL_MODULES
     import importlib
 
     for mod_path, class_names in _LAZY_MODULES:
@@ -744,7 +772,7 @@ TOOL_CATALOG = [
     {
         "id": "ais_stream",
         "name": "AIS Live Vessels",
-        "description": "Sample real-time global vessel positions from AISStream.io. Every MMSI in the response is a real ship that can be looked up on VesselFinder. Filter by bounding box and ship-type code (84 = LPG tanker). Requires AISSTREAM_API_KEY env var (free registration at aisstream.io).",
+        "description": "Sample real-time global vessel positions from AISStream.io. Every MMSI in the response is a real ship that can be looked up on VesselFinder. Filter by bounding box and ship-type code (84 = LPG tanker). Needs AISSTREAM_API_KEY, set under Admin -> Tool Configuration (free registration at aisstream.io).",
         "category": "core",
         "input_schema": {
             "type": "object",
@@ -971,9 +999,14 @@ async def list_tools(
 ) -> JSONResponse:
     """Return metadata for all available built-in tools."""
     runtime_schemas = _load_runtime_schemas()
+    # Declarations are static, status is read from the resolver per request.
+    from app.services import tool_config as _tc
+
+    await _tc.refresh()
     out: list[dict[str, Any]] = []
     for entry in TOOL_CATALOG:
         merged = dict(entry)
+        merged["config"] = _tc.tool_config_for(merged["id"])
         if not merged.get("input_schema"):
             schema = runtime_schemas.get(merged["id"])
             if schema:
@@ -1003,6 +1036,7 @@ async def list_tools(
                 "category": _guess_category(slug),
                 "input_schema": runtime_schemas.get(slug) or {},
                 "uncatalogued": True,
+                "config": _tc.tool_config_for(slug),
             }
         )
     return success(out, meta={"count": len(out)})

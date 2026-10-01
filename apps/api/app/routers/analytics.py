@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, require_role
 from app.core.responses import error, success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
@@ -501,10 +501,10 @@ async def get_drift_config(user: User = Depends(get_current_user)) -> JSONRespon
 @router.put("/drift-alerts/config")
 async def set_drift_config(
     body: dict,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role(["admin"])),
 ) -> JSONResponse:
-    """Turn drift detection on/off for the current tenant. Overrides the
-    global DRIFT_DETECTION_ENABLED env default."""
+    """Turn drift detection on/off for the current tenant. Admin only, the
+    flag is tenant-wide. Overrides the global DRIFT_DETECTION_ENABLED default."""
     if "enabled" not in body:
         return error("Body must include `enabled: boolean`", 400)
     enabled = bool(body.get("enabled"))
@@ -593,7 +593,7 @@ async def acknowledge_drift_alert(
     )
     alert = result.scalar_one_or_none()
     if not alert:
-        return success({"error": "Alert not found"})
+        return error("Alert not found", 404, "not_found")
 
     alert.acknowledged = True
     await db.commit()
