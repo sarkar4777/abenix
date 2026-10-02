@@ -4,39 +4,6 @@
 
 ### Added
 
-### Changed
-
-### Fixed
-
-- Code asset routes create their storage directory on first write, so loading them never fails on a read-only /data. Closes [#120](https://github.com/sarkar4777/abenix/issues/120).
-- The sub-agent tests import what they patch, so they pass in any order and on Python 3.12.
-- The API's CI requirements list matches its pyproject dependencies, and CI fails if they drift.
-
-## v2.5.1 — 2026-10-02
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Code asset routes create their storage directory on first write, so loading them never fails on a read-only /data. Closes [#120](https://github.com/sarkar4777/abenix/issues/120).
-- The sub-agent tests import what they patch, so they pass in any order and on Python 3.12.
-
-## v2.5.1 — 2026-10-02
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Code asset routes create their storage directory on first write, so loading them never fails on a read-only /data. Closes [#120](https://github.com/sarkar4777/abenix/issues/120).
-
-## v2.5.1 — 2026-10-02
-
-### Added
-
 - Invite a teammate from the Team page and share the link it shows. The invitee sets a name and password and joins your workspace with the role you chose.
 - A Getting started checklist on the dashboard ticks off from your own work and links to the next step. Code assets, knowledge bases and Atlas graphs each offer Use in an agent, which opens the builder with the right tools and bindings already in place.
 - Pipelines can be built without drag and drop. Clicking a palette step adds it, Dependencies is a checkbox list, templates insert their steps and agent steps have an agent picker.
@@ -65,6 +32,9 @@
 
 ### Fixed
 
+- Code asset routes create their storage directory on first write, so loading them never fails on a read-only /data. Closes [#120](https://github.com/sarkar4777/abenix/issues/120).
+- The sub-agent tests import what they patch, so they pass in any order and on Python 3.12.
+- The API's CI requirements list matches its pyproject dependencies, and CI fails if they drift.
 - Publishing a pipeline no longer fails for lack of a system prompt, and saving one keeps its error handling settings.
 - Publishing no longer calls the endpoint twice and overwrites a pending marketplace review.
 - The chat stream keeps events split across network chunks.
@@ -78,6 +48,7 @@
 - A pipeline step whose agent was deleted fails with a message naming it.
 - `deploy.sh reload api` runs migrations and moves the migration init container to the new image.
 - On multi-node AKS the API, worker and cognify worker share /data with the agent runtime through the Azure Files claim, instead of each node keeping its own copy.
+- A follow-on publish adds its notes to the current version's changelog section instead of repeating the heading, and the changelog's earlier repeated sections are folded into one per version.
 
 ### Security
 
@@ -160,6 +131,8 @@
 - [#117](https://github.com/sarkar4777/abenix/issues/117) Uploaded code and models depended on one pod's disk
 - [#118](https://github.com/sarkar4777/abenix/issues/118) Pipeline steps did not hold agents to their output schema
 - [#119](https://github.com/sarkar4777/abenix/issues/119) On multi-node AKS the API and worker ignored the shared data volume
+- [#120](https://github.com/sarkar4777/abenix/issues/120) Code asset routes created their storage directory at import
+- [#121](https://github.com/sarkar4777/abenix/issues/121) API requirements for CI had drifted from the image's dependencies
 
 ## v2.5.0 — 2026-10-01
 
