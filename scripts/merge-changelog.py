@@ -56,6 +56,10 @@ def groups(text: str) -> dict[str, list[str]]:
 def main() -> int:
     path, version, date, notes_path = sys.argv[1:5]
     raw = Path(notes_path).read_text(encoding="utf-8")
+    return _merge(path, version, date, raw)
+
+
+def _merge(path: str, version: str, date: str, raw: str) -> int:
     notes = groups(re.sub(r"<!--.*?-->", "", raw, flags=re.S))
     lines = Path(path).read_text(encoding="utf-8").splitlines()
     heading = re.compile(rf"^## {re.escape(version)}\b")
@@ -98,5 +102,19 @@ def main() -> int:
     return 0
 
 
+def fold_all(path: str) -> None:
+    """Fold every version that appears under more than one heading."""
+    text = Path(path).read_text(encoding="utf-8")
+    seen: list[str] = []
+    for v in re.findall(r"^## (v[\d.]+)", text, re.M):
+        if v not in seen:
+            seen.append(v)
+    for v in seen:
+        _merge(path, v, "", "")
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    if code == 0:
+        fold_all(sys.argv[1])
+    sys.exit(code)
