@@ -4,6 +4,16 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+- Code asset routes create their storage directory on first write, so loading them never fails on a read-only /data. Closes [#120](https://github.com/sarkar4777/abenix/issues/120).
+
+## v2.5.1 — 2026-10-02
+
+### Added
+
 - Invite a teammate from the Team page and share the link it shows. The invitee sets a name and password and joins your workspace with the role you chose.
 - A Getting started checklist on the dashboard ticks off from your own work and links to the next step. Code assets, knowledge bases and Atlas graphs each offer Use in an agent, which opens the builder with the right tools and bindings already in place.
 - Pipelines can be built without drag and drop. Clicking a palette step adds it, Dependencies is a checkbox list, templates insert their steps and agent steps have an agent picker.

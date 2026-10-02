@@ -31,7 +31,12 @@ router = APIRouter(prefix="/api/code-assets", tags=["code-assets"])
 
 
 _CODE_STORE_DIR = Path(os.environ.get("CODE_ASSET_STORE", "/data/code-assets"))
-_CODE_STORE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _store_dir() -> Path:
+    """The archive directory, created on first write rather than at import."""
+    _CODE_STORE_DIR.mkdir(parents=True, exist_ok=True)
+    return _CODE_STORE_DIR
 
 
 async def _owner_names(db: AsyncSession, ids: set[Any]) -> dict[uuid.UUID, str]:
@@ -274,7 +279,7 @@ async def _clone_git(url: str, ref: str | None) -> Path:
             err = (await proc.stderr.read()).decode(errors="replace")[:500]
             raise RuntimeError(f"git clone failed: {err}")
         # Zip the cloned tree
-        zip_path = _CODE_STORE_DIR / f"{asset_id}.zip"
+        zip_path = _store_dir() / f"{asset_id}.zip"
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for p in (tmp / "repo").rglob("*"):
                 if p.is_file() and ".git" not in p.parts:
@@ -340,7 +345,7 @@ def _analysis_error(notes: list[dict[str, Any]]) -> str:
 async def _save_upload(file: UploadFile) -> Path:
     """Store an uploaded zip or tar.gz as a zip and return its path."""
     file_id = uuid.uuid4().hex[:16]
-    raw_path = _CODE_STORE_DIR / f"{file_id}.bin"
+    raw_path = _store_dir() / f"{file_id}.bin"
     with open(raw_path, "wb") as f:
         while True:
             chunk = await file.read(1024 * 1024)
