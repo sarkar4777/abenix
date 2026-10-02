@@ -4,7 +4,7 @@
     "area": "team, auth",
     "problem": "An invite stored a token but never returned a link or sent an email, there was no accept page, and registering always created a new workspace. An admin had no way to add a teammate who could then log in.",
     "fix": "The invite returns a link the Team page shows with a copy button. The accept page lets the invitee set a name and password and joins them to the inviting workspace with the invited role. Tokens are single use and expire.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 51
   },
   {
@@ -12,7 +12,7 @@
     "area": "builder",
     "problem": "The tab fetched a relative /api URL, which 404s whenever the web app and the API are served from different ports, so it always said there were no collections.",
     "fix": "It goes through the shared API client like every other call.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 52
   },
   {
@@ -20,7 +20,7 @@
     "area": "builder, atlas",
     "problem": "Pinning needed model_config.atlas_graphs, which had no control anywhere.",
     "fix": "The Knowledge tab lists Atlas graphs with a checkbox each and offers to add the Atlas tools when none are on the canvas.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "enhancement"
     ],
@@ -31,7 +31,7 @@
     "area": "builder, accessibility",
     "problem": "Steps could only be dragged onto the canvas, edges only drawn by dragging handles, Dependencies was read only and the template buttons did nothing.",
     "fix": "Clicking a palette step adds it, Dependencies is a checkbox list that creates and removes edges, the templates insert their steps, and agent steps have an agent picker.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug",
       "accessibility"
@@ -43,7 +43,7 @@
     "area": "builder",
     "problem": "After the dialog succeeded a second publish with no body reset visibility to the organisation and marked the agent active, undoing a pending marketplace review.",
     "fix": "The second call is gone.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 55
   },
   {
@@ -51,7 +51,7 @@
     "area": "pipelines",
     "problem": "The publish check required a system prompt, which pipelines do not have.",
     "fix": "The check is skipped for pipelines.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 56
   },
   {
@@ -59,7 +59,7 @@
     "area": "pipelines",
     "problem": "timeout, on_error, error branch, switch and merge settings were lost on Save Draft.",
     "fix": "They save and reload.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 57
   },
   {
@@ -67,7 +67,7 @@
     "area": "chat",
     "problem": "When an event line and its data line arrived in different chunks the event was lost.",
     "fix": "The parser keeps the pending event name across chunks.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 58
   },
   {
@@ -75,7 +75,7 @@
     "area": "code runner",
     "problem": "The list did not refresh, so an upload showed analyzing until the page was reloaded, and an asset opened during analysis kept Run disabled after it finished.",
     "fix": "The list polls while anything is pending and the open asset follows it.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 59
   },
   {
@@ -83,7 +83,7 @@
     "area": "code runner",
     "problem": "The analyzer looked inside the single top-level folder that most zips have, but execution ran from the archive root, so the entrypoint was not found and the test run failed with exit code 2.",
     "fix": "The analyzer and the runtime share one rule and both run from inside a lone top-level folder, including assets uploaded before the fix.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 60
   },
   {
@@ -91,7 +91,7 @@
     "area": "knowledge",
     "problem": "After uploading, the detail view offered no search, and an empty search showed nothing at all.",
     "fix": "The detail view has search and Use in an agent buttons, and an empty search says why it found nothing.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 61
   },
   {
@@ -99,7 +99,7 @@
     "area": "executions, chat",
     "problem": "The prefill was read and never used, and chat had no link back to the run it produced.",
     "fix": "Re-run fills the composer and every answer links to its run.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 62
   },
   {
@@ -107,7 +107,7 @@
     "area": "triggers",
     "problem": "Only webhook triggers had a test action.",
     "fix": "Every trigger has Run now, which dispatches it like the scheduler and links to the run.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "enhancement"
     ],
@@ -118,7 +118,7 @@
     "area": "accessibility",
     "problem": "The share submit and key revoke buttons had no text or label, and Duplicate only existed for built-in agents.",
     "fix": "Both buttons are labelled and Duplicate works for any agent you can access.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug",
       "accessibility"
@@ -130,7 +130,7 @@
     "area": "builder",
     "problem": "Users without the publish feature saw the option and got a 403.",
     "fix": "The option is disabled with the reason and how to get access.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 65
   },
   {
@@ -138,7 +138,7 @@
     "area": "dashboard",
     "problem": "A new teammate landed on an empty dashboard with no path through the product.",
     "fix": "A Getting started checklist ticks off from the user's own work and links to the next step. Every resource page offers Use in an agent.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "enhancement"
     ],
@@ -149,7 +149,7 @@
     "area": "builder",
     "problem": "Tool nodes had no maximum width, so once every tool carried a full description the node grew to the length of the sentence, covered the canvas and pushed the agent node out of view.",
     "fix": "Canvas nodes have a fixed width, the description is truncated and shown in full on hover.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 67
   },
   {
@@ -157,7 +157,7 @@
     "area": "security, runtime",
     "problem": "invoke_agent searched and executed sub-agents with a shared platform key, so delegated runs were attributed to the key's owner and a user could invoke agents they had no access to.",
     "fix": "Sub-agents run as the user who started the parent run with a short-lived token, follow the normal access rules, are linked to the parent run and stop at a depth of three. An agent cannot call itself.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -168,7 +168,7 @@
     "area": "security, atlas",
     "problem": "Atlas only checked the tenant, so every member could list, change, export and delete every graph in the workspace.",
     "fix": "Atlas follows the owner, admin or share rule the other resources use, with view and edit shares and a read-only notice.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -179,7 +179,7 @@
     "area": "ux",
     "problem": "Code assets, knowledge bases and Atlas graphs from the platform and from teammates appeared alongside your own with no owner shown, and the getting started checklist counted them as your work.",
     "fix": "Each item carries a Yours, Shared by or Platform badge, controls you cannot use are hidden, and the checklist counts only your own work.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "enhancement"
     ],
@@ -190,7 +190,7 @@
     "area": "atlas, runtime",
     "problem": "atlas_search_grounded only looked at concept nodes, so asking about a named supplier such as Nordtek returned found false and the agent gave up. It also returned nothing useful when a concept had no bound documents.",
     "fix": "It matches any non-document node with exact matches first, returns the node's relationships, and when nothing matches lists the labels in the graph so the agent can retry.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 71
   },
   {
@@ -198,7 +198,7 @@
     "area": "builder, knowledge",
     "problem": "The builder listed knowledge bases with a limit the API rejects, the error was swallowed, and no grant was written. An agent built from Use in an agent on a knowledge base or Atlas graph could not search the documents it was built for.",
     "fix": "The agent save carries the selected knowledge bases and the API writes or removes the grants, telling the builder about any it was not allowed to attach.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 72
   },
   {
@@ -206,7 +206,7 @@
     "area": "builder",
     "problem": "A failed create or update was ignored, so the builder looked saved while nothing was stored.",
     "fix": "Failures show a banner with the server's reason and keep the changes in place.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 73
   },
   {
@@ -214,7 +214,7 @@
     "area": "security, code runner",
     "problem": "Update, test run and download only checked the workspace, not the owner or shares.",
     "fix": "View needs ownership, a share or a platform asset. Edit needs ownership, an edit share or admin.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 74
   },
   {
@@ -222,7 +222,7 @@
     "area": "security, atlas",
     "problem": "Binding, syncing and instance import only checked the workspace, so a graph could pull in documents from a private knowledge base.",
     "fix": "Atlas uses the knowledge base read check.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 75
   },
   {
@@ -230,7 +230,7 @@
     "area": "security, knowledge",
     "problem": "The share check let anyone in the workspace share any knowledge base, based on an old note that collections had no owner.",
     "fix": "Only the owner or an admin can share it.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 76
   },
   {
@@ -238,7 +238,7 @@
     "area": "ux, code runner, knowledge",
     "problem": "Code Runner and Knowledge detail panes always showed Share and Delete, and the upload area showed for read-only viewers, each ending in a 403. Atlas graphs were missing from the share dialog types.",
     "fix": "The controls follow can_manage and can_edit from the API, read-only viewers see who to ask, and the share dialog knows Atlas graphs.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 77
   },
   {
@@ -246,7 +246,7 @@
     "area": "builder",
     "problem": "When some specific-people shares failed the dialog navigated to chat at once, so the error was never seen.",
     "fix": "The dialog stays open with the failures and offers Continue to the agent.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 78
   },
   {
@@ -254,7 +254,7 @@
     "area": "security, runtime",
     "problem": "Several runtime paths built the tool registry without the calling user, so invoke_agent fell back to the platform key for pipelines, agent steps, queued runs with MCP tools and A2A calls.",
     "fix": "Every path passes the calling user through, so sub-agents always run as that user.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 79
   },
   {
@@ -262,7 +262,7 @@
     "area": "security, auth",
     "problem": "Looking up an invite and accepting it were outside the login rate limit, so invite tokens could be guessed at full speed.",
     "fix": "Both go through the same per-address limit as login and register.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 80
   },
   {
@@ -270,7 +270,7 @@
     "area": "builder, pipelines",
     "problem": "The Agent Step picker loaded only the first 100 agents by name, so in a workspace with more agents your own could be missing, and it was on the Arguments tab while the General tab a user opens first had no way to pick an agent.",
     "fix": "The picker pages through every agent, lists yours first, and sits on the General tab with the task. The inline prompt and model stay under Arguments.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 81
   },
   {
@@ -278,7 +278,7 @@
     "area": "dashboard, builder",
     "problem": "Both requested 200 agents from an endpoint capped at 100, the request failed validation, and the checklist never ticked Build an agent while the agent step config listed nothing.",
     "fix": "The checklist asks within the cap and the config pages through every agent.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 82
   },
   {
@@ -286,7 +286,7 @@
     "area": "pipelines",
     "problem": "The builder gives steps generated ids, so a step labelled score is really step_1790931980212_b8m3. Writing {{score.response}} resolved to nothing, the next step ran on an empty input and the final LLM call invented an answer while the run reported success.",
     "fix": "A unique step label works anywhere an id does, in the engine and the validator. An id still wins over a label of the same name and an unknown name is still a validation error.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 83
   },
   {
@@ -294,7 +294,7 @@
     "area": "executions",
     "problem": "Every pipeline step showed its tool name, so two agent steps both read agent_step and could not be told apart.",
     "fix": "Steps carry their label through the result and the recorder shows it, with the id on hover.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 84
   },
   {
@@ -302,7 +302,7 @@
     "area": "sdk playground",
     "problem": "For an agent with no declared input variables the live inputs panel had no message box and told the user to leave the message blank, so every live run sent the word run and the agent had nothing to work on.",
     "fix": "The panel shows a message box for such agents and the live run sends what was typed.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 85
   },
   {
@@ -310,7 +310,7 @@
     "area": "chat, pipelines",
     "problem": "A pipeline routed through the worker queue publishes its result only on the done event. The chat relay passed that event through without text, so the chat showed the step list and no answer, and each step was named by its generated id.",
     "fix": "The relay sends the final answer as text when the run streamed none, and node events carry the step label the chat shows.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 86
   },
   {
@@ -318,7 +318,7 @@
     "area": "pipelines, runtime",
     "problem": "An agent step loaded the agent's prompt, model and tools but not its tool configuration, so an agent bound to a code asset or an Atlas graph could not find it inside a pipeline. The scorer replied that its code asset was unavailable and every later step built on that.",
     "fix": "An agent step applies the agent's tool configuration, asset schemas and pinned graphs exactly as a direct run does.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 87
   },
   {
@@ -326,7 +326,7 @@
     "area": "sdk playground",
     "problem": "Selecting an agent loads its input schema in the background and then reset every input, so a message typed in the meantime was silently replaced by an empty one.",
     "fix": "Values typed while the schema loads are kept.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 88
   },
   {
@@ -334,7 +334,7 @@
     "area": "settings, api keys",
     "problem": "The revoke button removed the key immediately with no confirmation, so a stray click broke every client using it.",
     "fix": "Revoking asks for confirmation and names the key.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "number": 89
   },
   {
@@ -342,7 +342,7 @@
     "area": "accessibility",
     "problem": "The share, export, version history, AI builder, AI validate and resource share dialogs ignored Escape and had no dialog role, so a keyboard user was stuck behind the overlay.",
     "fix": "All six close on Escape and are marked as modal dialogs.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug",
       "accessibility"
@@ -354,7 +354,7 @@
     "area": "code runner",
     "problem": "Fixing a bug in uploaded code meant creating a new asset and rewiring every agent and pipeline that used the old one.",
     "fix": "Upload new version replaces the code behind the same asset. It goes live only if it analyses cleanly, earlier versions are kept up to a limit and can be restored, uploads are serialised per asset and every change is audited.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "enhancement"
     ],
@@ -365,7 +365,7 @@
     "area": "code runner",
     "problem": "When analysis failed the asset showed a generic message and the raw notes, with no statement of what to change or how to fix it in place.",
     "fix": "A failed asset shows the analyzer's reason and points to Upload new version.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -376,7 +376,7 @@
     "area": "security, code runner",
     "problem": "Assets too large to inline were fetched by the sandbox with a token that only the test endpoint ever set, so agent runs of large assets failed, and the token was the caller's own which a shared agent's user may not have.",
     "fix": "The runtime signs a ten minute token scoped to that one asset and the sandbox fetches through a route that accepts only that token.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -387,7 +387,7 @@
     "area": "security, agents",
     "problem": "The bulk delete endpoint hard deleted every listed agent in the tenant with no ownership check, so any member could permanently remove a teammate's or a built-in agent, bypassing the archive the single delete uses.",
     "fix": "Bulk delete follows the single delete rules: owner or admin only, built-in agents refused, agents are archived, and agents something depends on are skipped unless confirmed.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -398,7 +398,7 @@
     "area": "agents, knowledge, code runner",
     "problem": "Deleting an agent, a code asset or a knowledge base gave a plain confirm with no mention of the pipelines, agents, triggers or Atlas graphs that used it. Those broke silently afterwards and the triggers kept firing.",
     "fix": "Each delete first lists what uses the item with links, refuses unless confirmed, and on a confirmed delete switches off the agent's triggers and unbinds graphs and grants. Deletes are audited.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -409,7 +409,7 @@
     "area": "pipelines, runtime",
     "problem": "A pipeline step looked its agent up by slug regardless of status, so an archived agent still ran inside pipelines, and a direct call to it said only that it was not in an executable state.",
     "fix": "A step whose agent was deleted fails with a message naming the step and the deleted agent, and a direct call says the agent was deleted.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -420,7 +420,7 @@
     "area": "knowledge, agents",
     "problem": "The knowledge base detail delete reported success even when the server refused, and every agent card offered Delete to people who could not delete it while saying it could not be undone, though agents are archived and can be restored.",
     "fix": "Delete reports the server's answer, agent delete only appears for the owner or an admin, and the dialog says what is kept.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -431,7 +431,7 @@
     "area": "agents",
     "problem": "Deleting an agent archived it, but nothing in the product listed archived agents or brought one back, so a mistaken delete needed database access to undo.",
     "fix": "Manage Agents has a Recently deleted list. Restore brings back the agent's previous status and switches its triggers back on, and both directions are audited.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "enhancement"
     ],
@@ -442,7 +442,7 @@
     "area": "agents, triggers",
     "problem": "Reverting an agent to an earlier version reloaded the page whether or not the revert worked, and a trigger switched off because its agent was deleted looked the same as one paused by hand.",
     "fix": "Revert reports success or the server's reason, and such a trigger reads Off, agent deleted, with a hint that restoring the agent switches it back on.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -453,7 +453,7 @@
     "area": "agents, ux",
     "problem": "Edit, Share and Versions showed on every agent page, so a teammate an agent was shared with to run hit a 403 from each.",
     "fix": "The agent detail says what the caller may do, Edit and Versions show to editors and Share to the owner or an admin.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -464,7 +464,7 @@
     "area": "executions",
     "problem": "Tool results were stored as a 500 character preview, so the end of a result, often the part that explains a failure, could not be seen after the run.",
     "fix": "Each tool call and pipeline step keeps its full result up to a configurable cap of 8000 characters, marked when cut, and the recorder shows it.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -475,7 +475,7 @@
     "area": "builder, agents",
     "problem": "The builder sends the agent type with every save and the API refused any agent type from a non-admin, even unchanged, so a member editing their own published agent got a 403 and the change was lost.",
     "fix": "Only an actual change of agent type needs an admin. The builder shows the server's reason when a save is refused.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -486,7 +486,7 @@
     "area": "builder, knowledge",
     "problem": "The builder read an agent's knowledge bases from its saved config, so collections granted from the Knowledge page showed unticked, and saving could appear to drop them.",
     "fix": "The agent detail returns the agent's actual grants and the builder edits that list.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -497,7 +497,7 @@
     "area": "builder, ux",
     "problem": "Someone an agent was shared with to run could open it in the builder and change everything, and only found out on save that nothing would be kept.",
     "fix": "The builder says up front that the agent is read only for them and links to Duplicate.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -508,7 +508,7 @@
     "area": "deploy",
     "problem": "deploy.sh reload pointed the API container at the new image but left the db-migrate init container on the old one, which does not know the newest migration, so the new pod crash looped. Reload also never applied migrations.",
     "fix": "Reload moves every container built from the service image, init containers included, and runs migrations after an API reload.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -519,7 +519,7 @@
     "area": "agents",
     "problem": "The agent list left out creator and tenant ids, so My Agents showed 0 and the header said 0 agents available while the user's agents were on screen, and sub-agent lookup without a user found nothing.",
     "fix": "List rows carry creator, tenant, published state and timestamps.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -530,7 +530,7 @@
     "area": "agents",
     "problem": "The revert endpoint read a field agents do not have and compared the role to plain strings, so every revert errored, and it applied the state before the chosen version rather than the version itself.",
     "fix": "Restore puts the chosen version back, records the replaced state as a new revision, keeps knowledge base grants in step and is audited.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -541,7 +541,7 @@
     "area": "agents, ux",
     "problem": "The default grouped layout used a card without the delete control, so agents could only be deleted after switching to the grid.",
     "fix": "Both layouts offer delete to the owner or an admin.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -552,7 +552,7 @@
     "area": "security, triggers",
     "problem": "The trigger list returned every trigger in the tenant with its webhook URL, which contains the secret that fires the agent, and any member could edit, pause or delete any trigger or add one to an agent they could not run.",
     "fix": "Members see and manage triggers they created or that belong to their own agents, admins see all, and creating a trigger needs run access to the agent.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -563,7 +563,7 @@
     "area": "triggers, ux",
     "problem": "Following Schedule from an agent opened the create dialog even when the agent already had triggers, behind it the list showed every trigger, and the agent picker held only the first twenty agents.",
     "fix": "The link shows that agent's triggers with a Show all chip, opens the create form only when there are none, and the picker lists every agent.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -574,7 +574,7 @@
     "area": "chat, pipelines",
     "problem": "When a pipeline step failed, chat showed the step as failed with no message, and the error banner was not announced to screen readers.",
     "fix": "The failed step shows its error under it and the chat error banner is an alert.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -585,7 +585,7 @@
     "area": "agents",
     "problem": "Version history could restore a saved version but not the state before the first saved change.",
     "fix": "History ends with an Original entry that restores the state before any saved change.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "enhancement"
     ],
@@ -596,7 +596,7 @@
     "area": "agents, ux",
     "problem": "After a version restore the agent page did a full reload, so the confirmation disappeared before it could be read.",
     "fix": "The page refreshes the agent in place and the confirmation stays.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -607,7 +607,7 @@
     "area": "chat, ux",
     "problem": "When the model provider refused or could not be reached, chat showed the provider's raw response, for example Error code 401 with a JSON body, which told the user nothing about what to do.",
     "fix": "Known failures read in plain language with who can fix them, and the raw text sits under Details.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -618,7 +618,7 @@
     "area": "runtime, pipelines",
     "problem": "When an agent hit its iteration limit its whole output was the text Max iterations reached, so a pipeline step built on it, such as PharmaVigil's MedDRA coding, passed nothing downstream and the case came out with no coded terms.",
     "fix": "At the limit the agent gets one more turn to answer from what it already gathered, in the format it was asked for, and says what it could not establish.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -629,7 +629,7 @@
     "area": "ml models, deploy",
     "problem": "Locally the runtime mounted the shared model volume over /data/ml-models while the API, which writes seeded and uploaded models, did not, so the runtime saw an empty directory. Pipelines that ran inside the API found the model and those routed to the runtime did not, so PharmaVigil triage was intermittently answered without its model.",
     "fix": "The local values mount the model volume on the API too, so both see the same files, and the runtime fetches a model it cannot see from the API with a token scoped to that model and caches it, so a volume mismatch can no longer silently disable a model.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -640,7 +640,7 @@
     "area": "storage, deploy",
     "problem": "Code assets and ML models lived only on the data volume of the API pod that received them, so with several API replicas, a rescheduled pod or a volume that was not shared, a file could be missing on the pod asked to serve it and runs failed.",
     "fix": "Uploads, new versions and seeded files are mirrored to the configured object storage and restored by any pod that lacks them before serving, runtimes pull missing files with scoped tokens, seeds heal missing files, and both deploy scripts verify the runtime can read what the API stored.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -651,7 +651,7 @@
     "area": "pipelines, runtime",
     "problem": "An agent's output_schema was only checked on single-agent runs, the docs said pipelines checked it too, and a required field that was present but empty passed. PharmaVigil's coder could list a reaction as coded with no preferred term and the case carried it forward.",
     "fix": "A required field that is empty counts as a violation, an agent run as a pipeline step is checked against its schema and asked once to correct it, remaining violations are recorded on the step, and the MedDRA coder declares the schema a coded term must meet.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
@@ -662,10 +662,21 @@
     "area": "deploy, azure",
     "problem": "With sharedData.usePVC on, only the agent runtime pools mounted the shared Azure Files claim. The API, the worker and the cognify worker kept a per-node host path, so code assets and knowledge base uploads were only visible on the node that received them and were lost if the API moved node, and the runtime pools named the claim after the release while the claim itself was fixed.",
     "fix": "The API, worker and cognify worker mount the shared claim when it is enabled, the Azure values turn it on for all of them, the API's init container copies anything the older host path held without overwriting, and every pod uses the one claim name.",
-    "fixed_in": "PENDING",
+    "fixed_in": "v2.5.1 (36a82a3)",
     "labels": [
       "bug"
     ],
     "number": 119
+  },
+  {
+    "title": "Code asset routes created their storage directory at import",
+    "area": "api, ci",
+    "problem": "Importing the code asset router created /data/code-assets, so anything that loaded the module where /data is not writable failed before running, which broke the unit tests in CI.",
+    "fix": "The directory is created on the first write instead of at import.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 120
   }
 ]
