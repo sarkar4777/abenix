@@ -47,6 +47,10 @@ api:
   archivesPVC:
     enabled: true
     claimName: abenix-archives
+  # the API writes models where the runtime reads them, same claim on both
+  mlModelsPVC:
+    enabled: true
+    claimName: ml-models-storage
   image:
     repository: localhost:5000/abenix/api
     tag: latest

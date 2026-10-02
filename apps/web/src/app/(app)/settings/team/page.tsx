@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  Check,
   ChevronDown,
+  Copy,
   Loader2,
   Mail,
   MoreHorizontal,
@@ -35,6 +37,8 @@ interface Invite {
   status: string;
   created_at: string;
   expires_at: string;
+  expired?: boolean;
+  invite_url?: string;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -71,6 +75,18 @@ export default function TeamPage() {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [removeLoading, setRemoveLoading] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copyLink = async (url: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      toastError('Copy failed', 'Select the link and copy it by hand');
+    }
+  };
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) return;
@@ -81,15 +97,17 @@ export default function TeamPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+        throwOnError: false,
       });
       if (res.data) {
         setInviteEmail('');
         setShowInvite(false);
+        setInviteLink(res.data.invite_url || null);
         mutateTeam();
-        toastSuccess('Invitation sent');
+        toastSuccess('Invite created', 'Copy the link and send it to your teammate');
       } else {
         setInviteError(res.error || 'Failed to invite');
-        toastError('Failed to send invitation');
+        toastError('Failed to create invitation', res.error || undefined);
       }
     } catch {
       setInviteError('Failed to invite');
@@ -253,6 +271,36 @@ export default function TeamPage() {
         )}
       </AnimatePresence>
 
+      {inviteLink && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
+          <div className="flex items-start justify-between mb-2">
+            <p className="text-sm text-emerald-400 font-medium">
+              Invite link ready. It works once and expires in 7 days.
+            </p>
+            <button
+              onClick={() => setInviteLink(null)}
+              aria-label="Dismiss invite link"
+              className="text-slate-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <code data-testid="invite-link" className="flex-1 px-3 py-2 bg-slate-900/50 rounded-lg text-xs text-emerald-300 font-mono break-all">
+              {inviteLink}
+            </code>
+            <button
+              onClick={() => copyLink(inviteLink, 'new')}
+              data-testid="invite-link-copy"
+              className="shrink-0 px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-xs text-slate-300 hover:text-white transition-colors flex items-center gap-1.5"
+            >
+              {copied === 'new' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied === 'new' ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">
         {members
           .filter((m) => m.is_active)
@@ -286,6 +334,7 @@ export default function TeamPage() {
                   onClick={() =>
                     setMenuOpen(menuOpen === member.id ? null : member.id)
                   }
+                  aria-label={`Actions for ${member.email}`}
                   className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors"
                 >
                   <MoreHorizontal className="w-4 h-4" />
@@ -326,16 +375,33 @@ export default function TeamPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <p className="text-sm text-slate-400">{invite.email}</p>
-                <span className="text-xs text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">
-                  Pending
-                </span>
+                {invite.expired ? (
+                  <span className="text-xs text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                    Expired
+                  </span>
+                ) : (
+                  <span className="text-xs text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">
+                    Pending
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-600">
                 Invited as {invite.role}
               </p>
             </div>
+            {invite.invite_url && !invite.expired && (
+              <button
+                onClick={() => copyLink(invite.invite_url!, invite.id)}
+                data-testid={`invite-copy-${invite.id}`}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-300 bg-slate-700/40 hover:bg-slate-700 rounded-lg transition-colors"
+              >
+                {copied === invite.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied === invite.id ? 'Copied' : 'Copy link'}
+              </button>
+            )}
             <button
               onClick={() => handleCancelInvite(invite.id)}
+              aria-label={`Cancel invite for ${invite.email}`}
               className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
             >
               <X className="w-4 h-4" />

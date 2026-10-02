@@ -84,6 +84,10 @@ api:
   mlModelsPVC:
     enabled: true
     claimName: ml-models-storage
+  # /data on the shared Azure Files claim, the same one the runtime pools mount
+  sharedDataPVC:
+    enabled: true
+    claimName: abenix-shared-data
   # Archive dumps on the RWX claim from the archives section below
   archivesPVC:
     enabled: true
@@ -114,6 +118,10 @@ agent-runtime:
 # ── Worker ─────────────────────────────────────────────────────────────────
 worker:
   replicaCount: 1
+  # reads uploads the api wrote, so it mounts the same shared claim
+  sharedDataPVC:
+    enabled: true
+    claimName: abenix-shared-data
   image:
     repository: your-acr.azurecr.io/worker
     tag: procps-fix

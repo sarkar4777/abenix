@@ -143,6 +143,7 @@ class PipelineNode:
     # single dict, with no tool call. Lets pipelines declare a final
     # `final_report` shape without a dummy tool.
     structured_output: bool = False
+    label: str = ""
 
 
 @dataclass
@@ -179,6 +180,7 @@ class PipelineResult:
     total_duration_ms: int = 0
     final_output: Any = None
     node_errors: dict[str, str] = field(default_factory=dict)  # {node_id: error_msg}
+    labels: dict[str, str] = field(default_factory=dict)  # {node_id: label}
 
 
 _MD_JSON_FENCE = __import__("re").compile(
@@ -778,6 +780,7 @@ class PipelineExecutor:
             total_duration_ms=total_ms,
             final_output=final_output,
             node_errors=node_errors,
+            labels={n.id: n.label for n in nodes if n.label},
         )
 
     async def _execute_node(
@@ -997,6 +1000,21 @@ class PipelineExecutor:
         )
         if effective_slug:
             agent_row = await self._resolve_agent_by_slug(effective_slug)
+            if agent_row is not None and agent_row.get("archived"):
+                msg = (
+                    f"agent '{effective_slug}' was deleted. Pick another agent for "
+                    f"step '{node.label or node.id}'."
+                )
+                return NodeResult(
+                    node_id=node.id,
+                    status="failed",
+                    error=msg,
+                    error_message=msg,
+                    error_type="validation",
+                    tool_name=node.tool_name,
+                    resolved_arguments=resolved_args,
+                    duration_ms=int((time.monotonic() - node_start) * 1000),
+                )
             if agent_row is None:
                 return NodeResult(
                     node_id=node.id,
@@ -1283,7 +1301,8 @@ class PipelineExecutor:
             async with AsyncSession(engine) as session:
                 res = await session.execute(
                     _t(
-                        "SELECT id, system_prompt, model_config FROM agents WHERE slug = :slug LIMIT 1"
+                        "SELECT id, system_prompt, model_config, status::text FROM agents "
+                        "WHERE slug = :slug ORDER BY (status::text = 'archived') LIMIT 1"
                     ).bindparams(slug=slug)
                 )
                 row = res.first()
@@ -1291,6 +1310,9 @@ class PipelineExecutor:
                     cache[slug] = None
                     return None
                 aid, sp, mcfg = row[0], row[1], row[2]
+                if str(row[3] or "").lower() == "archived":
+                    cache[slug] = {"archived": True}
+                    return cache[slug]
                 if isinstance(mcfg, str):
                     try:
                         mcfg = json.loads(mcfg)
@@ -1618,8 +1640,57 @@ def _infer_template_deps(obj: Any, known_ids: set[str]) -> set[str]:
     return deps
 
 
+def _label_key(label: Any) -> str:
+    import re as _re
+
+    return _re.sub(r"\W+", "_", str(label or "").strip().lower()).strip("_")
+
+
+def alias_labels_to_ids(raw_nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rewrite {{label.x}} to {{id.x}} when a step is referenced by its unique label.
+
+    The builder gives steps generated ids, and people write the label they
+    typed. An id always wins over a label of the same name.
+    """
+    ids = {raw.get("id") for raw in raw_nodes if raw.get("id")}
+    seen: dict[str, list[str]] = {}
+    for raw in raw_nodes:
+        key = _label_key(raw.get("label"))
+        if key and raw.get("id"):
+            seen.setdefault(key, []).append(raw["id"])
+    alias = {k: v[0] for k, v in seen.items() if len(v) == 1 and k not in ids}
+    if not alias:
+        return raw_nodes
+
+    def _sub(m: Any) -> str:
+        root, _, rest = m.group(1).partition(".")
+        target = alias.get(root.lower()) if root not in ids else None
+        if not target:
+            return m.group(0)
+        return "{{" + target + ("." + rest if rest else "") + "}}"
+
+    def _walk(v: Any) -> Any:
+        if isinstance(v, str):
+            return _TEMPLATE_REF_RE.sub(_sub, v) if "{{" in v else v
+        if isinstance(v, dict):
+            return {k: _walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [_walk(x) for x in v]
+        return v
+
+    out = []
+    for raw in raw_nodes:
+        r = dict(raw)
+        for k in ("arguments", "context", "input_mappings"):
+            if k in r:
+                r[k] = _walk(r[k])
+        out.append(r)
+    return out
+
+
 def parse_pipeline_nodes(raw_nodes: list[dict[str, Any]]) -> list[PipelineNode]:
     """Parse raw JSON/dict pipeline node definitions into PipelineNode objects."""
+    raw_nodes = alias_labels_to_ids(raw_nodes)
     nodes: list[PipelineNode] = []
     # Build the set of sibling ids up-front so template refs like
     # {{triage.intent}} can be traced back to a node called 'triage'.
@@ -1772,6 +1843,7 @@ def parse_pipeline_nodes(raw_nodes: list[dict[str, Any]]) -> list[PipelineNode]:
                 agent_id=agent_id,
                 agent_slug=agent_slug,
                 structured_output=structured_output,
+                label=str(raw.get("label") or ""),
             )
         )
 
@@ -1784,6 +1856,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
     for nid, nr in result.node_results.items():
         node_results[nid] = {
             "node_id": nr.node_id,
+            "label": result.labels.get(nid, ""),
             "status": nr.status,
             "tool_name": nr.tool_name,
             "duration_ms": nr.duration_ms,
@@ -1835,6 +1908,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
             {
                 "node_type": "pipeline_node",
                 "node_id": nid,
+                "label": result.labels.get(nid, ""),
                 "tool": nr.tool_name,
                 "status": nr.status,
                 "duration_ms": nr.duration_ms,

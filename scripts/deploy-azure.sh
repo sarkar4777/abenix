@@ -730,7 +730,7 @@ deploy_edge_runtime() {
 _fetch_edge_signing_pubkey() {
   local api_pod
   api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
-    --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
   if [ -z "${api_pod}" ]; then return 1; fi
   kubectl exec -n "${NAMESPACE}" "${api_pod}" -c api -- python3 -c "
 from app.routers.edge import _resolve_signing_key
@@ -899,7 +899,7 @@ run_migrations() {
   local api_pod="" tries=0
   while [ -z "${api_pod}" ] && [ "$tries" -lt 30 ]; do
     api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
-      --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+      --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
     [ -n "${api_pod}" ] && break
     sleep 3
     tries=$((tries + 1))
@@ -1050,6 +1050,40 @@ PY
   return 0
 }
 
+verify_ml_models_shared() {
+  # A model the API stored must be readable by the agent runtime, or ml_model
+  # tool calls fall back to fetching it over HTTP. A rollout can still show the
+  # old pods as Running, so look again for a minute before warning.
+  local api_pod rt_pod sample attempt
+  for attempt in 1 2 3 4 5 6; do
+    api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+      --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp \
+      -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
+    rt_pod=$(kubectl get pods -n "${NAMESPACE}" --field-selector=status.phase=Running \
+      --sort-by=.metadata.creationTimestamp -o name 2>/dev/null | grep agent-runtime | tail -1 | sed 's#pod/##' | tr -d '\r')
+    if [ -z "${api_pod}" ] || [ -z "${rt_pod}" ]; then
+      sleep 10
+      continue
+    fi
+    sample=$(kubectl exec -n "${NAMESPACE}" "${api_pod}" -c api -- sh -c \
+      'find /data/ml-models -type f \( -name "*.pkl" -o -name "*.onnx" -o -name "*.pt" \) 2>/dev/null | head -1' 2>/dev/null | tr -d '\r')
+    if [ -z "${sample}" ]; then
+      log "ML model volume check: no model files yet"
+      return 0
+    fi
+    if MSYS_NO_PATHCONV=1 kubectl exec -n "${NAMESPACE}" "${rt_pod}" -- sh -c "test -f '${sample}'" 2>/dev/null; then
+      ok "ML models: the runtime reads the files the API stores"
+      return 0
+    fi
+    sleep 10
+  done
+  if [ -z "${api_pod}" ] || [ -z "${rt_pod}" ]; then
+    warn "ML model volume check skipped, api or runtime pod not running"
+  else
+    warn "ML models: ${sample} exists on the API but not on the runtime. The runtime will fetch models over HTTP. Mount the same ml-models claim on both."
+  fi
+}
+
 verify_subscription() {
   log "Verifying the Claude subscription token"
   local pod
@@ -1127,7 +1161,7 @@ seed_agents() {
   local api_pod=""
   for i in $(seq 1 30); do
     api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
-      --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+      --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
     if [ -n "${api_pod}" ]; then
       local ready
       ready=$(kubectl get pod "${api_pod}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
@@ -1186,7 +1220,7 @@ deploy_livekit() {
 _generate_abenix_api_key() {
   local api_pod
   api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
-    --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
   if [ -z "${api_pod}" ]; then return 1; fi
   # Run a one-shot python that creates a platform API key for the system user
   # with can_delegate scope (same setup deploy.sh relies on implicitly).
@@ -1824,6 +1858,7 @@ deploy_all() {
   run_migrations || true
   seed_agents || true
   verify_subscription || true
+  verify_ml_models_shared || true
   report_tool_credentials || true
   _wire_abenix_platform_key || true
   deploy_livekit || warn "LiveKit deploy failed (non-fatal)"
@@ -2335,6 +2370,7 @@ case "${CMD}" in
     az aks get-credentials -n "${AKS_NAME}" -g "${AZ_RESOURCE_GROUP}" --overwrite-existing &>/dev/null || true
     seed_agents
     verify_subscription || true
+  verify_ml_models_shared || true
   report_tool_credentials || true
     # Always reconcile standalone keys after a manual reseed — agents/users
     # may have been recreated under fresh tenant IDs which would invalidate

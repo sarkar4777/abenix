@@ -45,10 +45,10 @@ spec:
               memory: 32Mi
         - name: init-data-dirs
           image: busybox:1.36
-          # The PVC mount at /data/ml-models lands under hostPath /data,
-          # so the init container must mount it too — chmod must touch
-          # the share itself, not the hostPath subdirectory it hides.
-          command: ['sh', '-c', 'mkdir -p /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache /data/archives && chmod 777 /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache /data/archives']
+          # Claims mounted over /data or /data/ml-models hide what was written
+          # before they existed. Copy anything they lack from the older layout,
+          # never overwriting, so switching storage never strands a file.
+          command: ['sh', '-c', 'mkdir -p /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache /data/archives && chmod 777 /data/uploads /data/exports /data/ml-models /data/code-assets /data/code-asset-cache /data/archives && for src in /prior-host /prior-data; do [ -d "$src" ] || continue; for d in uploads exports code-assets ml-models; do [ -d "$src/$d" ] && cp -rn "$src/$d/." "/data/$d/" 2>/dev/null; done; done; true']
           securityContext:
             runAsUser: 0
             runAsNonRoot: false
@@ -58,6 +58,14 @@ spec:
             {{- if .Values.mlModelsPVC.enabled }}
             - name: ml-models
               mountPath: /data/ml-models
+            - name: data
+              mountPath: /prior-data
+              readOnly: true
+            {{- end }}
+            {{- if .Values.sharedDataPVC.enabled }}
+            - name: prior-host-data
+              mountPath: /prior-host
+              readOnly: true
             {{- end }}
             {{- if and .Values.archivesPVC .Values.archivesPVC.enabled }}
             - name: archives
@@ -156,14 +164,21 @@ spec:
               mountPath: /tmp
       volumes:
         - name: data
-          # /data is shared with the worker so document_processor can read
-          # uploads the API wrote. On single-node minikube a hostPath
-          # works (both pods land on the same node). For multi-node or
-          # production, swap this for a ReadWriteMany PVC, NFS, or
-          # S3-backed StorageService.
+          # /data is shared with the worker and the agent runtime. One node
+          # can use the host path, a multi-node cluster needs the shared
+          # ReadWriteMany claim, the same one the runtime pools mount.
+          {{- if .Values.sharedDataPVC.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.sharedDataPVC.claimName | default "abenix-shared-data" }}
+        - name: prior-host-data
           hostPath:
             path: {{ .Values.sharedDataHostPath | default "/var/lib/abenix/data" }}
             type: DirectoryOrCreate
+          {{- else }}
+          hostPath:
+            path: {{ .Values.sharedDataHostPath | default "/var/lib/abenix/data" }}
+            type: DirectoryOrCreate
+          {{- end }}
         {{- if .Values.mlModelsPVC.enabled }}
         - name: ml-models
           persistentVolumeClaim:

@@ -1,5 +1,133 @@
 # Changelog
 
+## v2.5.1 — 2026-10-02
+
+### Added
+
+- Invite a teammate from the Team page and share the link it shows. The invitee sets a name and password and joins your workspace with the role you chose.
+- A Getting started checklist on the dashboard ticks off from your own work and links to the next step. Code assets, knowledge bases and Atlas graphs each offer Use in an agent, which opens the builder with the right tools and bindings already in place.
+- Pipelines can be built without drag and drop. Clicking a palette step adds it, Dependencies is a checkbox list, templates insert their steps and agent steps have an agent picker.
+- The builder Knowledge tab can pin Atlas graphs to an agent.
+- Every trigger has Run now, and every chat answer links to the run it produced.
+- Lists show whether an item is yours, shared with you or from the platform.
+- Code assets have versions. Upload new version replaces the code behind an asset without rewiring agents, goes live only if it analyses cleanly, and earlier versions can be restored. History is bounded and old archives are pruned.
+- Deleting an agent, code asset or knowledge base first lists what uses it. A confirmed delete switches off the agent's triggers and unbinds graphs and grants, and deleted agents can be restored from Manage Agents with their triggers.
+- Pipeline steps can be referenced by their label, so `{{score.response}}` works for a step labelled score.
+
+### Changed
+
+- Uploaded code and models are stored durably. With S3 or Azure object storage configured, every upload, version and seeded file is mirrored and any replica restores a file it lacks before serving it, so restarts, rescheduling and multiple API replicas never lose one.
+- Knowledge bases picked in the builder are attached by the API when the agent is saved, and the builder says when one could not be attached. Save failures show a banner instead of looking saved.
+- Atlas grounded search matches named instances as well as concepts and returns their relationships.
+- A code asset zipped as one folder runs from inside that folder, the same way the analyzer reads it.
+- The publish dialog stays open when sharing with some people fails.
+- Share, delete and upload only appear for people who can use them.
+- The Flight Recorder keeps each tool result up to 8000 characters and names pipeline steps by label.
+- Pipeline runs show their answer in chat, and the agent picker lists every agent with yours first.
+- A failed code asset says why, and a failing test run reports the code's own error instead of a server error.
+- The builder says when an agent is read only for you and shows knowledge bases granted from anywhere.
+- Dialogs close on Escape, and revoking an API key asks first.
+- A failed run says in plain language what went wrong and who can fix it, with the provider's raw error under Details, and a failed pipeline step shows its reason.
+- Members only see and manage triggers they created or that belong to their agents. The agent page's trigger link shows that agent's triggers.
+
+### Fixed
+
+- Publishing a pipeline no longer fails for lack of a system prompt, and saving one keeps its error handling settings.
+- Publishing no longer calls the endpoint twice and overwrites a pending marketplace review.
+- The chat stream keeps events split across network chunks.
+- Code Runner updates an asset while it is analysed.
+- Builder canvas nodes keep a fixed width.
+- Members can save edits to their own existing agents again.
+- An agent that reaches its step limit answers from what it gathered instead of returning a placeholder.
+- Agents run as pipeline steps are held to their output_schema with one corrective retry, and an empty required field counts as missing.
+- Seeded ML models reach the agent runtime on local installs. The API and the runtime share the model volume, models written before are copied in, the seed restores a model file whose row outlived it, the runtime fetches a model it cannot see with a token scoped to that model, and the deploy warns if the two pods disagree.
+- Agents run as pipeline steps keep their tool settings, so a bound code asset is found.
+- A pipeline step whose agent was deleted fails with a message naming it.
+- `deploy.sh reload api` runs migrations and moves the migration init container to the new image.
+- On multi-node AKS the API, worker and cognify worker share /data with the agent runtime through the Azure Files claim, instead of each node keeping its own copy.
+
+### Security
+
+- Sub-agents run as the user who started the parent run on every path, follow the normal access rules, are linked to the parent run and stop at a depth of three.
+- Atlas graphs follow the owner, admin or share rule, and Atlas can only bind knowledge bases the caller can read.
+- Editing, running and downloading a code asset need ownership, a share or admin.
+- Only the owner or an admin can share a knowledge base.
+- Invite lookups and acceptance share the login rate limit.
+- Bulk delete follows the single delete rules instead of hard deleting any agent in the workspace.
+- The sandbox fetches a large code asset with a short-lived token scoped to that asset.
+
+### Closed issues
+
+- [#51](https://github.com/sarkar4777/abenix/issues/51) Invited teammates could never sign in
+- [#52](https://github.com/sarkar4777/abenix/issues/52) Builder Knowledge tab empty when the API is on another origin
+- [#53](https://github.com/sarkar4777/abenix/issues/53) No way to pin an agent to an Atlas graph from the UI
+- [#54](https://github.com/sarkar4777/abenix/issues/54) Pipelines could only be built by drag and drop
+- [#55](https://github.com/sarkar4777/abenix/issues/55) Publishing called the endpoint twice and overwrote a marketplace submission
+- [#56](https://github.com/sarkar4777/abenix/issues/56) Publishing a pipeline failed with 400
+- [#57](https://github.com/sarkar4777/abenix/issues/57) Saving a pipeline dropped its error handling settings
+- [#58](https://github.com/sarkar4777/abenix/issues/58) Chat dropped stream events split across network chunks
+- [#59](https://github.com/sarkar4777/abenix/issues/59) Code Runner never updated an asset while it was being analysed
+- [#60](https://github.com/sarkar4777/abenix/issues/60) Code asset zipped as one folder failed to run
+- [#61](https://github.com/sarkar4777/abenix/issues/61) Knowledge base page had no way into search
+- [#62](https://github.com/sarkar4777/abenix/issues/62) Re-run from the Flight Recorder opened an empty chat
+- [#63](https://github.com/sarkar4777/abenix/issues/63) Schedule triggers could not be run on demand
+- [#64](https://github.com/sarkar4777/abenix/issues/64) Icon-only buttons without labels and no duplicate for your own agents
+- [#65](https://github.com/sarkar4777/abenix/issues/65) Marketplace option offered to roles that cannot publish
+- [#66](https://github.com/sarkar4777/abenix/issues/66) New users had no guidance on where to start
+- [#67](https://github.com/sarkar4777/abenix/issues/67) Builder tool nodes stretched across the canvas
+- [#68](https://github.com/sarkar4777/abenix/issues/68) Sub-agents ran under the platform key instead of the caller
+- [#69](https://github.com/sarkar4777/abenix/issues/69) Any member could edit or delete another member's Atlas graph
+- [#70](https://github.com/sarkar4777/abenix/issues/70) Lists did not say which items were yours
+- [#71](https://github.com/sarkar4777/abenix/issues/71) Atlas grounded search never matched instance nodes
+- [#72](https://github.com/sarkar4777/abenix/issues/72) Knowledge bases picked in the builder were never attached to the agent
+- [#73](https://github.com/sarkar4777/abenix/issues/73) Builder save failures were silent
+- [#74](https://github.com/sarkar4777/abenix/issues/74) Any member could edit, run or download another member's code asset
+- [#75](https://github.com/sarkar4777/abenix/issues/75) Atlas could bind a knowledge base the caller cannot read
+- [#76](https://github.com/sarkar4777/abenix/issues/76) Any member could share another member's knowledge base
+- [#77](https://github.com/sarkar4777/abenix/issues/77) Share, delete and upload offered to people who cannot use them
+- [#78](https://github.com/sarkar4777/abenix/issues/78) Publish dialog left the page when sharing failed
+- [#79](https://github.com/sarkar4777/abenix/issues/79) Sub-agents called outside chat ran under the platform key
+- [#80](https://github.com/sarkar4777/abenix/issues/80) Invite links were not rate limited
+- [#81](https://github.com/sarkar4777/abenix/issues/81) Pipeline agent picker hid your agents and sat on the wrong tab
+- [#82](https://github.com/sarkar4777/abenix/issues/82) Getting started and the agent step config asked for more agents than the API returns
+- [#83](https://github.com/sarkar4777/abenix/issues/83) Pipeline steps referenced by their label got nothing
+- [#84](https://github.com/sarkar4777/abenix/issues/84) Flight Recorder named pipeline steps by tool
+- [#85](https://github.com/sarkar4777/abenix/issues/85) SDK playground could not send a message to a plain agent
+- [#86](https://github.com/sarkar4777/abenix/issues/86) Pipeline runs in chat never showed the answer
+- [#87](https://github.com/sarkar4777/abenix/issues/87) Agents run as pipeline steps lost their tool settings
+- [#88](https://github.com/sarkar4777/abenix/issues/88) SDK playground dropped a message typed while the agent was loading
+- [#89](https://github.com/sarkar4777/abenix/issues/89) API keys were revoked on a single click
+- [#90](https://github.com/sarkar4777/abenix/issues/90) Dialogs did not close on Escape
+- [#91](https://github.com/sarkar4777/abenix/issues/91) No way to upload a new version of a code asset
+- [#92](https://github.com/sarkar4777/abenix/issues/92) A failed code asset did not say why
+- [#93](https://github.com/sarkar4777/abenix/issues/93) Sandbox fetch of large code assets had no valid credentials
+- [#94](https://github.com/sarkar4777/abenix/issues/94) Bulk delete removed any agent in the workspace
+- [#95](https://github.com/sarkar4777/abenix/issues/95) Deleting something others used gave no warning
+- [#96](https://github.com/sarkar4777/abenix/issues/96) Pipelines kept running deleted agents
+- [#97](https://github.com/sarkar4777/abenix/issues/97) Delete buttons misled about what happened
+- [#98](https://github.com/sarkar4777/abenix/issues/98) Deleted agents could not be restored
+- [#99](https://github.com/sarkar4777/abenix/issues/99) Version revert and switched-off triggers gave no feedback
+- [#100](https://github.com/sarkar4777/abenix/issues/100) Agent page offered edit, share and versions to people who could only run it
+- [#101](https://github.com/sarkar4777/abenix/issues/101) Flight Recorder kept only the first 500 characters of a tool result
+- [#102](https://github.com/sarkar4777/abenix/issues/102) Owners could not save edits to an existing agent
+- [#103](https://github.com/sarkar4777/abenix/issues/103) Builder did not show knowledge bases granted elsewhere
+- [#104](https://github.com/sarkar4777/abenix/issues/104) Builder let people edit agents they could not save
+- [#105](https://github.com/sarkar4777/abenix/issues/105) Reloading the API after a new migration left it unable to start
+- [#106](https://github.com/sarkar4777/abenix/issues/106) My Agents always counted zero
+- [#107](https://github.com/sarkar4777/abenix/issues/107) Restoring an earlier agent version always failed
+- [#108](https://github.com/sarkar4777/abenix/issues/108) Grouped agent view had no delete
+- [#109](https://github.com/sarkar4777/abenix/issues/109) Any member could see, change or fire every trigger in the workspace
+- [#110](https://github.com/sarkar4777/abenix/issues/110) Agent trigger link always opened a create form over all triggers
+- [#111](https://github.com/sarkar4777/abenix/issues/111) A failed pipeline step showed no reason in chat
+- [#112](https://github.com/sarkar4777/abenix/issues/112) The original version of an agent could not be restored
+- [#113](https://github.com/sarkar4777/abenix/issues/113) Restoring a version reloaded the page and hid the result
+- [#114](https://github.com/sarkar4777/abenix/issues/114) Failed runs showed the raw provider error in chat
+- [#115](https://github.com/sarkar4777/abenix/issues/115) An agent that ran out of steps returned nothing usable
+- [#116](https://github.com/sarkar4777/abenix/issues/116) Seeded ML models were invisible to the agent runtime on local installs
+- [#117](https://github.com/sarkar4777/abenix/issues/117) Uploaded code and models depended on one pod's disk
+- [#118](https://github.com/sarkar4777/abenix/issues/118) Pipeline steps did not hold agents to their output schema
+- [#119](https://github.com/sarkar4777/abenix/issues/119) On multi-node AKS the API and worker ignored the shared data volume
+
 ## v2.5.0 — 2026-10-01
 
 ### Added

@@ -20,6 +20,7 @@ from app.core.sanitize import sanitize_input
 from app.schemas.knowledge import CreateKnowledgeBaseRequest, UpdateKnowledgeBaseRequest
 from app.services.collection_access import grant_agent_collection
 from app.services.kb_access import (
+    _is_tenant_admin,
     accessible_collection_ids,
     user_can_access_collection,
     user_can_edit_collection,
@@ -74,7 +75,61 @@ def _kb_rollups(kb: KnowledgeBase) -> tuple[int, int, int]:
     return chunks, size, degraded
 
 
-def _serialize_kb(kb: KnowledgeBase, include_docs: bool = False) -> dict[str, Any]:
+async def _owner_names(db: AsyncSession, ids: set[Any]) -> dict[uuid.UUID, str]:
+    wanted = {i for i in ids if i is not None}
+    if not wanted:
+        return {}
+    rows = (
+        await db.execute(
+            select(User.id, User.full_name, User.email).where(User.id.in_(wanted))
+        )
+    ).all()
+    return {r[0]: (r[1] or r[2]) for r in rows}
+
+
+def _owner_fields(
+    kb: KnowledgeBase,
+    user: User | None,
+    names: dict[uuid.UUID, str] | None,
+    can_edit: bool | None,
+) -> dict[str, Any]:
+    owner = kb.created_by
+    ownership = None
+    if user is not None:
+        if owner is None:
+            ownership = "platform"
+        else:
+            ownership = "mine" if owner == user.id else "shared"
+    return {
+        "owner_id": str(owner) if owner else None,
+        "owner_name": (names or {}).get(owner) if owner else None,
+        "ownership": ownership,
+        "can_edit": can_edit,
+        # share is owner or admin only
+        "can_manage": bool(
+            user is not None
+            and ((owner is not None and owner == user.id) or user.role.value == "admin")
+        ),
+    }
+
+
+async def _owner_context(
+    db: AsyncSession, kb: KnowledgeBase, user: User
+) -> dict[str, Any]:
+    return {
+        "user": user,
+        "names": await _owner_names(db, {kb.created_by}),
+        "can_edit": await user_can_edit_collection(db, user=user, kb=kb),
+    }
+
+
+def _serialize_kb(
+    kb: KnowledgeBase,
+    include_docs: bool = False,
+    user: User | None = None,
+    names: dict[uuid.UUID, str] | None = None,
+    can_edit: bool | None = None,
+) -> dict[str, Any]:
     chunk_count, total_size, degraded_doc_count = _kb_rollups(kb)
     docs: list[dict[str, Any]] = []
     if include_docs:
@@ -109,6 +164,7 @@ def _serialize_kb(kb: KnowledgeBase, include_docs: bool = False) -> dict[str, An
         ),
         "vector_backend": kb.vector_backend,
         "created_by": str(kb.created_by) if kb.created_by else None,
+        **_owner_fields(kb, user, names, can_edit),
         "documents": docs,
         "created_at": kb.created_at.isoformat() if kb.created_at else None,
         "updated_at": kb.updated_at.isoformat() if kb.updated_at else None,
@@ -121,7 +177,12 @@ def _serialize_kb_summary(kb: KnowledgeBase) -> dict[str, Any]:
     return full
 
 
-def _serialize_kb_summary_lite(kb: KnowledgeBase) -> dict[str, Any]:
+def _serialize_kb_summary_lite(
+    kb: KnowledgeBase,
+    user: User | None = None,
+    names: dict[uuid.UUID, str] | None = None,
+    can_edit: bool | None = None,
+) -> dict[str, Any]:
     return {
         "id": str(kb.id),
         "name": kb.name,
@@ -144,6 +205,7 @@ def _serialize_kb_summary_lite(kb: KnowledgeBase) -> dict[str, Any]:
         ),
         "vector_backend": kb.vector_backend,
         "created_by": str(kb.created_by) if kb.created_by else None,
+        **_owner_fields(kb, user, names, can_edit),
         "created_at": kb.created_at.isoformat() if kb.created_at else None,
         "updated_at": kb.updated_at.isoformat() if kb.updated_at else None,
     }
@@ -270,9 +332,28 @@ async def list_knowledge_bases(
         ).all()
         for cid, cnt in degraded_rows:
             degraded_counts[cid] = int(cnt or 0)
+    names = await _owner_names(db, {kb.created_by for kb in kbs})
+    admin = _is_tenant_admin(user)
+    writable: set[uuid.UUID] = set()
+    if kb_ids and not admin:
+        grant_rows = (
+            await db.execute(
+                select(
+                    UserCollectionGrant.collection_id, UserCollectionGrant.permission
+                ).where(
+                    UserCollectionGrant.collection_id.in_(kb_ids),
+                    UserCollectionGrant.user_id == user.id,
+                )
+            )
+        ).all()
+        for cid, perm in grant_rows:
+            pv = perm.value if hasattr(perm, "value") else str(perm)
+            if pv.lower() in ("edit", "admin"):
+                writable.add(cid)
     data = []
     for kb in kbs:
-        d = _serialize_kb_summary_lite(kb)
+        can_edit = admin or kb.created_by == user.id or kb.id in writable
+        d = _serialize_kb_summary_lite(kb, user, names, can_edit)
         ck, sz = rollups.get(kb.id, (0, 0))
         d["chunk_count"] = ck
         d["total_size"] = sz
@@ -406,7 +487,9 @@ async def create_knowledge_base(
         )
     await db.commit()
     await db.refresh(kb)
-    return success(_serialize_kb(kb), status_code=201)
+    return success(
+        _serialize_kb(kb, **(await _owner_context(db, kb, user))), status_code=201
+    )
 
 
 @router.get("/{kb_id}")
@@ -426,7 +509,9 @@ async def get_knowledge_base(
     kb = result.scalar_one_or_none()
     if not kb or not await user_can_access_collection(db, user=user, kb=kb):
         return error("Knowledge base not found", 404)
-    return success(_serialize_kb(kb, include_docs=True))
+    return success(
+        _serialize_kb(kb, include_docs=True, **(await _owner_context(db, kb, user)))
+    )
 
 
 @router.put("/{kb_id}")
@@ -475,12 +560,34 @@ async def update_knowledge_base(
 
     await db.commit()
     await db.refresh(kb)
-    return success(_serialize_kb(kb))
+    return success(_serialize_kb(kb, **(await _owner_context(db, kb, user))))
+
+
+@router.get("/{kb_id}/dependents")
+async def get_kb_dependents(
+    kb_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Agents granted this knowledge base and Atlas graphs bound to it."""
+    from app.services.dependents import kb_dependents
+
+    kb = (
+        await db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == kb_id, KnowledgeBase.tenant_id == user.tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if not kb or not await user_can_access_collection(db, user=user, kb=kb):
+        return error("Knowledge base not found", 404)
+    return success(await kb_dependents(db, user.tenant_id, kb_id))
 
 
 @router.delete("/{kb_id}")
 async def delete_knowledge_base(
     kb_id: uuid.UUID,
+    force: bool = False,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -498,6 +605,17 @@ async def delete_knowledge_base(
     if not await user_can_edit_collection(db, user=user, kb=kb):
         return error("You don't have permission to delete this collection", 403)
 
+    from app.services.dependents import count, kb_dependents, release_kb
+
+    deps = await kb_dependents(db, user.tenant_id, kb_id)
+    if count(deps) and not force:
+        return error(
+            f"{kb.name} is used by {count(deps)} agent(s) or Atlas graph(s). They lose these documents if it is deleted.",
+            409,
+            error_code="IN_USE",
+            details={"dependents": deps},
+        )
+    await release_kb(db, user.tenant_id, kb_id)
     for doc in kb.documents:
         _delete_file(doc.storage_url)
         await db.delete(doc)

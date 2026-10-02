@@ -105,6 +105,8 @@ async def execute(request: Request):
             "execution_id": body.get("execution_id", ""),
             "agent_name": body.get("agent_name", ""),
             "db_url": body.get("db_url", ""),
+            "user_id": str(body.get("user_id") or ""),
+            "user_role": str(body.get("user_role") or body.get("role") or ""),
         }
         kb_ids = body.get("kb_ids")
 
@@ -169,6 +171,8 @@ async def execute_stream(request: Request):
                 "execution_id": body.get("execution_id", ""),
                 "agent_name": body.get("agent_name", ""),
                 "db_url": body.get("db_url", ""),
+                "user_id": str(body.get("user_id") or ""),
+                "user_role": str(body.get("user_role") or body.get("role") or ""),
             }
             kb_ids = body.get("kb_ids")
 

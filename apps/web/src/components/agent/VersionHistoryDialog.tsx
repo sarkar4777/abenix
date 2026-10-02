@@ -1,5 +1,7 @@
 'use client';
 
+import { toastError, toastSuccess } from '@/stores/toastStore';
+import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 import { useState, useEffect } from 'react';
 import { Clock, GitBranch, Loader2, RotateCcw, X } from 'lucide-react';
 
@@ -40,18 +42,27 @@ export default function VersionHistoryDialog({ open, onClose, agentId, agentName
       .finally(() => setLoading(false));
   }, [open, agentId, token]);
 
+  useEscapeToClose(open, onClose);
   if (!open) return null;
 
-  const revert = async (revId: string) => {
+  const revert = async (revId: string, which: 'after' | 'before' = 'after') => {
     setReverting(revId);
     try {
-      await fetch(`${API_URL}/api/agents/${agentId}/revisions/${revId}/revert`, {
+      const r = await fetch(`${API_URL}/api/agents/${agentId}/revisions/${revId}/revert?which=${which}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!r.ok) {
+        const b = await r.json().catch(() => null);
+        toastError('Revert failed', b?.error?.message || `HTTP ${r.status}`);
+        return;
+      }
+      toastSuccess('Reverted', 'The agent runs this version from its next call.');
       onReverted?.();
       onClose();
-    } catch {}
+    } catch {
+      toastError('Revert failed', 'Could not reach the server.');
+    }
     finally { setReverting(null); }
   };
 
@@ -64,7 +75,7 @@ export default function VersionHistoryDialog({ open, onClose, agentId, agentName
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true">
       <div className="bg-slate-800 border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-lg max-h-[70vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50">
           <div className="flex items-center gap-2">
@@ -101,16 +112,33 @@ export default function VersionHistoryDialog({ open, onClose, agentId, agentName
                   </div>
                   {i > 0 && (
                     <button
+                      data-testid={`version-revert-${rev.revision_number}`}
                       onClick={() => revert(rev.id)}
                       disabled={reverting === rev.id}
                       className="shrink-0 flex items-center gap-1 px-2 py-1 text-[9px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded hover:bg-amber-500/20 disabled:opacity-50"
                     >
                       {reverting === rev.id ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <RotateCcw className="w-2.5 h-2.5" />}
-                      Revert
+                      Restore
                     </button>
                   )}
                 </div>
               ))}
+              {revisions.length > 0 && (() => {
+                const first = revisions[revisions.length - 1];
+                return (
+                  <div className="flex items-center justify-between gap-3 p-3 bg-slate-900/30 rounded-lg border border-dashed border-slate-700/40">
+                    <span className="text-[10px] text-slate-400">Original, before any saved change</span>
+                    <button
+                      data-testid="version-restore-original"
+                      onClick={() => revert(first.id, 'before')}
+                      disabled={reverting === first.id}
+                      className="shrink-0 flex items-center gap-1 px-2 py-1 text-[9px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded hover:bg-amber-500/20 disabled:opacity-50"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" /> Restore
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>

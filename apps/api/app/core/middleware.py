@@ -15,6 +15,7 @@ AUTH_PATHS = frozenset(
         "/api/auth/login",
         "/api/auth/register",
         "/api/auth/refresh",
+        "/api/auth/accept-invite",
     }
 )
 
@@ -89,7 +90,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         from app.core.rate_limit import rate_limit_auth, rate_limit_user
 
-        if path in AUTH_PATHS:
+        if path in AUTH_PATHS or path.startswith("/api/auth/invite/"):
             blocked = await rate_limit_auth(request)
             if blocked:
                 return blocked

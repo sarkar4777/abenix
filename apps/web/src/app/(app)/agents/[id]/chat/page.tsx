@@ -1,5 +1,6 @@
 'use client';
 
+import { explainRunError } from '@/lib/run-errors';
 import Link from 'next/link';
 
 import { useEffect, useRef, useCallback, useState, Suspense, lazy } from 'react';
@@ -223,6 +224,7 @@ export default function AgentChatPage() {
               model={msg.model}
               requestedModel={msg.requestedModel}
               fallbackReason={msg.fallbackReason}
+              executionId={msg.executionId}
             />
           ))}
 
@@ -245,8 +247,21 @@ export default function AgentChatPage() {
           )}
           {error && (
             <div className="flex justify-center">
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-2">
-                {error}
+              <div role="alert" data-testid="chat-error" className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-2 max-w-2xl">
+                {(() => {
+                  const known = explainRunError(error);
+                  if (!known) return error;
+                  return (
+                    <>
+                      <p className="text-red-300">{known.title}</p>
+                      <p className="text-xs text-red-400/80 mt-0.5">{known.hint}</p>
+                      <details className="mt-1 text-[11px] text-red-400/70">
+                        <summary className="cursor-pointer">Details</summary>
+                        <p className="mt-1 break-all font-mono">{error}</p>
+                      </details>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -311,6 +326,7 @@ export default function AgentChatPage() {
           tokenCount={tokenCount}
           cost={cost}
           confidenceScore={confidenceScore}
+          initialValue={prefill}
         />
       </div>
 

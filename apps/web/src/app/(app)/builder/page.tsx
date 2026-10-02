@@ -115,6 +115,7 @@ interface AgentConfig {
   slug?: string;
   output_schema?: string;
   knowledge_collection_ids?: string[];
+  atlas_graphs?: string[];
   agent_type?: 'custom' | 'oob';
 }
 
@@ -232,6 +233,8 @@ export default function BuilderPage() {
   const presetTool = searchParams.get('tool');
   const presetModelName = searchParams.get('model_name');
   const presetAssetId = searchParams.get('asset_id');
+  const presetAtlas = searchParams.get('atlas');
+  const presetKb = searchParams.get('kb');
   const isMobile = useIsMobile();
 
   const [agentId, setAgentId] = useState<string | null>(agentParam);
@@ -239,11 +242,14 @@ export default function BuilderPage() {
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
   const [loading, setLoading] = useState(!!agentParam);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [mcpExtensions, setMcpExtensions] = useState<MCPExtensions | undefined>(undefined);
   const [builderMode, setBuilderMode] = useState<BuilderMode>('agent');
   const [showExecutionViewer, setShowExecutionViewer] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
+  const [readOnly, setReadOnly] = useState(false);
 
   // Pipeline store
   const pipelineStore = usePipelineStore();
@@ -375,6 +381,26 @@ export default function BuilderPage() {
         setLoading(false);
         return;
       }
+      if (presetAtlas || presetKb) {
+        const forcedModel = _forcedModelFromLocalStorage();
+        const tools = [
+          ...(presetAtlas ? ['atlas_search_grounded', 'atlas_describe'] : []),
+          ...(presetKb ? ['knowledge_search'] : []),
+        ];
+        const presetConfig: AgentConfig = {
+          ...DEFAULT_CONFIG,
+          ...(forcedModel ? { model: forcedModel } : {}),
+          ...(presetAtlas ? { atlas_graphs: [presetAtlas] } : {}),
+          ...(presetKb ? { knowledge_collection_ids: [presetKb] } : {}),
+        };
+        setConfig(presetConfig);
+        setSelectedTools(tools);
+        setNodes(buildInitialNodes(presetConfig, tools));
+        setEdges(buildInitialEdges(tools));
+        setDirty(true);
+        setLoading(false);
+        return;
+      }
       const forced = _forcedModelFromLocalStorage();
       const initialCfg: AgentConfig = forced
         ? { ...DEFAULT_CONFIG, model: forced }
@@ -429,9 +455,12 @@ export default function BuilderPage() {
             ? mc.output_schema
             : mc.output_schema ? JSON.stringify(mc.output_schema, null, 2) : '',
           knowledge_collection_ids: a.knowledge_collection_ids || mc.knowledge_collection_ids || [],
+          atlas_graphs: Array.isArray(mc.atlas_graphs) ? mc.atlas_graphs : [],
           agent_type: (a.agent_type || mc.agent_type || 'custom') as 'custom' | 'oob',
         };
         setConfig(loaded);
+        setAgentStatus(typeof a.status === 'string' ? a.status.toLowerCase() : null);
+        setReadOnly(a.can_edit === false);
         setMcpExtensions(loadedMcpExtensions);
         setSelectedTools(tools);
 
@@ -447,7 +476,7 @@ export default function BuilderPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [agentParam, presetTool, presetModelName, presetAssetId, setNodes, setEdges, buildInitialNodes, buildInitialEdges]);
+  }, [agentParam, presetTool, presetModelName, presetAssetId, presetAtlas, presetKb, setNodes, setEdges, buildInitialNodes, buildInitialEdges]);
 
   // Update agent config & reflect in nodes
   const updateConfig = useCallback(
@@ -533,6 +562,13 @@ export default function BuilderPage() {
       setDirty(true);
     },
     [setNodes, setEdges, deleteNode],
+  );
+
+  const addTools = useCallback(
+    (toolIds: string[]) => {
+      toolIds.filter((id) => !selectedTools.includes(id)).forEach((id) => toggleTool(id));
+    },
+    [selectedTools, toggleTool],
   );
 
   // Drag-and-drop from palette onto canvas
@@ -684,6 +720,7 @@ export default function BuilderPage() {
     if (!token) return;
 
     setSaving(true);
+    setSaveError(null);
 
     // Build model_config depending on mode
     const modelConfig: Record<string, unknown> = {
@@ -739,6 +776,9 @@ export default function BuilderPage() {
     if (Number.isFinite(config.rate_limit_qps as number)) modelConfig.rate_limit_qps = config.rate_limit_qps;
     if (Number.isFinite(config.daily_budget_usd as number)) modelConfig.daily_budget_usd = config.daily_budget_usd;
     if (config.timeout) modelConfig.timeout = config.timeout;
+    if (config.atlas_graphs && config.atlas_graphs.length > 0) modelConfig.atlas_graphs = config.atlas_graphs;
+    // the API turns this list into the agent's knowledge base grants
+    modelConfig.knowledge_collection_ids = config.knowledge_collection_ids || [];
     if (config.max_iterations) modelConfig.max_iterations = config.max_iterations;
 
     // Output schema — store as parsed JSON if valid, otherwise the raw
@@ -771,66 +811,29 @@ export default function BuilderPage() {
     }
 
     try {
-      let resolvedAgentId: string | null = agentId;
-      if (agentId) {
-        await fetch(`${API_URL}/api/agents/${agentId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        const res = await fetch(`${API_URL}/api/agents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(payload),
-        });
-        const json = await res.json();
-        if (json.data?.id) {
-          resolvedAgentId = json.data.id;
-          setAgentId(json.data.id);
-          router.replace(`/builder?agent=${json.data.id}`);
-        }
+      const res = await fetch(agentId ? `${API_URL}/api/agents/${agentId}` : `${API_URL}/api/agents`, {
+        method: agentId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.data) {
+        setSaveError(json.error?.message || `Save failed (${res.status}). Your changes are still here, try again.`);
+        return;
       }
-
-      // Reconcile knowledge-collection grants. Compare the user's
-      // current selection against what the server has and post-or-
-      // delete the diff. Best-effort — failures don't block save.
-      if (resolvedAgentId) {
-        const want = new Set(config.knowledge_collection_ids || []);
-        try {
-          const listRes = await fetch(`${API_URL}/api/knowledge-bases?limit=200`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const listJson = listRes.ok ? await listRes.json() : { data: [] };
-          const all: { id: string }[] = Array.isArray(listJson.data) ? listJson.data : (listJson.data?.collections || []);
-          const grantOps = all.map(async (c) => {
-            const grantsRes = await fetch(`${API_URL}/api/knowledge-collections/${c.id}/agents`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!grantsRes.ok) return;
-            const grantsJson = await grantsRes.json();
-            const granted = (grantsJson.data || []).some((g: { agent_id: string }) => g.agent_id === resolvedAgentId);
-            if (want.has(c.id) && !granted) {
-              await fetch(`${API_URL}/api/knowledge-collections/${c.id}/agents`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ agent_id: resolvedAgentId, permission: 'READ' }),
-              });
-            } else if (!want.has(c.id) && granted) {
-              await fetch(`${API_URL}/api/knowledge-collections/${c.id}/agents/${resolvedAgentId}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` },
-              });
-            }
-          });
-          await Promise.allSettled(grantOps);
-        } catch {
-          // grants are best-effort; surfacing this to the UI is left for a follow-up
-        }
+      if (!agentId && json.data.id) {
+        setAgentStatus('draft');
+        setAgentId(json.data.id);
+        router.replace(`/builder?agent=${json.data.id}`);
+      }
+      const refused: { id: string; reason: string }[] = json.data.kb_grants_refused || [];
+      if (refused.length) {
+        setSaveError(`Saved, but ${refused.length} knowledge base${refused.length > 1 ? 's were' : ' was'} not attached: ${refused[0].reason}. Ask its owner to share it with you as admin.`);
       }
 
       setDirty(false);
     } catch {
+      setSaveError('Could not reach the server. Your changes are still here, try again.');
     } finally {
       setSaving(false);
     }
@@ -930,13 +933,7 @@ export default function BuilderPage() {
     const currentId = agentId || (await getCreatedId());
     if (!currentId) return;
 
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-
-    await fetch(`${API_URL}/api/agents/${currentId}/publish`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    // PublishDialog already called /publish with the chosen visibility
     router.push(`/agents/${currentId}/chat`);
   }, [agentId, save, router]);
 
@@ -999,7 +996,20 @@ export default function BuilderPage() {
           firstErrorNodeId={firstErrorNodeId}
           firstWarningNodeId={firstWarningNodeId}
           onFocusErrorNode={focusErrorNode}
+          showNextStep={!!agentId && agentStatus === 'draft'}
         />
+        {readOnly && agentId && (
+          <div role="status" data-testid="builder-read-only" className="mx-3 mt-2 flex items-center justify-between gap-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+            <span>You can run this agent but not change it. Changes here will not be saved.</span>
+            <a href={`/agents/${agentId}/info`} className="text-cyan-300 hover:underline whitespace-nowrap">Duplicate it to make your own</a>
+          </div>
+        )}
+        {saveError && (
+          <div role="alert" data-testid="builder-save-error" className="mx-3 mt-2 flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            <span>{saveError}</span>
+            <button onClick={() => setSaveError(null)} aria-label="Dismiss" className="text-amber-300 hover:text-white">×</button>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           {/* Agent Name */}
           <div>
@@ -1116,6 +1126,7 @@ export default function BuilderPage() {
         firstErrorNodeId={firstErrorNodeId}
         firstWarningNodeId={firstWarningNodeId}
         onFocusErrorNode={focusErrorNode}
+        showNextStep={!!agentId && agentStatus === 'draft'}
         getDraftForValidate={() => {
           if (builderMode === 'pipeline') {
             const serialized = pipelineStore.serialize();
@@ -1133,6 +1144,18 @@ export default function BuilderPage() {
           return { nodes: [], tools: selectedTools, context_keys: [], purpose: config.description || '' };
         }}
       />
+      {readOnly && agentId && (
+        <div role="status" data-testid="builder-read-only" className="mx-3 mt-2 flex items-center justify-between gap-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+          <span>You can run this agent but not change it. Changes here will not be saved.</span>
+          <a href={`/agents/${agentId}/info`} className="text-cyan-300 hover:underline whitespace-nowrap">Duplicate it to make your own</a>
+        </div>
+      )}
+      {saveError && (
+        <div role="alert" data-testid="builder-save-error" className="mx-3 mt-2 flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          <span>{saveError}</span>
+          <button onClick={() => setSaveError(null)} aria-label="Dismiss" className="text-amber-300 hover:text-white">×</button>
+        </div>
+      )}
       <div className="flex-1 flex min-h-0">
         {builderMode === 'agent' ? (
           <>
@@ -1198,6 +1221,8 @@ export default function BuilderPage() {
               onConnectMcp={handleConnectMcp}
               onAddMcpConnection={handleAddMcpConnection}
               onDisconnectMcp={handleDisconnectMcp}
+              selectedTools={selectedTools}
+              onAddTools={addTools}
             />
           </>
         ) : (
@@ -1373,6 +1398,54 @@ function PipelineModeContent({
     [pipelineStore],
   );
 
+  // Click-to-add from PipelineToolbar, placed right of the last step
+  const handleAddStepClick = useCallback(
+    (toolId: string, name: string) => {
+      const steps = usePipelineStore.getState().steps;
+      const last = steps[steps.length - 1];
+      const position = last ? { x: last.position.x + 280, y: last.position.y } : { x: 100, y: 100 };
+      const id = pipelineStore.addStep(toolId, name, position);
+      pipelineStore.setSelectedStep(id);
+      setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2, duration: 200 }), 50);
+    },
+    [pipelineStore],
+  );
+
+  const handleAddTemplate = useCallback(
+    (templateId: string) => {
+      const store = usePipelineStore.getState();
+      const maxX = store.steps.reduce((m, st) => Math.max(m, st.position.x), -Infinity);
+      const x0 = Number.isFinite(maxX) ? maxX + 300 : 100;
+      const y0 = 100;
+      const add = (label: string, x: number, y: number, prompt: string) => {
+        const id = store.addStep('llm_call', label, { x, y });
+        store.updateStep(id, { arguments: { prompt } });
+        return id;
+      };
+      if (templateId === 'parallel-compare') {
+        const a = add('Approach A', x0, y0, 'Answer using approach A: {{context.user_message}}');
+        const b = add('Approach B', x0, y0 + 160, 'Answer using approach B: {{context.user_message}}');
+        const cmp = add('Compare', x0 + 300, y0 + 80, `Compare these two answers and pick the better one.
+
+A: {{${a}.response}}
+
+B: {{${b}.response}}`);
+        store.connectSteps(a, cmp);
+        store.connectSteps(b, cmp);
+      } else if (templateId === 'sequential-chain') {
+        const s1 = add('Extract', x0, y0, 'Extract the key facts from: {{context.user_message}}');
+        const s2 = add('Analyze', x0 + 300, y0, `Analyze these facts: {{${s1}.response}}`);
+        const s3 = add('Summarize', x0 + 600, y0, `Write a short summary of: {{${s2}.response}}`);
+        store.connectSteps(s1, s2);
+        store.connectSteps(s2, s3);
+      } else {
+        return;
+      }
+      setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2, duration: 200 }), 50);
+    },
+    [],
+  );
+
   // Validate connections (prevent cycles)
   const handleIsValidConnection = useCallback(
     (connection: Connection) => {
@@ -1384,7 +1457,7 @@ function PipelineModeContent({
 
   return (
     <>
-      <PipelineToolbar />
+      <PipelineToolbar onAddStep={handleAddStepClick} onAddTemplate={handleAddTemplate} />
       <div className="flex-1 min-w-0 relative h-full">
         <PipelineCanvas
           nodes={rfNodes}

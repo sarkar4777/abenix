@@ -20,11 +20,12 @@ import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
 import { KnowledgeSkeleton } from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
-import ConfirmModal from '@/components/ui/ConfirmModal';
+import DeleteWithDependents from '@/components/ui/DeleteWithDependents';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch, API_URL } from '@/lib/api-client';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import OwnerBadge from '@/components/OwnerBadge';
 
 interface KnowledgeBase {
   id: string;
@@ -36,9 +37,16 @@ interface KnowledgeBase {
   total_size: number;
   created_at: string | null;
   updated_at: string | null;
+  owner_name?: string | null;
+  ownership?: 'mine' | 'shared' | 'platform' | null;
+  can_edit?: boolean | null;
+  can_manage?: boolean;
 }
 
 interface KBDetail {
+  can_edit?: boolean | null;
+  can_manage?: boolean;
+  owner_name?: string | null;
   id: string;
   name: string;
   description: string;
@@ -345,17 +353,14 @@ function KBDetailView({
     }
   };
 
-  const deleteKB = async () => {
+  const deleteKB = async (force: boolean) => {
     setDeletingKB(true);
     try {
-      await fetch(`${API_URL}/api/knowledge-bases/${kb.id}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      });
+      await apiFetch(`/api/knowledge-bases/${kb.id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
       onDeleted();
       toastSuccess('Knowledge base deleted');
-    } catch {
-      toastError('Failed to delete knowledge base');
+    } catch (e: any) {
+      toastError('Failed to delete knowledge base', e?.message);
     } finally {
       setDeletingKB(false);
     }
@@ -392,24 +397,52 @@ function KBDetailView({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowShare(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-300 hover:text-white border border-slate-600/40 hover:border-slate-500 rounded-lg transition-colors"
-            data-testid="kb-share"
-          >
-            <Share2 className="w-3 h-3" /> Share
-          </button>
-          <button
-            onClick={() => setConfirmDeleteKB(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
-          >
-            <Trash2 className="w-3 h-3" />
-            Delete KB
-          </button>
+          {docs.some((d) => d.status === 'ready') && (
+            <button
+              onClick={() => { window.location.href = `/builder?kb=${kb.id}`; }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-cyan-300 hover:text-white border border-cyan-500/30 hover:border-cyan-400 rounded-lg transition-colors"
+              data-testid="kb-use-in-agent"
+            >
+              <Upload className="w-3 h-3 rotate-90" /> Use in an agent
+            </button>
+          )}
+          {docs.some((d) => d.status === 'ready') && (
+            <button
+              onClick={() => { window.location.href = `/knowledge/${kb.id}/engine`; }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-emerald-300 hover:text-white border border-emerald-500/30 hover:border-emerald-400 rounded-lg transition-colors"
+              data-testid="kb-open-engine"
+            >
+              <Database className="w-3 h-3" /> Search this knowledge base
+            </button>
+          )}
+          {kb.can_manage !== false && (
+            <button
+              onClick={() => setShowShare(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-300 hover:text-white border border-slate-600/40 hover:border-slate-500 rounded-lg transition-colors"
+              data-testid="kb-share"
+            >
+              <Share2 className="w-3 h-3" /> Share
+            </button>
+          )}
+          {kb.can_edit !== false && (
+            <button
+              onClick={() => setConfirmDeleteKB(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete KB
+            </button>
+          )}
         </div>
       </div>
 
-      <DropZone kbId={kb.id} onUploaded={handleUploaded} />
+      {kb.can_edit !== false ? (
+        <DropZone kbId={kb.id} onUploaded={handleUploaded} />
+      ) : (
+        <p className="text-xs text-slate-400 border border-slate-700/50 rounded-lg px-3 py-2" data-testid="kb-read-only">
+          You can search and use this knowledge base but not add documents to it. Ask {kb.owner_name || 'its owner'} for edit access.
+        </p>
+      )}
 
       <div>
         <h3 className="text-sm font-medium text-slate-300 mb-3">
@@ -426,6 +459,7 @@ function KBDetailView({
           {docs.map((doc) => (
             <div
               key={doc.id}
+              data-testid="kb-doc-row" data-name={doc.filename} data-status={doc.status}
               className="flex items-center gap-3 p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg group"
             >
               <div className="w-8 h-8 rounded-md bg-slate-700/50 flex items-center justify-center shrink-0">
@@ -462,14 +496,14 @@ function KBDetailView({
           ))}
         </div>
       </div>
-      <ConfirmModal
+      <DeleteWithDependents
         open={confirmDeleteKB}
         onClose={() => setConfirmDeleteKB(false)}
+        resource={`/api/knowledge-bases/${kb.id}`}
+        name={kb.name}
+        what="knowledge base"
+        note="Its documents and embeddings are removed permanently."
         onConfirm={deleteKB}
-        title="Delete Knowledge Base"
-        description={`Are you sure you want to delete "${kb.name}"? All documents and embeddings will be permanently removed.`}
-        confirmLabel="Delete"
-        loading={deletingKB}
       />
       <ResourceShareDialog
         open={showShare}
@@ -494,6 +528,7 @@ export default function KnowledgePage() {
   const LIMIT = 20;
 
   const apiUrl = `/api/knowledge-bases?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}&sort=${sortBy}&limit=${LIMIT}&offset=${page * LIMIT}`;
+  const [deletingCard, setDeletingCard] = useState<{ id: string; name: string } | null>(null);
   const { data: kbs, isLoading: loading, meta, mutate: mutateKBs } =
     useApi<KnowledgeBase[]>(apiUrl);
 
@@ -642,20 +677,20 @@ export default function KnowledgePage() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               onClick={() => openDetail(kb.id)}
+              data-testid="kb-card" data-name={kb.name} data-status={kb.status}
               className="relative bg-slate-800/30 border border-slate-700/50 rounded-xl p-5 hover:border-slate-600/50 transition-colors cursor-pointer group"
             >
-              <button
+              {kb.can_edit !== false && <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (confirm(`Delete "${kb.name}"? All documents will be removed.`)) {
-                    apiFetch(`/api/knowledge-bases/${kb.id}`, { method: 'DELETE' }).then(() => mutateKBs());
-                  }
+                  setDeletingCard({ id: kb.id, name: kb.name });
                 }}
-                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all"
+                data-testid={`kb-delete-${kb.id}`}
+                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all"
                 aria-label="Delete knowledge base"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              </button>}
               <div className="flex items-start justify-between mb-3">
                 <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                   <Database className="w-5 h-5 text-emerald-400" />
@@ -667,7 +702,8 @@ export default function KnowledgePage() {
                   {kb.status}
                 </span>
               </div>
-              <h3 className="text-sm font-semibold text-white mb-2">{kb.name}</h3>
+              <h3 className="text-sm font-semibold text-white mb-1">{kb.name}</h3>
+              <OwnerBadge ownership={kb.ownership} ownerName={kb.owner_name} className="mb-2" />
               <div className="space-y-1.5 text-xs text-slate-500">
                 <div className="flex items-center gap-2">
                   <FileText className="w-3 h-3" /> {kb.doc_count} documents
@@ -684,6 +720,7 @@ export default function KnowledgePage() {
               {kb.status === 'ready' && (
                 <button
                   onClick={(e) => { e.stopPropagation(); window.location.href = `/knowledge/${kb.id}/engine`; }}
+                  data-testid="kb-card-engine"
                   className="mt-3 w-full py-1.5 text-[10px] text-emerald-400 bg-emerald-500/5 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/10 transition-colors flex items-center justify-center gap-1.5"
                 >
                   <Database className="w-3 h-3" />
@@ -727,6 +764,24 @@ export default function KnowledgePage() {
       )}
 
       <CreateModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={handleCreated} />
+      <DeleteWithDependents
+        open={!!deletingCard}
+        onClose={() => setDeletingCard(null)}
+        resource={`/api/knowledge-bases/${deletingCard?.id}`}
+        name={deletingCard?.name || ''}
+        what="knowledge base"
+        note="Its documents and embeddings are removed permanently."
+        onConfirm={async (force) => {
+          if (!deletingCard) return;
+          try {
+            await apiFetch(`/api/knowledge-bases/${deletingCard.id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+            toastSuccess('Knowledge base deleted');
+            mutateKBs();
+          } catch (e: any) {
+            toastError('Failed to delete knowledge base', e?.message);
+          }
+        }}
+      />
     </motion.div>
   );
 }

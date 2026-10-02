@@ -16,10 +16,12 @@ import {
   ChevronRight, Save, Layers, Database, FileText, GitBranch,
   Workflow, Box, Zap, Eye, ArrowRight, RotateCcw,
   LibraryBig, Search, ScanLine, Link2, Compass, ListChecks,
-  CircleDot, Grid3x3, HelpCircle, Mouse,
+  CircleDot, Grid3x3, HelpCircle, Mouse, Share2, Lock,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import ModelPicker from '@/components/ModelPicker';
+import OwnerBadge from '@/components/OwnerBadge';
+import ResourceShareDialog, { type Shareable } from '@/components/share/ResourceShareDialog';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -68,6 +70,12 @@ interface GraphMeta {
   settings: Record<string, any>;
   created_at: string | null;
   updated_at: string | null;
+  owner_id?: string | null;
+  owner_name?: string | null;
+  ownership?: 'mine' | 'shared' | 'platform' | null;
+  can_edit?: boolean | null;
+  can_delete?: boolean | null;
+  permission?: string | null;
 }
 
 interface SnapshotRow {
@@ -196,6 +204,8 @@ export default function AtlasPage() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rfRef = useRef<ReactFlowInstance | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const canEdit = graph ? graph.can_edit !== false : true;
 
   // ─── In-app modal + toast plumbing (replaces native prompt/confirm/alert)
   const [promptState, setPromptState] = useState<{
@@ -719,7 +729,7 @@ export default function AtlasPage() {
     e.preventDefault(); e.stopPropagation();
     setDragOver(false);
     const f = e.dataTransfer.files?.[0];
-    if (f) void submitFile(f);
+    if (f && canEdit) void submitFile(f);
   };
 
   const selectedNode = useMemo(() => nodesData.find(n => n.id === selectedNodeId) || null, [nodesData, selectedNodeId]);
@@ -764,11 +774,14 @@ export default function AtlasPage() {
             >
               <div className="flex items-start justify-between gap-1">
                 <p className="text-[12px] text-slate-200 truncate flex-1" title={g.name}>{g.name}</p>
-                <button onClick={e => { e.stopPropagation(); void deleteGraph(g.id); }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-rose-400">
-                  <Trash2 className="w-3 h-3" />
-                </button>
+                {g.can_delete !== false && (
+                  <button onClick={e => { e.stopPropagation(); void deleteGraph(g.id); }} aria-label={`Delete atlas ${g.name}`}
+                    className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-0.5 text-slate-500 hover:text-rose-400">
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
               </div>
+              <OwnerBadge ownership={g.ownership} ownerName={g.owner_name} className="mt-1" />
               <p className="text-[10px] text-slate-500 mt-0.5">{g.node_count} nodes · {g.edge_count} edges</p>
               <p className="text-[9px] text-slate-600">v{g.version} · {g.updated_at ? new Date(g.updated_at).toLocaleDateString() : ''}</p>
             </div>
@@ -788,11 +801,12 @@ export default function AtlasPage() {
               </h1>
               {graph && (
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-400 whitespace-nowrap">
+                  <OwnerBadge ownership={graph.ownership} ownerName={graph.owner_name} />
                   <span className="px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/50 font-mono">v{graph.version}</span>
                   <span className="text-slate-600">·</span>
-                  <span><span className="text-slate-200 font-semibold">{graph.node_count}</span> nodes</span>
+                  <span data-testid="atlas-node-count" data-count={graph.node_count}><span className="text-slate-200 font-semibold">{graph.node_count}</span> nodes</span>
                   <span className="text-slate-600">·</span>
-                  <span><span className="text-slate-200 font-semibold">{graph.edge_count}</span> edges</span>
+                  <span data-testid="atlas-edge-count" data-count={graph.edge_count}><span className="text-slate-200 font-semibold">{graph.edge_count}</span> edges</span>
                   {graph.kb_id && (
                     <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 border border-emerald-500/40 text-emerald-200 inline-flex items-center gap-1">
                       <Link2 className="w-2.5 h-2.5" /> KB linked
@@ -801,15 +815,30 @@ export default function AtlasPage() {
                 </div>
               )}
             </div>
-            {graph && (
+            {graph && graph.can_delete && (
+              <button
+                onClick={() => setShareOpen(true)}
+                data-testid="atlas-share"
+                className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs font-semibold"
+              >
+                <Share2 className="w-3.5 h-3.5" /> Share
+              </button>
+            )}
+            {graph && canEdit && (
               <div className="shrink-0 min-w-[180px]" title="LLM used for natural-language parsing and extraction">
                 <ModelPicker value={model} onChange={setModel} />
               </div>
             )}
           </div>
+          {graph && !canEdit && (
+            <p data-testid="atlas-read-only" className="mt-2 text-[11px] text-amber-300 inline-flex items-center gap-1.5">
+              <Lock className="w-3 h-3" /> View only. {graph.owner_name || 'The owner'} shared this atlas with you, ask them for edit access to change it.
+            </p>
+          )}
           {/* Toolbar row — wraps on narrow screens instead of overflowing */}
           {graph && (
             <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+              {canEdit && (<>
               <ToolbarGroup label="Add">
                 <ToolbarBtn onClick={() => addNodeAtCenter('concept')} icon={Plus} accent="violet">Concept</ToolbarBtn>
                 <ToolbarBtn onClick={() => addNodeAtCenter('instance')} icon={Database} accent="emerald">Instance</ToolbarBtn>
@@ -826,16 +855,22 @@ export default function AtlasPage() {
                   <ToolbarBtn onClick={() => void projectKb()} icon={ScanLine} accent="emerald">Project KB</ToolbarBtn>
                 )}
               </ToolbarGroup>
+              </>)}
+              <ToolbarGroup label="Use">
+                <ToolbarBtn onClick={() => { window.location.href = `/builder?atlas=${graph.id}${graph.kb_id ? `&kb=${graph.kb_id}` : ''}`; }} icon={Network} accent="violet">
+                  <span data-testid="atlas-use-in-agent">Use in an agent</span>
+                </ToolbarBtn>
+              </ToolbarGroup>
               <ToolbarGroup label="Explore">
                 <ToolbarBtn onClick={() => setShowQuery(s => !s)} icon={Search} accent="violet" active={showQuery}>Query</ToolbarBtn>
-                <div className="inline-flex items-center bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden">
+                {canEdit && <div className="inline-flex items-center bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden">
                   <ToolbarIcon onClick={() => relayout('semantic')} icon={layoutBusy === 'semantic' ? Loader2 : Compass} spinning={layoutBusy === 'semantic'} title="Semantic layout (embedding-aware)" />
                   <ToolbarIcon onClick={() => relayout('circle')} icon={layoutBusy === 'circle' ? Loader2 : CircleDot} spinning={layoutBusy === 'circle'} title="Circular layout" />
                   <ToolbarIcon onClick={() => relayout('grid')} icon={layoutBusy === 'grid' ? Loader2 : Grid3x3} spinning={layoutBusy === 'grid'} title="Grid layout" />
-                </div>
+                </div>}
               </ToolbarGroup>
               <ToolbarGroup label="Time">
-                <ToolbarBtn onClick={() => { void captureSnapshot(); }} icon={Save}>Snap</ToolbarBtn>
+                {canEdit && <ToolbarBtn onClick={() => { void captureSnapshot(); }} icon={Save}>Snap</ToolbarBtn>}
                 <ToolbarBtn onClick={() => { void loadSnapshots(); setShowSnapshots(true); }} icon={History}>History</ToolbarBtn>
               </ToolbarGroup>
               <ToolbarGroup label="Export">
@@ -880,7 +915,7 @@ export default function AtlasPage() {
             <div
               className="flex-1 relative"
               onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-              onKeyDown={(e) => { if ((e.key === 'Backspace' || e.key === 'Delete') && (selectedNodeId || selectedEdgeId)) deleteSelected(); }}
+              onKeyDown={(e) => { if (canEdit && (e.key === 'Backspace' || e.key === 'Delete') && (selectedNodeId || selectedEdgeId)) deleteSelected(); }}
               tabIndex={0}
             >
               <ReactFlow
@@ -889,7 +924,9 @@ export default function AtlasPage() {
                 nodeTypes={nodeTypes}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
+                onConnect={canEdit ? onConnect : undefined}
+                nodesDraggable={canEdit}
+                nodesConnectable={canEdit}
                 onNodeClick={(_, n) => { setSelectedNodeId(n.id); setSelectedEdgeId(null); }}
                 onEdgeClick={(_, e) => { setSelectedEdgeId(e.id); setSelectedNodeId(null); }}
                 onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
@@ -906,7 +943,7 @@ export default function AtlasPage() {
               {/* Empty-canvas onboarding — shows the four concrete first
                   actions a brand-new user can take. Disappears as soon
                   as the first node lands. */}
-              {nodesData.length === 0 && (
+              {nodesData.length === 0 && canEdit && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-6 py-8 overflow-y-auto">
                   <motion.div
                     initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -1079,7 +1116,7 @@ export default function AtlasPage() {
                     <div className="flex-1 overflow-y-auto p-2">
                       {snapshots.length === 0 && <p className="text-[11px] text-slate-500 p-4 text-center">No snapshots yet</p>}
                       {snapshots.map(s => (
-                        <button key={s.id} onClick={() => restoreSnapshot(s.id)}
+                        <button key={s.id} onClick={() => { if (canEdit) void restoreSnapshot(s.id); }} disabled={!canEdit}
                           className="w-full text-left rounded-lg p-2 hover:bg-slate-800/50 transition-colors mb-1 group">
                           <div className="flex items-center gap-2">
                             <RotateCcw className="w-3 h-3 text-slate-500 group-hover:text-violet-400" />
@@ -1138,6 +1175,7 @@ export default function AtlasPage() {
             </div>
 
             {/* NL bar */}
+            {canEdit && (<>
             <div className="border-t border-slate-800/50 px-6 py-3 flex items-center gap-2">
               <Wand2 className="w-4 h-4 text-violet-400 shrink-0" />
               <input
@@ -1170,6 +1208,7 @@ export default function AtlasPage() {
                 </button>
               ))}
             </div>
+            </>)}
           </>
         )}
       </main>
@@ -1326,6 +1365,17 @@ export default function AtlasPage() {
         )}
       </AnimatePresence>
 
+      {graph && (
+        <ResourceShareDialog
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          // atlas_graph is accepted by /api/me/shares but not yet in the Shareable union
+          resourceType={'atlas_graph' as Shareable}
+          resourceId={graph.id}
+          resourceName={graph.name}
+        />
+      )}
+
       {/* ── Right rail: multi-lens inspector ──────────────────────── */}
       {activeId && (
         <aside className="w-80 border-l border-slate-800/50 flex flex-col shrink-0 bg-slate-950/40">
@@ -1351,6 +1401,7 @@ export default function AtlasPage() {
               onBindKb={bindNodeToKb}
               onUpdate={updateSelectedNode}
               onDelete={deleteSelected}
+              readOnly={!canEdit}
             />}
           </div>
         </aside>
@@ -1660,7 +1711,7 @@ function OnboardCard({
 
 function NodeInspector({
   node, edges, allNodes, instances, instancesLoading, kbList,
-  onLoadKbs, onBindKb, onUpdate, onDelete,
+  onLoadKbs, onBindKb, onUpdate, onDelete, readOnly = false,
 }: {
   node: AtlasNodeRow;
   edges: AtlasEdgeRow[];
@@ -1672,6 +1723,7 @@ function NodeInspector({
   onBindKb: (kbId: string) => void;
   onUpdate: (patch: Partial<AtlasNodeRow>) => void;
   onDelete: () => void;
+  readOnly?: boolean;
 }) {
   const binding = (node.properties as any)?._binding as { kind: string; ref_id: string } | undefined;
   const [tab, setTab] = useState<'schema' | 'relations' | 'properties' | 'lineage' | 'instances'>(binding ? 'instances' : 'schema');
@@ -1703,6 +1755,7 @@ function NodeInspector({
           <select
             value={node.kind}
             onChange={e => onUpdate({ kind: e.target.value as NodeKind })}
+            disabled={readOnly}
             className="bg-transparent text-[10px] uppercase tracking-wider text-slate-400 border-none outline-none cursor-pointer"
           >
             <option value="concept">concept</option>
@@ -1713,11 +1766,11 @@ function NodeInspector({
           <span className="ml-auto text-[9px] text-slate-500 font-mono">{node.source}</span>
         </div>
         <input
-          value={label} onChange={e => setLabel(e.target.value)} onBlur={commit}
+          value={label} onChange={e => setLabel(e.target.value)} onBlur={commit} readOnly={readOnly}
           className="w-full bg-transparent text-base font-semibold text-white border-none outline-none"
         />
         <textarea
-          value={desc} onChange={e => setDesc(e.target.value)} onBlur={commit}
+          value={desc} onChange={e => setDesc(e.target.value)} onBlur={commit} readOnly={readOnly}
           placeholder="Add a description…"
           className="w-full mt-1 bg-transparent text-[11px] text-slate-300 border-none outline-none resize-none"
           rows={2}
@@ -1795,10 +1848,10 @@ function NodeInspector({
               <Database className="w-5 h-5 text-slate-600 mx-auto mb-1.5" />
               <p className="text-slate-400 text-[11px] mb-2">No live binding yet.</p>
               <p className="text-[10px] text-slate-500 mb-2">Bind this concept to a knowledge collection to see live document instances under this node.</p>
-              <button onClick={() => { onLoadKbs(); setShowBindMenu(true); }}
+              {!readOnly && <button onClick={() => { onLoadKbs(); setShowBindMenu(true); }}
                 className="px-2.5 py-1 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 text-[11px] font-semibold inline-flex items-center gap-1">
                 <Link2 className="w-3 h-3" /> Bind to KB
-              </button>
+              </button>}
             </div>
           )}
           {binding && (
@@ -1840,11 +1893,11 @@ function NodeInspector({
       )}
 
       {/* Footer actions */}
-      <div className="mt-4 pt-3 border-t border-slate-800/50">
+      {!readOnly && <div className="mt-4 pt-3 border-t border-slate-800/50">
         <button onClick={onDelete} className="w-full px-3 py-2 rounded-lg border border-rose-500/30 text-rose-300 text-xs hover:bg-rose-500/10 inline-flex items-center justify-center gap-1.5">
           <Trash2 className="w-3 h-3" /> Delete node
         </button>
-      </div>
+      </div>}
     </div>
   );
 }

@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from seeds._artifacts import mirror_quietly  # noqa: E402
 from models.code_asset import CodeAsset, CodeAssetSource, CodeAssetStatus
 from models.tenant import Tenant
 
@@ -150,12 +151,30 @@ async def _ensure_for_tenant(
                 CodeAsset.status != CodeAssetStatus.DELETED,
             )
         )
-        if existing_q.scalar_one_or_none() is not None:
+        existing = existing_q.scalar_one_or_none()
+        if existing is not None:
+            # a seeded archive lost to a volume change is rebuilt, a user's own version never is
+            seeded = any(
+                "Seeded from" in str((n or {}).get("message", ""))
+                for n in (existing.analysis_notes or [])
+            )
+            target = Path(existing.storage_uri or "")
+            if (
+                seeded
+                and (getattr(existing, "version", 1) or 1) == 1
+                and existing.storage_uri
+                and not target.is_file()
+            ):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                existing.file_size_bytes = _zip_folder(folder, target)
+                await mirror_quietly(target)
+                print(f"  ~ Restored missing archive for {name} ({tenant.slug})")
             continue
 
         asset_id = uuid.uuid4().hex[:16]
         zip_path = tenant_dir / f"{asset_id}_{folder.name}.zip"
         size = _zip_folder(folder, zip_path)
+        await mirror_quietly(zip_path)
 
         lang, entry = _detect_entry(folder)
         run_template = _RUN_BY_LANG.get(lang or "", "")

@@ -285,7 +285,9 @@ Permissions are three-tier and **strictly ranked**.
 | **use** | 2 | Call / run / query the resource. Cannot modify its definition. |
 | **edit** | 3 | Full editor — change config, schema, version. |
 
-Sharing is **polymorphic** — one table handles every resource type. `resource_shares.resource_type` is a string tag (`agent`, `pipeline`, `ml_model`, `code_asset`, `knowledge_base`, `saved_tool`). `resource_id` is the target UUID. A unique constraint on `(tenant_id, resource_type, resource_id, shared_with_user_id)` means each (resource, recipient) pair has at most one row — re-sharing upgrades the permission in place.
+Sharing is **polymorphic** — one table handles every resource type. `resource_shares.resource_type` is a string tag (`agent`, `pipeline`, `ml_model`, `code_asset`, `knowledge_base`, `saved_tool`, `atlas_graph`). `resource_id` is the target UUID. A unique constraint on `(tenant_id, resource_type, resource_id, shared_with_user_id)` means each (resource, recipient) pair has at most one row — re-sharing upgrades the permission in place.
+
+Atlas graphs follow the same rule. A member lists their own graphs, platform graphs and graphs shared with them, admins list the tenant. `view` and `use` shares can read, query and export. An `edit` share can change nodes, edges, bindings, layout and snapshots. Only the owner or an admin can delete or re-share a graph.
 
 ### The access predicate
 
@@ -332,6 +334,14 @@ The generic `ResourceShareDialog` ([`apps/web/src/components/share/ResourceShare
 > **Trap** — new code must use `/api/me/shares`. The legacy router is not reachable from the new ResourceShareDialog and will stay deprecated until the next major bump.
 
 ---
+
+## Deleting shared work
+
+Agents, code assets and knowledge bases expose `GET .../dependents`, which lists the pipelines, agents, triggers and Atlas graphs that use them, scoped to the tenant and capped at 50 per group. A delete with dependents is refused with `409 IN_USE` and the list, unless the caller passes `force=true`. The UI shows the list and only then offers Delete anyway.
+
+A deleted agent is archived, not removed. Its triggers are switched off with `last_status = "agent deleted"`, and pipeline steps that use it fail with a message naming the step. `GET /api/agents/deleted` lists archived agents the caller can restore, and `POST /api/agents/{id}/restore` brings back the agent's previous status and its triggers. Bulk delete follows the same rules agent by agent and reports what it skipped and why.
+
+Triggers belong to whoever created them and to the agent's owner. Members only list and manage those, because a webhook URL is the secret that fires the agent. Admins see every trigger in the tenant.
 
 ## Audit trail
 

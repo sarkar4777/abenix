@@ -12,8 +12,8 @@ type=object/array/string/number, enum, required). If a stricter schema
 language becomes necessary, swap this for `jsonschema` in one place.
 
 Wired in:
-- apps/agent-runtime/engine/pipeline.py — after each llm_call/agent_step
-  node where the producing agent has output_schema set.
+- apps/agent-runtime/engine/tools/agent_step.py: an agent run as a pipeline
+  step is checked against its output_schema and asked once to correct it.
 - apps/agent-runtime/consumer.py — after AgentExecutor.invoke() for
   single-agent runs.
 
@@ -123,6 +123,8 @@ def _walk(
         for required in schema.get("required") or []:
             if required not in value:
                 warnings.append(f"{path}: missing required field {required!r}")
+            elif value[required] is None or value[required] == "":
+                warnings.append(f"{path}: required field {required!r} is empty")
 
     elif expected_type == "array" and isinstance(value, list):
         item_schema = schema.get("items")
@@ -184,6 +186,19 @@ def _extract_json(text: str) -> Any | None:
         except json.JSONDecodeError:
             return None
     return None
+
+
+_VIOLATION_MARKERS = (
+    "missing required field",
+    "is empty",
+    "no JSON could be extracted",
+    "not a number",
+)
+
+
+def schema_violations(warnings: list[str]) -> list[str]:
+    """The warnings that mean the output breaks its contract, not cosmetic fixes."""
+    return [w for w in warnings if any(m in w for m in _VIOLATION_MARKERS)]
 
 
 def post_process(

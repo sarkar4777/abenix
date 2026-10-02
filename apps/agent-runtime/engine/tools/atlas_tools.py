@@ -463,15 +463,30 @@ class AtlasSearchGroundedTool(BaseTool):
                     )
                 gid_uuid = _uuid.UUID(gid)
 
+                # instances count as seeds too, an agent asks about "Nordtek" as often as "Supplier"
                 seeds = await conn.fetch(
-                    "SELECT id, label FROM atlas_nodes "
-                    "WHERE graph_id = $1 AND lower(label) LIKE $2 AND kind::text = 'concept' LIMIT 5",
+                    "SELECT id, label, kind::text AS kind FROM atlas_nodes "
+                    "WHERE graph_id = $1 AND lower(label) LIKE $2 AND kind::text <> 'document' "
+                    "ORDER BY (lower(label) = $3) DESC, length(label) LIMIT 5",
                     gid_uuid,
                     f"%{near.lower()}%",
+                    near.lower(),
                 )
                 if not seeds:
+                    labels = await conn.fetch(
+                        "SELECT label FROM atlas_nodes WHERE graph_id = $1 "
+                        "AND kind::text <> 'document' ORDER BY label LIMIT 40",
+                        gid_uuid,
+                    )
                     return ToolResult(
-                        content=json.dumps({"found": False, "near_label": near})
+                        content=json.dumps(
+                            {
+                                "found": False,
+                                "near_label": near,
+                                "labels_in_graph": [r["label"] for r in labels],
+                                "hint": "Retry with one of these labels, or use knowledge_search for document text.",
+                            }
+                        )
                     )
 
                 seed_ids = [r["id"] for r in seeds]
@@ -487,14 +502,30 @@ class AtlasSearchGroundedTool(BaseTool):
                     max_docs,
                 )
 
+                rel = await conn.fetch(
+                    "SELECT e.label AS rel, a.label AS src, b.label AS dst "
+                    "FROM atlas_edges e "
+                    "JOIN atlas_nodes a ON a.id = e.from_node_id "
+                    "JOIN atlas_nodes b ON b.id = e.to_node_id "
+                    "WHERE e.from_node_id = ANY($1::uuid[]) OR e.to_node_id = ANY($1::uuid[]) "
+                    "LIMIT 40",
+                    seed_ids,
+                )
+                neighbours = [f"{r['src']} -[{r['rel']}]-> {r['dst']}" for r in rel]
                 return ToolResult(
                     content=json.dumps(
                         {
                             "graph_id": gid,
                             "near_label": near,
                             "seeds": [
-                                {"id": str(s["id"]), "label": s["label"]} for s in seeds
+                                {
+                                    "id": str(s["id"]),
+                                    "label": s["label"],
+                                    "kind": s["kind"],
+                                }
+                                for s in seeds
                             ],
+                            "neighbours": neighbours,
                             "documents": [
                                 {
                                     "node_id": str(d["id"]),

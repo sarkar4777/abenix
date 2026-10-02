@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/atom-one-dark.css';
@@ -97,9 +98,10 @@ function PipelineNodeCard({ block }: { block: PipelineNodeBlock }) {
   const cfg = nodeStatusConfig[block.status];
 
   return (
-    <div className={`flex items-center gap-2.5 bg-slate-900/50 border ${cfg.border} rounded-lg px-3 py-2 my-1`}>
+    <div className="my-1">
+    <div className={`flex items-center gap-2.5 bg-slate-900/50 border ${cfg.border} rounded-lg px-3 py-2`}>
       <GitBranch className="w-3.5 h-3.5 text-purple-400" />
-      <span className="text-xs font-mono text-slate-300">{block.nodeId}</span>
+      <span className={`text-xs text-slate-300 ${block.label ? "" : "font-mono"}`} title={block.nodeId}>{block.label || block.nodeId}</span>
       <span className="text-[10px] text-slate-500">{block.toolName}</span>
       <span className="ml-auto flex items-center gap-1">
         {cfg.icon}
@@ -108,6 +110,10 @@ function PipelineNodeCard({ block }: { block: PipelineNodeBlock }) {
       {block.durationMs !== undefined && (
         <span className="text-[10px] text-slate-600">{block.durationMs}ms</span>
       )}
+    </div>
+    {block.error && (
+      <p className="mt-1 ml-6 text-[11px] text-red-300" data-testid="pipeline-node-error">{block.error}</p>
+    )}
     </div>
   );
 }
@@ -119,14 +125,15 @@ interface ChatMessageProps {
   model?: string;
   requestedModel?: string;
   fallbackReason?: string;
+  executionId?: string;
 }
 
-export default function ChatMessage({ role, blocks, isStreaming, model, requestedModel, fallbackReason }: ChatMessageProps) {
+export default function ChatMessage({ role, blocks, isStreaming, model, requestedModel, fallbackReason, executionId }: ChatMessageProps) {
   const isUser = role === 'user';
   const hasFallback = !!(model && requestedModel && model !== requestedModel);
 
   return (
-    <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div data-testid="chat-message" data-role={isUser ? 'user' : 'assistant'} className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (
         <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center shrink-0 mt-1">
           <Bot className="w-4 h-4 text-cyan-400" />
@@ -225,6 +232,16 @@ export default function ChatMessage({ role, blocks, isStreaming, model, requeste
               </>
             )}
           </div>
+        )}
+
+        {!isUser && !isStreaming && executionId && (
+          <Link
+            href={`/executions/${executionId}`}
+            data-testid="chat-view-run"
+            className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-cyan-400/80 hover:text-cyan-300 underline-offset-2 hover:underline"
+          >
+            View run
+          </Link>
         )}
       </div>
 

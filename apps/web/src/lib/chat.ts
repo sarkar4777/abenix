@@ -11,6 +11,7 @@ export interface ToolResultData {
 }
 
 export interface DoneData {
+  execution_id?: string;
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;
@@ -29,12 +30,14 @@ export interface DoneData {
 export interface PipelineNodeStartData {
   node_id: string;
   tool_name: string;
+  label?: string;
 }
 
 export interface PipelineNodeCompleteData {
   node_id: string;
   status: string;
   duration_ms: number;
+  error?: string;
 }
 
 export interface ModerationData {
@@ -91,6 +94,8 @@ export function connectToAgentStream(
 
       const decoder = new TextDecoder();
       let buffer = '';
+      // an event line and its data line can land in different chunks
+      let currentEvent = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -100,7 +105,6 @@ export function connectToAgentStream(
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
-        let currentEvent = '';
         for (const line of lines) {
           if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim();

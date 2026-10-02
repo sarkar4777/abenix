@@ -28,6 +28,14 @@ import Link from 'next/link';
 import { LiveDagView } from '@/components/shared/LiveDagView';
 import { FallbackBadge } from '@/components/FallbackBadge';
 
+interface ChildExecution {
+  id: string;
+  agent_id: string;
+  status: string;
+  duration_ms?: number | null;
+  created_at?: string | null;
+}
+
 interface ExecutionDetail {
   id: string;
   agent_id: string;
@@ -48,10 +56,11 @@ interface ExecutionDetail {
   tool_calls?: Array<{ name: string; arguments?: Record<string, unknown>; result?: string; result_preview?: string; is_error?: boolean; duration_ms?: number; node_id?: string }> | { total?: number };
   confidence_score?: number;
   failure_code?: string | null;
+  parent_execution_id?: string | null;
   // a dict keyed by node id on the wire
-  node_results?: Record<string, { node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }> | Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
+  node_results?: Record<string, { node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }> | Array<{ node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
   execution_trace?: {
-    steps?: Array<{ node_type?: string; type?: string; tool?: string; node_id?: string; name?: string; status?: string; input?: unknown; output?: unknown; output_preview?: string; duration_ms?: number; tokens?: number; is_error?: boolean; error?: string | null }>;
+    steps?: Array<{ label?: string; node_type?: string; type?: string; tool?: string; node_id?: string; name?: string; status?: string; input?: unknown; output?: unknown; output_preview?: string; duration_ms?: number; tokens?: number; is_error?: boolean; error?: string | null }>;
     tool_calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
     warnings?: string[];
     confidence_score?: number;
@@ -59,7 +68,7 @@ interface ExecutionDetail {
     execution_path?: string[];
     failed_nodes?: string[];
     skipped_nodes?: string[];
-    node_results?: Record<string, { node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }> | Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
+    node_results?: Record<string, { node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }> | Array<{ node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
   };
   error_message?: string;
   created_at: string;
@@ -133,6 +142,7 @@ function DataPanel({ title, data, isJson }: { title: string; data: unknown; isJs
     <div className="bg-slate-900/50 border border-slate-700/30 rounded-lg overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-300 hover:bg-slate-800/30"
       >
         <span className="flex items-center gap-2">
@@ -215,7 +225,7 @@ function LineageGraph({
   inputMessage: string;
   outputMessage?: string;
   executionPath?: string[];
-  nodeResults?: Array<{ node_id: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
+  nodeResults?: Array<{ node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -238,7 +248,7 @@ function LineageGraph({
       if (!nr) return;
       nodes.push({
         id: nr.node_id,
-        label: nr.tool_name,
+        label: nr.label || nr.tool_name,
         type: 'tool',
         toolName: nr.tool_name,
         durationMs: nr.duration_ms,
@@ -438,6 +448,10 @@ export default function ExecutionDetailPage() {
   const { data: execution, isLoading, mutate } = useApi<ExecutionDetail>(
     executionId ? `/api/executions/${executionId}` : null,
   );
+  // children persist parent_execution_id, so this works after the live tree has expired
+  const { data: childRuns } = useApi<ChildExecution[]>(
+    executionId ? `/api/executions/${executionId}/children` : null,
+  );
 
   // Live state for running executions
   const [liveState, setLiveState] = useState<{
@@ -569,6 +583,42 @@ export default function ExecutionDetailPage() {
           <ConfidenceRing score={execution.confidence_score} />
         )}
       </div>
+      {execution.parent_execution_id && (
+        <p className="text-xs text-slate-400 flex items-center gap-1.5">
+          <GitBranch className="w-3.5 h-3.5 text-purple-400" />
+          Started by
+          <Link
+            href={`/executions/${execution.parent_execution_id}`}
+            className="font-mono text-cyan-300 hover:text-cyan-200 underline-offset-2 hover:underline"
+            data-testid="execution-parent-link"
+          >
+            {execution.parent_execution_id.slice(0, 12)}...
+          </Link>
+        </p>
+      )}
+      {Array.isArray(childRuns) && childRuns.length > 0 && (
+        <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-xl p-4" data-testid="execution-children">
+          <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-purple-400" /> Sub-agent runs ({childRuns.length})
+          </h3>
+          <ul className="space-y-1.5">
+            {childRuns.map((c) => (
+              <li key={c.id} className="flex items-center gap-3 text-xs">
+                <Link href={`/executions/${c.id}`} className="font-mono text-cyan-300 hover:text-cyan-200 hover:underline">
+                  {c.id.slice(0, 12)}...
+                </Link>
+                <Link href={`/agents/${c.agent_id}/info`} className="text-slate-400 hover:text-white">
+                  agent {c.agent_id.slice(0, 8)}
+                </Link>
+                <StatusBadge status={c.status} />
+                {typeof c.duration_ms === 'number' && (
+                  <span className="text-slate-500">{c.duration_ms >= 1000 ? `${(c.duration_ms / 1000).toFixed(1)}s` : `${c.duration_ms}ms`}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {execution.error_message && execution.status !== 'completed' && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-xs text-red-200" data-testid="execution-error">
           {execution.error_message}
@@ -799,7 +849,7 @@ export default function ExecutionDetailPage() {
                 <tbody>
                   {nodeResults.map((nr) => (
                     <tr key={nr.node_id} className="border-b border-slate-700/30">
-                      <td className="text-[10px] text-slate-300 font-mono py-1.5">{nr.node_id}</td>
+                      <td className="text-[10px] text-slate-300 py-1.5" title={nr.node_id}>{nr.label || nr.node_id}</td>
                       <td className="text-[10px] text-slate-400 py-1.5">{nr.tool_name}</td>
                       <td className="text-center py-1.5">
                         {nr.status === 'completed' ? (
@@ -842,7 +892,7 @@ export default function ExecutionDetailPage() {
           <ol className="space-y-2">
             {steps.map((st, i) => {
               const failed = st.is_error || st.status === 'failed';
-              const label = st.tool || st.name || st.node_id || st.node_type || st.type || 'step';
+              const label = st.label || st.tool || st.name || st.node_id || st.node_type || st.type || 'step';
               return (
                 <li key={i} className="flex items-start gap-3 text-xs">
                   <span className="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">{i + 1}</span>

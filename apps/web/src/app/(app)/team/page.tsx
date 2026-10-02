@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { MoreHorizontal, Plus, Users, Loader2 } from 'lucide-react';
+import { Check, Copy, Plus, Users, Loader2, Mail } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
@@ -18,6 +18,15 @@ interface TeamMember {
   is_active: boolean;
 }
 
+interface PendingInvite {
+  id: string;
+  email: string;
+  role: string;
+  expires_at: string | null;
+  expired?: boolean;
+  invite_url?: string;
+}
+
 const roleColor: Record<string, string> = {
   admin: 'text-amber-400 bg-amber-500/10',
   creator: 'text-purple-400 bg-purple-500/10',
@@ -26,8 +35,21 @@ const roleColor: Record<string, string> = {
 
 export default function TeamPage() {
   usePageTitle('Team');
-  const { data, isLoading, mutate } = useApi<{ members: TeamMember[] }>('/api/team/members');
+  const { data, isLoading, mutate } = useApi<{ members: TeamMember[]; pending_invites?: PendingInvite[] }>('/api/team/members');
   const members = data?.members ?? [];
+  const pendingInvites = data?.pending_invites ?? [];
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  async function copyLink(url: string, key: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      toastError('Copy failed', 'Select the link and copy it by hand');
+    }
+  }
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -42,7 +64,7 @@ export default function TeamPage() {
     }
     setInviteSubmitting(true);
     try {
-      const res = await apiFetch('/api/team/invite', {
+      const res = await apiFetch<{ invite_url?: string }>('/api/team/invite', {
         method: 'POST',
         body: JSON.stringify({ email, role: inviteRole }),
         throwOnError: false,
@@ -51,10 +73,11 @@ export default function TeamPage() {
         toastError('Invite failed', res.error);
         return;
       }
-      toastSuccess('Invite sent', `${email} can now join as ${inviteRole}`);
+      toastSuccess('Invite created', `Send the link to ${email}`);
       setInviteEmail('');
       setInviteRole('user');
-      setInviteOpen(false);
+      setInviteLink(res.data?.invite_url || null);
+      if (!res.data?.invite_url) setInviteOpen(false);
       mutate();
     } finally {
       setInviteSubmitting(false);
@@ -114,19 +137,84 @@ export default function TeamPage() {
               <span className={`text-xs px-2 py-0.5 rounded-full ${roleColor[member.role] || 'text-slate-400 bg-slate-500/10'}`}>
                 {member.role}
               </span>
-              <button className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors">
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
             </div>
           ))
         )}
       </div>
 
+      {pendingInvites.length > 0 && (
+        <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl overflow-hidden">
+          <p className="px-4 pt-3 text-[10px] uppercase tracking-wider text-slate-500">Pending invites</p>
+          {pendingInvites.map((inv) => (
+            <div key={inv.id} className="flex items-center gap-4 p-4 border-t border-slate-700/30 first:border-t-0" data-testid={`pending-invite-${inv.id}`}>
+              <Mail className="w-4 h-4 text-slate-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white truncate">{inv.email}</p>
+                <p className="text-xs text-slate-500">
+                  {inv.expired ? 'Expired' : inv.expires_at ? `Expires ${new Date(inv.expires_at).toLocaleDateString()}` : 'Pending'}
+                </p>
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${roleColor[inv.role] || 'text-slate-400 bg-slate-500/10'}`}>
+                {inv.role}
+              </span>
+              {inv.invite_url && !inv.expired && (
+                <button
+                  onClick={() => copyLink(inv.invite_url!, inv.id)}
+                  data-testid={`invite-copy-${inv.id}`}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-300 bg-slate-700/40 hover:bg-slate-700 rounded-lg transition-colors"
+                >
+                  {copied === inv.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied === inv.id ? 'Copied' : 'Copy link'}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <ResponsiveModal
         open={inviteOpen}
-        onClose={() => (inviteSubmitting ? undefined : setInviteOpen(false))}
+        onClose={() => {
+          if (inviteSubmitting) return;
+          setInviteOpen(false);
+          setInviteLink(null);
+        }}
         title="Invite member"
       >
+        {inviteLink ? (
+          <div className="space-y-3 p-1">
+            <p className="text-sm text-slate-300">
+              Share this link with your teammate. It works once and expires in 7 days.
+            </p>
+            <div className="flex items-center gap-2">
+              <code data-testid="invite-link" className="flex-1 px-3 py-2 bg-slate-900/60 rounded-lg text-xs text-emerald-300 font-mono break-all">
+                {inviteLink}
+              </code>
+              <button
+                onClick={() => copyLink(inviteLink, 'new')}
+                data-testid="invite-link-copy"
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-slate-800/60 border border-slate-700 rounded-lg text-xs text-slate-300 hover:text-white"
+              >
+                {copied === 'new' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied === 'new' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setInviteLink(null)}
+                className="px-3 py-1.5 text-sm text-slate-300 hover:text-white"
+              >
+                Invite another
+              </button>
+              <button
+                onClick={() => { setInviteOpen(false); setInviteLink(null); }}
+                className="px-4 py-1.5 bg-slate-700 text-white text-sm rounded-lg hover:bg-slate-600"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-4 p-1">
           <div>
             <label className="block text-xs text-slate-400 mb-1">Email</label>
@@ -169,6 +257,7 @@ export default function TeamPage() {
             </button>
           </div>
         </div>
+        )}
       </ResponsiveModal>
     </motion.div>
   );

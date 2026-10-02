@@ -16,6 +16,8 @@ import {
   Wrench, Zap, Share2, GitBranch, Download, Upload,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { apiFetch } from '@/lib/api-client';
+import { toastError } from '@/stores/toastStore';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import ShareDialog from '@/components/agent/ShareDialog';
 import VersionHistoryDialog from '@/components/agent/VersionHistoryDialog';
@@ -52,6 +54,8 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
 };
 
 interface AgentDetail {
+  can_edit?: boolean;
+  can_manage?: boolean;
   id: string;
   name: string;
   slug: string;
@@ -85,8 +89,9 @@ export default function AgentInfoPage() {
   const [showShare, setShowShare] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
 
-  const { data: agent } = useApi<AgentDetail>(agentId ? `/api/agents/${agentId}` : null);
+  const { data: agent, mutate: refreshAgent } = useApi<AgentDetail>(agentId ? `/api/agents/${agentId}` : null);
   usePageTitle(agent?.name ? `${agent.name} — Info` : 'Agent Info');
 
   const copy = (text: string, field: string) => {
@@ -218,7 +223,20 @@ curl -X POST ${API_URL}/api/triggers \\
           </div>
           <p className="text-sm text-slate-400">{agent.description}</p>
           <div className="flex items-center gap-3 mt-2">
-            <code className="text-[10px] font-mono text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded">{agent.slug}</code>
+            <span className="inline-flex items-center gap-1.5 text-xs bg-slate-800/60 border border-slate-700/60 rounded px-2 py-1">
+              <span className="text-slate-500">Slug</span>
+              <code data-testid="agent-slug" className="font-mono text-slate-200 select-all">{agent.slug}</code>
+              <button
+                type="button"
+                data-testid="agent-slug-copy"
+                onClick={() => copy(agent.slug, 'slug')}
+                title="Copy slug for invoke_agent"
+                aria-label="Copy agent slug"
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                {copiedField === 'slug' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              </button>
+            </span>
             {agent.category && (
               <span className="text-[10px] bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded">{agent.category}</span>
             )}
@@ -240,26 +258,7 @@ curl -X POST ${API_URL}/api/triggers \\
             <Zap className="w-4 h-4" />
             Schedule
           </Link>
-          {agent.agent_type === 'oob' ? (
-            <button
-              onClick={async () => {
-                const token = localStorage.getItem('access_token');
-                if (!token) return;
-                const res = await fetch(`${API_URL}/api/agents/${agent.id}/duplicate`, {
-                  method: 'POST',
-                  headers: { Authorization: `Bearer ${token}` },
-                });
-                const json = await res.json();
-                if (json.data?.id) {
-                  router.push(`/builder?agent=${json.data.id}`);
-                }
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-sm rounded-lg hover:bg-slate-700 transition-colors"
-              title="Create an editable copy of this agent"
-            >
-              Fork & Edit
-            </button>
-          ) : (
+          {agent.agent_type !== 'oob' && agent.can_edit !== false && (
             <Link
               href={`/builder?agent=${agent.id}`}
               className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-sm rounded-lg hover:bg-slate-700 transition-colors"
@@ -267,16 +266,47 @@ curl -X POST ${API_URL}/api/triggers \\
               Edit
             </Link>
           )}
-          <button onClick={() => setShowShare(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
-            title="Share with team members">
-            <Share2 className="w-3.5 h-3.5" /> Share
+          <button
+            data-testid="agent-duplicate"
+            disabled={duplicating}
+            onClick={async () => {
+              setDuplicating(true);
+              try {
+                const res = await apiFetch<{ id: string }>(`/api/agents/${agent.id}/duplicate`, {
+                  method: 'POST',
+                  throwOnError: false,
+                });
+                if (res.data?.id) {
+                  router.push(`/builder?agent=${res.data.id}`);
+                } else {
+                  toastError('Duplicate failed', res.error || undefined);
+                }
+              } finally {
+                setDuplicating(false);
+              }
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-sm rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
+            title="Create an editable copy of this agent"
+          >
+            <Copy className="w-4 h-4" />
+            {duplicating ? 'Duplicating...' : 'Duplicate'}
           </button>
-          <button onClick={() => setShowVersions(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
-            title="View version history">
-            <GitBranch className="w-3.5 h-3.5" /> Versions
-          </button>
+          {agent.can_manage !== false && (
+            <button onClick={() => setShowShare(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
+              title="Share with team members"
+              data-testid="agent-share">
+              <Share2 className="w-3.5 h-3.5" /> Share
+            </button>
+          )}
+          {agent.can_edit !== false && (
+            <button onClick={() => setShowVersions(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
+              title="View version history"
+              data-testid="agent-versions">
+              <GitBranch className="w-3.5 h-3.5" /> Versions
+            </button>
+          )}
           <button onClick={() => setShowExport(true)}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-300 text-xs rounded-lg hover:bg-slate-700 transition-colors"
             title="Export as template">
@@ -307,7 +337,7 @@ curl -X POST ${API_URL}/api/triggers \\
       {agent && (
         <>
           <ShareDialog open={showShare} onClose={() => setShowShare(false)} agentId={agentId} agentName={agent.name} />
-          <VersionHistoryDialog open={showVersions} onClose={() => setShowVersions(false)} agentId={agentId} agentName={agent.name} onReverted={() => window.location.reload()} />
+          <VersionHistoryDialog open={showVersions} onClose={() => setShowVersions(false)} agentId={agentId} agentName={agent.name} onReverted={() => refreshAgent()} />
           <ExportImportDialog open={showExport} onClose={() => setShowExport(false)} agentId={agentId} agentName={agent.name} mode="export" />
         </>
       )}

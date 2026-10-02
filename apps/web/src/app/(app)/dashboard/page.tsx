@@ -22,6 +22,7 @@ import { useApi } from '@/hooks/useApi';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { DashboardSkeleton } from '@/components/ui/Skeleton';
+import { GettingStarted } from '@/components/GettingStarted';
 
 interface LiveStats {
   active_executions: number;
@@ -211,6 +212,10 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+      </motion.div>
+
+      <motion.div variants={item}>
+        <GettingStarted />
       </motion.div>
 
       {/*

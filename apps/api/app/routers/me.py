@@ -65,6 +65,7 @@ _SHAREABLE_KINDS = {
     "code_asset",
     "knowledge_base",
     "saved_tool",
+    "atlas_graph",
 }
 
 
@@ -354,9 +355,7 @@ async def _user_can_share(
         obj = r.scalar_one_or_none()
         if not obj:
             return False
-        # KB doesn't have created_by today; anyone in tenant can share
-        # (matches existing visibility), pending the migration to add it.
-        return True
+        return obj.created_by == user.id or is_admin(user)
 
     if kind == "saved_tool":
         from models.saved_tool import SavedTool
@@ -370,6 +369,19 @@ async def _user_can_share(
         if not obj:
             return False
         return obj.created_by == user.id or is_admin(user)
+
+    if kind == "atlas_graph":
+        from models.atlas import AtlasGraph
+
+        r = await db.execute(
+            _s(AtlasGraph).where(
+                AtlasGraph.id == resource_id, AtlasGraph.tenant_id == user.tenant_id
+            )
+        )
+        obj = r.scalar_one_or_none()
+        if not obj:
+            return False
+        return obj.owner_user_id == user.id or is_admin(user)
 
     if kind == "pipeline":
         # Pipelines are stored as Agents with mode=pipeline.

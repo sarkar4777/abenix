@@ -2,7 +2,8 @@ import re
 import uuid
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
@@ -23,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 from models.moderation_policy import ModerationAction, ModerationPolicy
+from models.team_invite import InviteStatus, TeamInvite
 from models.tenant import Tenant, TenantPlan
 from models.user import User, UserRole
 
@@ -168,6 +170,130 @@ async def login(
             "token_type": "bearer",
             "user": _user_dict(user),
         }
+    )
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+    full_name: str
+    password: str
+
+
+MIN_PASSWORD_LEN = 8
+
+
+async def _load_invite(db: AsyncSession, token: str) -> TeamInvite | None:
+    if not token or len(token) > 255:
+        return None
+    result = await db.execute(select(TeamInvite).where(TeamInvite.token == token))
+    return result.scalar_one_or_none()
+
+
+def _invite_problem(invite: TeamInvite | None) -> tuple[str, int] | None:
+    from app.routers.team import invite_is_expired
+
+    if invite is None:
+        return "Invite not found", 404
+    status = (
+        invite.status.value
+        if isinstance(invite.status, InviteStatus)
+        else str(invite.status)
+    )
+    if status == InviteStatus.ACCEPTED.value:
+        return "This invite has already been used", 410
+    if status != InviteStatus.PENDING.value or invite_is_expired(invite):
+        return "This invite has expired, ask an admin for a new one", 410
+    return None
+
+
+@router.get("/invite/{token}")
+async def get_invite(token: str, db: AsyncSession = Depends(get_db)):
+    from app.routers.team import invite_is_expired
+
+    invite = await _load_invite(db, token)
+    if invite is None:
+        return error("Invite not found", 404)
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == invite.tenant_id))
+    ).scalar_one_or_none()
+    status = (
+        invite.status.value
+        if isinstance(invite.status, InviteStatus)
+        else str(invite.status)
+    )
+    return success(
+        {
+            "email": invite.email,
+            "tenant_name": tenant.name if tenant else "",
+            "role": invite.role,
+            "status": status,
+            "expired": status == InviteStatus.EXPIRED.value
+            or (status == InviteStatus.PENDING.value and invite_is_expired(invite)),
+            "used": status == InviteStatus.ACCEPTED.value,
+        }
+    )
+
+
+@router.post("/accept-invite")
+async def accept_invite(
+    body: AcceptInviteRequest, request: Request, db: AsyncSession = Depends(get_db)
+):
+    invite = await _load_invite(db, body.token.strip())
+    problem = _invite_problem(invite)
+    if problem:
+        return error(*problem)
+
+    full_name = body.full_name.strip()
+    if not full_name:
+        return error("Full name is required", 400)
+    if len(body.password) < MIN_PASSWORD_LEN:
+        return error(f"Password must be at least {MIN_PASSWORD_LEN} characters", 400)
+
+    email = invite.email.strip().lower()
+    existing = await db.execute(select(User).where(func.lower(User.email) == email))
+    if existing.scalar_one_or_none():
+        return error("An account with this email already exists, sign in instead", 409)
+
+    try:
+        role = UserRole(str(invite.role or "user").lower())
+    except ValueError:
+        role = UserRole.USER
+
+    user = User(
+        id=uuid.uuid4(),
+        email=email,
+        password_hash=hash_password(body.password),
+        full_name=full_name,
+        role=role,
+        tenant_id=invite.tenant_id,
+        is_active=True,
+    )
+    db.add(user)
+    invite.status = InviteStatus.ACCEPTED
+    await db.commit()
+    await db.refresh(user)
+
+    await log_action(
+        db,
+        invite.tenant_id,
+        user.id,
+        "user.invite_accepted",
+        {"email": user.email, "invite_id": str(invite.id), "role": role.value},
+        request,
+    )
+    await db.commit()
+
+    access = create_access_token(user.id, user.tenant_id, user.role.value)
+    refresh = create_refresh_token(user.id)
+
+    return success(
+        {
+            "access_token": access,
+            "refresh_token": refresh,
+            "token_type": "bearer",
+            "user": _user_dict(user),
+        },
+        status_code=201,
     )
 
 

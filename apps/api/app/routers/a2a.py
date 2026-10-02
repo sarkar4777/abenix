@@ -189,6 +189,8 @@ async def invoke_agent(
         execution_id=str(uuid.uuid4()),
         agent_name=agent.name,
         db_url=str(settings.database_url).replace("+asyncpg", ""),
+        user_id=str(user.id),
+        user_role=user.role.value if hasattr(user.role, "value") else str(user.role),
     )
 
     executor = AgentExecutor(

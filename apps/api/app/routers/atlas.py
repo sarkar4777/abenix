@@ -11,15 +11,17 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.core.permissions import is_admin, sees_other_users_resources
 from app.core.responses import error, success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 from models.atlas import AtlasEdge, AtlasGraph, AtlasNode, AtlasNodeKind, AtlasSnapshot  # type: ignore
 from models.knowledge_base import Document, KnowledgeBase  # type: ignore
+from models.resource_share import ResourceShare, SharePermission  # type: ignore
 from models.user import User  # type: ignore
 
 # Reuses the BPM analyser's hardened multimodal pipeline.
@@ -74,9 +76,80 @@ def _edge_to_dict(e: AtlasEdge) -> dict[str, Any]:
     }
 
 
+ATLAS_KIND = "atlas_graph"
+
+
+def graph_ownership(g: Any, user: Any) -> str:
+    if g.owner_user_id is None:
+        return "platform"
+    return "mine" if g.owner_user_id == user.id else "shared"
+
+
+def can_view_graph(g: Any, user: Any, share: SharePermission | None = None) -> bool:
+    """Owner, platform row, tenant-wide viewer, or any share."""
+    if g.tenant_id != user.tenant_id:
+        return False
+    if g.owner_user_id is None or g.owner_user_id == user.id:
+        return True
+    return sees_other_users_resources(user) or share is not None
+
+
+def can_edit_graph(g: Any, user: Any, share: SharePermission | None = None) -> bool:
+    """Owner, tenant admin, or an EDIT share."""
+    if g.tenant_id != user.tenant_id:
+        return False
+    if g.owner_user_id is not None and g.owner_user_id == user.id:
+        return True
+    return is_admin(user) or share == SharePermission.EDIT
+
+
+def can_delete_graph(g: Any, user: Any) -> bool:
+    if g.tenant_id != user.tenant_id:
+        return False
+    if g.owner_user_id is not None and g.owner_user_id == user.id:
+        return True
+    return is_admin(user)
+
+
+def _annotate(
+    g: AtlasGraph,
+    user: User,
+    share: SharePermission | None,
+    owner_name: str | None,
+) -> AtlasGraph:
+    # Plain attribute, not a mapped column, so it never reaches the DB.
+    g._access = {
+        "owner_name": owner_name,
+        "ownership": graph_ownership(g, user),
+        "can_edit": can_edit_graph(g, user, share),
+        "can_delete": can_delete_graph(g, user),
+        "permission": share.value.lower() if share is not None else None,
+    }
+    return g
+
+
+async def _owner_names(db: AsyncSession, ids: set[Any]) -> dict[uuid.UUID, str]:
+    wanted = {i for i in ids if i is not None}
+    if not wanted:
+        return {}
+    rows = (
+        await db.execute(
+            select(User.id, User.full_name, User.email).where(User.id.in_(wanted))
+        )
+    ).all()
+    return {r[0]: (r[1] or r[2]) for r in rows}
+
+
 def _graph_meta(g: AtlasGraph) -> dict[str, Any]:
+    access = getattr(g, "_access", None) or {}
     return {
         "id": str(g.id),
+        "owner_id": str(g.owner_user_id) if g.owner_user_id else None,
+        "owner_name": access.get("owner_name"),
+        "ownership": access.get("ownership"),
+        "can_edit": access.get("can_edit"),
+        "can_delete": access.get("can_delete"),
+        "permission": access.get("permission"),
         "name": g.name,
         "description": g.description or "",
         "kb_id": str(g.kb_id) if g.kb_id else None,
@@ -89,12 +162,27 @@ def _graph_meta(g: AtlasGraph) -> dict[str, Any]:
     }
 
 
+async def _share_for(
+    db: AsyncSession, user: User, graph_id: uuid.UUID
+) -> SharePermission | None:
+    return (
+        await db.execute(
+            select(ResourceShare.permission).where(
+                ResourceShare.resource_type == ATLAS_KIND,
+                ResourceShare.resource_id == graph_id,
+                ResourceShare.shared_with_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def _load_graph(
     db: AsyncSession,
     graph_id: str,
     user: User,
+    need: str = "view",
 ) -> AtlasGraph | JSONResponse:
-    """Fetch a graph + tenant check. Returns the graph or an error response."""
+    """Fetch a graph the caller may `need` (view, edit or delete)."""
     try:
         gid = uuid.UUID(graph_id)
     except ValueError:
@@ -102,11 +190,17 @@ async def _load_graph(
     g = (
         await db.execute(select(AtlasGraph).where(AtlasGraph.id == gid))
     ).scalar_one_or_none()
-    if not g:
+    if not g or g.tenant_id != user.tenant_id:
         return error("Graph not found", 404)
-    if g.tenant_id != user.tenant_id:
-        return error("Forbidden", 403)
-    return g
+    share = await _share_for(db, user, g.id)
+    if not can_view_graph(g, user, share):
+        return error("Graph not found", 404)
+    if need == "edit" and not can_edit_graph(g, user, share):
+        return error("Only the graph owner, an editor or an admin can change it", 403)
+    if need == "delete" and not can_delete_graph(g, user):
+        return error("Only the graph owner or an admin can delete this graph", 403)
+    names = await _owner_names(db, {g.owner_user_id})
+    return _annotate(g, user, share, names.get(g.owner_user_id))
 
 
 async def _bump_version(db: AsyncSession, graph: AtlasGraph) -> None:
@@ -185,19 +279,37 @@ async def list_graphs(
     db: AsyncSession = Depends(get_db),
     limit: int = 100,
 ) -> JSONResponse:
-    """List Atlas graphs the caller's tenant can see."""
+    """Own, shared and platform graphs, or the whole tenant for admins."""
+    share_rows = (
+        await db.execute(
+            select(ResourceShare.resource_id, ResourceShare.permission).where(
+                ResourceShare.resource_type == ATLAS_KIND,
+                ResourceShare.shared_with_user_id == user.id,
+            )
+        )
+    ).all()
+    shares = {r[0]: r[1] for r in share_rows}
+    q = select(AtlasGraph).where(AtlasGraph.tenant_id == user.tenant_id)
+    if not sees_other_users_resources(user):
+        visible = [
+            AtlasGraph.owner_user_id == user.id,
+            AtlasGraph.owner_user_id.is_(None),
+        ]
+        if shares:
+            visible.append(AtlasGraph.id.in_(list(shares)))
+        q = q.where(or_(*visible))
     rows = (
         (
             await db.execute(
-                select(AtlasGraph)
-                .where(AtlasGraph.tenant_id == user.tenant_id)
-                .order_by(desc(AtlasGraph.updated_at))
-                .limit(min(max(limit, 1), 200))
+                q.order_by(desc(AtlasGraph.updated_at)).limit(min(max(limit, 1), 200))
             )
         )
         .scalars()
         .all()
     )
+    names = await _owner_names(db, {g.owner_user_id for g in rows})
+    for g in rows:
+        _annotate(g, user, shares.get(g.id), names.get(g.owner_user_id))
     return success({"graphs": [_graph_meta(g) for g in rows]})
 
 
@@ -228,6 +340,7 @@ async def create_graph(
     db.add(g)
     await db.commit()
     await db.refresh(g)
+    _annotate(g, user, None, user.full_name or user.email)
     return success({"graph": _graph_meta(g)})
 
 
@@ -279,7 +392,7 @@ async def patch_graph(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     if "name" in body:
@@ -300,7 +413,7 @@ async def delete_graph(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="delete")
     if isinstance(g, JSONResponse):
         return g
     await db.delete(g)
@@ -315,7 +428,7 @@ async def create_node(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     label = (body.get("label") or "").strip()[:255]
@@ -357,7 +470,7 @@ async def patch_node(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     try:
@@ -403,7 +516,7 @@ async def delete_node(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     try:
@@ -431,7 +544,7 @@ async def create_edge(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     try:
@@ -482,7 +595,7 @@ async def patch_edge(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     try:
@@ -530,7 +643,7 @@ async def delete_edge(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     try:
@@ -584,7 +697,7 @@ async def parse_nl(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Parse a natural-language sentence into a list of graph ops."""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     text = (body.get("text") or "").strip()
@@ -659,7 +772,7 @@ async def extract_from_upload(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Drop a doc/image/audio/video/text → proposed nodes + edges."""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
 
@@ -739,7 +852,7 @@ async def apply_ops(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Apply a list of ops returned from parse-nl or extract."""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
 
@@ -1039,7 +1152,7 @@ async def capture_snapshot(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Manual snapshot: not rate-limited, labelled by the user."""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     nodes = (
@@ -1079,7 +1192,7 @@ async def restore_snapshot(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Replay a snapshot: wipe live nodes/edges, recreate from payload."""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     try:
@@ -1267,7 +1380,9 @@ async def _load_kb(
     kb_id: str | uuid.UUID,
     user: User,
 ) -> KnowledgeBase | None:
-    """Tenant-scoped KB load — returns None if not found / not owned."""
+    """KB the caller can read, else None."""
+    from app.services.kb_access import user_can_access_collection
+
     try:
         kid = uuid.UUID(str(kb_id))
     except (TypeError, ValueError):
@@ -1275,7 +1390,7 @@ async def _load_kb(
     kb = (
         await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kid))
     ).scalar_one_or_none()
-    if not kb or kb.tenant_id != user.tenant_id:
+    if not kb or not await user_can_access_collection(db, user=user, kb=kb):
         return None
     return kb
 
@@ -1351,7 +1466,7 @@ async def bind_kb(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Bind / unbind an Atlas graph to a knowledge collection."""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     new_kb_id_raw = body.get("kb_id")
@@ -1375,7 +1490,7 @@ async def sync_kb(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Project the bound KB's documents into the canvas as document"""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     if not g.kb_id:
@@ -1557,7 +1672,7 @@ async def patch_binding(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Bind a node to a live data source."""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     try:
@@ -2191,7 +2306,7 @@ async def import_starter(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Import a curated starter ontology into the graph."""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     kit_id = (body.get("kit") or "").strip()
@@ -2222,7 +2337,7 @@ async def relayout(
     """Reposition every node on the canvas."""
     import math
 
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     mode = (body.get("mode") or "semantic").lower()
@@ -2294,7 +2409,7 @@ async def persist_to_kb(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """If the graph is bound to a KB, write the dropped file into the"""
-    g = await _load_graph(db, graph_id, user)
+    g = await _load_graph(db, graph_id, user, need="edit")
     if isinstance(g, JSONResponse):
         return g
     if not g.kb_id:
