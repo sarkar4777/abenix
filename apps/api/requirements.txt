@@ -37,3 +37,12 @@ opentelemetry-sdk>=1.27.0
 opentelemetry-exporter-otlp-proto-grpc>=1.27.0
 opentelemetry-instrumentation-fastapi>=0.48b0
 opentelemetry-instrumentation-httpx>=0.48b0
+
+# kept in step with pyproject.toml, which is what the image installs
+celery[redis]>=5.4.0
+stripe>=9.0.0
+structlog>=24.1.0
+prometheus-client>=0.20.0
+python-dotenv>=1.0.0
+boto3>=1.34.0
+nats-py>=2.7.0
