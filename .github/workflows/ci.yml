@@ -65,6 +65,8 @@ jobs:
           pip install -r apps/api/requirements.txt \
                       -r apps/agent-runtime/requirements.txt \
                       -r apps/worker/requirements.txt
+      # the image installs pyproject.toml, CI installs requirements.txt, keep them equal
+      - run: python scripts/check-api-requirements.py
       - run: pytest tests/unit/ -v --tb=short
       # Validates every agent seed, and checks that an agent declaring
       # knowledge_search has a collection granted somewhere. Nothing ran this
