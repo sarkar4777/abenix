@@ -9,6 +9,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.routers import agents as agents_router
+
+# patched by dotted path below, import them so the patch never depends on test order
+import app.core.platform_settings  # noqa: E402,F401
+import app.core.usage  # noqa: E402,F401
+import app.services.agent_share  # noqa: E402,F401
+import engine.queue_backend  # noqa: E402,F401
 from app.schemas.agents import ExecuteRequest
 from models.agent import AgentStatus
 from models.user import UserRole

@@ -9,6 +9,17 @@
 ### Fixed
 
 - Code asset routes create their storage directory on first write, so loading them never fails on a read-only /data. Closes [#120](https://github.com/sarkar4777/abenix/issues/120).
+- The sub-agent tests import what they patch, so they pass in any order and on Python 3.12.
+
+## v2.5.1 — 2026-10-02
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Code asset routes create their storage directory on first write, so loading them never fails on a read-only /data. Closes [#120](https://github.com/sarkar4777/abenix/issues/120).
 
 ## v2.5.1 — 2026-10-02
 
