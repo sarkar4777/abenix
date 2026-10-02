@@ -15,6 +15,8 @@
 | `POST` | `/api/auth/signup` | New tenant + first user (marketplace flow) |
 | `POST` | `/api/auth/exchange` | OAuth/OIDC exchange |
 | `POST` | `/api/auth/forgot-password` / `reset-password` | Password reset |
+| `GET`  | `/api/auth/invite/{token}` | Public invite lookup. Returns `{email, tenant_name, role, expired, used}` |
+| `POST` | `/api/auth/accept-invite` | Body `{token, full_name, password}`. Creates the user in the inviting tenant with the invited role, returns the login token pair. 410 when the token is used or expired |
 
 ---
 
@@ -29,6 +31,11 @@
 | `DELETE` | `/api/agents/{id}` | Soft-delete |
 | `POST`   | `/api/agents/{id}/execute` | Run. body `{input, wait, client_token}` |
 | `POST`   | `/api/agents/{id}/duplicate` | Clone |
+| `GET`    | `/api/agents/{id}/dependents` | Pipelines, agents and triggers that use it |
+| `DELETE` | `/api/agents/{id}?force=true` | Archive. Without `force`, 409 `IN_USE` with the dependents when something uses it |
+| `GET`    | `/api/agents/deleted` | Archived agents the caller can restore |
+| `POST`   | `/api/agents/{id}/restore` | Undo a delete, triggers switch back on |
+| `POST`   | `/api/agents/{id}/revisions/{rev}/revert?which=after\|before` | Restore a saved version, or the state before it |
 | `POST`   | `/api/agents/{id}/publish` | Set status=active |
 | `GET`    | `/api/agents/{id}/revisions` | List version history |
 | `POST`   | `/api/agents/{id}/revisions/{rev_id}/revert` | Roll back |
@@ -69,7 +76,8 @@
 | `POST` | `/api/knowledge-bases` | Create |
 | `GET`  | `/api/knowledge-bases/{id}` | Detail with documents |
 | `PUT`  | `/api/knowledge-bases/{id}` | Update |
-| `DELETE` | `/api/knowledge-bases/{id}` | Delete |
+| `DELETE` | `/api/knowledge-bases/{id}?force=true` | Delete. Without `force`, 409 `IN_USE` when agents or Atlas graphs use it. A confirmed delete unbinds graphs and removes agent grants |
+| `GET`  | `/api/knowledge-bases/{id}/dependents` | Agents granted it and Atlas graphs bound to it |
 | `POST` | `/api/knowledge-bases/{id}/upload` | Upload document |
 | `GET`  | `/api/knowledge-bases/{id}/documents` | List documents |
 | `DELETE` | `/api/knowledge-bases/{id}/documents/{doc_id}` | Delete doc |
@@ -102,8 +110,12 @@
 | `POST` | `/api/code-assets` | Create (zip or git_url in multipart) |
 | `GET`  | `/api/code-assets/{id}` | Detail |
 | `PUT`  | `/api/code-assets/{id}` | Update schemas + commands |
-| `DELETE` | `/api/code-assets/{id}` | Delete |
-| `POST` | `/api/code-assets/{id}/test` | Test run |
+| `DELETE` | `/api/code-assets/{id}?force=true` | Delete. Without `force`, 409 `IN_USE` with the dependents |
+| `POST` | `/api/code-assets/{id}/test` | Test run. 422 `CODE_FAILED` when the code itself fails |
+| `POST` | `/api/code-assets/{id}/versions` | Upload a new version, live only if it analyses cleanly |
+| `POST` | `/api/code-assets/{id}/versions/{n}/restore` | Make an earlier version live again |
+| `GET`  | `/api/code-assets/{id}/dependents` | Agents and pipelines that call it |
+| `GET`  | `/api/code-assets/{id}/fetch` | Archive for a sandbox pod, asset-scoped token only |
 
 ---
 
@@ -154,6 +166,27 @@ Agent-facing tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_se
 | `GET`  | `/api/gdpr/users/{user_id}/receipts` | Per-store audit trail (`gdpr_purge_log` rows) — provable to a regulator |
 
 See [`02-runtime/15-v2-knowledge-enterprise.md`](../02-runtime/15-v2-knowledge-enterprise.md) for the implementation details and [`04-data-model/03-knowledge.md`](../04-data-model/03-knowledge.md) for the data model.
+
+---
+
+## Team
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/team/members` | Members plus pending invites. Admins also get `invite_url` per invite |
+| `POST` | `/api/team/invite` | Admin only. Body `{email, role}`. Returns the invite with `invite_url` built from `WEB_BASE_URL` or the request origin |
+| `DELETE` | `/api/team/invites/{id}` | Cancel a pending invite |
+
+---
+
+## Triggers
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` / `POST` | `/api/triggers` | Triggers you created or on your agents, all for admins. `agent_id` narrows the list. Creating needs run access to the agent |
+| `PUT` / `DELETE` | `/api/triggers/{id}` | Update or delete |
+| `POST` | `/api/triggers/{id}/run` | Owner or admin. Fires the trigger once as its owner through the scheduler dispatch path. 202 with `{execution_id}` |
+| `POST` | `/api/triggers/webhook/{token}` | Inbound webhook fire |
 
 ---
 

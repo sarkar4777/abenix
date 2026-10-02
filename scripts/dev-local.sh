@@ -196,9 +196,11 @@ export SANDBOXED_JOB_ENABLED SANDBOXED_JOB_ALLOWED_IMAGES
 : "${ML_MODELS_DIR:=$ROOT_DIR/.data/ml-models}"
 : "${CODE_ASSET_STORE:=$ROOT_DIR/.data/code-assets}"
 : "${CODE_ASSET_BUILD_CACHE:=$ROOT_DIR/.data/code-asset-cache}"
+# object keys for durable copies are paths under this root
+: "${OBJECT_STORAGE_LOCAL_ROOT:=$ROOT_DIR/.data}"
 mkdir -p "$EXPORT_DIR" "$UPLOAD_DIR" "$ML_MODELS_DIR" \
          "$CODE_ASSET_STORE" "$CODE_ASSET_BUILD_CACHE" 2>/dev/null || true
-export EXPORT_DIR UPLOAD_DIR ML_MODELS_DIR CODE_ASSET_STORE CODE_ASSET_BUILD_CACHE
+export EXPORT_DIR UPLOAD_DIR ML_MODELS_DIR CODE_ASSET_STORE CODE_ASSET_BUILD_CACHE OBJECT_STORAGE_LOCAL_ROOT
 
 # ── Per-process log directory (must exist before any helper runs) ─────
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/.local-logs}"

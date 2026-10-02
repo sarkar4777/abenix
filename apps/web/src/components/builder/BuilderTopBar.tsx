@@ -31,6 +31,7 @@ interface BuilderTopBarProps {
   firstErrorNodeId?: string | null;
   firstWarningNodeId?: string | null;
   onFocusErrorNode?: (nodeId: string) => void;
+  showNextStep?: boolean;
   getDraftForValidate?: () => {
     nodes: unknown[];
     tools: string[];
@@ -60,6 +61,7 @@ export default function BuilderTopBar({
   firstWarningNodeId = null,
   onFocusErrorNode,
   getDraftForValidate,
+  showNextStep = false,
 }: BuilderTopBarProps) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -129,6 +131,8 @@ export default function BuilderTopBar({
             onChange={(e) => setEditValue(e.target.value)}
             onBlur={commitName}
             onKeyDown={handleKeyDown}
+            data-testid="builder-name-input"
+            aria-label="Agent name"
             className="px-2 py-1 bg-slate-800 border border-cyan-500 rounded text-sm text-white focus:outline-none min-w-[200px]"
           />
         ) : (
@@ -137,6 +141,7 @@ export default function BuilderTopBar({
               setEditValue(name);
               setEditing(true);
             }}
+            data-testid="builder-name-button"
             className="flex items-center gap-2 text-sm font-semibold text-white hover:text-cyan-400 transition-colors group"
           >
             <span className="truncate max-w-[300px]">{name || 'Untitled Agent'}</span>
@@ -156,6 +161,14 @@ export default function BuilderTopBar({
             Saved
           </span>
         )}
+        {showNextStep && (
+          <span
+            className="hidden md:inline text-[11px] text-amber-300/90 truncate"
+            data-testid="builder-next-step"
+          >
+            Saved as draft. Publish to use it in chat, pipelines and the SDK playground.
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -163,6 +176,7 @@ export default function BuilderTopBar({
         <div className="flex bg-slate-800 rounded-lg border border-slate-700 p-0.5">
           <button
             onClick={() => onModeChange('agent')}
+            data-testid="builder-mode-agent"
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
               builderMode === 'agent'
                 ? 'bg-cyan-500/20 text-cyan-400'
@@ -175,6 +189,7 @@ export default function BuilderTopBar({
           </button>
           <button
             onClick={() => onModeChange('pipeline')}
+            data-testid="builder-mode-pipeline"
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
               builderMode === 'pipeline'
                 ? 'bg-emerald-500/20 text-emerald-400'
@@ -258,6 +273,7 @@ export default function BuilderTopBar({
           <button
             onClick={onRunPipeline}
             disabled={pipelineRunning}
+            data-testid="pipeline-run-button"
             className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium rounded-lg hover:bg-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {pipelineRunning ? (
@@ -314,6 +330,7 @@ export default function BuilderTopBar({
         <button
           onClick={onSave}
           disabled={saving || !dirty}
+          data-testid="builder-save-draft"
           className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 border border-slate-600 text-slate-200 text-xs rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <Save className="w-3.5 h-3.5" />
@@ -322,6 +339,7 @@ export default function BuilderTopBar({
         <button
           onClick={() => setShowPublish(true)}
           disabled={saving || !agentId}
+          data-testid="builder-publish"
           // Publishing needs a saved draft to publish. Without this the button
           // is just greyed out and there is nothing on screen saying why.
           title={

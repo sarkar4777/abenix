@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+import asyncio
 import logging
 import os
 from typing import Any
@@ -25,6 +27,62 @@ def _safe_parse_json(content: str | None):
         return _json.loads(content)
     except Exception:
         return {"raw": str(content)[:2000]}
+
+
+_FETCH_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+async def _ensure_local(model_id: str, file_uri: str, tenant_id: str) -> str:
+    """A readable path for the model file on this pod.
+
+    The API and the runtime need not share a volume, so a file the runtime
+    cannot see is fetched once from the API with a token scoped to this
+    model, written atomically and reused afterwards.
+    """
+    if file_uri and os.path.isfile(file_uri):
+        return file_uri
+    cache_dir = os.path.join(tempfile.gettempdir(), "ml-model-cache", tenant_id or "_")
+    os.makedirs(cache_dir, exist_ok=True)
+    local = os.path.join(
+        cache_dir, f"{model_id}_{os.path.basename(file_uri or 'model.bin')}"
+    )
+    if os.path.isfile(local) and os.path.getsize(local) > 0:
+        return local
+    lock = _FETCH_LOCKS.setdefault(model_id, asyncio.Lock())
+    async with lock:
+        if os.path.isfile(local) and os.path.getsize(local) > 0:
+            return local
+        import httpx
+
+        from engine.tools.invoke_agent import mint_fetch_token
+
+        token = mint_fetch_token("ml_model_fetch", model_id, tenant_id)
+        if not token:
+            raise FileNotFoundError(
+                f"model file {file_uri} is not on this pod and no fetch token could be signed"
+            )
+        base = os.environ.get("ABENIX_INTERNAL_URL") or os.environ.get(
+            "ABENIX_API_URL", "http://abenix-api:8000"
+        )
+        tmp = f"{local}.part"
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "GET",
+                f"{base.rstrip('/')}/api/ml-models/{model_id}/fetch",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status_code != 200:
+                    raise FileNotFoundError(
+                        f"model file {file_uri} is not on this pod and the API returned {resp.status_code}"
+                    )
+                with open(tmp, "wb") as fh:
+                    async for chunk in resp.aiter_bytes():
+                        fh.write(chunk)
+        if os.path.getsize(tmp) == 0:
+            os.unlink(tmp)
+            raise FileNotFoundError(f"model file {file_uri} came back empty")
+        os.replace(tmp, local)
+    return local
 
 
 class MLModelTool(BaseTool):
@@ -282,7 +340,9 @@ class MLModelTool(BaseTool):
             # Fall back to local inference
             if predictions is None:
                 predictions = await self._local_predict(
-                    row["file_uri"],
+                    await _ensure_local(
+                        str(row["id"]), row["file_uri"], self.tenant_id
+                    ),
                     row["framework"],
                     input_data,
                 )
@@ -472,7 +532,7 @@ class MLModelTool(BaseTool):
         try:
             row = await conn.fetchrow(
                 """
-                SELECT file_uri, framework, name, version, input_schema
+                SELECT id, file_uri, framework, name, version, input_schema
                 FROM ml_models
                 WHERE tenant_id = $1::uuid AND name = $2 AND status = 'ready'
                 ORDER BY is_active DESC, updated_at DESC LIMIT 1
@@ -492,11 +552,12 @@ class MLModelTool(BaseTool):
                 )
             import joblib
 
-            cache_key = f"{row['file_uri']}:{framework}"
+            local = await _ensure_local(str(row["id"]), row["file_uri"], self.tenant_id)
+            cache_key = f"{local}:{framework}"
             if cache_key not in _MODEL_CACHE:
                 if len(_MODEL_CACHE) >= _MAX_CACHE:
                     del _MODEL_CACHE[next(iter(_MODEL_CACHE))]
-                _MODEL_CACHE[cache_key] = joblib.load(row["file_uri"])
+                _MODEL_CACHE[cache_key] = joblib.load(local)
             model = _MODEL_CACHE[cache_key]
             schema = row["input_schema"]
             if isinstance(schema, str):

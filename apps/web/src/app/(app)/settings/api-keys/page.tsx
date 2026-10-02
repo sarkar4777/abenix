@@ -55,7 +55,9 @@ export default function ApiKeysPage() {
     }
   };
 
-  const handleRevoke = async (keyId: string) => {
+  const handleRevoke = async (keyId: string, name?: string) => {
+    // revoking breaks every client using the key at once
+    if (!window.confirm(`Revoke ${name ? `"${name}"` : 'this key'}? Anything using it stops working immediately.`)) return;
     setRevoking(keyId);
     try {
       await apiFetch(`/api/api-keys/${keyId}`, { method: 'DELETE' });
@@ -125,6 +127,7 @@ export default function ApiKeysPage() {
         </div>
         <button
           onClick={() => setShowCreate(true)}
+          data-testid="apikey-generate"
           className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 transition-all"
         >
           <Plus className="w-4 h-4" />
@@ -146,13 +149,14 @@ export default function ApiKeysPage() {
               </p>
               <button
                 onClick={() => setNewKey(null)}
+                aria-label="Dismiss"
                 className="text-slate-400 hover:text-white"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="flex items-center gap-2">
-              <code className="flex-1 px-3 py-2 bg-slate-900/50 rounded-lg text-xs text-emerald-300 font-mono break-all">
+              <code data-testid="apikey-created-value" className="flex-1 px-3 py-2 bg-slate-900/50 rounded-lg text-xs text-emerald-300 font-mono break-all">
                 {newKey.raw_key}
               </code>
               <button
@@ -188,12 +192,15 @@ export default function ApiKeysPage() {
                 value={newKeyName}
                 onChange={(e) => setNewKeyName(e.target.value)}
                 placeholder="Key name (e.g. Production)"
+                aria-label="Key name"
+                data-testid="apikey-name"
                 className="flex-1 px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none transition-colors"
                 onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
               />
               <button
                 onClick={handleCreate}
                 disabled={creating || !newKeyName.trim()}
+                data-testid="apikey-create"
                 className="px-4 py-2.5 bg-cyan-500/20 text-cyan-400 text-sm font-medium rounded-lg hover:bg-cyan-500/30 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
                 {creating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -245,8 +252,11 @@ export default function ApiKeysPage() {
                 </p>
               </div>
               <button
-                onClick={() => handleRevoke(apiKey.id)}
+                onClick={() => handleRevoke(apiKey.id, apiKey.name)}
                 disabled={revoking === apiKey.id}
+                aria-label="Revoke key"
+                title="Revoke key"
+                data-testid={`apikey-revoke-${apiKey.id}`}
                 className="w-8 h-8 flex items-center justify-center rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-50"
               >
                 {revoking === apiKey.id ? (

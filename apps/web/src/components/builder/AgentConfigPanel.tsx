@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { Node } from 'reactflow';
 import { getToolDoc } from '@/lib/tool-docs';
+import { apiFetch } from '@/lib/api-client';
 import ModelPicker from '@/components/ModelPicker';
 import { ModelStatusBanner } from '@/components/ModelStatusBanner';
 import { CredentialBadge, CredentialHint, missingKeys, type ToolConfigInfo } from '@/components/CredentialBadge';
@@ -79,6 +80,8 @@ interface AgentConfig {
   output_schema?: string;
   // Knowledge bindings — collection IDs the agent can read.
   knowledge_collection_ids?: string[];
+  // Atlas graph ids the atlas_* tools are pinned to (model_config.atlas_graphs).
+  atlas_graphs?: string[];
   // Edge runtime — opt-in to compile this agent into a `.agent` bundle.
   edge_compatible?: boolean;
   edge_constraints?: {
@@ -94,6 +97,15 @@ interface KbCollectionRow {
   name: string;
   description?: string;
 }
+
+interface AtlasGraphRow {
+  id: string;
+  name: string;
+  description?: string;
+  node_count?: number;
+}
+
+const ATLAS_TOOL_IDS = ['atlas_search_grounded', 'atlas_describe', 'atlas_query', 'atlas_traverse'];
 
 interface MCPExtensions {
   allow_user_mcp?: boolean;
@@ -120,6 +132,7 @@ interface AgentConfigPanelProps {
   onDisconnectMcp?: (nodeId: string) => void;
   /** Built-in tool ids on the canvas, for the credential checklist. */
   selectedTools?: string[];
+  onAddTools?: (toolIds: string[]) => void;
 }
 
 const CATEGORIES = [
@@ -550,33 +563,34 @@ export default function AgentConfigPanel({
   onAddMcpConnection,
   onDisconnectMcp,
   selectedTools = [],
+  onAddTools,
 }: AgentConfigPanelProps) {
   const [tab, setTab] = useState<Tab>('general');
   // KB collections — declared up here, before any early return, so the
   // hooks-rules linter is happy and the order is stable across renders.
   const [kbCollections, setKbCollections] = useState<KbCollectionRow[] | null>(null);
   const [kbLoading, setKbLoading] = useState(false);
+  const [atlasGraphs, setAtlasGraphs] = useState<AtlasGraphRow[] | null>(null);
   const credentialMap = useToolConfigMap();
   const isAdmin = useIsAdmin();
   useEffect(() => {
     if (tab !== 'knowledge' || kbCollections !== null) return;
     setKbLoading(true);
-    const tok = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    fetch('/api/knowledge-bases?limit=100', {
-      credentials: 'include',
-      headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((j) => {
-        const list = Array.isArray(j.data) ? j.data : j.data?.collections || j.collections || [];
-        const rows: KbCollectionRow[] = list.map((c: { id: string; name: string; description?: string }) => ({
-          id: c.id, name: c.name, description: c.description,
-        }));
-        setKbCollections(rows);
+    apiFetch<unknown>('/api/knowledge-bases?limit=100', { silent: true })
+      .then((r) => {
+        const d = r.data as { collections?: unknown[] } | unknown[] | null;
+        const list = (Array.isArray(d) ? d : d?.collections || []) as { id: string; name: string; description?: string }[];
+        setKbCollections(list.map((c) => ({ id: c.id, name: c.name, description: c.description })));
       })
       .catch(() => setKbCollections([]))
       .finally(() => setKbLoading(false));
   }, [tab, kbCollections]);
+  useEffect(() => {
+    if (tab !== 'knowledge' || atlasGraphs !== null) return;
+    apiFetch<{ graphs?: AtlasGraphRow[] }>('/api/atlas/graphs?limit=200', { silent: true })
+      .then((r) => setAtlasGraphs(r.data?.graphs || []))
+      .catch(() => setAtlasGraphs([]));
+  }, [tab, atlasGraphs]);
 
   // Get/set tool config for selected tool node
   const selectedToolId = selectedNode?.id?.replace('tool-', '') || '';
@@ -616,6 +630,12 @@ export default function AgentConfigPanel({
     onChange({ knowledge_collection_ids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
   };
 
+  const toggleAtlasGraph = (id: string) => {
+    const cur = config.atlas_graphs || [];
+    onChange({ atlas_graphs: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  };
+  const hasAtlasTool = selectedTools.some((t) => ATLAS_TOOL_IDS.includes(t));
+
   const handleText = (field: keyof AgentConfig) => (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     onChange({ [field]: e.target.value });
 
@@ -629,6 +649,7 @@ export default function AgentConfigPanel({
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
+            data-testid={`config-tab-${t.label.toLowerCase()}`}
             className={`relative flex-1 px-1 py-3 text-[10px] uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-1 ${
               i > 0 ? 'border-l border-slate-800/60' : ''
             } ${
@@ -718,6 +739,7 @@ export default function AgentConfigPanel({
                 </button>
               </div>
               <textarea
+                data-testid="builder-description"
                 value={config.description}
                 onChange={handleText('description')}
                 placeholder="Describe what this agent does, what input it expects, and what output it produces. This is shown to users on the agent card and info page."
@@ -735,6 +757,7 @@ export default function AgentConfigPanel({
                 Category <span className="text-red-400">*</span>
               </label>
               <select
+                data-testid="builder-category"
                 value={config.category}
                 onChange={handleText('category')}
                 className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
@@ -825,6 +848,7 @@ export default function AgentConfigPanel({
               </div>
             )}
             <textarea
+              data-testid="builder-system-prompt"
               value={config.system_prompt}
               onChange={handleText('system_prompt')}
               placeholder={"You are a [role/expertise]. Your job is to [primary task].\n\nCapabilities:\n- [capability 1]\n- [capability 2]\n\nWhen given a request, you should:\n1. [step 1]\n2. [step 2]\n3. [step 3]\n\nOutput format:\n- [describe expected output]"}
@@ -1306,6 +1330,68 @@ export default function AgentConfigPanel({
                 {config.knowledge_collection_ids!.length} collection{config.knowledge_collection_ids!.length === 1 ? '' : 's'} bound.
               </div>
             )}
+
+            <div className="pt-3 border-t border-slate-700/40" data-testid="atlas-graphs-section">
+              <h4 className="text-xs font-semibold text-white mb-1">Atlas graphs</h4>
+              <p className="text-[10px] text-slate-500 mb-3">
+                Pin the agent to specific graphs. The atlas tools only read pinned graphs and default to them when no
+                graph is named. Leave all unchecked to allow every graph in your tenant.
+              </p>
+              {atlasGraphs === null && <div className="text-[10px] text-slate-500">Loading graphs…</div>}
+              {atlasGraphs !== null && atlasGraphs.length === 0 && (
+                <div className="bg-slate-800/30 border border-slate-700/40 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-300">No atlas graphs yet.</p>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Create one in <a href="/atlas" className="text-cyan-400 hover:underline">Atlas</a>.
+                  </p>
+                </div>
+              )}
+              {atlasGraphs && atlasGraphs.length > 0 && (
+                <div className="space-y-1.5">
+                  {atlasGraphs.map((g) => {
+                    const checked = (config.atlas_graphs || []).includes(g.id);
+                    const inputId = `atlas-graph-${g.id}`;
+                    return (
+                      <label
+                        key={g.id}
+                        htmlFor={inputId}
+                        className={`flex items-start gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition-colors ${
+                          checked ? 'bg-cyan-500/10 border-cyan-500/40' : 'bg-slate-800/30 border-slate-700/40 hover:border-slate-600'
+                        }`}
+                      >
+                        <input
+                          id={inputId}
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleAtlasGraph(g.id)}
+                          data-testid={`atlas-graph-checkbox-${g.id}`}
+                          className="mt-0.5 rounded border-slate-600"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-white truncate">{g.name}</p>
+                          {g.description && <p className="text-[10px] text-slate-500 truncate">{g.description}</p>}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {(config.atlas_graphs || []).length > 0 && !hasAtlasTool && (
+                <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-amber-300" data-testid="atlas-tools-hint">
+                  <span>No atlas tools on the canvas, so the pin has no effect.</span>
+                  {onAddTools && (
+                    <button
+                      type="button"
+                      onClick={() => onAddTools(['atlas_search_grounded', 'atlas_describe'])}
+                      data-testid="atlas-add-tools"
+                      className="shrink-0 px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20"
+                    >
+                      Add atlas tools
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </>
         )}
 

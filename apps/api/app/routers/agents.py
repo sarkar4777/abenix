@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
@@ -56,6 +56,8 @@ def _merge_tool_trace(tool_calls: list[dict[str, Any]], trace: dict[str, Any]) -
     for tc in tool_calls:
         if tc.get("name") == name and "duration_ms" not in tc:
             tc["result_preview"] = trace.get("output_preview") or ""
+            if trace.get("output"):
+                tc["result"] = trace["output"]
             tc["is_error"] = bool(trace.get("is_error"))
             tc["duration_ms"] = trace.get("duration_ms")
             if trace.get("output_summary"):
@@ -78,6 +80,8 @@ def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, 
                 "node_id": nid,
                 "arguments": nr.get("resolved_arguments") or {},
                 "result_preview": preview[:500],
+                "result": preview[:8000],
+                "label": nr.get("label") or "",
                 "is_error": nr.get("status") == "failed",
                 "duration_ms": nr.get("duration_ms"),
             }
@@ -217,33 +221,102 @@ def _serialize_agent_summary(a: Agent) -> dict[str, Any]:
         "icon_url": a.icon_url,
         "category": a.category,
         "model_config": a.model_config_,
+        # lists need these to say whose an agent is and what the caller may do
+        "creator_id": str(a.creator_id) if a.creator_id else None,
+        "tenant_id": str(a.tenant_id) if a.tenant_id else None,
+        "is_published": bool(getattr(a, "is_published", False)),
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "updated_at": a.updated_at.isoformat() if a.updated_at else None,
     }
 
 
 @router.delete("/bulk")
 async def bulk_delete_agents(
     body: dict,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Delete multiple agents by ID. Only deletes agents owned by the current tenant."""
+    """Archive several agents under the same rules as a single delete.
+
+    Agents the caller does not own, built-in agents, and agents something
+    still depends on (unless `force`) are skipped and reported back.
+    """
+    from app.services.dependents import agent_dependents, count, disable_agent_triggers
+
     ids = body.get("ids", [])
+    force = bool(body.get("force"))
     if not ids or len(ids) > 100:
         return error("Provide 1-100 agent IDs", 400)
-
     try:
         agent_uuids = [uuid.UUID(str(i)) for i in ids]
     except (ValueError, AttributeError):
         return error("Invalid agent ID format", 400)
 
-    result = await db.execute(
-        delete(Agent).where(
-            Agent.id.in_(agent_uuids),
-            Agent.tenant_id == user.tenant_id,
+    rows = (
+        (
+            await db.execute(
+                select(Agent).where(
+                    Agent.id.in_(agent_uuids),
+                    Agent.tenant_id == user.tenant_id,
+                    Agent.status != AgentStatus.ARCHIVED,
+                )
+            )
         )
+        .scalars()
+        .all()
     )
+    found = {a.id for a in rows}
+    skipped: list[dict[str, Any]] = [
+        {"id": str(i), "reason": "not found"} for i in agent_uuids if i not in found
+    ]
+    deleted = 0
+    for agent in rows:
+        if agent.agent_type == AgentType.OOB:
+            skipped.append(
+                {"id": str(agent.id), "name": agent.name, "reason": "built-in agent"}
+            )
+            continue
+        if agent.creator_id != user.id and user.role.value != "admin":
+            skipped.append(
+                {"id": str(agent.id), "name": agent.name, "reason": "not yours"}
+            )
+            continue
+        deps = await agent_dependents(db, agent)
+        if count(deps) and not force:
+            skipped.append(
+                {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "reason": "in use",
+                    "dependents": deps,
+                }
+            )
+            continue
+        agent.model_config_ = {
+            **(agent.model_config_ or {}),
+            "_archived_from": agent.status.value,
+        }
+        agent.status = AgentStatus.ARCHIVED
+        await disable_agent_triggers(db, agent.id)
+        await log_action(
+            db,
+            user.tenant_id,
+            user.id,
+            "agent.deleted",
+            {
+                "agent_id": str(agent.id),
+                "name": agent.name,
+                "bulk": True,
+                "dependents": deps,
+            },
+            request,
+            resource_type="agent",
+            resource_id=str(agent.id),
+        )
+        deleted += 1
     await db.commit()
-    return success({"deleted": result.rowcount, "requested": len(ids)})
+    return success({"deleted": deleted, "requested": len(ids), "skipped": skipped})
 
 
 @router.get("")
@@ -368,6 +441,97 @@ async def list_agents(
     return success(
         data, meta={"total": total, "limit": limit, "offset": effective_offset}
     )
+
+
+@router.get("/deleted")
+async def list_deleted_agents(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Deleted agents the caller can restore: their own, or the tenant's for an admin."""
+    q = select(Agent).where(
+        Agent.tenant_id == user.tenant_id,
+        Agent.status == AgentStatus.ARCHIVED,
+        Agent.agent_type != AgentType.OOB,
+    )
+    if user.role.value != "admin":
+        q = q.where(Agent.creator_id == user.id)
+    total = (
+        await db.execute(select(func.count()).select_from(q.subquery()))
+    ).scalar() or 0
+    rows = (
+        (
+            await db.execute(
+                q.order_by(Agent.updated_at.desc()).offset(offset).limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return success(
+        [_serialize_agent(a) for a in rows],
+        meta={"total": total, "limit": limit, "offset": offset},
+    )
+
+
+@router.post("/{agent_id}/restore")
+async def restore_agent(
+    agent_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Undo a delete: the agent gets its status back and its triggers resume."""
+    from sqlalchemy import update as _update
+
+    from models.agent_trigger import AgentTrigger
+
+    agent = (
+        await db.execute(
+            select(Agent).where(
+                Agent.id == agent_id,
+                Agent.tenant_id == user.tenant_id,
+                Agent.status == AgentStatus.ARCHIVED,
+            )
+        )
+    ).scalar_one_or_none()
+    if not agent:
+        return error("No deleted agent with that id", 404)
+    if agent.creator_id != user.id and user.role.value != "admin":
+        return error("Only the agent's owner or an admin can restore it", 403)
+    mc = dict(agent.model_config_ or {})
+    before = mc.pop("_archived_from", "active")
+    try:
+        agent.status = AgentStatus(before)
+    except ValueError:
+        agent.status = AgentStatus.ACTIVE
+    agent.model_config_ = mc
+    resumed = (
+        await db.execute(
+            _update(AgentTrigger)
+            .where(
+                AgentTrigger.agent_id == agent.id,
+                AgentTrigger.is_active.is_(False),
+                AgentTrigger.last_status == "agent deleted",
+            )
+            .values(is_active=True, last_status=None)
+        )
+    ).rowcount or 0
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "agent.restored",
+        {"agent_id": str(agent.id), "name": agent.name, "triggers_resumed": resumed},
+        request,
+        resource_type="agent",
+        resource_id=str(agent.id),
+    )
+    await db.commit()
+    await db.refresh(agent)
+    return success({**_serialize_agent(agent), "triggers_resumed": resumed})
 
 
 @router.get("/by-slug/{slug}")
@@ -556,7 +720,41 @@ async def get_agent(
     if not await resolve_agent_access(db, user, agent):
         return error("You do not have access to this agent", 403)
 
-    return success(_serialize_agent(agent))
+    # what the caller may do, so the UI only offers working actions
+    admin = user.role.value == "admin"
+    mine = agent.tenant_id == user.tenant_id and agent.creator_id == user.id
+    oob = agent.agent_type == AgentType.OOB
+    can_manage = (
+        (mine and not oob)
+        or (admin and agent.tenant_id == user.tenant_id)
+        or (admin and oob)
+    )
+    can_edit = can_manage or (
+        not oob
+        and agent.tenant_id == user.tenant_id
+        and await resolve_agent_access(
+            db, user, agent, permission_required=SharePermission.EDIT
+        )
+    )
+    from models.collection_grant import AgentCollectionGrant as _ACG
+
+    # the grants are the truth, the builder edits this list and saves it back
+    granted = [
+        str(r[0])
+        for r in (
+            await db.execute(
+                select(_ACG.collection_id).where(_ACG.agent_id == agent.id)
+            )
+        ).all()
+    ]
+    return success(
+        {
+            **_serialize_agent(agent),
+            "can_edit": bool(can_edit),
+            "can_manage": bool(can_manage),
+            "knowledge_collection_ids": granted,
+        }
+    )
 
 
 def _self_check_agent(agent: Agent) -> dict[str, Any]:
@@ -726,6 +924,47 @@ async def self_check_agent(
     return success(_self_check_agent(agent))
 
 
+def _final_text(output: Any) -> str:
+    """The readable answer in a run output, unwrapping {"response": ...}."""
+    if output is None:
+        return ""
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+        except (ValueError, TypeError):
+            return output
+        if not isinstance(parsed, dict):
+            return output
+        output = parsed
+    if isinstance(output, dict):
+        for k in ("response", "content", "text", "answer"):
+            if isinstance(output.get(k), str) and output[k].strip():
+                return output[k]
+        return json.dumps(output, default=str)
+    return str(output)
+
+
+async def _sync_kb_grants(
+    db: AsyncSession, agent: Agent, user: User
+) -> list[dict[str, str]]:
+    """Apply model_config.knowledge_collection_ids as grants when the caller sent it."""
+    cfg = agent.model_config_ or {}
+    if "knowledge_collection_ids" not in cfg:
+        return []
+    from app.services.collection_access import reconcile_agent_collections
+
+    refused = await reconcile_agent_collections(
+        db,
+        agent_id=agent.id,
+        wanted=list(cfg.get("knowledge_collection_ids") or []),
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        is_admin=user.role.value == "admin",
+    )
+    await db.commit()
+    return refused
+
+
 @router.post("")
 async def create_agent(
     body: CreateAgentRequest,
@@ -815,7 +1054,11 @@ async def create_agent(
     )
     await db.commit()
 
-    return success(_serialize_agent(agent), status_code=201)
+    refused = await _sync_kb_grants(db, agent, user)
+    out = _serialize_agent(agent)
+    if refused:
+        out["kb_grants_refused"] = refused
+    return success(out, status_code=201)
 
 
 @router.put("/{agent_id}")
@@ -907,12 +1150,15 @@ async def update_agent(
         except ValueError:
             return error(f"Invalid status: {body.status}", 400)
     if body.agent_type is not None:
-        if user.role.value != "admin":
-            return error("Only admins can change agent_type", 403)
         try:
-            agent.agent_type = AgentType(body.agent_type.lower())
+            wanted_type = AgentType(body.agent_type.lower())
         except ValueError:
             return error(f"Invalid agent_type: {body.agent_type}", 400)
+        # the builder echoes the current type on every save, only a change needs admin
+        if wanted_type != agent.agent_type:
+            if user.role.value != "admin":
+                return error("Only admins can change agent_type", 403)
+            agent.agent_type = wanted_type
 
     await db.commit()
     await db.refresh(agent)
@@ -966,7 +1212,15 @@ async def update_agent(
     except Exception:
         pass  # Revision tracking failure should not block agent update
 
-    return success(_serialize_agent(agent))
+    refused = (
+        await _sync_kb_grants(db, agent, user)
+        if body.agent_model_config is not None
+        else []
+    )
+    out = _serialize_agent(agent)
+    if refused:
+        out["kb_grants_refused"] = refused
+    return success(out)
 
 
 @router.get("/{agent_id}/revisions")
@@ -1010,68 +1264,133 @@ async def list_revisions(
 async def revert_to_revision(
     agent_id: uuid.UUID,
     revision_id: uuid.UUID,
+    request: Request,
+    which: str = Query(
+        "after",
+        pattern="^(after|before)$",
+        description="after: this version, before: the state it replaced",
+    ),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    agent_result = await db.execute(
-        select(Agent).where(
-            Agent.id == agent_id,
-            Agent.tenant_id == user.tenant_id,
+    """Make the agent look as it did right after the chosen revision, or right before it."""
+    agent = (
+        await db.execute(
+            select(Agent)
+            .where(Agent.id == agent_id, Agent.tenant_id == user.tenant_id)
+            .with_for_update()
         )
-    )
-    agent = agent_result.scalar_one_or_none()
+    ).scalar_one_or_none()
     if not agent:
         return error("Agent not found", 404)
     if agent.agent_type == AgentType.OOB:
         return error("Cannot revert an OOB agent", 403)
-    if user.role not in ("admin", "owner") and agent.created_by != user.id:
-        return error("Only the agent creator or a tenant admin may revert", 403)
+    if agent.creator_id != user.id and user.role.value != "admin":
+        return error("Only the agent's owner or an admin can restore a version", 403)
 
-    rev_result = await db.execute(
-        select(AgentRevision).where(
-            AgentRevision.id == revision_id, AgentRevision.agent_id == agent_id
+    revision = (
+        await db.execute(
+            select(AgentRevision).where(
+                AgentRevision.id == revision_id, AgentRevision.agent_id == agent_id
+            )
         )
-    )
-    revision = rev_result.scalar_one_or_none()
-    if not revision or not revision.previous_state:
+    ).scalar_one_or_none()
+    if revision is None:
+        target = None
+    elif which == "before":
+        target = revision.previous_state
+    else:
+        target = revision.new_state or revision.previous_state
+    if not target:
         return error("Revision not found", 404)
 
-    # Apply previous state
-    prev = revision.previous_state
-    if prev.get("name"):
-        agent.name = prev["name"]
-    if prev.get("description") is not None:
-        agent.description = prev["description"]
-    if prev.get("system_prompt") is not None:
-        agent.system_prompt = prev["system_prompt"]
-    if prev.get("model_config") is not None:
-        agent.model_config_ = prev["model_config"]
-    if prev.get("category"):
-        agent.category = prev["category"]
+    current = {
+        "name": agent.name,
+        "description": agent.description,
+        "system_prompt": agent.system_prompt,
+        "model_config": agent.model_config_,
+        "category": agent.category,
+        "status": agent.status.value,
+    }
+    if target.get("name"):
+        agent.name = target["name"]
+    if target.get("description") is not None:
+        agent.description = target["description"]
+    if target.get("system_prompt") is not None:
+        agent.system_prompt = target["system_prompt"]
+    if target.get("model_config") is not None:
+        agent.model_config_ = target["model_config"]
+    if target.get("category"):
+        agent.category = target["category"]
 
-    # Create a revert revision
-    rev_count = await db.execute(
-        select(AgentRevision).where(AgentRevision.agent_id == agent_id)
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(AgentRevision)
+            .where(AgentRevision.agent_id == agent_id)
+        )
+    ).scalar() or 0
+    db.add(
+        AgentRevision(
+            id=uuid.uuid4(),
+            agent_id=agent_id,
+            revision_number=count + 1,
+            changed_by=user.id,
+            change_type="revert",
+            previous_state=current,
+            new_state=target,
+            diff_summary=(
+                f"Restored the state before version {revision.revision_number}"
+                if which == "before"
+                else f"Restored version {revision.revision_number}"
+            ),
+        )
     )
-    new_rev = AgentRevision(
-        id=uuid.uuid4(),
-        agent_id=agent_id,
-        revision_number=len(rev_count.scalars().all()) + 1,
-        changed_by=user.id,
-        change_type="revert",
-        previous_state=revision.new_state,  # Current state before revert
-        new_state=revision.previous_state,  # State we're reverting to
-        diff_summary=f"Reverted to revision #{revision.revision_number}",
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "agent.reverted",
+        {"agent_id": str(agent.id), "to_revision": revision.revision_number},
+        request,
+        resource_type="agent",
+        resource_id=str(agent.id),
     )
-    db.add(new_rev)
     await db.commit()
+    refused = await _sync_kb_grants(db, agent, user)
+    return success(
+        {
+            "reverted": True,
+            "to_revision": revision.revision_number,
+            **({"kb_grants_refused": refused} if refused else {}),
+        }
+    )
 
-    return success({"reverted": True, "to_revision": revision.revision_number})
+
+@router.get("/{agent_id}/dependents")
+async def get_agent_dependents(
+    agent_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Pipelines, agents and triggers that use this agent."""
+    from app.services.dependents import agent_dependents
+
+    agent = (
+        await db.execute(
+            select(Agent).where(Agent.id == agent_id, Agent.tenant_id == user.tenant_id)
+        )
+    ).scalar_one_or_none()
+    if not agent:
+        return error("Agent not found", 404)
+    return success(await agent_dependents(db, agent))
 
 
 @router.delete("/{agent_id}")
 async def delete_agent(
     agent_id: uuid.UUID,
+    request: Request,
+    force: bool = Query(False, description="Delete even though other work uses it"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -1092,10 +1411,37 @@ async def delete_agent(
     if agent.agent_type == AgentType.OOB:
         return error("Cannot delete pre-built agents", 403)
 
+    from app.services.dependents import agent_dependents, count, disable_agent_triggers
+
+    deps = await agent_dependents(db, agent)
+    if count(deps) and not force:
+        return error(
+            f"{agent.name} is used by {count(deps)} other item(s). They stop working if it is deleted.",
+            409,
+            error_code="IN_USE",
+            details={"dependents": deps},
+        )
+    agent.model_config_ = {
+        **(agent.model_config_ or {}),
+        "_archived_from": agent.status.value,
+    }
     agent.status = AgentStatus.ARCHIVED
+    disabled = await disable_agent_triggers(db, agent.id)
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "agent.deleted",
+        {"agent_id": str(agent.id), "name": agent.name, "dependents": deps},
+        request,
+        resource_type="agent",
+        resource_id=str(agent.id),
+    )
     await db.commit()
 
-    return success({"id": str(agent.id), "status": "archived"})
+    return success(
+        {"id": str(agent.id), "status": "archived", "triggers_disabled": disabled}
+    )
 
 
 @router.post("/{agent_id}/duplicate")
@@ -1167,7 +1513,8 @@ async def publish_agent(
     if agent.agent_type == AgentType.OOB:
         return error("Cannot publish pre-built agents", 403)
 
-    if not agent.name or not agent.system_prompt:
+    is_pipeline = (agent.model_config_ or {}).get("mode") == "pipeline"
+    if not agent.name or (not agent.system_prompt and not is_pipeline):
         return error("Agent must have a name and system prompt to publish", 400)
 
     visibility = "tenant"
@@ -1541,6 +1888,51 @@ async def preview_validation(
     )
 
 
+MAX_DELEGATION_DEPTH = 3
+
+
+async def _resolve_delegation(
+    db: AsyncSession, user: User, agent: Agent, raw: Any
+) -> tuple[uuid.UUID | None, int, str | None]:
+    """Parent link and depth for a sub-agent run. Depth comes from the stored chain, never below what the caller sent."""
+    if not isinstance(raw, dict) or not raw.get("parent_execution_id"):
+        return None, 0, None
+    try:
+        parent_id = uuid.UUID(str(raw["parent_execution_id"]))
+    except (ValueError, TypeError):
+        return None, 0, "parent_execution_id is not a valid id"
+    try:
+        claimed = int(raw.get("delegation_depth") or 0)
+    except (ValueError, TypeError):
+        claimed = 0
+
+    depth = 0
+    parent_agent_id = None
+    cursor: uuid.UUID | None = parent_id
+    while cursor is not None and depth <= MAX_DELEGATION_DEPTH:
+        row = (
+            await db.execute(
+                select(Execution.agent_id, Execution.parent_execution_id).where(
+                    Execution.id == cursor, Execution.tenant_id == user.tenant_id
+                )
+            )
+        ).first()
+        if row is None:
+            if depth == 0:
+                return None, 0, "parent execution not found"
+            break
+        if depth == 0:
+            parent_agent_id = row[0]
+        depth += 1
+        cursor = row[1]
+    depth = max(depth, claimed)
+    if parent_agent_id is not None and parent_agent_id == agent.id:
+        return None, 0, "an agent cannot invoke itself"
+    if depth > MAX_DELEGATION_DEPTH:
+        return None, 0, f"sub-agent depth limit reached ({MAX_DELEGATION_DEPTH})"
+    return parent_id, depth, None
+
+
 @router.post("/{agent_id_or_slug}/execute", response_model=None)
 async def execute_agent(
     agent_id_or_slug: str,
@@ -1663,8 +2055,28 @@ async def execute_agent(
         ):
             return error("You do not have access to this agent", 403)
 
+    if agent.status == AgentStatus.ARCHIVED:
+        return error(
+            f"{agent.name} was deleted. Point this at another agent or ask its owner to restore it.",
+            410,
+            error_code="AGENT_DELETED",
+        )
     if agent.status not in (AgentStatus.ACTIVE, AgentStatus.DRAFT):
         return error("Agent is not in an executable state", 400)
+
+    # sub-agent runs from invoke_agent carry the parent run and their nesting depth
+    try:
+        _raw_body = await request.json()
+    except Exception:
+        _raw_body = {}
+    parent_execution_id, delegation_depth, _deleg_err = await _resolve_delegation(
+        db, user, agent, _raw_body
+    )
+    if _deleg_err:
+        return error(_deleg_err, 400)
+    _user_role = getattr(getattr(user, "role", None), "value", None) or str(
+        getattr(user, "role", "") or "user"
+    )
 
     model_cfg = agent.model_config_ or {}
     is_pipeline = model_cfg.get("mode") == "pipeline"
@@ -1721,6 +2133,7 @@ async def execute_agent(
         model_used=model if not is_pipeline else "pipeline",
         model_requested=model if not is_pipeline else "pipeline",
         started_at=datetime.now(timezone.utc),
+        parent_execution_id=parent_execution_id,
     )
     db.add(execution)
     await db.commit()
@@ -1767,10 +2180,15 @@ async def execute_agent(
                 "agent_id": str(agent.id),
                 "tenant_id": str(user.tenant_id),
                 "user_id": str(user.id),
+                "role": _user_role,
                 "api_key_id": str(api_key_id) if api_key_id else None,
                 "message": sanitized_message,
                 "context": user_context,
                 "is_pipeline": is_pipeline,
+                "parent_execution_id": (
+                    str(parent_execution_id) if parent_execution_id else None
+                ),
+                "delegation_depth": delegation_depth,
             }
             task_id = await backend.submit(agent_pool, payload)
 
@@ -1780,6 +2198,7 @@ async def execute_agent(
                 from app.core.execution_bus import subscribe_events
 
                 async def _remote_stream() -> AsyncIterator[bytes]:
+                    sent_text = False
                     # The bus carries the runtime's own event shape: a string
                     # token arrives as {"event":"token","data":"..."} and an
                     # error as {"error":...}. The browser reads data.text and
@@ -1795,6 +2214,7 @@ async def execute_agent(
                             if not isinstance(raw, str):
                                 raw = evt.get("text") or evt.get("content") or ""
                             payload = {"text": raw}
+                            sent_text = sent_text or bool(raw)
                         elif ev_name == "error":
                             payload = {
                                 "message": str(
@@ -1803,6 +2223,13 @@ async def execute_agent(
                             }
                         else:
                             payload = {k: v for k, v in evt.items() if k != "event"}
+                        if ev_name == "done":
+                            payload.setdefault("execution_id", str(execution.id))
+                            # pipelines publish their answer only on done, show it as text
+                            final = _final_text(evt.get("output"))
+                            if final and not sent_text:
+                                tok = json.dumps({"text": final})
+                                yield f"event: token\ndata: {tok}\n\n".encode()
                         data = json.dumps(payload, default=str)
                         yield f"event: {ev_name}\ndata: {data}\n\n".encode()
 
@@ -2013,6 +2440,12 @@ async def execute_agent(
                 _enqueue_err,
             )
 
+    _caller_ctx = {
+        "user_id": str(user.id),
+        "user_role": _user_role,
+        "delegation_depth": delegation_depth,
+    }
+
     # Pipeline agents use PipelineExecutor instead of AgentExecutor
     if is_pipeline:
         pipeline_config = model_cfg.get("pipeline_config")
@@ -2046,6 +2479,7 @@ async def execute_agent(
                     tenant_id=str(user.tenant_id),
                     agent_id=str(agent.id),
                     agent_name=agent.name,
+                    caller=_caller_ctx,
                 ),
                 media_type="text/event-stream",
                 headers={
@@ -2065,12 +2499,15 @@ async def execute_agent(
             tenant_id=str(user.tenant_id),
             agent_name=agent.name,
             input_defaults=_input_defaults(agent.model_config_),
+            caller=_caller_ctx,
         )
 
     # Enterprise context for tools and monitoring
     _enterprise_ctx = {
         "tenant_id": str(user.tenant_id),
         "user_id": str(user.id),
+        "user_role": _user_role,
+        "delegation_depth": delegation_depth,
         "agent_name": agent.name,
         "per_execution_cost_limit": (
             float(agent.per_execution_cost_limit)
@@ -2175,6 +2612,7 @@ async def _stream_pipeline_execution(
     agent_id: str = "",
     agent_name: str = "",
     timeout_seconds: int = 120,
+    caller: dict[str, Any] | None = None,
 ) -> Any:
     """Stream pipeline execution with node-level progress events."""
     import asyncio as _asyncio
@@ -2187,16 +2625,32 @@ async def _stream_pipeline_execution(
         serialize_pipeline_result,
     )
 
-    tool_registry = build_tool_registry(tool_names)
+    _caller = caller or {}
+    tool_registry = build_tool_registry(
+        tool_names,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        execution_id=str(execution_id),
+        user_id=str(_caller.get("user_id") or ""),
+        user_role=str(_caller.get("user_role") or ""),
+        delegation_depth=int(_caller.get("delegation_depth") or 0),
+    )
 
     event_queue: _asyncio.Queue[str | None] = _asyncio.Queue()
     _node_statuses: dict[str, str] = {}
+    _labels: dict[str, str] = {}
     _completed_nodes = 0
 
     async def on_node_start(node_id: str, tool_name: str) -> None:
         nonlocal _completed_nodes
         _node_statuses[node_id] = "running"
-        data = json.dumps({"node_id": node_id, "tool_name": tool_name})
+        data = json.dumps(
+            {
+                "node_id": node_id,
+                "tool_name": tool_name,
+                "label": _labels.get(node_id, ""),
+            }
+        )
         await event_queue.put(f"event: node_start\ndata: {data}\n\n")
         await publish_state(
             str(execution_id),
@@ -2275,6 +2729,7 @@ async def _stream_pipeline_execution(
     # Parse pipeline nodes and inject user message as query for search nodes
     raw_nodes = pipeline_config.get("nodes", [])
     pipeline_nodes = parse_pipeline_nodes(raw_nodes)
+    _labels.update({n.id: n.label for n in pipeline_nodes if n.label})
     for node in pipeline_nodes:
         if node.tool_name == "web_search" and "query" not in node.arguments:
             node.arguments["query"] = message
@@ -2345,6 +2800,7 @@ async def _stream_pipeline_execution(
 
             done_data = json.dumps(
                 {
+                    "execution_id": str(execution_id),
                     "total_tokens": _total_in + _total_out,
                     "input_tokens": _total_in,
                     "output_tokens": _total_out,
@@ -2541,6 +2997,7 @@ async def _non_stream_pipeline_execution(
     tenant_id: str = "",
     agent_name: str = "",
     input_defaults: dict[str, Any] | None = None,
+    caller: dict[str, Any] | None = None,
 ) -> JSONResponse:
     """Execute pipeline and return JSON result."""
     from app.core.execution_state import publish_state, complete_state, fail_state
@@ -2566,7 +3023,16 @@ async def _non_stream_pipeline_execution(
 
         from app.core.platform_settings import get_int_setting
 
-        tool_registry = build_tool_registry(tool_names)
+        _caller = caller or {}
+        tool_registry = build_tool_registry(
+            tool_names,
+            agent_id=str(execution.agent_id),
+            tenant_id=str(tenant_id),
+            execution_id=str(execution.id),
+            user_id=str(_caller.get("user_id") or execution.user_id or ""),
+            user_role=str(_caller.get("user_role") or ""),
+            delegation_depth=int(_caller.get("delegation_depth") or 0),
+        )
         executor = PipelineExecutor(
             tool_registry=tool_registry,
             timeout_seconds=await get_int_setting("pipeline.timeout_seconds", 300),
@@ -2774,6 +3240,9 @@ async def _stream_execution(
         db_url=str(settings.database_url),
         acting_subject=acting_subject,
         model_config=agent_model_config,
+        user_id=str(enterprise_ctx.get("user_id") or ""),
+        user_role=str(enterprise_ctx.get("user_role") or ""),
+        delegation_depth=int(enterprise_ctx.get("delegation_depth") or 0),
     )
 
     # Publish live execution state to Redis
@@ -2970,6 +3439,7 @@ async def _stream_execution(
                 yield f"event: node_trace\ndata: {json.dumps(event_data, default=str)}\n\n"
             elif event_type == "done":
                 final_data = event_data if isinstance(event_data, dict) else {}
+                final_data.setdefault("execution_id", str(execution_id))
                 # Calculate confidence score
                 try:
                     from engine.confidence import (
@@ -3364,6 +3834,9 @@ async def _non_stream_execution(
         agent_name=agent_name,
         db_url=str(settings.database_url),
         acting_subject=acting_subject,
+        user_id=str(enterprise_ctx.get("user_id") or execution.user_id or ""),
+        user_role=str(enterprise_ctx.get("user_role") or ""),
+        delegation_depth=int(enterprise_ctx.get("delegation_depth") or 0),
     )
 
     mcp_clients = []

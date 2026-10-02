@@ -166,7 +166,7 @@ spec:
         - name: shared-data
           {{- if $.Values.sharedData.usePVC }}
           persistentVolumeClaim:
-            claimName: {{ $release }}-shared-data
+            claimName: abenix-shared-data
           {{- else }}
           # On minikube / single-node dev clusters, hostPath works
           # because every pod lands on the same node. Multi-node clusters

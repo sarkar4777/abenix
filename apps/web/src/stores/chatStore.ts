@@ -24,9 +24,11 @@ export interface ToolBlock {
 export interface PipelineNodeBlock {
   type: 'pipeline_node';
   nodeId: string;
+  label?: string;
   toolName: string;
   status: 'running' | 'completed' | 'failed' | 'skipped';
   durationMs?: number;
+  error?: string;
 }
 
 export type ContentBlock = TextBlock | ToolBlock | PipelineNodeBlock;
@@ -39,6 +41,7 @@ export interface ChatMessage {
   model?: string;
   requestedModel?: string;
   fallbackReason?: string;
+  executionId?: string;
 }
 
 export interface AgentInfo {
@@ -153,6 +156,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         blocks.push({
           type: 'pipeline_node',
           nodeId: data.node_id,
+          label: data.label || undefined,
           toolName: data.tool_name,
           status: 'running',
         });
@@ -170,6 +174,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ) {
             b.status = data.status as PipelineNodeBlock['status'];
             b.durationMs = data.duration_ms;
+            if (data.error) b.error = data.error;
             break;
           }
         }
@@ -198,6 +203,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           model: data.effective_model || data.model,
           requestedModel: data.requested_model,
           fallbackReason: data.fallback_reason,
+          executionId: data.execution_id,
         };
         set({
           messages: [...get().messages, assistantMsg],

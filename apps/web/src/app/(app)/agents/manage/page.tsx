@@ -14,6 +14,7 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 import { apiFetch } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
+import DeletedAgents from '@/components/agent/DeletedAgents';
 
 interface Agent {
   id: string;
@@ -101,7 +102,7 @@ export default function ManageAgentsPage() {
         }
         setBulkLoadingRemaining(null);
       }
-      const res = await apiFetch<{ deleted: number; requested: number }>(
+      const res = await apiFetch<{ deleted: number; requested: number; skipped?: { name?: string; reason: string }[] }>(
         '/api/agents/bulk',
         {
           method: 'DELETE',
@@ -112,6 +113,16 @@ export default function ManageAgentsPage() {
         toastSuccess(
           `Deleted ${res.data.deleted} agent${res.data.deleted === 1 ? '' : 's'}`,
         );
+        const skipped = res.data.skipped || [];
+        if (skipped.length) {
+          const by = (r: string) => skipped.filter((x) => x.reason === r).length;
+          const parts = [
+            by('in use') && `${by('in use')} still used by pipelines, agents or triggers (delete those one at a time to see what breaks)`,
+            by('not yours') && `${by('not yours')} owned by someone else`,
+            by('built-in agent') && `${by('built-in agent')} built in`,
+          ].filter(Boolean);
+          toastError(`${skipped.length} not deleted`, parts.join(', '));
+        }
         setSelected(new Set());
         setConfirmBulk(false);
         mutateAgents();
@@ -368,6 +379,7 @@ export default function ManageAgentsPage() {
           </tbody>
         </table>
       </div>
+      <DeletedAgents onRestored={() => mutateAgents()} />
     </motion.div>
   );
 }

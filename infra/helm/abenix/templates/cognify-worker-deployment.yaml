@@ -130,9 +130,14 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: data
+          {{- if .Values.sharedData.usePVC }}
+          persistentVolumeClaim:
+            claimName: abenix-shared-data
+          {{- else }}
           hostPath:
             path: {{ .Values.sharedDataHostPath | default "/var/lib/abenix/data" }}
             type: DirectoryOrCreate
+          {{- end }}
       {{- if .Values.cognifyWorker.colocateWithApi | default true }}
       affinity:
         podAffinity:

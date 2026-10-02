@@ -168,3 +168,70 @@ async def grant_agent_collection(
     elif g.permission != permission:
         g.permission = permission
         g.granted_by = granted_by
+
+
+async def reconcile_agent_collections(
+    db: AsyncSession,
+    *,
+    agent_id: uuid.UUID,
+    wanted: list[Any],
+    user_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    is_admin: bool = False,
+) -> list[dict[str, str]]:
+    """Make the agent's READ grants match `wanted`. Returns refused ids with reasons.
+
+    Only collections the caller can administer are added or removed, the same
+    rule the grant endpoint applies. Commits nothing.
+    """
+    want: set[uuid.UUID] = set()
+    refused: list[dict[str, str]] = []
+    for raw in wanted or []:
+        try:
+            want.add(uuid.UUID(str(raw)))
+        except ValueError:
+            refused.append({"id": str(raw), "reason": "not a valid id"})
+
+    current = {
+        g.collection_id: g
+        for g in (
+            await db.execute(
+                select(AgentCollectionGrant).where(
+                    AgentCollectionGrant.agent_id == agent_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+
+    async def can_admin(cid: uuid.UUID) -> bool:
+        return await assert_collection_access(
+            db,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            collection_id=cid,
+            minimum_permission=CollectionPermission.ADMIN,
+            is_admin=is_admin,
+        )
+
+    for cid in want - set(current):
+        if not await can_admin(cid):
+            refused.append(
+                {
+                    "id": str(cid),
+                    "reason": "you cannot grant agents access to this knowledge base",
+                }
+            )
+            continue
+        await grant_agent_collection(
+            db,
+            agent_id=agent_id,
+            collection_id=cid,
+            permission=CollectionPermission.READ,
+            granted_by=user_id,
+        )
+    for cid, g in current.items():
+        if cid not in want and await can_admin(cid):
+            await db.delete(g)
+    return refused

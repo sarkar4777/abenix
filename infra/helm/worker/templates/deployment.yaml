@@ -167,6 +167,11 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: data
+          {{- if .Values.sharedDataPVC.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.sharedDataPVC.claimName | default "abenix-shared-data" }}
+          {{- else }}
           hostPath:
             path: {{ .Values.sharedDataHostPath | default "/var/lib/abenix/data" }}
             type: DirectoryOrCreate
+          {{- end }}

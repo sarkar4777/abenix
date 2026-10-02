@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, require_role
@@ -35,8 +35,34 @@ def _serialize_member(u: User) -> dict:
     }
 
 
-def _serialize_invite(inv: TeamInvite) -> dict:
-    return {
+def web_base_url(request: Request | None) -> str:
+    import os
+
+    base = os.environ.get("WEB_BASE_URL", "").strip()
+    if not base and request is not None:
+        base = (request.headers.get("origin") or "").strip()
+    if not base:
+        from app.core.config import settings
+
+        base = os.environ.get("FRONTEND_URL", "") or settings.frontend_url
+    return base.rstrip("/")
+
+
+def invite_is_expired(inv: TeamInvite, now: datetime | None = None) -> bool:
+    exp = inv.expires_at
+    if exp is None:
+        return False
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return exp <= (now or datetime.now(timezone.utc))
+
+
+def invite_url(request: Request | None, token: str) -> str:
+    return f"{web_base_url(request)}/auth/accept-invite?token={token}"
+
+
+def _serialize_invite(inv: TeamInvite, request: Request | None = None) -> dict:
+    data = {
         "id": str(inv.id),
         "email": inv.email,
         "role": inv.role,
@@ -47,11 +73,17 @@ def _serialize_invite(inv: TeamInvite) -> dict:
         ),
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
         "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
+        "expired": invite_is_expired(inv),
     }
+    # the token is a credential, only callers that pass a request see the link
+    if request is not None and inv.token:
+        data["invite_url"] = invite_url(request, inv.token)
+    return data
 
 
 @router.get("/members")
 async def list_members(
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -71,7 +103,10 @@ async def list_members(
     return success(
         {
             "members": [_serialize_member(m) for m in members],
-            "pending_invites": [_serialize_invite(i) for i in invites],
+            "pending_invites": [
+                _serialize_invite(i, request if user.role == UserRole.ADMIN else None)
+                for i in invites
+            ],
         }
     )
 
@@ -125,6 +160,7 @@ async def dev_create_member(
 @router.post("/invite")
 async def invite_member(
     body: InviteMemberRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -134,26 +170,32 @@ async def invite_member(
     if body.role not in ("admin", "creator", "user"):
         return error("Invalid role. Must be admin, creator, or user", 400)
 
-    existing = await db.execute(
-        select(User).where(User.email == body.email, User.tenant_id == user.tenant_id)
-    )
-    if existing.scalar_one_or_none():
-        return error("User already a member of this workspace", 409)
+    email = str(body.email).strip().lower()
+    existing = await db.execute(select(User).where(func.lower(User.email) == email))
+    found = existing.scalar_one_or_none()
+    if found is not None:
+        if found.tenant_id == user.tenant_id:
+            return error("User already a member of this workspace", 409)
+        # one account belongs to one workspace, the invite could never be accepted
+        return error("This email already has an account in another workspace", 409)
 
     pending = await db.execute(
         select(TeamInvite).where(
-            TeamInvite.email == body.email,
+            TeamInvite.email == email,
             TeamInvite.tenant_id == user.tenant_id,
             TeamInvite.status == InviteStatus.PENDING,
         )
     )
-    if pending.scalar_one_or_none():
-        return error("Invite already pending for this email", 409)
+    prior = pending.scalar_one_or_none()
+    if prior is not None:
+        if not invite_is_expired(prior):
+            return error("Invite already pending for this email", 409)
+        prior.status = InviteStatus.EXPIRED
 
     invite = TeamInvite(
         tenant_id=user.tenant_id,
         invited_by=user.id,
-        email=body.email,
+        email=email,
         role=body.role,
         token=secrets.token_urlsafe(32),
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
@@ -162,7 +204,7 @@ async def invite_member(
     await db.commit()
     await db.refresh(invite)
 
-    return success(_serialize_invite(invite), status_code=201)
+    return success(_serialize_invite(invite, request), status_code=201)
 
 
 @router.put("/members/{member_id}/role")

@@ -9,6 +9,87 @@ from engine.provider_credentials import PROVIDER_CONFIG_FIELDS
 from engine.tools.base import BaseTool, ToolResult
 
 
+async def _agent_model_config(agent_id: str, db_url: str) -> dict[str, Any]:
+    """model_config of a saved agent, empty for an inline step or on any failure."""
+    if not agent_id or not db_url:
+        return {}
+    try:
+        from sqlalchemy import text as _t
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from engine.pipeline import _get_pipeline_engine
+
+        engine = await _get_pipeline_engine(db_url)
+        if engine is None:
+            return {}
+        async with AsyncSession(engine) as session:
+            row = (
+                await session.execute(
+                    _t(
+                        "SELECT model_config FROM agents WHERE id = CAST(:aid AS uuid)"
+                    ).bindparams(aid=agent_id)
+                )
+            ).first()
+        cfg = row[0] if row else {}
+        if isinstance(cfg, str):
+            cfg = json.loads(cfg)
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _hold_to_schema(
+    router: Any,
+    schema: Any,
+    system_prompt: str,
+    model: str,
+    temperature: float,
+    task: str,
+    output: str,
+) -> tuple[str, list[str]]:
+    """Check an agent's answer against its declared output_schema, one corrective retry.
+
+    Returns the output to pass on and any violations still left. Agents
+    without a schema pass through untouched.
+    """
+    if not isinstance(schema, dict) or not output:
+        return output, []
+    from engine.post_process import post_process, schema_violations
+
+    _, warns = post_process(output, schema)
+    bad = schema_violations(warns)
+    if not bad:
+        return output, []
+    note = (
+        "Your answer does not match the required output format:\n- "
+        + "\n- ".join(bad[:15])
+        + "\nReturn only the corrected JSON. Do not leave required fields empty. "
+        "Anything you cannot fill in completely goes where the format puts unresolved items."
+    )
+    try:
+        resp = await router.complete(
+            messages=[
+                {"role": "user", "content": task},
+                {"role": "assistant", "content": output},
+                {"role": "user", "content": note},
+            ],
+            system=system_prompt or None,
+            tools=None,
+            model=model,
+            temperature=min(float(temperature or 0), 0.2),
+            max_tokens=4096,
+            stream=False,
+        )
+        fixed = getattr(resp, "content", "") or ""
+    except Exception:  # noqa: BLE001
+        return output, bad
+    _, warns2 = post_process(fixed, schema)
+    bad2 = schema_violations(warns2)
+    if fixed and len(bad2) < len(bad):
+        return fixed, bad2
+    return output, bad
+
+
 class AgentStepTool(BaseTool):
     # The LLM provider keys, declared here so they sit on the admin screen.
     config_fields = PROVIDER_CONFIG_FIELDS
@@ -19,6 +100,15 @@ class AgentStepTool(BaseTool):
         "Use this to chain agents within a pipeline — the output of one agent can "
         "feed into another. Supports all available tools and LLM models."
     )
+
+    def __init__(
+        self, user_id: str = "", user_role: str = "", delegation_depth: int = 0
+    ) -> None:
+        # the caller of the pipeline, so tools inside the step act as them
+        self._user_id = user_id
+        self._user_role = user_role
+        self._delegation_depth = delegation_depth
+
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
@@ -108,12 +198,33 @@ class AgentStepTool(BaseTool):
             # that it has no way to look anything up.
             import os as _os
 
+            # the agent's own tool settings, e.g. which code asset it is bound to
+            agent_cfg = await _agent_model_config(
+                str(arguments.get("__agent_id__") or ""),
+                _os.environ.get("DATABASE_URL", ""),
+            )
+            tool_cfg = agent_cfg.get("tool_config") or {}
+            if tool_cfg:
+                from engine.agent_executor import resolve_asset_schemas
+                from engine.tool_config_prompt import build_tool_config_prompt
+
+                system_prompt = build_tool_config_prompt(system_prompt, tool_cfg)
+                asset_schemas = await resolve_asset_schemas(
+                    tool_cfg, tenant_id=str(arguments.get("__tenant_id__") or "")
+                )
+            else:
+                asset_schemas = {}
+
             tool_registry = build_tool_registry(
                 tool_names or [],
                 kb_ids=arguments.get("__kb_ids__") or [],
                 agent_id=str(arguments.get("__agent_id__") or ""),
                 tenant_id=str(arguments.get("__tenant_id__") or ""),
                 db_url=_os.environ.get("DATABASE_URL", ""),
+                user_id=getattr(self, "_user_id", ""),
+                user_role=getattr(self, "_user_role", ""),
+                delegation_depth=getattr(self, "_delegation_depth", 0),
+                model_config=agent_cfg,
             )
             router = LLMRouter()
 
@@ -125,12 +236,23 @@ class AgentStepTool(BaseTool):
                 temperature=temperature,
                 max_iterations=max_iterations,
                 sandbox=sub_sandbox,
+                tool_config=tool_cfg or None,
+                asset_schemas=asset_schemas or None,
             )
 
             result = await executor.invoke(input_message)
+            final_output, schema_warnings = await _hold_to_schema(
+                router,
+                agent_cfg.get("output_schema"),
+                system_prompt,
+                model,
+                temperature,
+                input_message,
+                result.output,
+            )
 
             output = {
-                "response": result.output,
+                "response": final_output,
                 "model": result.model,
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
@@ -143,6 +265,11 @@ class AgentStepTool(BaseTool):
             return ToolResult(
                 content=json.dumps(output, indent=2, default=str),
                 metadata={
+                    **(
+                        {"validation_warnings": schema_warnings}
+                        if schema_warnings
+                        else {}
+                    ),
                     "model": result.model,
                     "input_tokens": result.input_tokens,
                     "output_tokens": result.output_tokens,

@@ -198,6 +198,18 @@ The deploy writes the hostname to `.azure-endpoint` at the repo root, and
 
 ---
 
+## Where uploaded code and models live
+
+Code assets and ML models are written to the data volume first, under `/data/code-assets` and `/data/ml-models`. Every pod that reads them has to see the same files, and the platform does not rely on that alone.
+
+- **Shared volumes.** On one node `/data` is a host path every pod mounts. With `sharedData.usePVC` (on in the Azure values) the API, worker, cognify worker and runtime pools mount the ReadWriteMany claim `abenix-shared-data` instead. Models also sit on `ml-models-storage`, mounted by the API and the runtime everywhere. The API's init container copies anything an older layout held into these claims, never overwriting.
+- **Durable copy.** With `objectStorage.type` set to `s3` or `azure`, every upload, new version and seeded file is mirrored to object storage under `artifacts/<path under /data>`. Any API replica that lacks a file restores it before serving it, so replicas, restarts and rescheduling never lose one. With the local backend this step does nothing.
+- **Pull on demand.** A runtime pod that cannot see a model fetches it from `GET /api/ml-models/{id}/fetch`, and a sandbox fetches a large code asset from `GET /api/code-assets/{id}/fetch`. Both take only a ten minute token signed for that one file and cache what they fetched.
+- **Self-healing seeds.** The seeds restore a seeded model or code archive whose database row outlived its file. A code asset a user has replaced with their own version is never overwritten.
+- **Deploy check.** After seeding, `deploy.sh` and `deploy-azure.sh` confirm the runtime reads a model file the API stored and warn when it cannot.
+
+Running the processes directly on a workstation, they share one filesystem and all of this reduces to plain files.
+
 ## Day-2 operations
 
 ### Rolling a single service

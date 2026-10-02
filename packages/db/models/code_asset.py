@@ -104,6 +104,10 @@ class CodeAsset(UUIDMixin, TenantMixin, TimestampMixin, Base):
     )
     last_test_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
+    # bumped on every new upload, earlier archives kept so one can be restored
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    version_history: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),

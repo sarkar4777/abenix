@@ -40,7 +40,7 @@ export interface MCPNodeData {
 export const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentNodeData>) {
   return (
     <div
-      className={`bg-slate-800/90 border-2 rounded-xl p-4 min-w-[220px] shadow-lg transition-all ${
+      className={`bg-slate-800/90 border-2 rounded-xl p-4 min-w-[220px] max-w-[300px] shadow-lg transition-all ${
         selected
           ? 'border-cyan-400 shadow-cyan-500/30 ring-2 ring-cyan-400/20'
           : 'border-cyan-500/50 shadow-cyan-500/10'
@@ -92,7 +92,8 @@ export const ToolNode = memo(function ToolNode({ data, selected }: NodeProps<Too
 
   return (
     <div
-      className={`bg-slate-800/90 border rounded-lg p-3 min-w-[180px] shadow-md transition-all relative group ${borderColor}`}
+      className={`bg-slate-800/90 border rounded-lg p-3 min-w-[180px] w-[240px] shadow-md transition-all relative group ${borderColor}`}
+      title={data.description}
     >
       <Handle type="target" position={Position.Left} className="!bg-cyan-400 !w-2.5 !h-2.5 !border-2 !border-slate-900" />
       {selected && data.onDelete && (
@@ -151,7 +152,7 @@ export const ToolNode = memo(function ToolNode({ data, selected }: NodeProps<Too
 export const KnowledgeNode = memo(function KnowledgeNode({ data, selected }: NodeProps<KnowledgeNodeData>) {
   return (
     <div
-      className={`bg-slate-800/90 border rounded-lg p-3 min-w-[160px] shadow-md transition-all relative ${
+      className={`bg-slate-800/90 border rounded-lg p-3 min-w-[160px] max-w-[300px] shadow-md transition-all relative ${
         selected
           ? 'border-purple-400 shadow-purple-500/20 ring-2 ring-purple-400/20'
           : 'border-slate-700'
@@ -185,7 +186,7 @@ export const KnowledgeNode = memo(function KnowledgeNode({ data, selected }: Nod
 export const MCPNode = memo(function MCPNode({ data, selected }: NodeProps<MCPNodeData>) {
   return (
     <div
-      className={`bg-slate-800/90 border rounded-lg p-3 min-w-[160px] shadow-md transition-all relative ${
+      className={`bg-slate-800/90 border rounded-lg p-3 min-w-[160px] max-w-[300px] shadow-md transition-all relative ${
         selected
           ? 'border-amber-400 shadow-amber-500/20 ring-2 ring-amber-400/20'
           : 'border-slate-700'

@@ -156,6 +156,10 @@ def validate_pipeline(
         return ValidationResult(valid=False, errors=errors, warnings=warnings)
 
     nodes = [_normalise_dsl_node(n) for n in nodes]
+    from engine.pipeline import alias_labels_to_ids
+
+    # steps may be referenced by label, the engine accepts that too
+    nodes = alias_labels_to_ids(nodes)
 
     node_ids: set[str] = set()
     for idx, n in enumerate(nodes):

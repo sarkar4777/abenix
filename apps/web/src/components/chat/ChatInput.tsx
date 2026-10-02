@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useCallback, type KeyboardEvent, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, useCallback, type KeyboardEvent, type ChangeEvent } from 'react';
 import { ArrowUp, FileText, Paperclip, Square, X } from 'lucide-react';
 
 interface AttachedFile {
@@ -17,6 +17,7 @@ interface ChatInputProps {
   tokenCount: { input: number; output: number };
   cost: number;
   confidenceScore?: number | null;
+  initialValue?: string | null;
 }
 
 export default function ChatInput({
@@ -27,10 +28,23 @@ export default function ChatInput({
   tokenCount,
   cost,
   confidenceScore,
+  initialValue,
 }: ChatInputProps) {
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState(initialValue || '');
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // prefill can arrive after mount, e.g. from ?prefill= read in an effect
+  useEffect(() => {
+    if (!initialValue) return;
+    setValue(initialValue);
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 4 * 24)}px`;
+      el.focus();
+    }
+  }, [initialValue]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileAttach = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -114,6 +128,7 @@ export default function ChatInput({
               </span>
               <button
                 onClick={() => removeFile(file.name)}
+                aria-label={`Remove ${file.name}`}
                 className="w-4 h-4 flex items-center justify-center rounded text-slate-500 hover:text-red-400 transition-colors"
               >
                 <X className="w-3 h-3" />
@@ -141,6 +156,7 @@ export default function ChatInput({
               : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
           }`}
           title="Attach file"
+          aria-label="Attach file"
         >
           <Paperclip className="w-5 h-5" />
         </button>
@@ -154,6 +170,8 @@ export default function ChatInput({
           }}
           onKeyDown={handleKeyDown}
           placeholder="Message agent..."
+          aria-label="Message"
+          data-testid="chat-input"
           rows={1}
           className="flex-1 bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-cyan-500 transition-colors"
         />
@@ -163,6 +181,8 @@ export default function ChatInput({
             onClick={onStop}
             className="w-10 h-10 flex items-center justify-center rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors shrink-0 mb-0.5"
             title="Stop generating"
+            aria-label="Stop generating"
+            data-testid="chat-stop"
           >
             <Square className="w-4 h-4" />
           </button>
@@ -172,6 +192,8 @@ export default function ChatInput({
             disabled={!value.trim() && attachedFiles.length === 0}
             className="w-10 h-10 flex items-center justify-center rounded-lg bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg shadow-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity shrink-0 mb-0.5"
             title="Send message"
+            aria-label="Send message"
+            data-testid="chat-send"
           >
             <ArrowUp className="w-5 h-5" />
           </button>

@@ -1,7 +1,9 @@
 'use client';
 
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
   Webhook, Clock, Plus, Trash2, Copy, Check, ExternalLink,
@@ -10,6 +12,7 @@ import {
 import { useApi } from '@/hooks/useApi';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { toastSuccess, toastError } from '@/stores/toastStore';
+import { apiFetch } from '@/lib/api-client';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -192,20 +195,31 @@ export default function TriggersPage() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [page, setPage] = useState(0);
+  const [running, setRunning] = useState<string | null>(null);
+  const [manualRuns, setManualRuns] = useState<Record<string, string>>({});
   const LIMIT = 20;
 
-  const apiUrl = `/api/triggers?search=${encodeURIComponent(search)}&trigger_type=${typeFilter}&limit=${LIMIT}&offset=${page * LIMIT}`;
+  // ?agent= narrows the list to that agent until the user clears it
+  const [agentFilter, setAgentFilter] = useState<string | null>(preselectedAgentId);
+  const apiUrl = `/api/triggers?search=${encodeURIComponent(search)}&trigger_type=${typeFilter}${agentFilter ? `&agent_id=${agentFilter}` : ''}&limit=${LIMIT}&offset=${page * LIMIT}`;
   const { data: triggers, meta, mutate } = useApi<Trigger[]>(apiUrl);
-  const { data: agentsData } = useApi<AgentOption[]>('/api/agents');
-  const total = (meta?.total as number) || (triggers || []).length;
-  const agents = agentsData || [];
-
-  // Auto-open create modal if agent param is in URL
+  const [agents, setAgents] = useState<AgentOption[]>([]);
   useEffect(() => {
-    if (preselectedAgentId && agents.length > 0) {
-      setShowCreate(true);
-    }
-  }, [preselectedAgentId, agents.length]);
+    let cancelled = false;
+    // every agent the user can pick, not just the first page
+    fetchAllAgents<AgentOption>().then(({ agents: all }) => { if (!cancelled) setAgents(all); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const total = (meta?.total as number) || (triggers || []).length;
+  const filterName = agentFilter ? agents.find((a) => a.id === agentFilter)?.name : null;
+
+  // open the create dialog only when the agent has no triggers yet
+  const [autoOpened, setAutoOpened] = useState(false);
+  useEffect(() => {
+    if (autoOpened || !preselectedAgentId || triggers === undefined || agents.length === 0) return;
+    setAutoOpened(true);
+    if ((triggers || []).length === 0) setShowCreate(true);
+  }, [preselectedAgentId, triggers, agents.length, autoOpened]);
 
   const copyUrl = useCallback((url: string, id: string) => {
     navigator.clipboard.writeText(url);
@@ -226,6 +240,26 @@ export default function TriggersPage() {
       toastSuccess(isActive ? 'Trigger paused' : 'Trigger activated');
     } catch {
       toastError('Failed to update trigger');
+    }
+  }, [mutate]);
+
+  const runNow = useCallback(async (triggerId: string) => {
+    setRunning(triggerId);
+    try {
+      const res = await apiFetch<{ execution_id: string }>(`/api/triggers/${triggerId}/run`, {
+        method: 'POST',
+        throwOnError: false,
+      });
+      const execId = res.data?.execution_id;
+      if (execId) {
+        setManualRuns((prev) => ({ ...prev, [triggerId]: execId }));
+        toastSuccess('Trigger started', `Execution ${execId.slice(0, 8)}, open it from View run on the row`);
+        mutate();
+      } else {
+        toastError('Run failed', res.error || undefined);
+      }
+    } finally {
+      setRunning(null);
     }
   }, [mutate]);
 
@@ -283,6 +317,12 @@ export default function TriggersPage() {
           <option value="webhook">Webhook</option>
           <option value="schedule">Schedule</option>
         </select>
+        {agentFilter && (
+          <span className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-200" data-testid="trigger-agent-filter">
+            Triggers for {filterName || 'this agent'}
+            <button onClick={() => { setAgentFilter(null); setPage(0); }} className="text-cyan-300 hover:text-white" aria-label="Show triggers for all agents">Show all</button>
+          </span>
+        )}
       </div>
 
       {/* Triggers list */}
@@ -305,6 +345,7 @@ export default function TriggersPage() {
           return (
             <div
               key={trigger.id}
+              data-testid={`trigger-row-${trigger.id}`}
               className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4"
             >
               <div className="flex items-start gap-4">
@@ -334,12 +375,14 @@ export default function TriggersPage() {
                     }`}>
                       {trigger.trigger_type}
                     </span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                    <span data-testid={`trigger-state-${trigger.id}`} className={`text-[10px] px-2 py-0.5 rounded-full ${
                       trigger.is_active
                         ? 'bg-emerald-500/10 text-emerald-400'
-                        : 'bg-slate-700 text-slate-500'
-                    }`}>
-                      {trigger.is_active ? 'Active' : 'Paused'}
+                        : trigger.last_status === 'agent deleted'
+                          ? 'bg-red-500/10 text-red-300'
+                          : 'bg-slate-700 text-slate-500'
+                    }`} title={!trigger.is_active && trigger.last_status === 'agent deleted' ? 'Its agent was deleted. Restoring the agent switches this back on.' : undefined}>
+                      {trigger.is_active ? 'Active' : trigger.last_status === 'agent deleted' ? 'Off · agent deleted' : 'Paused'}
                     </span>
                   </div>
 
@@ -413,13 +456,37 @@ export default function TriggersPage() {
                         {trigger.last_status}
                       </span>
                     )}
+                    {manualRuns[trigger.id] && (
+                      <Link
+                        href={`/executions/${manualRuns[trigger.id]}`}
+                        data-testid={`trigger-run-link-${trigger.id}`}
+                        className="text-cyan-400 hover:text-cyan-300 hover:underline"
+                      >
+                        View run
+                      </Link>
+                    )}
                   </div>
                 </div>
 
                 {/* Actions */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
+                    onClick={() => runNow(trigger.id)}
+                    disabled={running === trigger.id}
+                    data-testid={`trigger-run-${trigger.id}`}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 rounded-lg transition-colors disabled:opacity-50"
+                    title="Run this trigger once now"
+                  >
+                    {running === trigger.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Zap className="w-3.5 h-3.5" />
+                    )}
+                    Run now
+                  </button>
+                  <button
                     onClick={() => toggleTrigger(trigger.id, trigger.is_active)}
+                    aria-label={trigger.is_active ? 'Pause trigger' : 'Activate trigger'}
                     className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-colors"
                     title={trigger.is_active ? 'Pause' : 'Activate'}
                   >
@@ -431,6 +498,7 @@ export default function TriggersPage() {
                   </button>
                   <button
                     onClick={() => deleteTrigger(trigger.id)}
+                    aria-label="Delete trigger"
                     className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                     title="Delete"
                   >

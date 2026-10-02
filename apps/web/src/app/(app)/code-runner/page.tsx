@@ -12,6 +12,8 @@ import { apiFetch } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
 import ResourceShareDialog from '@/components/share/ResourceShareDialog';
 import InvocationsTable from '@/components/observability/InvocationsTable';
+import OwnerBadge from '@/components/OwnerBadge';
+import DeleteWithDependents from '@/components/ui/DeleteWithDependents';
 
 interface AnalysisNote {
   level: 'info' | 'warn' | 'error';
@@ -43,6 +45,11 @@ interface CodeAsset {
   last_test_output: unknown;
   last_test_ok: boolean | null;
   last_test_at: string | null;
+  owner_name?: string | null;
+  ownership?: 'mine' | 'shared' | 'platform' | null;
+  can_manage?: boolean;
+  version?: number;
+  version_history?: { version: number; replaced_at?: string; detected_entrypoint?: string | null; file_size_bytes?: number | null; source_type?: string }[];
   created_at: string;
 }
 
@@ -63,10 +70,23 @@ function fmtBytes(b: number | null): string {
   return `${b} B`;
 }
 
+const PENDING_STATUSES = ['uploaded', 'analyzing', 'pending', 'building'];
+
 export default function CodeRunnerPage() {
   const router = useRouter();
-  const { data: assets, mutate } = useApi<CodeAsset[]>('/api/code-assets');
+  const [pending, setPending] = useState(false);
+  // poll while an upload is still being analysed, otherwise the badge never moves
+  const { data: assets, mutate } = useApi<CodeAsset[]>('/api/code-assets', pending ? { refreshInterval: 3000 } : undefined);
   const [selected, setSelected] = useState<CodeAsset | null>(null);
+  useEffect(() => {
+    setPending((assets || []).some(a => PENDING_STATUSES.includes(a.status)));
+    // the open asset follows the list, so Run enables when analysis finishes
+    setSelected(sel => {
+      if (!sel) return sel;
+      const fresh = (assets || []).find(a => a.id === sel.id);
+      return fresh && fresh.status !== sel.status ? { ...sel, ...fresh } : sel;
+    });
+  }, [assets]);
 
   // Inline JSON lint state for the schema textareas — replaces the
   // alert() blocker so users see the error next to the field.
@@ -84,6 +104,9 @@ export default function CodeRunnerPage() {
   const [newGitRef, setNewGitRef] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const versionFileRef = useRef<HTMLInputElement>(null);
+  const [versionBusy, setVersionBusy] = useState(false);
+  const [versionError, setVersionError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   // test form
@@ -136,10 +159,49 @@ export default function CodeRunnerPage() {
     setUploading(false);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this code asset?')) return;
+  const handleNewVersion = async (file: File | undefined) => {
+    if (!selected || !file) return;
+    setVersionBusy(true); setVersionError('');
     try {
-      await apiFetch(`/api/code-assets/${id}`, { method: 'DELETE' });
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('metadata', '{}');
+      const res = await apiFetch<CodeAsset>(`/api/code-assets/${selected.id}/versions`, { method: 'POST', body: fd, headers: {} });
+      if (res?.data) setSelected(res.data);
+      toastSuccess(`Version ${res?.data?.version ?? ''} is live`, 'Agents using this asset run the new code from their next call.');
+      refresh();
+    } catch (e: any) {
+      const msg = e?.message || 'Upload failed';
+      setVersionError(msg);
+      toastError('New version not applied', msg);
+    }
+    if (versionFileRef.current) versionFileRef.current.value = '';
+    setVersionBusy(false);
+  };
+
+  const handleRestore = async (version: number) => {
+    if (!selected) return;
+    if (!confirm(`Make version ${version} live again? Agents using this asset switch on their next call.`)) return;
+    setVersionBusy(true); setVersionError('');
+    try {
+      const res = await apiFetch<CodeAsset>(`/api/code-assets/${selected.id}/versions/${version}/restore`, { method: 'POST' });
+      if (res?.data) setSelected(res.data);
+      toastSuccess(`Version ${version} restored`, `Now live as version ${res?.data?.version ?? ''}.`);
+      refresh();
+    } catch (e: any) {
+      setVersionError(e?.message || 'Restore failed');
+    }
+    setVersionBusy(false);
+  };
+
+  const [deletingAsset, setDeletingAsset] = useState<CodeAsset | null>(null);
+  const handleDelete = (id: string) => {
+    const a = (assets || []).find((x) => x.id === id) || (selected?.id === id ? selected : null);
+    if (a) setDeletingAsset(a);
+  };
+  const doDelete = async (id: string, force: boolean) => {
+    try {
+      await apiFetch(`/api/code-assets/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
       toastSuccess('Asset deleted');
       if (selected?.id === id) setSelected(null);
       refresh();
@@ -281,6 +343,7 @@ export default function CodeRunnerPage() {
                 )}
                 {(assets || []).map(a => (
                   <button key={a.id} onClick={() => setSelected(a)}
+                    data-testid="code-asset-item" data-name={a.name} data-status={a.status}
                     className={`w-full text-left px-3 py-2 rounded-lg text-xs ${selected?.id === a.id ? 'bg-indigo-500/10 border border-indigo-500/30' : 'bg-slate-900/30 border border-transparent hover:border-slate-700'}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-medium text-white flex items-center gap-1.5">
@@ -289,10 +352,11 @@ export default function CodeRunnerPage() {
                       </span>
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${STATUS_COLORS[a.status] || ''}`}>{a.status}</span>
                     </div>
-                    <div className="text-[10px] text-slate-400 flex gap-2">
+                    <div className="text-[10px] text-slate-400 flex items-center gap-2">
                       <span>{a.detected_language || '—'} {a.detected_version || ''}</span>
                       <span>·</span>
                       <span>{fmtBytes(a.file_size_bytes)}</span>
+                      <OwnerBadge ownership={a.ownership} ownerName={a.owner_name} className="ml-auto" />
                     </div>
                   </button>
                 ))}
@@ -317,6 +381,9 @@ export default function CodeRunnerPage() {
                         <span>{LANG_ICON[selected.detected_language || ''] || '📦'}</span>
                         {selected.name}
                         <span className="text-xs text-slate-500 font-normal">{selected.detected_version || ''}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300 font-normal" data-testid="code-version" data-version={selected.version || 1}>
+                          v{selected.version || 1}
+                        </span>
                       </h2>
                       {selected.description && <p className="text-xs text-slate-400 mt-1">{selected.description}</p>}
                       {selected.source_git_url && (
@@ -332,15 +399,33 @@ export default function CodeRunnerPage() {
                         data-testid="code-use-in-agent">
                         <Workflow className="w-3 h-3" /> Use in Agent <ArrowRight className="w-3 h-3" />
                       </button>
-                      <button onClick={() => setShowShare(true)}
-                        className="px-3 py-1.5 rounded-lg bg-slate-700/30 border border-slate-600/40 text-slate-300 text-xs hover:bg-slate-700/50 hover:text-white transition-colors flex items-center gap-1"
-                        data-testid="code-share">
-                        <Share2 className="w-3 h-3" /> Share
-                      </button>
-                      <button onClick={() => handleDelete(selected.id)}
-                        className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs hover:bg-red-500/20 flex items-center gap-1">
-                        <Trash2 className="w-3 h-3" /> Delete
-                      </button>
+                      {selected.can_manage !== false && (
+                        <>
+                          <input
+                            ref={versionFileRef}
+                            type="file"
+                            accept=".zip,.tar.gz,.tgz"
+                            className="hidden"
+                            data-testid="code-version-input"
+                            onChange={(e) => handleNewVersion(e.target.files?.[0])}
+                          />
+                          <button onClick={() => versionFileRef.current?.click()} disabled={versionBusy}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs hover:bg-emerald-500/20 disabled:opacity-50 flex items-center gap-1"
+                            title="Replace the code behind this asset. Agents keep using it and pick up the new code."
+                            data-testid="code-new-version">
+                            {versionBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Upload new version
+                          </button>
+                          <button onClick={() => setShowShare(true)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-700/30 border border-slate-600/40 text-slate-300 text-xs hover:bg-slate-700/50 hover:text-white transition-colors flex items-center gap-1"
+                            data-testid="code-share">
+                            <Share2 className="w-3 h-3" /> Share
+                          </button>
+                          <button onClick={() => handleDelete(selected.id)}
+                            className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs hover:bg-red-500/20 flex items-center gap-1">
+                            <Trash2 className="w-3 h-3" /> Delete
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-4 gap-3">
@@ -364,6 +449,42 @@ export default function CodeRunnerPage() {
                 </div>
 
                 {/* Notes */}
+                {selected.status === 'failed' && (
+                  <div role="alert" data-testid="code-asset-error" className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-xs text-red-200">
+                    <p className="font-semibold text-red-100 mb-1">This asset cannot run yet</p>
+                    <p>{selected.error || 'Analysis failed. See the notes below.'}</p>
+                    {selected.can_manage !== false && (
+                      <p className="mt-2 text-red-300">Fix the code and use Upload new version. Agents bound to this asset keep its id.</p>
+                    )}
+                  </div>
+                )}
+                {versionError && (
+                  <div role="alert" data-testid="code-version-error" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 flex justify-between gap-3">
+                    <span>{versionError}</span>
+                    <button onClick={() => setVersionError('')} aria-label="Dismiss" className="text-amber-300 hover:text-white">×</button>
+                  </div>
+                )}
+                {(selected.version_history || []).length > 0 && (
+                  <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4" data-testid="code-version-history">
+                    <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-2">Earlier versions</h3>
+                    <ul className="space-y-1">
+                      {[...(selected.version_history || [])].reverse().map((h) => (
+                        <li key={`${h.version}-${h.replaced_at}`} className="flex items-center justify-between text-xs text-slate-300">
+                          <span>
+                            v{h.version} · {h.detected_entrypoint || 'entrypoint unknown'}
+                            {h.replaced_at && <span className="text-slate-500"> · replaced {new Date(h.replaced_at).toLocaleString()}</span>}
+                          </span>
+                          {selected.can_manage !== false && (
+                            <button onClick={() => handleRestore(h.version)} disabled={versionBusy}
+                              className="text-emerald-300 hover:underline disabled:opacity-50" data-testid={`code-restore-${h.version}`}>
+                              Restore
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {(selected.analysis_notes || []).length > 0 && (
                   <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
                     <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-2">Analyzer notes</h3>
@@ -451,7 +572,7 @@ export default function CodeRunnerPage() {
                   </h3>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase mb-1">Input JSON</p>
-                    <textarea rows={3} value={testInput}
+                    <textarea rows={3} value={testInput} data-testid="code-test-input"
                       onChange={e => { setTestInput(e.target.value); setTestInputError(''); }}
                       onBlur={e => {
                         const v = e.target.value.trim();
@@ -462,7 +583,7 @@ export default function CodeRunnerPage() {
                       className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none ${testInputError ? 'border-red-500/60' : 'border-slate-700 focus:border-cyan-500'}`} />
                     {testInputError && <p className="text-[10px] text-red-300 mt-1 flex items-start gap-1"><CircleAlert className="w-3 h-3 mt-0.5 shrink-0" /><span>{testInputError}</span></p>}
                   </div>
-                  <button onClick={handleTest} disabled={testing || selected.status !== 'ready'}
+                  <button onClick={handleTest} disabled={testing || selected.status !== 'ready'} data-testid="code-test-run"
                     className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-600 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-2">
                     {testing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Running…</> : <><Play className="w-3.5 h-3.5" /> Run</>}
                   </button>
@@ -472,7 +593,7 @@ export default function CodeRunnerPage() {
                         Output {testOk === true && <Check className="w-3 h-3 text-emerald-400" />}
                         {testOk === false && <CircleAlert className="w-3 h-3 text-red-400" />}
                       </p>
-                      <pre className="w-full bg-slate-900/70 border border-slate-700 rounded-lg p-3 text-xs text-slate-300 font-mono overflow-x-auto max-h-64">{testOutput}</pre>
+                      <pre data-testid="code-test-output" className="w-full bg-slate-900/70 border border-slate-700 rounded-lg p-3 text-xs text-slate-300 font-mono overflow-x-auto max-h-64">{testOutput}</pre>
                     </div>
                   )}
                 </div>
@@ -490,6 +611,14 @@ export default function CodeRunnerPage() {
           resourceName={selected.name}
         />
       )}
+      <DeleteWithDependents
+        open={!!deletingAsset}
+        onClose={() => setDeletingAsset(null)}
+        resource={`/api/code-assets/${deletingAsset?.id}`}
+        name={deletingAsset?.name || ''}
+        what="code asset"
+        onConfirm={(force) => (deletingAsset ? doDelete(deletingAsset.id, force) : undefined)}
+      />
     </div>
   );
 }

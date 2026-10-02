@@ -1,5 +1,6 @@
 'use client';
 
+import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 import { useEffect, useState } from 'react';
 import { Loader2, Mail, Share2, Trash2, Users, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
@@ -11,7 +12,8 @@ export type Shareable =
   | 'ml_model'
   | 'code_asset'
   | 'knowledge_base'
-  | 'saved_tool';
+  | 'saved_tool'
+  | 'atlas_graph';
 
 interface ShareRow {
   id: string;
@@ -63,6 +65,7 @@ export default function ResourceShareDialog({
     loadShares();
   }, [open, resourceId, resourceType]);
 
+  useEscapeToClose(open, onClose);
   if (!open) return null;
 
   const onShare = async () => {
@@ -78,7 +81,7 @@ export default function ResourceShareDialog({
           permission,
         }),
       });
-      toastSuccess('Shared', `${email} can now ${permission} this ${resourceType.replace('_', ' ')}`);
+      toastSuccess('Shared', `${email} can now ${permission} this ${resourceType.replace(/_/g, ' ')}`);
       setEmail('');
       await loadShares();
     } catch (e: any) {
@@ -102,14 +105,14 @@ export default function ResourceShareDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" data-testid="resource-share-dialog">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" data-testid="resource-share-dialog">
       <div className="bg-slate-800 border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-lg">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50">
           <div className="flex items-center gap-2">
             <Share2 className="w-4 h-4 text-cyan-400" />
             <h2 className="text-sm font-semibold text-white">
               Share "{resourceName}"
-              <span className="ml-2 text-[10px] text-slate-500 uppercase">{resourceType.replace('_', ' ')}</span>
+              <span className="ml-2 text-[10px] text-slate-500 uppercase">{resourceType.replace(/_/g, ' ')}</span>
             </h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close">

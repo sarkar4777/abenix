@@ -98,6 +98,7 @@ export default function SDKPlaygroundPage() {
     }
     setContextLoading(true);
     setLiveResult(null);
+    setInputValues({});
     apiFetch<{ data: AssetContext }>(`/api/sdk-playground/asset-context/agent/${selectedAsset.id}`)
       .then(res => {
         const ctx = (res as any).data || res;
@@ -107,11 +108,14 @@ export default function SDKPlaygroundPage() {
           seed[v.name] =
             v.default != null ? String(v.default) : v.name === 'message' ? '' : '';
         }
-        setInputValues(seed);
+        // keep anything typed while the schema was loading
+        setInputValues(prev => {
+          const typed = Object.fromEntries(Object.entries(prev).filter(([, v]) => v !== ''));
+          return { ...seed, ...typed };
+        });
       })
       .catch(() => {
         setAssetContext(null);
-        setInputValues({});
       })
       .finally(() => setContextLoading(false));
   }, [selectedAsset?.id]);
@@ -133,7 +137,7 @@ export default function SDKPlaygroundPage() {
       const messageVar =
         (assetContext?.input_variables || []).find(v => v.name === 'message')
         || (assetContext?.input_variables || [])[0];
-      const message = messageVar ? (inputValues[messageVar.name] || '') : 'run';
+      const message = messageVar ? (inputValues[messageVar.name] || '') : (inputValues.message || '').trim() || 'run';
       const context: Record<string, unknown> = {};
       for (const v of assetContext?.input_variables || []) {
         if (messageVar && v.name === messageVar.name) continue;
@@ -389,9 +393,18 @@ export default function SDKPlaygroundPage() {
                     <Loader2 className="w-3 h-3 animate-spin" /> Loading input schema...
                   </div>
                 ) : !assetContext || (assetContext.input_variables || []).length === 0 ? (
-                  <p className="text-[11px] text-slate-500 leading-snug">
-                    This agent doesn&apos;t declare any input variables. The Run-live button still works — just leave the message blank.
-                  </p>
+                  <div>
+                    <label htmlFor="live-message" className="text-[10px] font-mono text-slate-300 mb-1 block">message</label>
+                    <textarea
+                      id="live-message"
+                      data-testid="live-message-input"
+                      value={inputValues.message || ''}
+                      onChange={e => setInputValues(prev => ({ ...prev, message: e.target.value }))}
+                      rows={3}
+                      placeholder="What should the agent do?"
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:border-cyan-500 focus:outline-none"
+                    />
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     {(assetContext.example_prompts || []).length > 0 && (
