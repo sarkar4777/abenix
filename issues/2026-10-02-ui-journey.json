@@ -678,5 +678,16 @@
       "bug"
     ],
     "number": 120
+  },
+  {
+    "title": "API requirements for CI had drifted from the image's dependencies",
+    "area": "ci, dependencies",
+    "problem": "The API image installs from pyproject.toml while CI installs apps/api/requirements.txt, which lacked stripe, celery, structlog, prometheus-client, python-dotenv, boto3 and nats-py, so tests touching those modules passed locally and failed in CI.",
+    "fix": "requirements.txt lists every pyproject dependency and a CI check fails the build if they drift apart again.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 121
   }
 ]
