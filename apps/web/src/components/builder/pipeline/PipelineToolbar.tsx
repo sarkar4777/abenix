@@ -55,6 +55,7 @@ import { apiFetch } from '@/lib/api-client';
 
 interface PipelineToolbarProps {
   onAddTemplate?: (templateId: string) => void;
+  onAddStep?: (toolId: string, name: string) => void;
 }
 
 // Server response shape
@@ -275,12 +276,14 @@ function DraggableToolItem({
   description,
   icon: Icon,
   isLogic,
+  onAdd,
 }: {
   id: string;
   name: string;
   description: string;
   icon: LucideIcon;
   isLogic: boolean;
+  onAdd?: (toolId: string, name: string) => void;
 }) {
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData(
@@ -294,7 +297,17 @@ function DraggableToolItem({
     <div
       draggable
       onDragStart={handleDragStart}
-      title={`${name} (${id})`}
+      role="button"
+      tabIndex={0}
+      onClick={() => onAdd?.(id, name)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onAdd?.(id, name);
+        }
+      }}
+      data-testid={`pipeline-palette-${id}`}
+      title={`${name} (${id}): click to add or drag onto the canvas`}
       className="w-full flex items-center gap-2.5 p-3 rounded-lg border bg-slate-800/50 border-slate-700/50 hover:border-emerald-500/40 transition-all text-left cursor-grab active:cursor-grabbing"
     >
       <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 bg-slate-700/50">
@@ -312,7 +325,7 @@ function DraggableToolItem({
 
 const PIPELINE_TIP_KEY = 'abenix:pipeline-tip-dismissed';
 
-export default function PipelineToolbar({ onAddTemplate }: PipelineToolbarProps) {
+export default function PipelineToolbar({ onAddTemplate, onAddStep }: PipelineToolbarProps) {
   const [search, setSearch] = useState('');
   const [tipDismissed, setTipDismissed] = useState(true);
   const [tools, setTools] = useState<PipelineToolDef[]>([]);
@@ -441,8 +454,8 @@ export default function PipelineToolbar({ onAddTemplate }: PipelineToolbarProps)
           <div className="flex gap-2 pr-4">
             <Info className="w-3.5 h-3.5 text-emerald-400/70 mt-0.5 shrink-0" />
             <p className="text-[10px] text-emerald-400/80 leading-relaxed">
-              <strong>Pipeline mode:</strong> Drag steps onto the canvas, then
-              connect them to define execution order. Steps without dependencies
+              <strong>Pipeline mode:</strong> Click or drag steps onto the canvas, then
+              set each step&apos;s dependencies to define execution order. Steps without dependencies
               run in parallel.
             </p>
           </div>
@@ -468,6 +481,7 @@ export default function PipelineToolbar({ onAddTemplate }: PipelineToolbarProps)
                     description={tool.description}
                     icon={tool.icon}
                     isLogic={false}
+                    onAdd={onAddStep}
                   />
                 ))}
               </div>
@@ -490,6 +504,7 @@ export default function PipelineToolbar({ onAddTemplate }: PipelineToolbarProps)
               description={node.description}
               icon={node.icon}
               isLogic
+              onAdd={onAddStep}
             />
           ))}
           {filteredLogic.length === 0 && (
@@ -508,6 +523,7 @@ export default function PipelineToolbar({ onAddTemplate }: PipelineToolbarProps)
             <div className="space-y-2">
               <button
                 onClick={() => onAddTemplate?.('parallel-compare')}
+                data-testid="pipeline-template-parallel-compare"
                 className="w-full flex items-center gap-2.5 p-3 rounded-lg border border-slate-700/50 bg-slate-800/50 hover:border-emerald-500/40 transition-all text-left"
               >
                 <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 bg-emerald-500/10">
@@ -520,6 +536,7 @@ export default function PipelineToolbar({ onAddTemplate }: PipelineToolbarProps)
               </button>
               <button
                 onClick={() => onAddTemplate?.('sequential-chain')}
+                data-testid="pipeline-template-sequential-chain"
                 className="w-full flex items-center gap-2.5 p-3 rounded-lg border border-slate-700/50 bg-slate-800/50 hover:border-emerald-500/40 transition-all text-left"
               >
                 <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 bg-emerald-500/10">
@@ -538,7 +555,7 @@ export default function PipelineToolbar({ onAddTemplate }: PipelineToolbarProps)
       {/* Footer */}
       <div className="px-3 py-2 border-t border-slate-800/50">
         <p className="text-[10px] text-slate-600 text-center">
-          Drag steps onto the canvas to build your pipeline
+          Click or drag steps onto the canvas to build your pipeline
         </p>
       </div>
     </div>

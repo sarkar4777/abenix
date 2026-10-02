@@ -247,6 +247,8 @@ function ToolSection({
                   e.dataTransfer.effectAllowed = 'move';
                 }}
                 onClick={() => onToggleTool(tool.id)}
+                data-testid={`palette-tool-${tool.id}`}
+                aria-pressed={active}
                 className={`w-full flex items-center gap-2.5 p-3 rounded-lg border transition-all text-left cursor-grab active:cursor-grabbing ${
                   active
                     ? 'bg-cyan-500/10 border-cyan-500/30'

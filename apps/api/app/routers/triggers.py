@@ -67,6 +67,13 @@ async def create_trigger(
     agent = result.scalar_one_or_none()
     if not agent:
         return error("Agent not found", 404)
+    from app.services.agent_share import resolve_agent_access
+    from models.resource_share import SharePermission
+
+    if not await resolve_agent_access(
+        db, user, agent, permission_required=SharePermission.EXECUTE
+    ):
+        return error("You can only add triggers to agents you can run", 403)
 
     trigger = AgentTrigger(
         id=uuid.uuid4(),
@@ -125,17 +132,33 @@ async def list_triggers(
     search: str = Query("", max_length=255, description="Search by trigger name"),
     trigger_type: str = Query("", description="Filter: webhook, schedule"),
     sort: str = Query("newest", description="Sort: newest, oldest, name"),
+    agent_id: str = Query("", description="Only triggers for this agent"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    """List all triggers for the current tenant."""
+    """Triggers the caller manages: their own and those on their agents, all for an admin.
+
+    Webhook URLs carry the secret that fires the agent, so they are never
+    listed to other members.
+    """
+    from app.core.permissions import is_admin
+
     query = (
         select(AgentTrigger, Agent.name)
         .join(Agent, AgentTrigger.agent_id == Agent.id)
         .where(AgentTrigger.tenant_id == user.tenant_id)
     )
+    if not is_admin(user):
+        query = query.where(
+            or_(AgentTrigger.created_by == user.id, Agent.creator_id == user.id)
+        )
+    if agent_id:
+        try:
+            query = query.where(AgentTrigger.agent_id == uuid.UUID(agent_id))
+        except ValueError:
+            return error("agent_id is not a valid id", 400)
 
     if search:
         query = query.where(AgentTrigger.name.ilike(f"%{search}%"))
@@ -187,6 +210,18 @@ async def list_triggers(
     return success(data, meta={"total": total, "limit": limit, "offset": offset})
 
 
+async def _can_manage(db: AsyncSession, user: User, trigger: AgentTrigger) -> bool:
+    """Trigger creator, the agent's owner, or an admin."""
+    from app.core.permissions import is_admin
+
+    if is_admin(user) or trigger.created_by == user.id:
+        return True
+    owner = (
+        await db.execute(select(Agent.creator_id).where(Agent.id == trigger.agent_id))
+    ).scalar_one_or_none()
+    return owner == user.id
+
+
 @router.delete("/{trigger_id}")
 async def delete_trigger(
     trigger_id: uuid.UUID,
@@ -200,7 +235,7 @@ async def delete_trigger(
         )
     )
     trigger = result.scalar_one_or_none()
-    if not trigger:
+    if not trigger or not await _can_manage(db, user, trigger):
         return error("Trigger not found", 404)
     await db.delete(trigger)
     await db.commit()
@@ -221,7 +256,7 @@ async def update_trigger(
         )
     )
     trigger = result.scalar_one_or_none()
-    if not trigger:
+    if not trigger or not await _can_manage(db, user, trigger):
         return error("Trigger not found", 404)
 
     if "is_active" in body:
@@ -727,3 +762,69 @@ async def _execute_triggered_agent(
                     await ndb.commit()
         except Exception:
             pass
+
+
+@router.post("/{trigger_id}/run")
+async def run_trigger_now(
+    trigger_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Fire a trigger once, through the same path the scheduler uses."""
+
+    result = await db.execute(
+        select(AgentTrigger).where(
+            AgentTrigger.id == trigger_id,
+            AgentTrigger.tenant_id == user.tenant_id,
+        )
+    )
+    trigger = result.scalar_one_or_none()
+    if not trigger:
+        return error("Trigger not found", 404)
+    if not await _can_manage(db, user, trigger):
+        return error(
+            "Only the trigger owner, the agent owner or an admin can run it", 403
+        )
+
+    agent = (
+        await db.execute(select(Agent).where(Agent.id == trigger.agent_id))
+    ).scalar_one_or_none()
+    owner = (
+        await db.execute(select(User).where(User.id == trigger.created_by))
+    ).scalar_one_or_none()
+
+    reason = await check_trigger_eligibility(db, trigger, agent, owner)
+    if reason:
+        await deactivate_trigger(db, trigger, reason, owner=owner)
+        return error(f"Trigger deactivated: {DEACTIVATION_REASONS[reason]}", 400)
+
+    trigger.run_count = (trigger.run_count or 0) + 1
+    trigger.last_run_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    # runs as the owner, like a scheduled fire, so grants and quotas match
+    execution, dispatched = await dispatch_execution(
+        db,
+        agent=agent,
+        user=owner,
+        message=trigger.default_message or "Manual trigger run",
+        context=(
+            trigger.default_context if isinstance(trigger.default_context, dict) else {}
+        ),
+        trigger_id=str(trigger.id),
+    )
+    if not dispatched:
+        trigger.last_status = "failed"
+        await db.commit()
+        return error("Trigger execution could not be queued", 503)
+
+    return success(
+        {
+            "execution_id": str(execution.id),
+            "trigger_id": str(trigger.id),
+            "agent_id": str(trigger.agent_id),
+            "agent_name": agent.name,
+            "status": "running",
+        },
+        status_code=202,
+    )

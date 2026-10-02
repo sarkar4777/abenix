@@ -281,9 +281,14 @@ export default function AuthCard() {
               </button>
             </div>
             {tab === 'register' && (
-              <p id="password-hint" className="text-xs text-slate-500 mt-1">
-                Min 8 characters
-              </p>
+              <>
+                <p id="password-hint" className="text-xs text-slate-500 mt-1">
+                  Min 8 characters
+                </p>
+                <p className="text-xs text-slate-500 mt-1" data-testid="register-invite-hint">
+                  Registering creates a new workspace. To join a team, open the invite link your admin sent you.
+                </p>
+              </>
             )}
             {/*
               Self-serve password reset isn't wired yet — link to a

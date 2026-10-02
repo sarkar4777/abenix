@@ -115,6 +115,11 @@ export interface PipelineNodeConfig {
   required_if?: string | null;   // "{{expr}}" — node skipped when the resolved value is falsy
   agent_slug?: string | null;    // when tool_name=agent_step, look up system_prompt/model/tools from this seeded agent at exec time
   type?: string;                 // "agent" | "tool" | "structured" — DSL type hint consumed by the server parser
+  timeout_seconds?: number;
+  on_error?: string;
+  error_branch_node?: string;
+  switch?: PipelineNodeSchema['switch'];
+  merge?: PipelineNodeSchema['merge'];
 }
 
 export interface PipelineNodeSchema {
@@ -489,6 +494,28 @@ export function serializeConfig(
     // Engine DSL round-trip.
     ...(step.requiredIf && step.requiredIf.trim() ? { required_if: step.requiredIf.trim() } : {}),
     ...(step.agentSlug && step.agentSlug.trim() ? { agent_slug: step.agentSlug.trim(), type: 'agent' } : {}),
+    ...(step.timeoutSeconds ? { timeout_seconds: step.timeoutSeconds } : {}),
+    ...(step.onError !== 'stop' ? { on_error: step.onError } : {}),
+    ...(step.onError === 'error_branch' && step.errorBranchNode ? { error_branch_node: step.errorBranchNode } : {}),
+    ...(step.switchConfig
+      ? {
+          switch: {
+            source_node: step.switchConfig.sourceNode,
+            field: step.switchConfig.field,
+            cases: step.switchConfig.cases.map((c) => ({ operator: c.operator, value: c.value, target_node: c.targetNode })),
+            default_node: step.switchConfig.defaultNode,
+          },
+        }
+      : {}),
+    ...(step.mergeConfig
+      ? {
+          merge: {
+            mode: step.mergeConfig.mode,
+            join_field: step.mergeConfig.joinField,
+            source_nodes: step.mergeConfig.sourceNodes,
+          },
+        }
+      : {}),
   }));
 
   return {
@@ -629,8 +656,21 @@ export function deserializeConfig(
     timeoutSeconds: (node as unknown as Record<string, unknown>).timeout_seconds as number | null ?? null,
     onError: ((node as unknown as Record<string, unknown>).on_error as string ?? 'stop') as 'stop' | 'continue' | 'error_branch',
     errorBranchNode: (node as unknown as Record<string, unknown>).error_branch_node as string | null ?? null,
-    switchConfig: null,
-    mergeConfig: null,
+    switchConfig: node.switch
+      ? {
+          sourceNode: node.switch.source_node,
+          field: node.switch.field,
+          cases: (node.switch.cases || []).map((c) => ({ operator: c.operator, value: c.value, targetNode: c.target_node })),
+          defaultNode: node.switch.default_node ?? null,
+        }
+      : null,
+    mergeConfig: node.merge
+      ? {
+          mode: (node.merge.mode || 'append') as MergeConfig['mode'],
+          joinField: node.merge.join_field ?? null,
+          sourceNodes: node.merge.source_nodes || [],
+        }
+      : null,
     position: node.position?.x ? { ...node.position } : (positionMap[node.id] || { x: 100, y: 100 }),
     // Engine DSL round-trip.
     requiredIf: ((node as unknown as Record<string, unknown>).required_if as string | undefined) || undefined,

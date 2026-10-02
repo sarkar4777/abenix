@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Globe, Loader2, Lock, Rocket, Shield, Users, X } from 'lucide-react';
 import ResponsiveModal from '@/components/ui/ResponsiveModal';
+import { useApi } from '@/hooks/useApi';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const MONETIZATION_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MONETIZATION !== 'false';
@@ -22,6 +23,14 @@ const CATEGORIES = [
 ];
 
 type Visibility = 'tenant' | 'specific' | 'public';
+
+const VISIBILITY_TESTID: Record<Visibility, string> = {
+  tenant: 'publish-visibility-org',
+  specific: 'publish-visibility-people',
+  public: 'publish-visibility-public',
+};
+
+const NO_MARKETPLACE_TEXT = 'Your role cannot publish to the marketplace. Ask an admin to make you a creator.';
 
 interface PublishDialogProps {
   open: boolean;
@@ -49,6 +58,13 @@ export default function PublishDialog({
   const [shareEmails, setShareEmails] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [publishedWithIssues, setPublishedWithIssues] = useState(false);
+  const { data: perms } = useApi<{ features?: Record<string, boolean> }>(open ? '/api/me/permissions' : null);
+  const canPublishPublic = perms?.features?.publish_to_marketplace !== false;
+
+  useEffect(() => {
+    if (!canPublishPublic && visibility === 'public') setVisibility('tenant');
+  }, [canPublishPublic, visibility]);
 
   // Load existing shares when dialog opens
   useEffect(() => {
@@ -127,8 +143,9 @@ export default function PublishDialog({
           }
         }
         if (failures.length > 0) {
-          setError(`Published, but some shares failed. ${failures.join(' | ')}`);
-          onPublished();
+          // stay open so the failures can be read and fixed
+          setError(`Published, but some shares failed. ${failures.join(' | ')}. Fix the addresses and publish again, or continue.`);
+          setPublishedWithIssues(true);
           return;
         }
       }
@@ -180,11 +197,16 @@ export default function PublishDialog({
           <div className="space-y-2">
             {visibilityOptions.map((opt) => {
               const Icon = opt.icon;
+              const blocked = opt.value === 'public' && !canPublishPublic;
               return (
                 <button
                   key={opt.value}
-                  onClick={() => setVisibility(opt.value)}
-                  className={`w-full flex items-start gap-3 p-3 rounded-lg border text-left transition-colors ${
+                  type="button"
+                  onClick={() => { if (!blocked) setVisibility(opt.value); }}
+                  disabled={blocked}
+                  aria-pressed={visibility === opt.value}
+                  data-testid={VISIBILITY_TESTID[opt.value]}
+                  className={`w-full flex items-start gap-3 p-3 rounded-lg border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     visibility === opt.value
                       ? 'bg-cyan-500/10 border-cyan-500/30'
                       : 'border-slate-700 hover:border-slate-600'
@@ -195,7 +217,7 @@ export default function PublishDialog({
                     <p className={`text-sm font-medium ${visibility === opt.value ? 'text-cyan-400' : 'text-slate-300'}`}>
                       {opt.label}
                     </p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{opt.description}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">{blocked ? NO_MARKETPLACE_TEXT : opt.description}</p>
                   </div>
                 </button>
               );
@@ -300,12 +322,22 @@ export default function PublishDialog({
         </div>
 
         {error && (
-          <p className="text-sm text-red-400">{error}</p>
+          <p className="text-sm text-red-400" role="alert" data-testid="publish-error">{error}</p>
+        )}
+        {publishedWithIssues && (
+          <button
+            onClick={() => { onPublished(); onClose(); }}
+            data-testid="publish-continue"
+            className="w-full py-2 text-sm text-slate-300 border border-slate-600 rounded-lg hover:text-white hover:border-slate-500"
+          >
+            Continue to the agent
+          </button>
         )}
 
         <button
           onClick={handleSubmit}
           disabled={submitting}
+          data-testid="publish-submit"
           className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-cyan-400 hover:to-purple-500 shadow-lg shadow-cyan-500/25 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
         >
           {submitting ? (

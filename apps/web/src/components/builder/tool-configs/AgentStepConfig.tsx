@@ -1,12 +1,12 @@
 'use client';
 
 
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { useEffect, useState, useMemo } from 'react';
 import { Bot, ChevronDown, Loader2, Search } from 'lucide-react';
 import ModelPicker from '@/components/ModelPicker';
 import { ModelStatusBanner } from '@/components/ModelStatusBanner';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const COMMON_TOOLS = [
   'web_search', 'calculator', 'code_executor', 'file_reader', 'http_client',
@@ -37,10 +37,9 @@ export default function AgentStepConfig({ values, onChange }: AgentStepConfigPro
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (!token) { setLoading(false); return; }
-    fetch(`${API_URL}/api/agents?limit=200`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((body) => {
-        const list = (body.data || [])
+    fetchAllAgents<Record<string, unknown>>({ token })
+      .then(({ agents: rows }) => {
+        const list = rows
           .filter((a: Record<string, unknown>) => a.status === 'active')
           .map((a: Record<string, unknown>) => ({
             id: a.id as string,

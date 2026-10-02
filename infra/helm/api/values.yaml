@@ -42,6 +42,12 @@ mlModelsPVC:
   enabled: false
   claimName: ml-models-storage
 
+# Mounts the umbrella shared-data claim at /data instead of the host path.
+# Turn on with sharedData.usePVC on any cluster with more than one node.
+sharedDataPVC:
+  enabled: false
+  claimName: abenix-shared-data
+
 # Mounts the umbrella archives PVC at /data/archives (local object-storage
 # mode only). Off by default so a plain install does not demand a claim.
 archivesPVC:

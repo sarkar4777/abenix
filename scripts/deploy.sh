@@ -821,7 +821,7 @@ run_migrations() {
   local api_pod=""
   for _ in $(seq 1 30); do
     api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
-      --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+      --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
     [ -n "${api_pod}" ] && break
     sleep 3
   done
@@ -863,7 +863,7 @@ seed_agents() {
   local api_pod=""
   for i in $(seq 1 30); do
     api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
-      --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+      --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
     if [ -n "${api_pod}" ]; then
       # Verify the pod is actually ready (not just Running)
       local ready
@@ -917,8 +917,8 @@ run_seed() {
     local i
     for i in $(seq 1 40); do
       pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
-        --field-selector=status.phase=Running \
-        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp \
+        -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
       if [ -n "${pod}" ] && [ "$(kubectl get pod "${pod}" -n "${NAMESPACE}" \
           -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = "True" ]; then
         break
@@ -1003,6 +1003,40 @@ PY
     *)        log "credential summary unavailable: ${out:-no output}" ;;
   esac
   return 0
+}
+
+verify_ml_models_shared() {
+  # A model the API stored must be readable by the agent runtime, or ml_model
+  # tool calls fall back to fetching it over HTTP. A rollout can still show the
+  # old pods as Running, so look again for a minute before warning.
+  local api_pod rt_pod sample attempt
+  for attempt in 1 2 3 4 5 6; do
+    api_pod=$(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+      --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp \
+      -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)
+    rt_pod=$(kubectl get pods -n "${NAMESPACE}" --field-selector=status.phase=Running \
+      --sort-by=.metadata.creationTimestamp -o name 2>/dev/null | grep agent-runtime | tail -1 | sed 's#pod/##' | tr -d '\r')
+    if [ -z "${api_pod}" ] || [ -z "${rt_pod}" ]; then
+      sleep 10
+      continue
+    fi
+    sample=$(kubectl exec -n "${NAMESPACE}" "${api_pod}" -c api -- sh -c \
+      'find /data/ml-models -type f \( -name "*.pkl" -o -name "*.onnx" -o -name "*.pt" \) 2>/dev/null | head -1' 2>/dev/null | tr -d '\r')
+    if [ -z "${sample}" ]; then
+      log "ML model volume check: no model files yet"
+      return 0
+    fi
+    if MSYS_NO_PATHCONV=1 kubectl exec -n "${NAMESPACE}" "${rt_pod}" -- sh -c "test -f '${sample}'" 2>/dev/null; then
+      ok "ML models: the runtime reads the files the API stores"
+      return 0
+    fi
+    sleep 10
+  done
+  if [ -z "${api_pod}" ] || [ -z "${rt_pod}" ]; then
+    warn "ML model volume check skipped, api or runtime pod not running"
+  else
+    warn "ML models: ${sample} exists on the API but not on the runtime. The runtime will fetch models over HTTP. Mount the same ml-models claim on both."
+  fi
 }
 
 verify_subscription() {
@@ -1422,6 +1456,7 @@ deploy_local() {
   run_migrations || true
   seed_agents || true
   verify_subscription || true
+  verify_ml_models_shared || true
   report_tool_credentials || true
 
   # EDGE_RUNTIME_VARIANT={python|rust|c} picks which port runs in the cluster.
@@ -1507,7 +1542,7 @@ deploy_local() {
     echo -e "  ${CYAN}Prometheus${NC}        http://localhost:9090"
   fi
   echo ""
-  echo -e "  ${YELLOW}Mode:${NC}            EMBEDDED (agents run inside API pod)"
+  echo -e "  ${YELLOW}Mode:${NC}            $(kubectl -n "${NAMESPACE}" get cm abenix-config -o jsonpath="{.data.RUNTIME_MODE}" 2>/dev/null || echo unknown) runtime"
   echo -e "  ${YELLOW}Namespace:${NC}       ${NAMESPACE}"
   echo -e "  ${YELLOW}Image tag:${NC}       ${IMAGE_TAG}"
   echo ""
@@ -1571,6 +1606,7 @@ deploy_local_runtime() {
   run_migrations || true
   seed_agents || true
   verify_subscription || true
+  verify_ml_models_shared || true
   report_tool_credentials || true
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"
   setup_port_forwards "true"
@@ -1638,6 +1674,7 @@ deploy_cloud() {
   run_migrations || true
   seed_agents || true
   verify_subscription || true
+  verify_ml_models_shared || true
   report_tool_credentials || true
   deploy_livekit || warn "LiveKit deploy failed (non-fatal — meeting agents will be unavailable)"
 
@@ -1837,10 +1874,27 @@ deploy_reload() {
       local container
       container=$(kubectl -n "${NAMESPACE}" get deploy "${dep}"         -o jsonpath='{.spec.template.spec.containers[0].name}' 2>/dev/null)
       kubectl -n "${NAMESPACE}" set image "deploy/${dep}"         "${container}=${registry}/${svc}:${IMAGE_TAG}" >/dev/null
+      # init containers built from the same image (db-migrate) must move too,
+      # an older image does not know the newest migration and the pod never starts
+      local init_name init_image
+      while read -r init_name init_image; do
+        [ -z "${init_name}" ] && continue
+        case "${init_image}" in
+          "${registry}/${svc}:"*)
+            kubectl -n "${NAMESPACE}" set image "deploy/${dep}" "${init_name}=${registry}/${svc}:${IMAGE_TAG}" >/dev/null
+            log "${dep}: init ${init_name} -> ${registry}/${svc}:${IMAGE_TAG}"
+            ;;
+        esac
+      done < <(kubectl -n "${NAMESPACE}" get deploy "${dep}" \
+        -o jsonpath='{range .spec.template.spec.initContainers[*]}{.name}{" "}{.image}{"\n"}{end}' 2>/dev/null)
       log "${dep}: image -> ${registry}/${svc}:${IMAGE_TAG}"
     fi
     kubectl -n "${NAMESPACE}" rollout restart deployment -l "app.kubernetes.io/name=${svc}"
     kubectl -n "${NAMESPACE}" rollout status deployment -l "app.kubernetes.io/name=${svc}" --timeout=240s
+    # the new API image may carry migrations the database has not seen yet
+    if [ "${svc}" = "api" ]; then
+      run_migrations || warn "migrations did not complete, check the API pod"
+    fi
   else
     # mideasttourism-api is the one app whose Dockerfile COPYs from the app
     # root rather than from the api/ subdirectory.

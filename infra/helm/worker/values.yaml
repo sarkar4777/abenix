@@ -24,3 +24,9 @@ envFrom: []
 
 nodeSelector: {}
 tolerations: []
+
+# Mounts the umbrella shared-data claim at /data instead of the host path,
+# so the worker reads uploads the API wrote on another node.
+sharedDataPVC:
+  enabled: false
+  claimName: abenix-shared-data

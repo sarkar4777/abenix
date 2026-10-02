@@ -1,5 +1,6 @@
 'use client';
 
+import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 import { useState, useRef } from 'react';
 import { Download, Upload, X, FileText, Check, Loader2 } from 'lucide-react';
 
@@ -23,6 +24,7 @@ export default function ExportImportDialog({ open, onClose, agentId, agentName, 
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : '';
 
+  useEscapeToClose(open, onClose);
   if (!open) return null;
 
   const exportAgent = async () => {
@@ -87,7 +89,7 @@ export default function ExportImportDialog({ open, onClose, agentId, agentName, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true">
       <div className="bg-slate-800 border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-lg">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50">
           <div className="flex items-center gap-2">

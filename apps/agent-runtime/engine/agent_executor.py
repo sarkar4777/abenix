@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -94,6 +95,18 @@ def _truncate_tool_result(content: str, max_chars: int = MAX_TOOL_RESULT_CHARS) 
         + f"\n\n[... truncated {len(content) - max_chars:,} chars ...]\n\n"
         + content[-half:]
     )
+
+
+_RESULT_PERSIST_CHARS = int(os.environ.get("TOOL_RESULT_PERSIST_CHARS", "8000"))
+
+
+def _persisted_result(content: str | None) -> str:
+    """The tool result kept on the execution row, bounded so rows stay small."""
+    text = content or ""
+    if len(text) <= _RESULT_PERSIST_CHARS:
+        return text
+    dropped = len(text) - _RESULT_PERSIST_CHARS
+    return text[:_RESULT_PERSIST_CHARS] + f"\n[{dropped} more characters not kept]"
 
 
 def _model_visible_content(result: Any) -> str:
@@ -365,6 +378,44 @@ class AgentExecutor:
 
     def get_trace_summary(self) -> list[dict[str, Any]]:
         return list(self._node_traces)
+
+    async def _final_answer(
+        self, messages: list[dict[str, Any]], tools: Any
+    ) -> LLMResponse | None:
+        """One last turn after the step limit, asking for the answer from what is in hand."""
+        note = (
+            "You have used all the steps available for this task. Do not call any "
+            "more tools. Give your final answer now, using only what you already "
+            "gathered, in the format you were asked for. Say plainly what you "
+            "could not establish."
+        )
+        msgs = list(messages)
+        last = msgs[-1] if msgs else None
+        if last and last.get("role") == "user":
+            content = last.get("content")
+            if isinstance(content, list):
+                msgs[-1] = {
+                    **last,
+                    "content": [*content, {"type": "text", "text": note}],
+                }
+            else:
+                msgs[-1] = {**last, "content": f"{content}\n\n{note}"}
+        else:
+            msgs.append({"role": "user", "content": note})
+        try:
+            resp = await self.llm_router.complete(
+                messages=msgs,
+                system=self.system_prompt or None,
+                tools=tools if tools else None,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                stream=False,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("final answer after step limit failed: %s", e)
+            return None
+        return resp if isinstance(resp, LLMResponse) and resp.content else None
 
     async def invoke(self, input_message: str) -> ExecutionResult:
         from engine.tracing import get_tracer, current_trace_id
@@ -796,6 +847,9 @@ class AgentExecutor:
                         )
                     )
                     node_counter += 1
+                    tc["result"] = _persisted_result(result.content)
+                    tc["is_error"] = bool(result.is_error)
+                    tc["duration_ms"] = tool_dur
                 else:
                     result = ToolResult(
                         content=f"Unknown tool: {tc['name']}", is_error=True
@@ -844,14 +898,23 @@ class AgentExecutor:
                     node_traces=node_traces,
                 )
 
+        grounding_violation = self._grounding_violated(all_tool_calls)
+        final_text = ""
+        if not grounding_violation:
+            # out of steps: answer from what was gathered rather than return nothing usable
+            final = await self._final_answer(messages, tools)
+            if final is not None:
+                final_text = final.content or ""
+                total_input += final.input_tokens
+                total_output += final.output_tokens
+                total_cost += final.cost
         duration = int((time.monotonic() - start) * 1000)
         agent_execution_duration_seconds.observe(duration / 1000)
-        grounding_violation = self._grounding_violated(all_tool_calls)
         return ExecutionResult(
             output=(
                 GROUNDING_REQUIRED_ERROR
                 if grounding_violation
-                else "Max iterations reached."
+                else final_text or "Max iterations reached."
             ),
             input_tokens=total_input,
             output_tokens=total_output,
@@ -1276,12 +1339,14 @@ class AgentExecutor:
                     "duration_ms": tool_dur,
                     "input": tc["arguments"],
                     "output_preview": result.content[:500],
+                    "output": _persisted_result(result.content),
                     "is_error": result.is_error,
                     "metadata": result.metadata,
                     "output_summary": tc["output_summary"],
                 }
                 # the tool_call event went out before the tool ran, so the result rides on the trace
                 tc["result_preview"] = result.content[:500]
+                tc["result"] = _persisted_result(result.content)
                 tc["is_error"] = bool(result.is_error)
                 tc["duration_ms"] = tool_dur
                 self._node_traces.append(_trace)
@@ -1789,6 +1854,9 @@ def build_tool_registry(
     db_url: str = "",
     acting_subject: dict | None = None,
     model_config: dict | None = None,
+    user_id: str = "",
+    user_role: str = "",
+    delegation_depth: int = 0,
 ) -> ToolRegistry:
     _ensure_tool_classes()
 
@@ -1898,9 +1966,23 @@ def build_tool_registry(
 
     InvokeAgentCls = _CONTEXT_TOOL_FACTORIES.get("invoke_agent")
     if InvokeAgentCls:
+        # the sub-agent runs as whoever started this run, never the platform key owner
         context_tools["invoke_agent"] = lambda: InvokeAgentCls(
-            tenant_id=tenant_id, execution_id=execution_id
+            tenant_id=str(tenant_id or ""),
+            execution_id=str(execution_id or ""),
+            agent_id=str(agent_id or ""),
+            user_id=str(user_id or ""),
+            user_role=user_role,
+            delegation_depth=delegation_depth,
         )
+
+    from engine.tools.agent_step import AgentStepTool as _AgentStep
+
+    context_tools["agent_step"] = lambda: _AgentStep(
+        user_id=str(user_id or ""),
+        user_role=user_role,
+        delegation_depth=delegation_depth,
+    )
 
     NarrateCls = _CONTEXT_TOOL_FACTORIES.get("narrate")
     if NarrateCls:

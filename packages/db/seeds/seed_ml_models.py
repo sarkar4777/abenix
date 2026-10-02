@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from seeds._artifacts import mirror_quietly  # noqa: E402
 from models.ml_model import (
     MLModel,
     MLModelDeployment,
@@ -114,7 +115,18 @@ async def _ensure_for_tenant(
                 MLModel.status != MLModelStatus.DELETED,
             )
         )
-        if existing_q.scalar_one_or_none() is not None:
+        existing = existing_q.scalar_one_or_none()
+        if existing is not None:
+            # the row can outlive its file when volumes change, put the file back
+            target = Path(existing.file_uri or "")
+            if existing.file_uri and not target.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(pkl_path, target)
+                existing.file_size_bytes = target.stat().st_size
+                await mirror_quietly(target)
+                print(
+                    f"  ~ Restored missing file for {model_name} v{version} ({tenant.slug})"
+                )
             continue
 
         file_id = uuid.uuid4().hex[:12]
@@ -125,6 +137,7 @@ async def _ensure_for_tenant(
         # copy calls chmod via copymode. Only copyfile skips both.
         # Default share permissions are fine for the runtime to read.
         shutil.copyfile(pkl_path, dest)
+        await mirror_quietly(dest)
 
         # deactivate prior versions of the same name before inserting
         await db.execute(

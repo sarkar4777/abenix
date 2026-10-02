@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -13,7 +14,8 @@ import {
   Settings2,
 } from 'lucide-react';
 import type { PipelineStep, PipelineCondition, SwitchConfig } from './pipelineUtils';
-import { validatePipeline } from './pipelineUtils';
+import { validatePipeline, isValidConnection } from './pipelineUtils';
+import { apiFetch } from '@/lib/api-client';
 import { usePipelineStore, type ValidationError } from './usePipelineStore';
 import { TOOL_DOCS, type ToolParam } from '@/lib/tool-docs';
 import ModelPicker from '@/components/ModelPicker';
@@ -314,6 +316,7 @@ function LLMCallArgumentsForm({
           value={prompt}
           onChange={(e) => onChange({ ...args, prompt: e.target.value })}
           placeholder="Enter your prompt... Use {{step_id.field}} for template variables."
+          data-testid="step-prompt-input"
           rows={10}
           className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded-lg text-xs font-mono text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
         />
@@ -1288,7 +1291,7 @@ function GitHubToolArgumentsForm({
 
 // Agent Step Arguments Form
 
-function AgentStepArgumentsForm({
+function AgentTaskInput({
   args,
   onChange,
   stepErrors,
@@ -1298,6 +1301,32 @@ function AgentStepArgumentsForm({
   stepErrors: ValidationError[];
 }) {
   const inputMessage = (args.input_message as string) || '';
+  return (
+    <div>
+        <label className="block text-xs text-slate-400 mb-1.5">Task / Input Message<HelpTip text="The task or question this agent will work on. Use {{node_id.response}} to inject outputs from upstream nodes. Example: 'Find historical analogies for: {{decision_parser.response}}'" /></label>
+        <textarea
+          value={inputMessage}
+          onChange={(e) => onChange({ ...args, input_message: e.target.value })}
+          placeholder="Describe the task for the agent..."
+          data-testid="step-agent-task-input"
+          rows={4}
+          className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded-lg text-xs font-mono text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
+        />
+        <TemplatePreview value={inputMessage} />
+        <FieldError stepErrors={stepErrors} field="arguments.input_message" />
+    </div>
+  );
+}
+
+function AgentStepArgumentsForm({
+  args,
+  onChange,
+  stepErrors,
+}: {
+  args: Record<string, unknown>;
+  onChange: (args: Record<string, unknown>) => void;
+  stepErrors: ValidationError[];
+}) {
   const systemPrompt = (args.system_prompt as string) || '';
   const model = (args.model as string) || 'claude-sonnet-4-5-20250929';
   const maxIterations = typeof args.max_iterations === 'number' ? args.max_iterations : 10;
@@ -1305,19 +1334,6 @@ function AgentStepArgumentsForm({
 
   return (
     <div className="space-y-4">
-      <div>
-        <label className="block text-xs text-slate-400 mb-1.5">Task / Input Message<HelpTip text="The task or question this agent will work on. Use {{node_id.response}} to inject outputs from upstream nodes. Example: 'Find historical analogies for: {{decision_parser.response}}'" /></label>
-        <textarea
-          value={inputMessage}
-          onChange={(e) => onChange({ ...args, input_message: e.target.value })}
-          placeholder="Describe the task for the agent..."
-          rows={4}
-          className="w-full px-3 py-2 bg-slate-950/50 border border-slate-700 rounded-lg text-xs font-mono text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
-        />
-        <TemplatePreview value={inputMessage} />
-        <FieldError stepErrors={stepErrors} field="arguments.input_message" />
-      </div>
-
       <div>
         <label className="block text-xs text-slate-400 mb-1.5">System Prompt<HelpTip text="Defines the agent's role, expertise, and behavior. This is the 'personality' of the sub-agent. Be specific about what the agent should do, what tools to use, and what format to output." /></label>
         <textarea
@@ -1581,6 +1597,127 @@ function getStepIcon(toolName: string): {
   return { icon: Zap, color: 'text-emerald-400', bg: 'bg-emerald-500/10' };
 }
 
+// Dependency editor, mirrors what dragging an edge does
+
+function DependencyEditor({ step, allSteps }: { step: PipelineStep; allSteps: PipelineStep[] }) {
+  const edges = usePipelineStore((s) => s.edges);
+  const others = allSteps.filter((s) => s.id !== step.id);
+  if (others.length === 0) {
+    return (
+      <p className="px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-xs text-slate-500">
+        No other steps yet. Add more steps to wire dependencies.
+      </p>
+    );
+  }
+  const toggle = (depId: string, on: boolean) => {
+    const store = usePipelineStore.getState();
+    if (on) {
+      store.connectSteps(depId, step.id);
+      return;
+    }
+    store.edges
+      .filter((e) => e.source === depId && e.target === step.id)
+      .forEach((e) => store.disconnectSteps(e.id));
+    const cur = usePipelineStore.getState().steps.find((s) => s.id === step.id);
+    if (cur && cur.dependsOn.includes(depId)) {
+      store.updateStep(step.id, { dependsOn: cur.dependsOn.filter((d) => d !== depId) });
+    }
+  };
+  return (
+    <div className="space-y-1">
+      {others.map((o) => {
+        const checked = step.dependsOn.includes(o.id) || edges.some((e) => e.source === o.id && e.target === step.id);
+        const allowed = checked || isValidConnection(o.id, step.id, allSteps);
+        const inputId = `step-dep-${step.id}-${o.id}`;
+        return (
+          <label
+            key={o.id}
+            htmlFor={inputId}
+            title={allowed ? undefined : 'Would create a cycle'}
+            className={`flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 border rounded-lg text-xs ${
+              checked ? 'border-emerald-500/40 text-white' : 'border-slate-700 text-slate-300'
+            } ${allowed ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+          >
+            <input
+              id={inputId}
+              type="checkbox"
+              checked={checked}
+              disabled={!allowed}
+              onChange={(e) => toggle(o.id, e.target.checked)}
+              data-testid={`step-dep-${o.id}`}
+              className="rounded border-slate-600"
+            />
+            <span className="truncate">{o.label || o.id}</span>
+          </label>
+        );
+      })}
+      {step.dependsOn.length === 0 && (
+        <p className="text-[10px] text-slate-500 px-1">No dependencies, this is a root step.</p>
+      )}
+    </div>
+  );
+}
+
+// Existing-agent picker for agent_step nodes
+
+interface AgentOption {
+  id: string;
+  name: string;
+  slug?: string | null;
+}
+
+function AgentSlugSelect({ value, onChange }: { value: string; onChange: (slug: string) => void }) {
+  const [agents, setAgents] = useState<AgentOption[] | null>(null);
+  const [mine, setMine] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    // paged, a workspace easily has more than one page of agents
+    Promise.all([
+      fetchAllAgents<AgentOption>({ query: 'sort=name' }),
+      fetchAllAgents<AgentOption>({ query: 'scope=mine&sort=name' }),
+    ])
+      .then(([all, own]) => {
+        if (cancelled) return;
+        setAgents(all.agents.filter((a) => a.slug));
+        setMine(new Set(own.agents.map((a) => a.id)));
+      })
+      .catch(() => {
+        if (!cancelled) setAgents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const known = (agents || []).some((a) => a.slug === value);
+  const own = (agents || []).filter((a) => mine.has(a.id));
+  const rest = (agents || []).filter((a) => !mine.has(a.id));
+  const opt = (a: AgentOption) => (
+    <option key={a.id} value={a.slug || ''}>
+      {a.name} ({a.slug})
+    </option>
+  );
+  return (
+    <div>
+      <label htmlFor="step-agent-select" className="block text-xs text-slate-400 mb-1.5">
+        Agent<HelpTip text="Run one of your saved agents as this step. Its system prompt, model and tools load at run time. Pick Inline agent to define the prompt under Arguments instead." />
+      </label>
+      <select
+        id="step-agent-select"
+        data-testid="step-agent-select"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-500"
+      >
+        <option value="">Inline agent (define it under Arguments)</option>
+        {value && !known && <option value={value}>{value}</option>}
+        {own.length > 0 && <optgroup label="Your agents">{own.map(opt)}</optgroup>}
+        {rest.length > 0 && <optgroup label="Shared and platform agents">{rest.map(opt)}</optgroup>}
+      </select>
+      {agents === null && <p className="text-[9px] text-slate-600 mt-1">Loading agents…</p>}
+    </div>
+  );
+}
+
 // StepConfigPanel
 
 export default function StepConfigPanel({
@@ -1688,6 +1825,7 @@ export default function StepConfigPanel({
                 value={step.label}
                 onChange={handleLabelChange}
                 placeholder="Step name"
+                data-testid="step-label-input"
                 className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
               />
             </div>
@@ -1697,6 +1835,35 @@ export default function StepConfigPanel({
                 {formatToolName(step.toolName)}
               </p>
             </div>
+            {step.toolName === 'agent_step' && (
+              <>
+                <AgentSlugSelect
+                  value={step.agentSlug || ''}
+                  onChange={(slug) => onUpdate(step.id, { agentSlug: slug || undefined })}
+                />
+                <AgentTaskInput args={step.arguments} onChange={handleArgumentsChange} stepErrors={stepErrors} />
+                {!step.agentSlug && (
+                  <p className="text-[11px] text-slate-500">
+                    Inline agent: set its system prompt and model under{' '}
+                    <button type="button" onClick={() => setTab('arguments')} className="text-emerald-300 hover:underline">Arguments</button>.
+                  </p>
+                )}
+              </>
+            )}
+            {step.toolName !== 'agent_step' && !isSwitch && (
+              <button
+                type="button"
+                onClick={() => setTab('arguments')}
+                data-testid="step-open-arguments"
+                className={`w-full text-left px-3 py-2 rounded-lg border text-xs transition-colors ${
+                  stepErrors.some((e) => String(e.field || '').startsWith('arguments'))
+                    ? 'border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/15'
+                    : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200 hover:bg-emerald-500/10'
+                }`}
+              >
+                Set what this step does under Arguments →
+              </button>
+            )}
             <div>
               <label className="block text-xs text-slate-400 mb-1.5">
                 Step ID<HelpTip text="Unique identifier for this step. Use this in template variables: {{step_id.response}} to reference this step's output in downstream nodes." />
@@ -1709,25 +1876,7 @@ export default function StepConfigPanel({
               <label className="block text-xs text-slate-400 mb-1.5">
                 Dependencies<HelpTip text="Steps that must complete before this one runs. Data flows from dependencies to this step via template variables like {{dependency_id.response}}." />
               </label>
-              {step.dependsOn.length === 0 ? (
-                <p className="px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-xs text-slate-500">
-                  No dependencies (root step)
-                </p>
-              ) : (
-                <div className="space-y-1">
-                  {step.dependsOn.map((depId) => {
-                    const depStep = allSteps.find((s) => s.id === depId);
-                    return (
-                      <div
-                        key={depId}
-                        className="px-3 py-1.5 bg-slate-800/50 border border-slate-700 rounded-lg text-xs text-slate-300"
-                      >
-                        {depStep ? depStep.label : depId}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <DependencyEditor step={step} allSteps={allSteps} />
               <FieldError stepErrors={stepErrors} field="depends_on" />
             </div>
             {/* Agent Configuration Summary */}
@@ -1909,11 +2058,13 @@ export default function StepConfigPanel({
                 stepErrors={stepErrors}
               />
             ) : step.toolName === 'agent_step' ? (
-              <AgentStepArgumentsForm
-                args={step.arguments}
-                onChange={handleArgumentsChange}
-                stepErrors={stepErrors}
-              />
+              <>
+                <AgentStepArgumentsForm
+                  args={step.arguments}
+                  onChange={handleArgumentsChange}
+                  stepErrors={stepErrors}
+                />
+              </>
             ) : (
               <SchemaArgumentsForm
                 toolName={step.toolName}

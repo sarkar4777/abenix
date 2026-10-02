@@ -283,6 +283,8 @@ def _merge_tool_trace(tool_calls: list[dict[str, Any]], trace: dict[str, Any]) -
     for tc in tool_calls:
         if tc.get("name") == name and "duration_ms" not in tc:
             tc["result_preview"] = trace.get("output_preview") or ""
+            if trace.get("output"):
+                tc["result"] = trace["output"]
             tc["is_error"] = bool(trace.get("is_error"))
             tc["duration_ms"] = trace.get("duration_ms")
             if trace.get("output_summary"):
@@ -305,6 +307,8 @@ def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, 
                 "node_id": nid,
                 "arguments": nr.get("resolved_arguments") or {},
                 "result_preview": preview[:500],
+                "result": preview[:8000],
+                "label": nr.get("label") or "",
                 "is_error": nr.get("status") == "failed",
                 "duration_ms": nr.get("duration_ms"),
             }
@@ -593,6 +597,8 @@ async def _run_one(payload: dict) -> None:
             )
             from engine.agent_executor import build_tool_registry
 
+            _labels: dict[str, str] = {}
+
             async def on_node_start(node_id: str, tool_name: str) -> None:
                 await _publish(
                     execution_id,
@@ -600,6 +606,7 @@ async def _run_one(payload: dict) -> None:
                         "event": "node_start",
                         "node_id": node_id,
                         "tool_name": tool_name,
+                        "label": _labels.get(node_id, ""),
                     },
                 )
 
@@ -645,6 +652,7 @@ async def _run_one(payload: dict) -> None:
             pipeline_config = loaded["pipeline_config"] or {}
             raw_nodes = pipeline_config.get("nodes", [])
             nodes = parse_pipeline_nodes(raw_nodes)
+            _labels.update({n.id: n.label for n in nodes if n.label})
             for node in nodes:
                 if node.tool_name == "web_search" and "query" not in node.arguments:
                     node.arguments["query"] = message
@@ -654,6 +662,10 @@ async def _run_one(payload: dict) -> None:
                 agent_id=loaded.get("agent_id"),
                 tenant_id=loaded.get("tenant_id"),
                 kb_ids=loaded.get("kb_ids") or [],
+                execution_id=execution_id,
+                user_id=user_id or "",
+                user_role=payload.get("role") or "",
+                delegation_depth=int(payload.get("delegation_depth") or 0),
             )
             executor = PipelineExecutor(
                 tool_registry=registry,
@@ -804,6 +816,9 @@ async def _run_one(payload: dict) -> None:
                 agent_name=agent_name,
                 db_url=os.environ.get("DATABASE_URL", ""),
                 model_config=loaded.get("model_cfg") or {},
+                user_id=user_id or "",
+                user_role=payload.get("role") or "",
+                delegation_depth=int(payload.get("delegation_depth") or 0),
             )
             # Same MCP resolution as the inline API path, read straight from the DB.
             _mcp_conns: list[dict[str, Any]] = []

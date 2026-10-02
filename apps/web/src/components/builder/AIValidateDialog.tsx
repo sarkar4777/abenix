@@ -1,6 +1,7 @@
 // @ts-nocheck — Tier 2/3 payload shapes are dynamic
 'use client';
 
+import { useEscapeToClose } from '@/hooks/useEscapeToClose';
 import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, Sparkles, X, XCircle } from 'lucide-react';
 
@@ -79,6 +80,7 @@ export default function AIValidateDialog({ open, onClose, agentId, agentName, ge
   const [result, setResult] = useState<SmartResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEscapeToClose(open, onClose);
   if (!open) return null;
 
   const runValidation = async () => {
@@ -127,7 +129,7 @@ export default function AIValidateDialog({ open, onClose, agentId, agentName, ge
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true">
       <div className="bg-slate-800 border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50">
           <div className="flex items-center gap-3">

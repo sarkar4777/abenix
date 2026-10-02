@@ -60,6 +60,19 @@ def _cache_put(key: str, tgz_bytes: bytes) -> None:
         logger.warning("code_asset build-cache store failed: %s", e)
 
 
+def single_root_prefix(names: list[str]) -> str:
+    """'folder/' when every entry sits under one top-level folder, else ''."""
+    parts = [n for n in names if n and not n.startswith("__MACOSX/")]
+    if not parts:
+        return ""
+    first = parts[0].split("/", 1)[0]
+    if not first or any(n.split("/", 1)[0] != first for n in parts):
+        return ""
+    if not any(n.startswith(first + "/") and len(n) > len(first) + 1 for n in parts):
+        return ""
+    return first + "/"
+
+
 class CodeAssetTool(BaseTool):
     name = "code_asset"
     description = (
@@ -247,11 +260,14 @@ class CodeAssetTool(BaseTool):
                 out = _io.BytesIO()
                 with _tarfile.open(fileobj=out, mode="w:gz") as tf:
                     with _zipfile.ZipFile(_io.BytesIO(zip_bytes)) as zf:
-                        for name in zf.namelist():
+                        names = zf.namelist()
+                        # a project zipped as one folder runs from inside it, same as the analyzer sees it
+                        prefix = single_root_prefix(names)
+                        for name in names:
                             if name.endswith("/"):
                                 continue
                             data = zf.read(name)
-                            info = _tarfile.TarInfo(name=name)
+                            info = _tarfile.TarInfo(name=name[len(prefix) :])
                             info.size = len(data)
                             info.mode = 0o644
                             tf.addfile(info, _io.BytesIO(data))
@@ -362,6 +378,13 @@ class CodeAssetTool(BaseTool):
             )
             download_url = f"{api_base}/api/code-assets/{asset_id}/download"
             auth_header = os.environ.get("CODE_ASSET_DOWNLOAD_TOKEN", "")
+            # whoever runs the agent, the pod may fetch this asset and no other
+            from engine.tools.invoke_agent import mint_asset_fetch_token
+
+            _fetch_tok = mint_asset_fetch_token(asset_id, self._tenant_id or "")
+            if _fetch_tok:
+                download_url = f"{api_base}/api/code-assets/{asset_id}/fetch"
+                auth_header = f"Bearer {_fetch_tok}"
 
             # Per-language bootstrap — matches the image ecosystem.
             if image.startswith(("python:", "python3:")):

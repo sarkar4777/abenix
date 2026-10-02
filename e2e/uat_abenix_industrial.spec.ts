@@ -572,8 +572,10 @@ test.describe('Industrial · SSE streaming', () => {
 
   test('Chat reply streams incrementally (final body grew vs initial)', async ({ page }) => {
     test.setTimeout(120_000);
-    const agents = await api<any[]>('/api/agents?limit=10');
-    const target = agents[0];
+    // a built-in agent, so the result does not depend on whatever other suites created
+    const agents = await api<any[]>('/api/agents?limit=100');
+    const target =
+      agents.find((a) => a.agent_type === 'oob' && (a.model_config || {}).mode !== 'pipeline') || agents[0];
     if (!target) test.skip(true, 'no agents');
     await gotoOk(page, `/agents/${target.id}/chat`, 2000);
     const input = page.locator('textarea, input[type="text"]').filter({ hasText: '' }).last();

@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -288,6 +288,13 @@ async def upload_model(
     file_id = uuid.uuid4().hex[:12]
     file_path = model_dir / f"{file_id}_{file.filename}"
     file_path.write_bytes(content)
+    from app.core.artifact_store import ArtifactStoreError, mirror
+
+    try:
+        await mirror(file_path)
+    except ArtifactStoreError as e:
+        file_path.unlink(missing_ok=True)
+        return error(str(e), 503)
 
     # Deactivate previous versions of the same model name for this tenant
     # (only the latest upload is active by default)
@@ -463,11 +470,11 @@ async def delete_model(
     if not model:
         return error("Model not found", 404)
 
-    # Clean up file
-    try:
-        Path(model.file_uri).unlink(missing_ok=True)
-    except Exception:
-        pass
+    # the file and its durable copy
+    from app.core.artifact_store import remove
+
+    if model.file_uri:
+        await remove(model.file_uri)
 
     model.status = MLModelStatus.DELETED
     await db.commit()
@@ -989,6 +996,39 @@ async def undeploy_model(
     )
 
 
+@router.get("/{model_id}/fetch")
+async def fetch_model_for_runtime(
+    model_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Model file for a runtime pod that does not share the API's volume.
+
+    Authorised only by a short-lived token scoped to this one model.
+    """
+    from fastapi.responses import FileResponse
+
+    from app.core.security import verify_token
+
+    auth = request.headers.get("authorization", "")
+    claims = (
+        verify_token(auth.removeprefix("Bearer ")) if auth.startswith("Bearer ") else {}
+    )
+    if claims.get("type") != "ml_model_fetch" or claims.get("sub") != str(model_id):
+        return error("Model not found", 404)
+    model = (
+        await db.execute(select(MLModel).where(MLModel.id == model_id))
+    ).scalar_one_or_none()
+    if model is None or str(model.tenant_id) != str(claims.get("tenant_id")):
+        return error("Model not found", 404)
+    from app.core.artifact_store import ensure_local
+
+    file_path = Path(model.file_uri or "")
+    if not await ensure_local(file_path):
+        return error("Model file not found on disk", 404)
+    return FileResponse(path=str(file_path), media_type="application/octet-stream")
+
+
 @router.get("/{model_id}/download")
 async def download_model_file(
     model_id: uuid.UUID,
@@ -1008,8 +1048,10 @@ async def download_model_file(
     if not model:
         return error("Model not found", 404)
 
+    from app.core.artifact_store import ensure_local
+
     file_path = Path(model.file_uri)
-    if not file_path.exists():
+    if not await ensure_local(file_path):
         return error("Model file not found on disk", 404)
 
     return FileResponse(

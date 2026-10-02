@@ -417,6 +417,7 @@ export default function KnowledgeEnginePage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Ask a question about your knowledge base..."
+            data-testid="kb-search-input"
             className="flex-1 px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           />
@@ -435,6 +436,7 @@ export default function KnowledgeEnginePage() {
           <button
             onClick={handleSearch}
             disabled={searching || !searchQuery.trim()}
+            data-testid="kb-search-button"
             className="px-4 py-2 bg-cyan-500/10 text-cyan-400 rounded-lg hover:bg-cyan-500/20 disabled:opacity-40 text-sm flex items-center gap-2"
           >
             {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
@@ -456,8 +458,13 @@ export default function KnowledgeEnginePage() {
         )}
 
         {/* Results */}
+        {searchMeta && !searching && searchResults.length === 0 && (
+          <p className="text-xs text-slate-400 py-3" data-testid="kb-search-empty">
+            No matches. Check that documents finished processing, or try different words.
+          </p>
+        )}
         {searchResults.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-2" data-testid="kb-search-results">
             {searchResults.map((r, i) => (
               <div key={i} className="bg-slate-900/50 border border-slate-700/30 rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-1">

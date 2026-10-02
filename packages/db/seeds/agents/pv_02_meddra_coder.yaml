@@ -52,3 +52,31 @@ model_config:
   tools:
     - code_asset
     - knowledge_search
+
+# A coded term is only coded when it carries its hierarchy and code. Anything
+# short of that belongs in uncoded, and the engine asks once for a fix.
+output_schema:
+  type: object
+  required: [coded_terms, uncoded]
+  properties:
+    coded_terms:
+      type: array
+      items:
+        type: object
+        required: [verbatim, llt, pt, soc, meddra_code]
+        properties:
+          verbatim: { type: string }
+          llt: { type: string }
+          pt: { type: string }
+          hlt: { type: string }
+          soc: { type: string }
+          meddra_code: { type: string }
+          confidence: { type: number, minimum: 0, maximum: 1 }
+          source: { type: string, enum: [dictionary, adjudicated] }
+    uncoded:
+      type: array
+      items:
+        type: object
+        required: [verbatim, reason]
+    imc_terms:
+      type: array

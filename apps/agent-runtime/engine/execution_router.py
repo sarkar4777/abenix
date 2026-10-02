@@ -97,6 +97,7 @@ async def _execute_embedded(config: ExecutionConfig) -> ExecutionResult:
             "agent_name": config.agent_name,
             "db_url": config.db_url,
             "model_config": config.model_config or {},
+            "user_id": config.user_id,
         }
 
         # Handle MCP connections
@@ -105,7 +106,10 @@ async def _execute_embedded(config: ExecutionConfig) -> ExecutionResult:
             from engine.tool_resolver import resolve_tools
 
             tool_registry, mcp_clients, _ = await resolve_tools(
-                config.tool_names, config.mcp_connections
+                config.tool_names,
+                config.mcp_connections,
+                kb_ids=config.kb_ids,
+                **registry_kwargs,
             )
         else:
             tool_registry = build_tool_registry(
@@ -169,6 +173,7 @@ async def _stream_embedded(
             "agent_name": config.agent_name,
             "db_url": config.db_url,
             "model_config": config.model_config or {},
+            "user_id": config.user_id,
         }
 
         mcp_clients = []
@@ -176,7 +181,10 @@ async def _stream_embedded(
             from engine.tool_resolver import resolve_tools
 
             tool_registry, mcp_clients, _ = await resolve_tools(
-                config.tool_names, config.mcp_connections
+                config.tool_names,
+                config.mcp_connections,
+                kb_ids=config.kb_ids,
+                **registry_kwargs,
             )
         else:
             tool_registry = build_tool_registry(

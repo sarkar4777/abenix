@@ -28,6 +28,8 @@ import { apiFetch } from '@/lib/api-client';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
 import { SkeletonAgentCard } from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
+import DeleteWithDependents from '@/components/ui/DeleteWithDependents';
+import { toastError, toastSuccess } from '@/stores/toastStore';
 
 interface Agent {
   id: string;
@@ -108,8 +110,10 @@ export default function AgentsPage() {
   const { data: agents, isLoading: loading, meta, mutate } = useApi<Agent[]>(apiUrl);
 
   // Used to bucket the "My Agents" tab count against the active session.
-  const { data: perms } = useApi<{ user_id: string }>('/api/me/permissions');
+  const { data: perms } = useApi<{ user_id: string; is_admin?: boolean }>('/api/me/permissions');
   const currentUserId = perms?.user_id ?? null;
+  const [deleting, setDeleting] = useState<Agent | null>(null);
+  const canDelete = (a: Agent) => a.agent_type !== 'oob' && (!!perms?.is_admin || (!!currentUserId && a.creator_id === currentUserId));
 
   // Fan out one unbounded list-fetch so each tab can carry its own count
   // independent of the paginated visible slice. Without this the header
@@ -262,6 +266,16 @@ export default function AgentsPage() {
                       const GroupedIconComp = (agent.icon_url && iconMap[agent.icon_url]) || Bot;
                       return (
                       <motion.div key={agent.id} variants={item} className="relative bg-slate-800/30 backdrop-blur border border-slate-700/50 rounded-xl p-5 hover:border-slate-600/50 transition-all group">
+                        {canDelete(agent) && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setDeleting(agent); }}
+                            data-testid={`agent-delete-${agent.id}`}
+                            className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all"
+                            aria-label={`Delete ${agent.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         {/* /agents/[id] has no index page — only /info, /chat, /memories. */}
                         <a href={`/agents/${agent.id}/info`} className="block">
                           <div className="flex items-start gap-3 mb-3">
@@ -296,15 +310,14 @@ export default function AgentsPage() {
               variants={item}
               className="relative bg-slate-800/30 backdrop-blur border border-slate-700/50 rounded-xl p-5 hover:border-slate-600/50 transition-all group"
             >
-              {agent.agent_type !== 'oob' && (
+              {canDelete(agent) && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (confirm(`Delete "${agent.name}"? This cannot be undone.`)) {
-                      apiFetch(`/api/agents/${agent.id}`, { method: 'DELETE' }).then(() => mutate());
-                    }
+                    setDeleting(agent);
                   }}
-                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all"
+                  data-testid={`agent-delete-${agent.id}`}
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all"
                   aria-label="Delete agent"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -413,6 +426,24 @@ export default function AgentsPage() {
           </div>
         </div>
       )}
+      <DeleteWithDependents
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        resource={`/api/agents/${deleting?.id}`}
+        name={deleting?.name || ''}
+        what="agent"
+        note="Its run history stays. An admin can restore it."
+        onConfirm={async (force) => {
+          if (!deleting) return;
+          try {
+            await apiFetch(`/api/agents/${deleting.id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+            toastSuccess(`${deleting.name} deleted`);
+            mutate();
+          } catch (e: any) {
+            toastError('Delete failed', e?.message || 'Unknown error');
+          }
+        }}
+      />
     </motion.div>
   );
 }
