@@ -11,6 +11,7 @@ import type { Node } from 'reactflow';
 import { getToolDoc } from '@/lib/tool-docs';
 import { apiFetch } from '@/lib/api-client';
 import ModelPicker from '@/components/ModelPicker';
+import InputVariablesEditor, { type InputVariable } from './InputVariablesEditor';
 import { ModelStatusBanner } from '@/components/ModelStatusBanner';
 import { CredentialBadge, CredentialHint, missingKeys, type ToolConfigInfo } from '@/components/CredentialBadge';
 import { useIsAdmin, useToolConfigMap } from '@/hooks/useToolConfig';
@@ -27,16 +28,6 @@ import {
   ConnectorCallConfig,
   ApprovalGateConfig,
 } from './tool-configs';
-
-interface InputVariable {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'file' | 'url' | 'select' | 'connection_string';
-  description: string;
-  required: boolean;
-  default?: string | number | boolean;
-  placeholder?: string;
-  options?: string[];  // For select type
-}
 
 export interface ToolConfig {
   usage_instructions: string;
@@ -1110,121 +1101,11 @@ export default function AgentConfigPanel({
               />
             </div>
 
-            {/* Input Parameters — variables that users fill when executing */}
             <div className="border-t border-slate-700/50 pt-4 mt-2">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h4 className="text-xs font-semibold text-white">Input Parameters</h4>
-                  <p className="text-[10px] text-slate-500">Define variables that users must provide when running this agent or pipeline</p>
-                </div>
-                <button
-                  onClick={() => {
-                    const vars = [...(config.input_variables || [])];
-                    vars.push({ name: '', type: 'string', description: '', required: false });
-                    onChange({ input_variables: vars });
-                  }}
-                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-cyan-400 bg-cyan-500/10 rounded hover:bg-cyan-500/20 transition-colors"
-                >
-                  <Plus className="w-3 h-3" />
-                  Add Parameter
-                </button>
-              </div>
-
-              {(config.input_variables || []).length === 0 && (
-                <p className="text-[10px] text-slate-600 italic">No input parameters defined. Users will only provide a chat message.</p>
-              )}
-
-              <div className="space-y-2">
-                {(config.input_variables || []).map((v, idx) => (
-                  <div key={idx} className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-2.5 space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={v.name}
-                        placeholder="Parameter name"
-                        onChange={(e) => {
-                          const vars = [...(config.input_variables || [])];
-                          vars[idx] = { ...vars[idx], name: e.target.value.replace(/\s+/g, '_').toLowerCase() };
-                          onChange({ input_variables: vars });
-                        }}
-                        className="flex-1 px-2 py-1 text-xs bg-slate-900/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
-                      />
-                      <select
-                        value={v.type}
-                        onChange={(e) => {
-                          const vars = [...(config.input_variables || [])];
-                          vars[idx] = { ...vars[idx], type: e.target.value as InputVariable['type'] };
-                          onChange({ input_variables: vars });
-                        }}
-                        className="w-[110px] shrink-0 px-2 py-1 text-xs bg-slate-900/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500 truncate"
-                      >
-                        <option value="string">Text</option>
-                        <option value="number">Number</option>
-                        <option value="boolean">Yes/No</option>
-                        <option value="url">URL</option>
-                        <option value="file">File</option>
-                        <option value="connection_string">DB Conn</option>
-                        <option value="select">Dropdown</option>
-                      </select>
-                      <button
-                        onClick={() => {
-                          const vars = (config.input_variables || []).filter((_, i) => i !== idx);
-                          onChange({ input_variables: vars });
-                        }}
-                        className="px-1.5 text-red-400 hover:text-red-300"
-                      >
-                        &times;
-                      </button>
-                    </div>
-                    <p className="text-[9px] text-slate-600 px-1">
-                      {v.type === 'string' && 'Free-form text input'}
-                      {v.type === 'number' && 'Numeric value (integer or decimal)'}
-                      {v.type === 'boolean' && 'Yes/No toggle switch'}
-                      {v.type === 'url' && 'URL with http:// or https://'}
-                      {v.type === 'file' && 'User selects a file — content read as text and passed to agent'}
-                      {v.type === 'connection_string' && 'Database connection string (masked input)'}
-                      {v.type === 'select' && 'Dropdown — add options in Default value (comma-separated)'}
-                    </p>
-                    <input
-                      type="text"
-                      value={v.description}
-                      placeholder="Description (shown to users)"
-                      onChange={(e) => {
-                        const vars = [...(config.input_variables || [])];
-                        vars[idx] = { ...vars[idx], description: e.target.value };
-                        onChange({ input_variables: vars });
-                      }}
-                      className="w-full px-2 py-1 text-xs bg-slate-900/50 border border-slate-700 rounded text-slate-300 focus:outline-none focus:border-cyan-500"
-                    />
-                    <div className="flex items-center gap-3">
-                      <label className="flex items-center gap-1 text-[10px] text-slate-400">
-                        <input
-                          type="checkbox"
-                          checked={v.required}
-                          onChange={(e) => {
-                            const vars = [...(config.input_variables || [])];
-                            vars[idx] = { ...vars[idx], required: e.target.checked };
-                            onChange({ input_variables: vars });
-                          }}
-                          className="rounded border-slate-600"
-                        />
-                        Required
-                      </label>
-                      <input
-                        type="text"
-                        value={(v.default as string) || ''}
-                        placeholder="Default value"
-                        onChange={(e) => {
-                          const vars = [...(config.input_variables || [])];
-                          vars[idx] = { ...vars[idx], default: e.target.value };
-                          onChange({ input_variables: vars });
-                        }}
-                        className="flex-1 px-2 py-0.5 text-[10px] bg-slate-900/50 border border-slate-700 rounded text-slate-400 focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <InputVariablesEditor
+                value={config.input_variables || []}
+                onChange={(vars) => onChange({ input_variables: vars })}
+              />
             </div>
 
             {/* Example Prompts — shown on the agent's chat page as

@@ -35,6 +35,11 @@
 - Switching a subscription to webhook returns its new signing secret once.
 - Docs for warm code runners, Source Watch, evaluation suites and outbound events, plus updates to approvals, governance, env vars and the load test baseline.
 - Outbound webhooks can reach named in-cluster receivers through eventsAllowedInternalHosts (EVENTS_ALLOWED_INTERNAL_HOSTS). Names must match exactly, every other private address stays blocked.
+- Reference sets can be deleted, refused while an active decision version uses them.
+- Pipelines declare typed input parameters in the builder, step JSON fields keep what you type, and decision steps pick from a list of decisions with their required facts.
+- Decision risk tier can be changed after creation.
+- The SDK playground finds every agent, sends declared inputs as context, and its generated Python, TypeScript and Java code carries exactly what was run.
+- A UI journey spec covers rules, validation, publishing, an agent and a pipeline that use the decision, chat, the Flight Recorder and the SDK playground.
 
 ## v2.5.1 — 2026-10-02
 

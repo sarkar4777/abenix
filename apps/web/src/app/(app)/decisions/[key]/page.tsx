@@ -240,6 +240,13 @@ export default function DecisionWorkspace() {
     if (r.data) { await refreshModel(); setVersionNo(r.data.version); setNotice({ ok: true, text: `Draft version ${r.data.version} created from version ${from ?? 'in force'}.` }); }
     else setNotice({ ok: false, text: r.error || 'Could not create a draft' });
   }
+  async function setTier(tier: Tier) {
+    setBusy('tier');
+    const r = await apiFetch<any>(`/api/decisions/${encodeURIComponent(decisionKey)}`, { method: 'PATCH', body: JSON.stringify({ risk_tier: tier }), throwOnError: false });
+    setBusy(null);
+    if (r.data) { await refreshModel(); setNotice({ ok: true, text: `Risk tier is now ${TIER_STYLE[tier].label.toLowerCase()}. It applies to the next version you propose.` }); }
+    else setNotice({ ok: false, text: r.error || 'Could not change the risk tier' });
+  }
   async function exportJson() {
     const r = await apiFetch<any>(`/api/decisions/${encodeURIComponent(decisionKey)}/export?version=${version!.version}`, { throwOnError: false });
     if (!r.data) return;
@@ -283,7 +290,21 @@ export default function DecisionWorkspace() {
         <Link href="/decisions" className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white"><ArrowLeft className="w-3.5 h-3.5" /> Decisions</Link>
         <div className="flex flex-wrap items-center gap-3 mt-1">
           <h1 className="text-2xl font-semibold text-white">{model.name}</h1>
-          <span className={`text-[11px] px-1.5 py-0.5 rounded border ${TIER_STYLE[model.risk_tier].chip}`}>{TIER_STYLE[model.risk_tier].label} risk</span>
+          {canPublish ? (
+            <select
+              value={model.risk_tier}
+              onChange={(e) => setTier(e.target.value as Tier)}
+              disabled={busy === 'tier'}
+              className={`text-[11px] px-1.5 py-0.5 rounded border bg-transparent cursor-pointer ${TIER_STYLE[model.risk_tier].chip}`}
+              aria-label="Risk tier"
+              title="Higher tiers need more sign-off before a new version goes live"
+              data-testid="decision-tier"
+            >
+              {(Object.keys(TIER_STYLE) as Tier[]).map((t) => <option key={t} value={t} className="bg-slate-900 text-white">{TIER_STYLE[t].label} risk</option>)}
+            </select>
+          ) : (
+            <span className={`text-[11px] px-1.5 py-0.5 rounded border ${TIER_STYLE[model.risk_tier].chip}`}>{TIER_STYLE[model.risk_tier].label} risk</span>
+          )}
           <span className="text-xs font-mono text-slate-500">{model.key}</span>
           <div className="relative">
             <button type="button" onClick={() => setVersionMenu((o) => !o)} className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border ${STATE_STYLE[version.state]}`} data-testid="version-picker" aria-haspopup="listbox">
