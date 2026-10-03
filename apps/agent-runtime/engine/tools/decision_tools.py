@@ -27,12 +27,31 @@ class _DecisionTool(BaseTool):
     def _tenant(self) -> str:
         return str(self.tenant_id or credentials.current_tenant() or "")
 
+    def _run_ctx(self) -> Any:
+        from engine import governance
+
+        return governance.current()
+
+    def _execution(self) -> str:
+        ctx = self._run_ctx()
+        return str(self._execution_id or (ctx.execution_id if ctx else "") or "")
+
     def _caller(self) -> dict[str, Any]:
-        return {
-            "execution_id": self._execution_id,
-            "agent": self._agent_name,
+        ctx = self._run_ctx()
+        caller = {
+            "execution_id": self._execution(),
+            "agent": self._agent_name or (ctx.agent_name if ctx else "") or "",
             "user_id": self._user_id,
+            "tool": self.name,
         }
+        if ctx is not None:
+            caller["source"] = "pipeline" if ctx.scope == "pipeline" else "agent"
+        return caller
+
+    def _should_record(self, arguments: dict[str, Any]) -> bool:
+        record = arguments.get("record")
+        # every evaluation inside a run is kept, so the Flight Recorder can point at it
+        return bool(self._execution()) if record is None else bool(record)
 
     @staticmethod
     def _ok(payload: Any, **meta: Any) -> ToolResult:
@@ -167,8 +186,7 @@ class DecisionEvaluateTool(_DecisionTool):
             },
             "record": {
                 "type": "boolean",
-                "description": "Keep an auditable record of this evaluation",
-                "default": False,
+                "description": "Keep an auditable record of this evaluation. Inside an agent or pipeline run it is kept unless this is false.",
             },
         },
         "required": ["decision", "facts"],
@@ -183,15 +201,18 @@ class DecisionEvaluateTool(_DecisionTool):
                 "Say which decision to evaluate. decision_list shows the keys."
             )
 
+        persist = self._should_record(arguments)
+        facts = arguments.get("facts") or {}
+
         async def go(s):
             out = await S.evaluate(
                 s,
                 self._tenant(),
                 key,
-                arguments.get("facts") or {},
+                facts,
                 as_of=arguments.get("as_of"),
                 known_at=arguments.get("known_at"),
-                persist=bool(arguments.get("record")),
+                persist=persist,
                 caller=self._caller(),
             )
             if out["outcome"] == "missing_facts":
@@ -207,12 +228,15 @@ class DecisionEvaluateTool(_DecisionTool):
                         for x in out["invalid_facts"]
                     )
                 )
+            rules = await S.version_rules(s, out["version"]["id"])
             return self._ok(
                 out,
                 decision=key,
                 outcome=out["outcome"],
                 trace_hash=out.get("trace_hash"),
                 version=out["version"]["version"],
+                evaluation_id=out.get("evaluation_id"),
+                decision_record=S.evaluation_summary(out, rules, facts),
             )
 
         return await self._run(go)
@@ -318,15 +342,19 @@ class DecisionExplainTool(_DecisionTool):
         from engine.decisions import service as S
 
         key = str(arguments.get("decision") or "")
+        facts = arguments.get("facts") or {}
+        persist = self._should_record(arguments)
 
         async def go(s):
             r = await S.evaluate(
                 s,
                 self._tenant(),
                 key,
-                arguments.get("facts") or {},
+                facts,
                 as_of=arguments.get("as_of"),
                 known_at=arguments.get("known_at"),
+                persist=persist,
+                caller=self._caller(),
             )
             lines = [
                 f"{r['decision']['name']} version {r['version']['version']}, for {r['as_of']}."
@@ -377,7 +405,14 @@ class DecisionExplainTool(_DecisionTool):
             )
             return ToolResult(
                 content="\n".join(x for x in lines if x),
-                metadata={"decision": key, "outcome": r["outcome"]},
+                metadata={
+                    "decision": key,
+                    "outcome": r["outcome"],
+                    "evaluation_id": r.get("evaluation_id"),
+                    "decision_record": S.evaluation_summary(
+                        r, await S.version_rules(s, r["version"]["id"]), facts
+                    ),
+                },
             )
 
         return await self._run(go)

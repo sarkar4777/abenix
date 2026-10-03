@@ -57,6 +57,12 @@ async def analyze_decision(
     if not pipeline_config or not pipeline_config.get("nodes"):
         return error("OracleNet pipeline agent has no pipeline configuration", 400)
 
+    from app.core.budget_gate import budget_error, per_run_cost_limit
+
+    over = await budget_error(db, agent, user.tenant_id)
+    if over is not None:
+        return over
+
     tool_names = model_cfg.get("tools", [])
 
     # Build context with the decision prompt.
@@ -101,6 +107,7 @@ async def analyze_decision(
         agent_id=str(agent.id),
         agent_name=agent.name,
         timeout_seconds=600,  # OracleNet: 7 agents with web research need up to 10 min
+        cost_limit=per_run_cost_limit(agent),
     )
     await db.close()
 

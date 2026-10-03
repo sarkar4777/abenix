@@ -1,358 +1,224 @@
 # Kubernetes specifics
 
-> Every K8s resource the platform creates, how they're wired, and the gotchas. Read after [02-helm](02-helm.md).
+> What the chart and the deploy scripts create in the `abenix` namespace, how it is wired, and the gotchas. Read after [02-helm](02-helm.md).
 
 ---
 
-## Resource inventory (per namespace, abenix)
+## Resource inventory
 
-After a full helm install + standalone-apps apply, you have:
+With the Azure values and every standalone app selected, the namespace holds:
 
-```mermaid
-flowchart LR
-  subgraph WORKLOADS["Deployments + Statefulsets"]
-    AAPI[abenix-api]
-    AW[abenix-web]
-    W[worker]
-    AR1[agent-runtime-default]
-    AR2[agent-runtime-chat]
-    AR3[agent-runtime-heavy-reasoning]
-    AR4[agent-runtime-long-running]
-    WAPI[wingman-api]
-    WW[wingman-web]
-    CAPI[contractiq-api]
-    CW[contractiq-web]
-    SAPI[mideasttourism-api]
-    SW[mideasttourism-web]
-    RAPI[resolveai-api]
-    RW[resolveai-web]
-    IAPI[industrial-iot-api]
-    IW[industrial-iot-web]
-    PG[(postgres StatefulSet)]
-    NEO[(neo4j StatefulSet)]
-    NA[(nats StatefulSet)]
-    R[(redis StatefulSet)]
-    P[(prometheus StatefulSet)]
-    G[grafana]
-    T[(tempo StatefulSet)]
-  end
-
-  subgraph SERVICES["Services"]
-    SAAPI[svc/abenix-api]
-    SAW[svc/abenix-web]
-    SPG[svc/postgres]
-    SR[svc/redis]
-    SN[svc/nats]
-  end
-
-  subgraph KEDA["ScaledObjects"]
-    KAR1[default]
-    KAR2[chat]
-    KAR3[heavy-reasoning]
-    KAR4[long-running]
-    KW[worker]
-  end
-
-  subgraph RBAC["ServiceAccounts + ClusterRoles"]
-    SA[sa/abenix]
-    CR[clusterrole/abenix-cluster-reader]
-  end
-
-  subgraph INGRESS["Ingress + TLS"]
-    ING[ingress-nginx]
-    TLS[cert-manager + Letsencrypt]
-  end
-
-  WORKLOADS -.- SERVICES
-  WORKLOADS -.- KEDA
-  WORKLOADS -.- RBAC
-  SERVICES -.- INGRESS
-```
-
-Roughly:
-- **20-30 Deployments**, 1-20 replicas each
-- **6 StatefulSets** (Postgres, Neo4j, NATS, Redis, Prometheus, Tempo)
-- **30+ Services** (one per Deployment, plus per-StatefulSet)
-- **5 ScaledObjects** (KEDA — 4 runtime pools + worker)
-- **8 ConfigMaps** + **10 Secrets**
-- **5-8 Ingress routes** (api, web, grafana, tempo, prometheus, per-app)
-- **1 ServiceAccount** with **1 ClusterRole** (read-only access to nodes/pods/PVCs for the cluster-health page)
-- **6 PVCs** (postgres, neo4j, nats, tempo, prometheus, shared-data)
+| Kind | Objects |
+|---|---|
+| Deployments from subcharts | `abenix-api`, `abenix-web`, `abenix-worker`, `abenix-agent-runtime` |
+| Deployments from the umbrella chart | `abenix-agent-runtime-<pool>` per `scaling.pools` entry, `abenix-cognify-worker`, `abenix-alertmanager` |
+| StatefulSets | `abenix-postgresql`, `abenix-redis-master`, `abenix-neo4j`, `abenix-nats` (NATS backend only) |
+| Separate Helm releases | `abenix-mosquitto`, `abenix-timescaledb`, the edge runtime, LiveKit |
+| Plain manifests | Prometheus, Grafana and Tempo from `infra/observability/`, each standalone app from `<app>/k8s/<app>.yaml` |
+| Created at run time | One Deployment, Service and scaler per warm code runner, one Job per one-off sandbox run, one Pod per deployed ML model |
+| ScaledObjects | One per runtime pool when `scaling.keda.enabled`, one per warm runner when `codeRunners.keda.enabled` |
+| HPAs | `api`, `web`, `worker`, `agent-runtime` subcharts, plus KEDA's own |
+| PodDisruptionBudgets | `minAvailable: 1` for api, web, agent-runtime and the cognify worker, each only when it runs more than one replica |
+| CronJobs | `abenix-code-runner-reaper`, `abenix-pg-backup` and `abenix-neo4j-backup` when backups are on |
+| PVCs | Postgres, Redis, Neo4j, NATS, `abenix-shared-data`, `ml-models-storage`, `abenix-archives` |
+| Ingress | `abenix-ingress`, applied by `deploy-azure.sh` |
 
 ---
 
 ## Pod-to-pod networking
 
-In-cluster traffic uses DNS:
-```
-<service>.<namespace>.svc.cluster.local
-```
-
-Wingman-api hits abenix-api via:
-```
-ABENIX_API_URL=http://abenix-api.abenix.svc.cluster.local:8000
-```
-
-The deploy script wires this into every standalone app's ConfigMap.
-
-No service mesh by default. We pondered Istio + Linkerd. concluded plain k8s networking is sufficient given the OTel trace coverage. If you need mTLS between services, add Istio sidecars — the platform doesn't care.
+In-cluster traffic uses service DNS, `<service>.<namespace>.svc.cluster.local`.
+Standalone apps reach the API at
+`http://abenix-api.abenix.svc.cluster.local:8000` through `ABENIX_API_URL`.
+There is no service mesh.
 
 ---
 
 ## Probes
 
-Every Deployment has:
+| Workload | Probe | Path or command | Timing |
+|---|---|---|---|
+| api | startup, liveness, readiness | `GET /api/health` on 8000 | startup every 5s up to 30 tries, liveness from `health.initialDelaySeconds` (10) every 30s, readiness every 10s |
+| web | same shape | `GET /` | |
+| agent-runtime subchart | same shape | `GET /health` on 8001 | liveness delay 15s |
+| runtime pools | readiness, liveness | `GET /health` on 8001 | readiness after 10s every 15s, liveness after 30s every 30s |
+| worker, cognify worker | startup, liveness, readiness | `pgrep -f celery` | `celery inspect ping` was dropped because it goes through the broker and times out on a busy worker |
+| NATS | readiness, liveness | `GET /healthz` on 8222 | |
+| code runner gateway | readiness, liveness | `GET /healthz` on 9464 | |
 
-```yaml
-livenessProbe:
-  httpGet: {path: /health, port: 8000}
-  initialDelaySeconds: 30
-  periodSeconds: 30
-  timeoutSeconds: 5
-  failureThreshold: 3
-
-readinessProbe:
-  httpGet: {path: /health, port: 8000}
-  initialDelaySeconds: 10
-  periodSeconds: 10
-  timeoutSeconds: 3
-  failureThreshold: 3
-```
-
-Source paths:
-- abenix-api: `GET /api/health` — DB ping + Redis ping + NATS ping
-- abenix-web: `GET /api/health` — proxies to api
-- agent-runtime: `GET /health` — NATS connection check
-- worker: HTTP `/health` on `:9000` — celery worker heartbeat
-- standalone apps' api: `GET /health` — SDK connectivity check
-
-> **Trap** — `initialDelaySeconds: 30` is generous on purpose. Python apps with FastAPI + asyncpg + Anthropic SDK take 8-15s to boot cold. A tighter probe causes CrashLoopBackOff on slow nodes.
+`GET /api/health/ready` also exists on the API for load balancers that want a
+readiness URL.
 
 ---
 
-## Resource requests + limits
+## Resource requests and limits
 
-Per service defaults (overridable via helm values):
+Defaults from the subchart and umbrella values. Overlays shrink them for
+minikube.
 
-| Service | CPU req | CPU lim | Mem req | Mem lim |
+| Workload | CPU req | CPU lim | Mem req | Mem lim |
 |---|---|---|---|---|
-| abenix-api | 200m | 1000m | 512Mi | 2Gi |
-| abenix-web | 100m | 500m | 256Mi | 1Gi |
-| worker | 250m | 1000m | 512Mi | 2Gi |
-| agent-runtime-default | 500m | 2000m | 1Gi | 4Gi |
-| agent-runtime-chat | 250m | 1000m | 512Mi | 2Gi |
-| agent-runtime-heavy | 1000m | 4000m | 4Gi | 8Gi |
-| agent-runtime-long-running | 500m | 2000m | 2Gi | 4Gi |
-| postgres | 500m | 2000m | 2Gi | 8Gi |
-| neo4j | 500m | 1000m | 1Gi | 4Gi |
-| nats | 100m | 500m | 256Mi | 1Gi |
+| api (umbrella `values.yaml`) | 250m | 1 | 512Mi | 1Gi |
+| web | 100m | 500m | 256Mi | 512Mi |
+| worker | 250m | 1 | 256Mi | 1Gi |
+| agent-runtime subchart | 500m | 2 | 512Mi | 2Gi |
+| runtime pool (no `resources` set) | 200m | 1 | 512Mi | 1Gi |
+| cognify worker | 250m | 1 | 256Mi | 1Gi |
+| Postgres primary | 500m | 2 | 1Gi | 4Gi |
+| Redis master | 250m | 1 | 1Gi | 4Gi |
+| Neo4j | 250m | 1 | 512Mi | 2Gi |
+| NATS | 100m | 500m | 256Mi | 512Mi |
+| runner exec / gateway | 100m / 50m | 2 / 500m | 256Mi / 64Mi | 2Gi / 256Mi |
 
-Limits matter because:
-- HPA / KEDA scaling is based on requests, not limits.
-- Without limits, a runaway pod can starve the node.
-- LLM clients can hold connections open + buffer responses — memory limit prevents that from sinking the cluster.
+The Azure pools set their own, see `values-azure.yaml`.
 
 ---
 
 ## Persistent volumes
 
-```yaml
-# postgres
-volumeClaimTemplates:
-- metadata: {name: postgres-data}
-  spec:
-    accessModes: [ReadWriteOnce]
-    storageClassName: managed-premium      # AKS
-    resources: {requests: {storage: 100Gi}}
-```
-
-| StatefulSet | PVC | Default storageClass | Default size |
+| Volume | Source | Default size | Notes |
 |---|---|---|---|
-| postgres | `postgres-data-postgres-0` | managed-premium (AKS) / gp2 (EKS) / standard (local) | 100Gi |
-| neo4j | `neo4j-data-neo4j-0` | same | 50Gi |
-| tempo | `tempo-data-tempo-0` | same | 50Gi |
-| prometheus | `prometheus-data-prometheus-0` | same | 50Gi |
-| nats | `nats-data-nats-0,1,2` | same | 20Gi |
-| redis | `redis-data-redis-0` | same | 10Gi |
-
-The standalone apps share a single PVC (`shared-data`) via `hostPath` for the file-backed cache. In AKS this becomes an Azure-Files SMB mount — see [04-data-stores](../01-architecture/04-data-stores.md#azure-files-smb-trap).
+| Postgres data | Bitnami chart | 50Gi (`values.yaml`), 5Gi local | `managed-premium` in the base values |
+| Redis data | Bitnami chart | 10Gi | |
+| Neo4j data | neo4j subchart | 10Gi | |
+| NATS data | `volumeClaimTemplates` in `nats-jetstream.yaml` | `nats.jetstream.fileStorage.size`, 5Gi when unset | |
+| `abenix-shared-data` | `sharedData.usePVC` | 20Gi | RWX. `azurefile-csi` in the Azure values |
+| `ml-models-storage` | `mlModels.enabled` | 5Gi | |
+| `abenix-archives` | `archives.pvc.enabled` | 10Gi | Local storage mode only |
+| `<release>-backup` | `backup.enabled` and `backup.persistentVolume.enabled` ([`backup-pvc.yaml`](../../infra/helm/abenix/templates/backup-pvc.yaml)) | `backup.persistentVolume.size`, 20Gi | Kept on uninstall. `accessMode` defaults to RWO, use RWX on multi-node clusters. Azure sets `azurefile-csi`, RWX, 50Gi |
 
 ### `sharedData.usePVC` — single-node vs multi-node `/data`
 
-The api / worker / agent-runtime pods all need to read+write a shared `/data` directory for uploads, exports, code-asset caches, and ML model pickles. The helm chart supports two modes:
+The api, worker and agent-runtime pods all read and write `/data` for uploads,
+exports, code assets, the build cache and ML model files.
 
 | Mode | Set with | When to use | Failure mode if wrong |
 |---|---|---|---|
-| `hostPath` | `sharedData.usePVC: false` (default in `values.yaml`) | Single-node clusters: minikube, k3d, k3s on one box | On multi-node AKS / EKS, the api on node-A writes to `/var/lib/abenix/data` on node-A. The worker on node-B reads `/var/lib/abenix/data` on node-B — empty. Uploads vanish from the worker's view. |
-| RWX PVC | `sharedData.usePVC: true` + `sharedData.storageClass: azurefile-csi` (set in `values-azure.yaml`) | Multi-node AKS, EKS, GKE — production | Requires the storage class to actually be RWX. `azurefile-csi` is. `managed-premium` is RWO and will fail to mount on the second pod. |
+| hostPath | `sharedData.usePVC: false`, the default | Single node: minikube, k3d, one-box k3s | On several nodes each pod sees its own `/var/lib/abenix/data` and uploads vanish from the others |
+| RWX PVC | `sharedData.usePVC: true` and an RWX `sharedData.storageClass` | AKS and any other multi-node cluster | The class has to be RWX. `azurefile-csi` is. `managed-premium` is RWO and fails to mount on the second pod |
 
-`values-azure.yaml` enables the PVC mode. `values.yaml` keeps the hostPath default so local minikube works without an RWX provider. Any other multi-node target (EKS, GKE, on-prem) needs its own overlay enabling `sharedData.usePVC` with the right RWX class (`efs-sc` on EKS, `filestore.csi.storage.gke.io` on GKE, NFS subdir provisioner elsewhere).
+Every pod that mounts the host path uses `sharedDataHostPath`
+(`/var/lib/abenix/data`). An older pool template used a different path, so the
+API wrote code assets where the runtime could not see them.
 
-### PVC sizing — back-of-envelope formulas
+### Azure Files and `/data`
 
-| PVC | Growth driver | Formula | At typical scale |
-|---|---|---|---|
-| `postgres-data` | `executions` table (hypertable, TimescaleDB-compressed after 7d) | ~500B raw + ~80B compressed per execution | 100k exec/day → 50MB/day raw → 8MB/day compressed → 100Gi = ~30 years of compressed history |
-| `neo4j-data` | extracted entities + relationships in `atlas_*` graphs | ~5KB per entity + ~1KB per relationship | KB of 10k docs → ~30k entities + ~80k rels → ~50MB → 50Gi accommodates 100+ KBs of that size |
-| `tempo-data` | trace spans, retention 14d default | ~2KB per span, ~30 spans per agent execution | 100k exec/day × 30 × 2KB × 14d = ~85GB → 50Gi tight, 100Gi safer for that scale |
-| `prometheus-data` | metric samples, retention 15d | bin-packed ~1.3 bytes/sample, ~2k active series → ~7GB/15d | 50Gi has headroom for 2-3x metric count growth |
-| `nats-data` | JetStream `agents` stream (capped at 1M messages) | ~1KB per message → ~1GB max | 20Gi has comfortable safety margin |
-| `shared-data` (azurefile-csi) | KB uploads, code-asset packs, model pickles | depends on uploads | 20Gi default. Bump to 100Gi+ if customers upload large PDFs at scale. |
-| `ml-models-storage` | one pickle per registered model | most pickles 1-10MB, IsolationForest models 2-5MB | 10Gi fits ~1000 models comfortably |
+Azure Files is RWX but mounted over SMB, where `chmod` and `utime` fail.
+`shutil.copy` and `shutil.copy2` call both. When writing under `/data` use
+`shutil.copyfile` or plain `open(...).write(...)`. The seed scripts already do.
 
 ### Resizing a running PVC
 
-PVC resize is supported on AKS (managed-premium, azurefile-csi), EKS (gp2, gp3, efs), and GKE (pd-standard, pd-ssd, filestore). The helm chart's `storageSize` field is honored on upgrade.
-
-1. Edit the value: `helm upgrade ... --set postgres.persistence.size=200Gi`.
-2. K8s sets `pvc.spec.resources.requests.storage`. Provisioner expands the underlying disk.
-3. For RWX PVCs (shared-data, ml-models): immediate — pods see the larger filesystem after a `df` refresh, no restart.
-4. For RWO PVCs (postgres, neo4j): expansion requires a pod restart. For StatefulSets that means a rolling restart of the single replica (so brief downtime). Take a backup first.
-
-### Azure Files SMB workarounds for code that writes to `/data`
-
-Azure Files is RWX but mounted via SMB. Two operations that succeed silently on local disk fail on SMB: `chmod` (changes permissions) and `utime` (sets access/modify time). Python's `shutil.copy` and `shutil.copy2` call both of these internally, which causes them to raise `OperationNotPermitted` on every write to `/data` in AKS.
-
-**Rule:** when writing files to anywhere under `/data`, use `shutil.copyfile` (bytes-only) or direct `open(...).write(...)` calls. Never `copy` or `copy2`. The seed scripts (`seed_ml_models.py`, `seed_code_assets.py`) follow this — keep new code consistent.
-
-If you need to detect SMB at runtime: `os.statvfs("/data").f_fsid` returns the filesystem ID. On SMB this is the network mount identifier and you can branch off it. In practice we just unconditionally avoid the metadata operations.
-
-### Backup strategy
-
-| PVC | Strategy | RPO |
-|---|---|---|
-| postgres | WAL streaming to S3/Blob via pgBackRest sidecar. **Do not rely on PVC snapshots** — Postgres can be mid-write when the snapshot fires, leaving an unrecoverable image. | 60s |
-| neo4j | Nightly `neo4j-admin database dump` to S3/Blob via a CronJob. Atlas data is rebuildable from KB + Postgres in the worst case. | 24h |
-| shared-data | Rebuilt on-demand: code assets come from git/zip, ML models come from `aimodels/`. Treat as ephemeral. No backup. | n/a (rebuildable) |
-| nats-data | Ephemeral — JetStream history is short-lived. Postgres is the source of truth for executions. No backup. | n/a |
-| tempo, prometheus | Retention is bounded (15d), data is observability-only. Snapshot if you want trace replay, otherwise let it roll. | n/a |
+Expansion works when the storage class allows it. Raise the size value and
+`helm upgrade`. RWO volumes such as Postgres and Neo4j need the pod restarted
+before the filesystem grows. Take a backup first.
 
 ---
 
-## RBAC (in-cluster)
+## RBAC
 
-The platform's `abenix` ServiceAccount has a ClusterRole `abenix-cluster-reader`:
+| Object | Scope | Grants | Created by |
+|---|---|---|---|
+| `abenix-cluster-reader` ClusterRole + binding | cluster | get, list, watch on nodes, pods and PVCs for the `default` ServiceAccount in `abenix` | `deploy-azure.sh` applies `infra/k8s/abenix-cluster-reader.yaml` |
+| `<release>-sandboxed-job-runner` Role + binding | `sandboxedJob.namespace` or the release namespace | Jobs, pods and logs, Deployments, Services, Secrets, HPAs and ScaledObjects for the `default` ServiceAccount | The chart, when `sandboxedJob.enabled` |
 
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata: {name: abenix-cluster-reader}
-rules:
-- apiGroups: [""]
-  resources: [nodes, pods, persistentvolumeclaims, services]
-  verbs: [get, list, watch]
-```
-
-Used by the `/admin/cluster` page to render the cluster-health widgets without leaking secrets.
-
-Applied idempotently by `deploy-azure.sh`. Most pods do **not** have cluster-level RBAC.
+The cluster reader feeds the `/admin/cluster` page. The namespaced Role is what
+lets the API and runtime create sandbox Jobs, warm runners and their scalers.
 
 ---
 
 ## Ingress
 
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: abenix
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt
-    nginx.ingress.kubernetes.io/proxy-buffering: "off"      # for SSE
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"  # for long execs
-spec:
-  ingressClassName: nginx
-  tls:
-  - hosts: [api.example.com, example.com]
-    secretName: abenix-tls
-  rules:
-  - host: example.com
-    http:
-      paths:
-      - {path: /, pathType: Prefix, backend: {service: {name: abenix-web, port: {number: 3000}}}}
-  - host: api.example.com
-    http:
-      paths:
-      - {path: /, pathType: Prefix, backend: {service: {name: abenix-api, port: {number: 8000}}}}
-```
+The chart's own `ingress.yaml` serves one host with `/api` to the API and `/`
+to web, `proxy-body-size: 50m`, `proxy-read-timeout: 120`. Local values turn it
+off.
 
-> **Trap** — SSE breaks without `proxy-buffering: off`. The nginx default buffers responses. events sit in the buffer for 30s before being flushed. Always include that annotation.
+On AKS, `deploy-azure.sh` installs ingress-nginx and applies `abenix-ingress`
+with one host per surface under `<lb-ip>.nip.io`, `proxy-body-size: 100m` and
+read and send timeouts of 600 seconds. There is no TLS or cert-manager in that
+path. See [00-overview](00-overview.md#aks) for the host list.
 
 ---
 
-## Network policies (optional)
+## Network policies
 
-The default install does **not** apply NetworkPolicies. For locked-down environments, the helm chart can render a default-deny + per-service allow set:
+Off by default, on in the production values. `networkPolicy.enabled: true`
+renders the policies in
+[`networkpolicy.yaml`](../../infra/helm/abenix/templates/networkpolicy.yaml).
+"Platform egress" below means Postgres 5432, Redis 6379, Neo4j 7687, NATS 4222,
+the API on 8000, agent-runtime on 8001, Tempo on 4317 and 4318, DNS, and outside
+addresses on `networkPolicy.externalEgressPorts` with private ranges closed.
 
-```bash
-helm upgrade abenix infra/helm/abenix --set networkPolicies.enabled=true
-```
+| Policy | Allows in | Allows out |
+|---|---|---|
+| api | ingress-nginx, and any pod in the namespace, on 8000 | Platform egress, the Kubernetes API, Prometheus 9090, Alertmanager 9093 |
+| agent-runtime | api, agent-runtime, worker, cognify-worker and Prometheus on 8001 | Platform egress, the Kubernetes API |
+| workers, cognify-worker | not restricted | Platform egress |
+| web | ingress-nginx on 80 and 3000 | The API on 8000, DNS |
+| postgresql-clients | Platform pods, the code runner reaper, backup jobs, pgpool, other Postgres pods, on 5432 | not restricted |
+| redis-clients | Platform pods, the code runner reaper, other Redis pods, on 6379 | not restricted |
+| neo4j | Platform pods and the Neo4j backup job on 7687 and 7474 | not restricted |
+| nats | Platform pods and code runners on 4222, Prometheus on 8222. Rendered only when `scaling.queueBackend` is `nats` | not restricted |
 
-Policies allow:
-- web → api
-- api → postgres, redis, nats, neo4j
-- worker → postgres, redis, nats
-- agent-runtime → postgres, redis, nats, S3
-- Anything → DNS (`kube-dns`)
-- Anything → external HTTPS (LLM providers)
+| Value | Default | Notes |
+|---|---|---|
+| `networkPolicy.externalEgressPorts` | `[443]` | Outside ports platform pods may call. Add one only when a provider needs it |
+| `networkPolicy.kubeApiServer.cidrs` | empty | API server addresses the api and runtime pods may call, for sandboxed jobs, code runners and model deployments. Empty adds no rule |
+| `networkPolicy.kubeApiServer.ports` | `[443, 6443, 8443]` | |
+
+The production values turn off the Bitnami Postgres and Redis subcharts' own
+policies (`postgresql.primary.networkPolicy`, `postgresql.readReplicas.networkPolicy`,
+`redis.networkPolicy`), since those admit every pod. The chart's
+`*-clients` policies decide instead.
+
+`codeRunners.networkPolicy` (on by default) adds separate policies for runner
+pods: DNS, the API on 8000 and NATS on 4222 for all, outside addresses except
+private ranges only for runners labelled `abenix.io/network: open`, and inbound
+scrapes from Prometheus and KEDA on 9464. With `networkPolicy.enabled` the
+chart also lets runners reach the API.
 
 ---
 
-## Image pull configuration
+## Image pulls on AKS
 
-On AKS we **attach the ACR** at provision time:
-```bash
-az aks update -n abenix-aks -g abenix-rg --attach-acr your-acr
-```
+`provision` runs `az aks update --attach-acr`. Without Owner rights that fails,
+and the script creates a docker-registry Secret `acr-pull-secret` and patches
+the default ServiceAccount to use it. The Bitnami Postgres ServiceAccount lists
+`acr-pull-secret` too.
 
-This adds an `imagePullSecret` to every namespace automatically. No per-pod pull secret needed.
-
-If `--attach-acr` fails (no Owner role on the subscription), the script falls back to creating a docker-registry Secret named `acr-pull-secret` and patches the default ServiceAccount with `imagePullSecrets: [acr-pull-secret]`.
-
-> **Trap** — if you ever swap ACRs (e.g. test → prod), the attach step must re-run. existing tokens don't propagate to the new registry.
+> **Trap** — swap ACRs and the attach has to run again.
 
 ---
 
 ## Common kubectl recipes
 
 ```bash
-# What's in the abenix namespace?
 kubectl -n abenix get all
 
-# Stream logs from all api replicas
-kubectl -n abenix logs -l app=abenix-api -f --tail=100
+# logs from every api replica
+kubectl -n abenix logs -l app.kubernetes.io/name=api -f --tail=100
 
-# Exec into a pod to run a one-off command
-kubectl -n abenix exec -it deploy/abenix-api -- python -c "from app.core.db import engine; print(engine.url)"
+# logs from one runtime pool
+kubectl -n abenix logs -l abenix.io/pool=default --tail=200
 
-# Watch a rolling deploy
 kubectl -n abenix rollout status deploy/abenix-web
+kubectl -n abenix rollout restart deploy/abenix-agent-runtime-default
 
-# Force a restart (e.g. picking up a new ConfigMap)
-kubectl -n abenix rollout restart deploy/agent-runtime-default
-
-# Scale manually (KEDA must be paused first if you want it to stick)
-kubectl -n abenix annotate scaledobject runtime-default autoscaling.keda.sh/paused=true
-kubectl -n abenix scale deploy agent-runtime-default --replicas=10
-
-# Port-forward locally
-kubectl -n abenix port-forward svc/abenix-api 8000:8000
-kubectl -n abenix port-forward svc/abenix-web 3000:3000
-
-# Inspect a stuck pod
-kubectl -n abenix describe pod <pod-name>
-kubectl -n abenix logs <pod-name> --previous       # before last crash
+kubectl -n abenix describe pod <pod>
+kubectl -n abenix logs <pod> --previous
 ```
+
+For port forwards use `scripts/deploy.sh forwards` locally and
+`scripts/portforward-azure.sh` on AKS, so they can be listed and stopped as a
+set.
 
 ---
 
-## Failure-domain isolation
+## Node placement
 
-- Postgres + Neo4j run on a separate node pool (`nodepool=data`) — they're stateful and we don't want them rescheduled on every drain.
-- Agent-runtimes are on the `nodepool=compute` pool with cluster-autoscaler enabled so KEDA's max replicas can actually materialise.
-- Edge runtimes are usually outside K8s entirely — see [05-edge-runtime](05-edge-runtime.md).
-
-The helm chart sets `nodeSelector` + `tolerations` accordingly. defaults are no-op on minikube where you have one pool.
+Subcharts accept `nodeSelector` and `tolerations`. A pool entry with
+`nodeAffinity: <name>` gets `nodeSelector: abenix.io/node-pool: <name>`. The
+shipped values set none of these, so everything schedules anywhere.
 
 ---
 
@@ -362,3 +228,4 @@ The helm chart sets `nodeSelector` + `tolerations` accordingly. defaults are no-
 - [02-helm](02-helm.md) — chart structure
 - [03-keda](03-keda.md) — autoscaling
 - [05-edge-runtime](05-edge-runtime.md) — edge deployment
+- [disaster-recovery](disaster-recovery.md) — backups and restores

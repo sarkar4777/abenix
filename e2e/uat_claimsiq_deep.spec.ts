@@ -52,6 +52,7 @@ async function pageFetch(page: Page, url: string, init: any = {}): Promise<{ sta
       method: (init.method || 'GET') as any,
       headers: init.headers,
       data: init.body,
+      timeout: init.timeout ?? 90_000,
     });
     return { status: r.status(), bodyText: await r.text() };
   } catch (e: any) {
@@ -328,7 +329,15 @@ test.describe('ClaimsIQ — Deep PM UAT (Azure)', () => {
       const status = (j?.data?.status || '').toString();
       const failureCode = (j?.data?.failure_code || j?.data?.error_code || '').toString();
       const merged = `${status} ${failureCode} ${JSON.stringify(j?.data || {}).slice(0, 800)}`;
-      expect(/moderat|polic|block|pii|denied|safety/i.test(merged) || status === 'failed' || status === 'blocked',
+      // a redact policy lets the run go ahead with the SSN masked, which is the gate working too
+      let redacted = false;
+      const exId = j?.data?.execution_id;
+      if (exId) {
+        const ex = await pageFetch(page, `${API}/api/executions/${exId}`, { headers: { Authorization: `Bearer ${tok}` } });
+        const input = String(JSON.parse(ex.bodyText || '{}')?.data?.input_message || '');
+        redacted = !!input && !input.includes('987-12-3456');
+      }
+      expect(/moderat|polic|block|pii|denied|safety/i.test(merged) || status === 'failed' || status === 'blocked' || redacted,
         'moderation gate engaged').toBeTruthy();
     }
   });

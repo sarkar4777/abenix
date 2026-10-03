@@ -38,6 +38,19 @@ Trajectories are JSON files on the shared `/data` PVC:
 Each record is small (a few KB at most) so a year of desk activity is a
 few hundred MB. No DB migration is required to run trajectory memory.
 
+The platform's `recall_trajectory` tool reads `TRAJECTORY_DIR`
+(`/data/trajectories`) under the tenant's folder and `shared`. Wingman writes
+to `WINGMAN_TRAJECTORY_DIR` (`/data/wingman-trajectories`), folder
+`WINGMAN_TRAJECTORY_TENANT` (`shared` by default).
+
+## Erasure
+
+Each record carries the `execution_id` of the run it came from. A GDPR purge
+(`POST /api/gdpr/users/{id}/purge`) looks up the person's runs and deletes
+every record whose `execution_id` is one of them, or whose `user_id` is the
+person, from the tenant's folder and `shared` under both directories. The
+trajectory receipt counts the records deleted.
+
 ## Outcome grading (phase 3)
 
 When a trade card produced by a trajectory routes through `/approvals`

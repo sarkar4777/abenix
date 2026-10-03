@@ -26,6 +26,8 @@ const findings: Finding[] = [];
 function note(f: Finding) { findings.push(f); console.log(`  [${f.severity}] ${f.area}: ${f.what}`); }
 
 let token = '';
+// cleaned up in afterAll even when a test fails halfway, a live policy would gate every later spec
+const created = { policies: [] as string[], agents: [] as string[], restore: [] as string[] };
 async function login(page: Page) {
   const res = await page.request.post(`${API}/api/auth/login`, { data: { email: EMAIL, password: PASSWORD } });
   expect(res.ok(), 'login').toBeTruthy();
@@ -82,7 +84,12 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 test.describe('ux walkthrough', () => {
   test.setTimeout(600_000);
-  test.afterAll(() => {
+  test.afterAll(async ({ request }) => {
+    const headers = { Authorization: `Bearer ${token}` };
+    // a policy with recorded events cannot be deleted, so switch ours off and put the old ones back
+    for (const id of created.policies) await request.patch(`${API}/api/moderation/policies/${id}`, { headers, data: { is_active: false } }).catch(() => {});
+    for (const id of created.restore) await request.patch(`${API}/api/moderation/policies/${id}`, { headers, data: { is_active: true } }).catch(() => {});
+    for (const id of created.agents) await request.delete(`${API}/api/agents/${id}`, { headers }).catch(() => {});
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
     fs.writeFileSync(OUT, JSON.stringify({ generated: new Date().toISOString(), findings }, null, 2));
   });
@@ -120,6 +127,10 @@ test.describe('ux walkthrough', () => {
     await login(page);
     const marker = `aurora${Date.now().toString().slice(-5)}`;
 
+    const before = await api(page, 'GET', '/api/moderation/policies');
+    const beforeRows: any[] = before.json?.data?.policies ?? before.json?.data ?? [];
+    created.restore.push(...beforeRows.filter((p) => p.is_active).map((p) => p.id));
+
     // 1. an agent with no tools, so the only thing that can change the answer is the gate
     const mk = await api(page, 'POST', '/api/agents', {
       name: `ux-guardrail-probe-${Date.now()}`, category: 'other', description: 'UX walkthrough probe',
@@ -127,6 +138,7 @@ test.describe('ux walkthrough', () => {
       model_config: { mode: 'agent', model: 'claude-haiku-4-5', tools: [], max_iterations: 2 },
     });
     const agentId = mk.json?.data?.id;
+    if (agentId) created.agents.push(agentId);
     expect(agentId, 'probe agent').toBeTruthy();
 
     // 2. the policy, created through the page
@@ -148,6 +160,7 @@ test.describe('ux walkthrough', () => {
     const rows: any[] = pol.json?.data?.policies ?? pol.json?.data ?? [];
     const mine = rows.find((p) => String(p.name).includes(marker));
     expect(mine, 'policy saved').toBeTruthy();
+    created.policies.push(mine.id);
     note({ area: 'moderation create', severity: mine?.is_active ? 'note' : 'major', what: mine?.is_active ? 'new policy is active' : 'new policy saved but not active, the gate will not use it', evidence: mine });
 
     // 3. the vet box on the same page, the quickest way to see a policy work
@@ -235,7 +248,8 @@ test.describe('ux walkthrough', () => {
     note({ area: 'response filtering', severity: leaked ? 'blocker' : 'note', what: `answer tail: ${respText.slice(-160).replace(/\n/g, ' ')}` });
 
     // cleanup, the policy must not linger and gate every later test
-    await api(page, 'DELETE', `/api/moderation/policies/${mine.id}`);
+    await api(page, 'PATCH', `/api/moderation/policies/${mine.id}`, { is_active: false });
+    for (const id of created.restore) await api(page, 'PATCH', `/api/moderation/policies/${id}`, { is_active: true });
     await api(page, 'DELETE', `/api/agents/${agentId}`);
   });
 

@@ -4,12 +4,17 @@ A small, reproducible smoke load test that anyone can run against any Abenix dep
 
 ## What it measures
 
-| Surface | Workload | What good looks like |
+`scripts/load/baseline.js` runs three k6 scenarios one after another, about
+three minutes in all:
+
+| Surface | Workload | Threshold in the script |
 |---|---|---|
-| `GET /api/health/ready` | 100 req/s for 60s, 1 connection | p99 < 50ms, error rate 0% |
-| `POST /api/auth/login` | 20 req/s for 30s | p95 < 250ms, error rate 0% |
-| `GET /api/agents` (authed) | 50 req/s for 60s | p99 < 200ms, error rate 0% |
-| Agent execute end-to-end | 5 concurrent runs, simple agent, haiku model | p95 < 6s, error rate 0% |
+| `GET /api/health/ready` | 100 req/s for 60s | p99 < 100ms |
+| `POST /api/auth/login` | 20 req/s for 30s, starting at 70s | p95 < 400ms |
+| `GET /api/agents` (authed) | 50 req/s for 60s, starting at 110s | p99 < 400ms |
+
+Across all of them `http_req_failed` must stay under 1%. Agent execution is not
+part of this script.
 
 ## How to run it
 
@@ -17,9 +22,13 @@ A small, reproducible smoke load test that anyone can run against any Abenix dep
 # Install k6 if you don't have it
 # https://k6.io/docs/get-started/installation/
 
-# Run against any base URL
+# BASE is the API base. EMAIL and PASSWORD default to the seeded admin
 BASE=https://api.your-deploy.com k6 run scripts/load/baseline.js
 ```
+
+The login scenario counts against the auth rate limit, 30 a minute per IP by
+default. Run against a deploy with `IS_LOCAL_DEV=1`, or raise
+`RATE_LIMIT_AUTH_REQ_PER_MIN`, or the thresholds fail on 429s.
 
 ## Reading the results
 
@@ -32,7 +41,6 @@ k6 prints `iteration_duration` percentiles and `http_req_duration` percentiles. 
 | `/health/ready` | 4ms | 12ms | 28ms | 0% |
 | `/auth/login` | 87ms | 142ms | 198ms | 0% |
 | `/agents` | 32ms | 88ms | 134ms | 0% |
-| agent execute (haiku, no tools) | 1.4s | 2.8s | 4.1s | 0% |
 
 These are baseline numbers, not SLAs. They exist so the next person who runs the test can spot "x feature got 3x slower" without having to know the absolute target.
 
@@ -76,9 +84,16 @@ The load is spread over processes because one httpx client degrades past a few d
 ## What this test does NOT cover
 
 - Long-running pipelines (the `long-running` pool serves those, and they're slow by design — measuring their p95 over short windows is misleading).
-- Real LLM cost / token spend — the script uses a cheap-by-design agent.
+- Agent runs and LLM spend — the script never starts a run.
 - Sustained throughput over hours — for capacity planning, lengthen `duration` and watch DB connection saturation and Redis stream backlog separately.
 - Cross-region latency — run from the same region you're testing.
+
+## Other benchmarks in `scripts/load/`
+
+| Script | What it measures | Where to run it |
+|---|---|---|
+| `code_runner_bench.py` | Cold, warm, scale-from-zero, new-version and concurrent latency of one code asset through the real `code_asset` tool | Inside an agent-runtime pod, see its docstring |
+| `middleware_bench.py` | The API middleware stack in process, `--requests` and `--concurrency` | Anywhere with the API dependencies installed |
 
 ## Reference: extending the test
 

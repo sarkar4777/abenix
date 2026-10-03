@@ -37,6 +37,42 @@ from models.user import User
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 
 
+async def _budget_error(db: AsyncSession, agent: Agent, user: User) -> Any:
+    from engine.agent_budget import BUDGET_EXCEEDED, check_agent_budget
+
+    breach = await check_agent_budget(
+        db,
+        agent_id=agent.id,
+        tenant_id=user.tenant_id,
+        agent_name=agent.name,
+        daily_cost_limit=getattr(agent, "daily_cost_limit", None),
+        daily_budget_usd=getattr(agent, "daily_budget_usd", None),
+    )
+    if breach is None:
+        return None
+    return error(
+        breach.message, 429, error_code=BUDGET_EXCEEDED, details=breach.details()
+    )
+
+
+def _apply_usage(execution: Execution, result: Any) -> None:
+    from engine.pipeline import pipeline_usage
+
+    usage = pipeline_usage(result)
+    execution.cost = usage["cost"]
+    execution.input_tokens = usage["input_tokens"] or None
+    execution.output_tokens = usage["output_tokens"] or None
+
+
+def _run_cost_limit(agent: Agent, requested: float | None) -> float | None:
+    caps = [
+        float(v)
+        for v in (requested, getattr(agent, "per_execution_cost_limit", None))
+        if v is not None and float(v) > 0
+    ]
+    return min(caps) if caps else None
+
+
 async def _save_detached(row: Any) -> None:
     from app.core.deps import async_session
 
@@ -66,6 +102,10 @@ async def execute_pipeline(
 
     if agent.status not in (AgentStatus.ACTIVE, AgentStatus.DRAFT):
         return error("Agent is not in an executable state", 400)
+
+    budget_error = await _budget_error(db, agent, user)
+    if budget_error is not None:
+        return budget_error
 
     # Get tool names from agent config
     model_config = agent.model_config_ or {}
@@ -173,6 +213,7 @@ async def execute_pipeline(
         db_url=os.environ.get("DATABASE_URL", ""),
         agent_id=str(agent_id),
         tenant_id=str(user.tenant_id),
+        cost_limit=_run_cost_limit(agent, getattr(body, "cost_limit", None)),
     )
 
     raw_nodes = [n.model_dump() for n in body.nodes]
@@ -206,6 +247,7 @@ async def execute_pipeline(
         else ExecutionStatus.FAILED
     )
     execution.duration_ms = pipeline_result.total_duration_ms
+    _apply_usage(execution, pipeline_result)
     execution.completed_at = datetime.now(timezone.utc)
     execution.output_message = (
         str(pipeline_result.final_output)[:5000]
@@ -278,6 +320,10 @@ async def execute_saved_pipeline(
 
     if agent.status not in (AgentStatus.ACTIVE, AgentStatus.DRAFT):
         return error("Agent is not in an executable state", 400)
+
+    budget_error = await _budget_error(db, agent, user)
+    if budget_error is not None:
+        return budget_error
 
     # Extract pipeline config
     model_config = agent.model_config_ or {}
@@ -362,6 +408,7 @@ async def execute_saved_pipeline(
         db_url=os.environ.get("DATABASE_URL", ""),
         agent_id=str(agent_id),
         tenant_id=str(user.tenant_id),
+        cost_limit=_run_cost_limit(agent, getattr(body, "cost_limit", None)),
     )
 
     pipeline_nodes = parse_pipeline_nodes(raw_nodes)
@@ -392,6 +439,7 @@ async def execute_saved_pipeline(
         else ExecutionStatus.FAILED
     )
     execution.duration_ms = pipeline_result.total_duration_ms
+    _apply_usage(execution, pipeline_result)
     execution.completed_at = datetime.now(timezone.utc)
     execution.output_message = (
         str(pipeline_result.final_output)[:5000]
@@ -436,6 +484,10 @@ async def execute_pipeline_stream(
 
     if agent.status not in (AgentStatus.ACTIVE, AgentStatus.DRAFT):
         return error("Agent is not in an executable state", 400)
+
+    budget_error = await _budget_error(db, agent, user)
+    if budget_error is not None:
+        return budget_error
 
     model_config = agent.model_config_ or {}
     tool_names = list(model_config.get("tools", []))
@@ -525,6 +577,7 @@ async def execute_pipeline_stream(
         db_url=os.environ.get("DATABASE_URL", ""),
         agent_id=str(agent_id),
         tenant_id=str(user.tenant_id),
+        cost_limit=_run_cost_limit(agent, getattr(body, "cost_limit", None)),
     )
 
     raw_nodes = [n.model_dump() for n in body.nodes]
@@ -541,6 +594,7 @@ async def execute_pipeline_stream(
                 else ExecutionStatus.FAILED
             )
             execution.duration_ms = pipeline_result.total_duration_ms
+            _apply_usage(execution, pipeline_result)
             execution.completed_at = datetime.now(timezone.utc)
             execution.output_message = (
                 str(pipeline_result.final_output)[:5000]
@@ -707,6 +761,10 @@ async def replay_pipeline(
     if not agent:
         return error("Agent not found", 404)
 
+    budget_error = await _budget_error(db, agent, user)
+    if budget_error is not None:
+        return budget_error
+
     model_config = agent.model_config_ or {}
     pipeline_config = model_config.get("pipeline_config")
     if not pipeline_config or not pipeline_config.get("nodes"):
@@ -756,6 +814,7 @@ async def replay_pipeline(
         db_url=os.environ.get("DATABASE_URL", ""),
         agent_id=str(agent_id),
         tenant_id=str(user.tenant_id),
+        cost_limit=_run_cost_limit(agent, getattr(body, "cost_limit", None)),
     )
     # pipeline.py's healing capture reads the execution id from the
     # context. Without it capture_failure got the all-zeros UUID and the
@@ -786,6 +845,9 @@ async def replay_pipeline(
         ),
         model_used="pipeline",
         duration_ms=result.total_duration_ms,
+        cost=serialized["cost"],
+        input_tokens=serialized["input_tokens"] or None,
+        output_tokens=serialized["output_tokens"] or None,
         node_results=serialized.get("node_results"),
         execution_trace={
             "replay_from": start_from,

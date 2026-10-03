@@ -499,11 +499,21 @@ backup:
   schedule: "0 2 * * *"
   image: postgres:16-alpine
   s3Bucket: ""
+  # Uploads the dump when objectStorage.type is s3, needs python3 and boto3.
+  # Empty uses the agent-runtime image.
+  uploaderImage: ""
+  # Off, the jobs write to an emptyDir that is lost when the pod ends
   persistentVolume:
     enabled: false
+    storageClass:
+    accessMode: ReadWriteOnce
+    size: 20Gi
+  # Streams an APOC Cypher export over Bolt using the agent-runtime image
   neo4j:
     enabled: false
     schedule: "0 3 * * *"
+    keep: 7
+    image: ""
 
 monitoring:
   enabled: false

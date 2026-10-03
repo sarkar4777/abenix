@@ -244,6 +244,18 @@ ensure_infra_images() {
   ok "Infrastructure images ready"
 }
 
+# NEXT_PUBLIC_* are inlined into the web bundle at build time, so forward the ones set in .env or the shell
+WEB_PUBLIC_VARS=(NEXT_PUBLIC_API_URL NEXT_PUBLIC_APP_URL NEXT_PUBLIC_ENABLE_MONETIZATION NEXT_PUBLIC_AUDIT_NATIVE NEXT_PUBLIC_GRAFANA_URL)
+web_build_args() { # web_build_args <svc>, fills BUILD_ARGS
+  BUILD_ARGS=()
+  [ "$1" = "web" ] || return 0
+  local v
+  for v in "${WEB_PUBLIC_VARS[@]}"; do
+    [ -n "${!v:-}" ] && BUILD_ARGS+=(--build-arg "${v}=${!v}")
+  done
+  return 0
+}
+
 # ── Build app images (only if code changed) ──────────────────────────────────
 # Build one core service image. Shared by build_images and `reload`, so a
 # single-service rebuild resolves its Dockerfile and build context exactly
@@ -270,6 +282,7 @@ build_core_service() {
   esac
 
   log "Building ${svc}..."
+  web_build_args "${svc}"
   # heavy images build on the host daemon, so the build does not starve the cluster inside minikube
   local host_build=false
   case " ${MINIKUBE_HOST_BUILD:-web} " in *" ${svc} "*) [ -n "${MINIKUBE_ACTIVE_DOCKERD:-}" ] && host_build=true ;; esac
@@ -277,7 +290,7 @@ build_core_service() {
   if [ "${host_build}" = "true" ]; then
     log "${svc}: building on the host, then loading into minikube"
     if ! (set -o pipefail; "${hostenv[@]}" docker build -t "${image}" -t "${registry}/${svc}:latest" \
-        -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -5); then
+        ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -5); then
       err "${svc}: image build failed, the running image was left as it is"
       return 1
     fi
@@ -287,7 +300,7 @@ build_core_service() {
       return 1
     fi
   elif ! (set -o pipefail; docker build -t "${image}" -t "${registry}/${svc}:latest" \
-      -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -3); then
+      ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -3); then
     err "${svc}: image build failed, the running image was left as it is"
     return 1
   fi

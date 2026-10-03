@@ -13,6 +13,7 @@ import {
   User,
   Users,
 } from 'lucide-react';
+import { readSignInParams } from '@/lib/auth-redirect';
 
 type Tab = 'login' | 'register';
 
@@ -58,6 +59,14 @@ export default function AuthCard() {
     full_name: '',
   });
   const [ssoProviders, setSsoProviders] = useState<string[]>([]);
+  const [returnTo, setReturnTo] = useState('/dashboard');
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => {
+    const params = readSignInParams();
+    setReturnTo(params.returnTo);
+    setSessionExpired(params.expired);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,14 +108,14 @@ export default function AuthCard() {
       if (json.data?.access_token) {
         localStorage.setItem('access_token', json.data.access_token);
         localStorage.setItem('refresh_token', json.data.refresh_token);
-        window.location.href = '/dashboard';
+        window.location.href = returnTo;
       }
     } catch {
       setError('Connection failed');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [returnTo]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -137,7 +146,7 @@ export default function AuthCard() {
       if (json.data?.access_token) {
         localStorage.setItem('access_token', json.data.access_token);
         localStorage.setItem('refresh_token', json.data.refresh_token);
-        window.location.href = '/dashboard';
+        window.location.href = returnTo;
       }
     } catch {
       setError('Connection failed');
@@ -177,6 +186,15 @@ export default function AuthCard() {
         <p className="text-sm text-slate-400 text-center mt-1">
           Create your account or sign in
         </p>
+
+        {sessionExpired && (
+          <p
+            role="status"
+            className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 text-center"
+          >
+            Your session expired. Sign in again to pick up where you left off.
+          </p>
+        )}
 
         <div className="flex mt-6 border-b border-slate-700/50">
           {(['login', 'register'] as Tab[]).map((t) => (
@@ -357,7 +375,7 @@ export default function AuthCard() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {ssoProviders.includes('google') && (
                 <a
-                  href={`${API_URL}/api/auth/oidc/google/start?return_to=/dashboard`}
+                  href={`${API_URL}/api/auth/oidc/google/start?return_to=${encodeURIComponent(returnTo)}`}
                   className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
                   aria-label="Sign in with Google"
                 >
@@ -366,7 +384,7 @@ export default function AuthCard() {
               )}
               {ssoProviders.includes('github') && (
                 <a
-                  href={`${API_URL}/api/auth/oidc/github/start?return_to=/dashboard`}
+                  href={`${API_URL}/api/auth/oidc/github/start?return_to=${encodeURIComponent(returnTo)}`}
                   className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
                   aria-label="Sign in with GitHub"
                 >
@@ -375,7 +393,7 @@ export default function AuthCard() {
               )}
               {ssoProviders.includes('microsoft') && (
                 <a
-                  href={`${API_URL}/api/auth/oidc/microsoft/start?return_to=/dashboard`}
+                  href={`${API_URL}/api/auth/oidc/microsoft/start?return_to=${encodeURIComponent(returnTo)}`}
                   className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-800 transition"
                   aria-label="Sign in with Microsoft"
                 >

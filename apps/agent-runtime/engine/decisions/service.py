@@ -504,6 +504,111 @@ async def _persist(
     return str(got or pid)
 
 
+SUMMARY_CAP = 4096
+_MAX_RULES_CACHED = 512
+_rules_cache: dict[str, list[dict[str, Any]]] = {}
+
+
+async def version_rules(db: AsyncSession, version_id: str) -> list[dict[str, Any]]:
+    """The authored rules of a version, cached once it can no longer change."""
+    hit = _rules_cache.get(version_id)
+    if hit is not None:
+        return hit
+    from models.decision import DecisionVersion
+
+    row = (
+        await db.execute(
+            select(DecisionVersion.authoring, DecisionVersion.state).where(
+                DecisionVersion.id == uuid.UUID(str(version_id))
+            )
+        )
+    ).first()
+    if row is None:
+        return []
+    rules = [r for r in ((row[0] or {}).get("rules") or []) if isinstance(r, dict)]
+    if row[1] != "draft":
+        if len(_rules_cache) >= _MAX_RULES_CACHED:
+            _rules_cache.clear()
+        _rules_cache[version_id] = rules
+    return rules
+
+
+def applied_rule_details(
+    rules: list[dict[str, Any]],
+    applied: list[str],
+    trace: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Each applied rule with its description and the sources it cites."""
+    by_ref: dict[str, dict[str, Any]] = {}
+    for r in rules:
+        for ref in (r.get("key"), r.get("id")):
+            if ref:
+                by_ref.setdefault(str(ref), r)
+    traced = {str(t.get("rule_id")): t for t in trace or [] if t.get("rule_id")}
+    out = []
+    for ref in list(dict.fromkeys(str(a) for a in applied or []))[:50]:
+        r = by_ref.get(ref) or {}
+        cites = (r.get("provenance") or {}).get("citations") or []
+        out.append(
+            {
+                "key": r.get("key") or ref,
+                "id": r.get("id") or "",
+                "description": r.get("description")
+                or (traced.get(ref) or {}).get("description")
+                or "",
+                "citations": [str(c) for c in cites][:10],
+            }
+        )
+    return out
+
+
+def _bounded(value: Any, cap: int) -> tuple[Any, bool]:
+    import json
+
+    text = json.dumps(value, default=str, ensure_ascii=False)
+    if len(text) <= cap:
+        return value, False
+    return text[:cap], True
+
+
+def evaluation_summary(
+    out: dict[str, Any],
+    rules: list[dict[str, Any]],
+    facts: Any = None,
+    cap: int = SUMMARY_CAP,
+) -> dict[str, Any]:
+    """A compact, bounded record of one evaluation for tool metadata and the Flight Recorder."""
+    result, result_cut = _bounded(out.get("result"), cap)
+    shown_facts, facts_cut = _bounded(facts if facts is not None else {}, cap)
+    invalid = [
+        {k: str(v)[:200] for k, v in x.items()}
+        for x in (out.get("invalid_facts") or [])[:50]
+        if isinstance(x, dict)
+    ]
+    return {
+        "key": (out.get("decision") or {}).get("key"),
+        "name": (out.get("decision") or {}).get("name"),
+        "version": (out.get("version") or {}).get("version"),
+        "version_id": (out.get("version") or {}).get("id"),
+        "outcome": out.get("outcome"),
+        "result": result,
+        "result_truncated": result_cut,
+        "applied_rules": applied_rule_details(
+            rules, out.get("applied_rules") or [], out.get("trace")
+        ),
+        "missing_facts": [str(f) for f in (out.get("missing_facts") or [])[:50]],
+        "invalid_facts": invalid,
+        "explanation": out.get("next_step"),
+        "facts": None if facts_cut else shown_facts,
+        "facts_truncated": facts_cut,
+        "trace_hash": out.get("trace_hash") or "",
+        "evaluation_id": out.get("evaluation_id"),
+        "duration_us": out.get("duration_us") or 0,
+        "as_of": out.get("as_of"),
+        "known_at": out.get("known_at"),
+    }
+
+
 def current_versions_filter(model_id: Any) -> Any:
     from models.decision import DecisionVersion
 

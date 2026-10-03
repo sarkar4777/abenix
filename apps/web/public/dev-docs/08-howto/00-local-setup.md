@@ -30,9 +30,15 @@ Windows: WSL2 + Docker Desktop + the Linux toolchain inside WSL.
 
 ---
 
-## Two paths
+## Three ways to run it
 
-### Path A — full local k8s (recommended for backend work)
+| Path | Script | What runs where | Use it for |
+|---|---|---|---|
+| A | `bash scripts/deploy.sh local` | Everything in minikube, same chart as AKS | Anything that touches deployment, scaling or the cluster |
+| B | `bash scripts/dev-local.sh` | Data stores in docker compose, API, web, Celery and the NATS consumer as local processes with reload | Fast backend and UI iteration |
+| C | `npm run dev` in `apps/web` | Only the web dev server, against an API you already have | UI-only work |
+
+### Path A — full local k8s
 
 ```bash
 git clone https://github.com/sarkar4777/abenix.git
@@ -128,20 +134,48 @@ deploy rather than from a page that will not load.
 Forwards drop whenever a pod restarts, so `bash scripts/deploy.sh forwards` puts
 them all back and prints which ones answer.
 
-### Path B — partial — frontend dev against deployed backend
-
-For UI-only work, faster turnaround:
+### Path B — processes on your machine
 
 ```bash
-# In one terminal: port-forward the cloud cluster's api
-kubectl -n abenix port-forward svc/abenix-api 8000:8000
+bash scripts/dev-local.sh             # start, self-heals anything left on its ports
+bash scripts/dev-local.sh --status    # PID, port and health per service, exit 1 if any is down
+bash scripts/dev-local.sh --restart
+bash scripts/dev-local.sh --stop
+```
 
-# In another: run web dev server pointing at it
+It starts `docker compose` for Postgres (5432), Redis (6379), NATS (4222),
+mosquitto (1883), TimescaleDB (5433), Neo4j, MinIO, pgAdmin and the three edge
+runtimes from `docker-compose.yml`, installs npm and pip
+dependencies when missing, runs migrations, then launches:
+
+| Process | Port | Notes |
+|---|---|---|
+| API, `uvicorn --reload` | 8000 | `DEBUG=true`, `IS_LOCAL_DEV=1`, `ENVIRONMENT=local`, `PGSSLMODE=disable` |
+| Web, `next dev` | 3000 | |
+| Celery worker | | `--pool=solo`, queues `documents,cognify,agents` |
+| NATS consumer, `consumer.py` | health on 8002 | `RUNTIME_MODE=remote`, pool `default` |
+
+It exports `QUEUE_BACKEND=nats`, `SCALING_EXEC_REMOTE=true`, `NATS_USER=abenix`,
+`NATS_PASSWORD=abenix-dev`, `MQTT_URL` and `TSDB_URL` unless you set them, and
+reads the rest from `.env`. Logs go to `logs/<service>.log`. Before it starts it
+stops any `kubectl port-forward` it finds, so a forward to a cluster cannot
+shadow the local ports.
+
+### Path C — frontend against a running backend
+
+```bash
+# backend in minikube
+bash scripts/deploy.sh forwards
+# or backend on AKS
+bash scripts/portforward-azure.sh
+
 cd apps/web
 NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-You get Next.js hot-reload but with real platform data. Caveat: any backend change requires path A.
+Both forward the API to `localhost:8000`. Start forwards only through these
+scripts so they can be listed and stopped as a set. You get Next.js hot reload
+with real platform data. Any backend change needs path A or B.
 
 ---
 
@@ -167,25 +201,32 @@ MEDIASTACK_API_KEY=...
 ENTSOE_API_KEY=...
 AISSTREAM_API_KEY=...
 
-# Postgres (auto-populated by deploy.sh local)
-JWT_SECRET=local-dev-secret-change-in-prod
 ```
+
+`deploy.sh` reads `.env` and passes the provider and tool keys it knows into
+`abenix-secrets` with `--set`. The database URL, Redis password and
+`SECRET_KEY` for a local cluster come from `values-local.yaml`, not from
+`.env`. `dev-local.sh` runs the API with `DEBUG=true`, which accepts the
+default `SECRET_KEY` and mints throwaway JWT keys in process, so a restart logs
+everyone out. Set `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEY` in `.env` if that
+bothers you. `.env.example` lists the rest.
 
 Anything missing degrades the corresponding tool — `tavily_search` returns "tool not configured" instead of crashing.
 
-### Knowledge bases need an embedding key
+### Knowledge bases without an embedding key
 
-`OPENAI_API_KEY` (or `AZURE_OPENAI_API_KEY` with `AZURE_OPENAI_ENDPOINT`) is the
-one key that is not optional if you want knowledge search to work. Embeddings
-have no fallback provider, so without it nothing can be ingested and nothing can
-be searched.
+With `OPENAI_API_KEY`, or `AZURE_OPENAI_API_KEY` with `AZURE_OPENAI_ENDPOINT`
+or `AZURE_OPENAI_API_BASE`, documents are embedded with that provider. Without
+one, the worker and the runtime fall back to a built-in hashed embedder in
+`packages/db/local_embeddings.py`. It is lexical, not semantic. It finds the
+chunk that contains the words you searched for, but will not connect synonyms.
+`ABENIX_LOCAL_EMBEDDINGS=1` forces it even with a key, which gives an offline,
+repeatable test run.
 
-`seed_kb.py` creates the collections and the agent grants but does **not** ingest
-the documents — it prints a warning naming every collection it left empty. Until
-you upload content through the Knowledge UI, or POST it to
-`/api/knowledge/collections/{id}/documents`, an agent that calls
-`knowledge_search` gets nothing back and says so in its answer. That affects
-ClaimsIQ's policy matcher, ResolveAI, Industrial IoT and Wingman.
+`seed_kb.py` creates the collections and grants, then chunks and embeds the
+sample documents itself, so a seeded collection is searchable as soon as the
+deploy finishes. A collection embedded one way has to be re-embedded before it
+answers queries embedded the other way.
 
 ---
 
@@ -223,11 +264,14 @@ See [05-testing](05-testing.md) for the full test catalogue.
 alias k="kubectl -n abenix"
 
 k get all
-k logs -l app=abenix-api -f
+k logs -l app.kubernetes.io/name=api -f
+k logs -l abenix.io/pool=default -f            # one runtime pool
 k exec -it deploy/abenix-api -- python -c "import app.main; print('ok')"
-k port-forward svc/grafana 3010:3000        # then visit localhost:3010
-k port-forward svc/abenix-api 8000:8000
 ```
+
+Grafana is already forwarded to http://localhost:3030 by `deploy.sh`. For any
+forward that dropped, run `bash scripts/deploy.sh forwards` rather than
+starting one by hand.
 
 ---
 
@@ -235,13 +279,17 @@ k port-forward svc/abenix-api 8000:8000
 
 ```bash
 # Nuke the cluster, keep the code
-minikube delete && bash scripts/deploy.sh local
+FRESH=true bash scripts/deploy.sh local
 
-# Or just reset DB
-k exec -it sts/postgres -- psql -U abenix -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
-k exec deploy/abenix-api -- alembic upgrade head
-k exec deploy/abenix-api -- python /app/packages/db/seeds/seed_agents.py
+# Or just reset the database, then let the deploy rebuild schema and seeds
+k exec abenix-postgresql-0 -- bash -c \
+  'PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -d abenix -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'
+bash scripts/deploy.sh local
 ```
+
+The API pod's `db-migrate` init container runs `python -m bootstrap` and
+`alembic upgrade heads` from `/app/packages/db` on every start, and the deploy
+runs every seed again. For path B, `dev-local.sh` runs the migrations itself.
 
 ---
 
@@ -257,8 +305,9 @@ k exec deploy/abenix-api -- python /app/packages/db/seeds/seed_agents.py
 
 | What | Where |
 |---|---|
-| **Local dev launcher (docker-compose + uvicorn + agent-runtime + Next.js)** | [`scripts/dev-local.sh`](../../scripts/dev-local.sh) |
-| **Minikube path (full helm chart on local k8s)** | [`scripts/dev-minikube.sh`](../../scripts/dev-minikube.sh) |
+| **Local dev launcher (docker compose + uvicorn + Celery + NATS consumer + Next.js)** | [`scripts/dev-local.sh`](../../scripts/dev-local.sh) |
+| **Minikube deploy (full Helm chart on local k8s)** | [`scripts/deploy.sh`](../../scripts/deploy.sh) |
+| **Quick restart of an existing minikube demo** | [`scripts/dev-minikube.sh`](../../scripts/dev-minikube.sh) |
 | **docker-compose data plane** | [`docker-compose.yml`](../../docker-compose.yml) |
 | **Helm chart (full deploy)** | [`infra/helm/abenix/`](../../infra/helm/abenix/) |
 | **Alembic migrations** | [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/) |

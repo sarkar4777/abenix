@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Braces, CheckCircle2, CircleSlash, FlaskConical, ListChecks, Loader2, Save, TriangleAlert } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
-import { getPath, setPath, type Evaluation, type Fact, type RuleDoc } from '@/lib/decisions';
+import { getPath, setPath, type Evaluation, type Fact, type RuleDoc, type TryPreload } from '@/lib/decisions';
 
 const OUTCOME = {
   decided: { icon: CheckCircle2, cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/5', text: 'Decided' },
@@ -50,6 +50,7 @@ export default function TryPanel({
   onSelectRule,
   onSavedTest,
   canSaveTest,
+  preload,
 }: {
   decisionKey: string;
   version: number;
@@ -58,11 +59,12 @@ export default function TryPanel({
   onSelectRule: (ruleKeyOrId: string) => void;
   onSavedTest: () => void;
   canSaveTest: boolean;
+  preload?: TryPreload | null;
 }) {
-  const [facts, setFacts] = useState<Record<string, any>>({});
-  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  const [facts, setFacts] = useState<Record<string, any>>(() => preload?.facts ?? {});
+  const [asOf, setAsOf] = useState((preload?.as_of || new Date().toISOString()).slice(0, 10));
   const [mode, setMode] = useState<'form' | 'json'>('form');
-  const [jsonText, setJsonText] = useState('{}');
+  const [jsonText, setJsonText] = useState(() => JSON.stringify(preload?.facts ?? {}, null, 2));
   const [jsonErr, setJsonErr] = useState<string | null>(null);
   const [res, setRes] = useState<Evaluation | null>(null);
   const [busy, setBusy] = useState(false);
@@ -135,6 +137,7 @@ export default function TryPanel({
         </div>
       </div>
       <p className="text-[11px] text-slate-500">{live ? 'Runs your unsaved changes as you edit.' : 'Runs this version exactly as stored.'}</p>
+      {preload && <p className="text-[11px] text-cyan-200 rounded-md bg-cyan-500/10 px-2 py-1" role="status" data-testid="try-preloaded">Filled in with the facts from a recorded evaluation. Change any of them to see what would happen.</p>}
       <div>
         <label className="block text-xs text-slate-400 mb-1" htmlFor="try-asof">Date of the activity</label>
         <input id="try-asof" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-sm text-white [color-scheme:dark]" data-testid="try-as-of" />

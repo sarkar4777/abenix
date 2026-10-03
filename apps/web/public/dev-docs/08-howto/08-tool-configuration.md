@@ -69,7 +69,7 @@ The API endpoints, all admin only. `scope` is `tenant` or `platform` and default
 | GET | `/api/admin/tool-config?scope=` | Every key grouped by provider. `source` and the masked `value` follow the scope. Each row also carries `tenant_source`, `platform_source`, `effective_source` and the masked `tenant_value` and `platform_value` |
 | PATCH | `/api/admin/tool-config/{KEY}` | Save a value in `scope`, given in the body or the query. Validated by kind. Returns the row |
 | DELETE | `/api/admin/tool-config/{KEY}?scope=` | Remove the value saved in that scope |
-| POST | `/api/admin/tool-config/{KEY}/test` | Run the declaring tool's check, with `{"value": "..."}` or the saved value for the caller's tenant |
+| POST | `/api/admin/tool-config/{KEY}/test` | Run the declaring tool's check, with `{"value": "..."}` or the saved value. `scope` in the body picks the tenant or the platform value |
 
 For everyone: `GET /api/tools` carries a `config` object per tool with `status` and `fields`, never values, resolved for the caller's tenant. `GET /api/integrations/tools` is the same catalogue without values.
 
@@ -82,6 +82,7 @@ A tool declares what it needs on the class and reads it through the resolver:
 ```python
 class AisStreamTool(BaseTool):
     name = "ais_stream"
+    risk_tier = "low"
     config_fields = (
         ConfigField("AISSTREAM_API_KEY", label="API key", kind="secret", required=True,
                     group="AISStream", signup_url="https://aisstream.io"),
@@ -93,7 +94,7 @@ class AisStreamTool(BaseTool):
 
 That is the whole contract. The API imports the runtime tool classes to read `input_schema` for the catalogue, and reads `config_fields` the same way. The admin screen renders whatever the API returns. So a tool that declares its fields is on the screen, in the badges and on the Integrations page the moment it is deployed.
 
-What makes the contract hold is the lint, `scripts/check-tool-config.py`. It runs in CI, in `deploy.sh` before images are built, and under pytest. It fails on any `os.environ` read in a tool, on a `cfg()` key no tool declares, on a declared key nothing reads, and on a tool class the registry cannot reach. A tool that reads a key privately cannot pass CI, which is why the platform can promise that the screen is complete.
+What makes the contract hold is the lint, `scripts/check-tool-config.py`. CI runs it and fails on any problem, `tests/unit/test_tool_contract.py` runs it under pytest, and `deploy.sh` runs it before images are built and warns. It fails on any `os.environ` read in a tool outside the infrastructure names in `INFRA_ENV`, on a `cfg()` key no tool declares, on a declared key nothing reads unless it is `dynamic=True`, on a tool class the registry in `engine/agent_executor.py` cannot reach, and on a tool with no valid `risk_tier`. A tool that reads a key privately cannot pass CI, which is why the platform can promise that the screen is complete.
 
 `required=True` is a strong statement. It means `cfg()` raises when nothing provides the value, the base class returns the standard "not configured" result, and a pipeline node using the tool fails. Say it only when the tool has one provider and no fallback. A tool with several sources declares each key optional and reports what it skipped in `metadata.sources_skipped` and `metadata.warnings`, which the runtime appends to what the model sees.
 

@@ -62,6 +62,9 @@ def _merge_tool_trace(tool_calls: list[dict[str, Any]], trace: dict[str, Any]) -
             tc["duration_ms"] = trace.get("duration_ms")
             if trace.get("output_summary"):
                 tc["output_summary"] = trace["output_summary"]
+            record = (trace.get("metadata") or {}).get("decision_record")
+            if record:
+                tc["decision_record"] = record
             return
 
 
@@ -74,18 +77,20 @@ def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, 
         preview = nr.get("output")
         if not isinstance(preview, str):
             preview = json.dumps(preview, default=str) if preview is not None else ""
-        out.append(
-            {
-                "name": nr["tool_name"],
-                "node_id": nid,
-                "arguments": nr.get("resolved_arguments") or {},
-                "result_preview": preview[:500],
-                "result": preview[:8000],
-                "label": nr.get("label") or "",
-                "is_error": nr.get("status") == "failed",
-                "duration_ms": nr.get("duration_ms"),
-            }
-        )
+        entry = {
+            "name": nr["tool_name"],
+            "node_id": nid,
+            "arguments": nr.get("resolved_arguments") or {},
+            "result_preview": preview[:500],
+            "result": preview[:8000],
+            "label": nr.get("label") or "",
+            "is_error": nr.get("status") == "failed",
+            "duration_ms": nr.get("duration_ms"),
+        }
+        record = (nr.get("metadata") or {}).get("decision_record")
+        if record:
+            entry["decision_record"] = record
+        out.append(entry)
     return out
 
 
@@ -2004,6 +2009,11 @@ async def _resolve_delegation(
     return parent_id, depth, None
 
 
+def _per_run_cost_limit(agent: Agent) -> float | None:
+    v = getattr(agent, "per_execution_cost_limit", None)
+    return float(v) if v is not None and float(v) > 0 else None
+
+
 @router.post("/{agent_id_or_slug}/execute", response_model=None)
 async def execute_agent(
     agent_id_or_slug: str,
@@ -2135,6 +2145,21 @@ async def execute_agent(
     if agent.status not in (AgentStatus.ACTIVE, AgentStatus.DRAFT):
         return error("Agent is not in an executable state", 400)
 
+    from engine.agent_budget import BUDGET_EXCEEDED, check_agent_budget
+
+    breach = await check_agent_budget(
+        db,
+        agent_id=agent.id,
+        tenant_id=user.tenant_id,
+        agent_name=agent.name,
+        daily_cost_limit=getattr(agent, "daily_cost_limit", None),
+        daily_budget_usd=getattr(agent, "daily_budget_usd", None),
+    )
+    if breach:
+        return error(
+            breach.message, 429, error_code=BUDGET_EXCEEDED, details=breach.details()
+        )
+
     # sub-agent runs from invoke_agent carry the parent run and their nesting depth
     try:
         _raw_body = await request.json()
@@ -2186,6 +2211,14 @@ async def execute_agent(
         return error(str(e), 400)
     except Exception:
         pass  # DLP failure should not block execution
+
+    if is_pipeline:
+        # agent runs check input inside the executor, pipelines have no such step
+        blocked = await _moderate_pipeline_input(db, user, body, sanitized_message)
+        if isinstance(blocked, str):
+            sanitized_message = blocked
+        elif blocked is not None:
+            return blocked
 
     mcp_connections = await _fetch_mcp_connections(db, agent.id, user.tenant_id)
 
@@ -2385,6 +2418,35 @@ async def execute_agent(
                                 "gate_kind": row.gate_kind,
                             }
                             return
+                        # human_approval gates live in Redis, not the approvals table
+                        from app.core.hitl import (
+                            hitl_to_approval_row,
+                            list_pending_hitl,
+                        )
+
+                        try:
+                            gates = await list_pending_hitl(str(user.tenant_id))
+                        except Exception:  # noqa: BLE001
+                            gates = []
+                        mine = [
+                            g
+                            for g in gates
+                            if str(g.get("execution_id")) == str(execution.id)
+                        ]
+                        if mine:
+                            hrow = hitl_to_approval_row(mine[0])
+                            paused_at = {
+                                k: hrow[k]
+                                for k in (
+                                    "title",
+                                    "payload",
+                                    "required_signoffs",
+                                    "expires_at",
+                                    "gate_kind",
+                                )
+                            }
+                            paused_at["approval_id"] = hrow["id"]
+                            return
 
                 try:
                     if body.wait_mode == "until_gate":
@@ -2509,9 +2571,7 @@ async def execute_agent(
                 }
             )
         except Exception as _enqueue_err:
-            # Enqueue failed — don't strand the client. Fall through to
-            # the inline path so the request still succeeds (same
-            # behaviour as queue_backend's fallback-to-celery design).
+            # enqueue failed, run inline so the request still succeeds
             logging.getLogger(__name__).warning(
                 "remote-exec enqueue failed, falling back to inline: %s",
                 _enqueue_err,
@@ -2559,6 +2619,7 @@ async def execute_agent(
                     agent_id=str(agent.id),
                     agent_name=agent.name,
                     caller=_caller_ctx,
+                    cost_limit=_per_run_cost_limit(agent),
                 ),
                 media_type="text/event-stream",
                 headers={
@@ -2579,6 +2640,7 @@ async def execute_agent(
             agent_name=agent.name,
             input_defaults=_input_defaults(agent.model_config_),
             caller=_caller_ctx,
+            cost_limit=_per_run_cost_limit(agent),
         )
 
     # Enterprise context for tools and monitoring
@@ -2693,6 +2755,7 @@ async def _stream_pipeline_execution(
     agent_name: str = "",
     timeout_seconds: int = 120,
     caller: dict[str, Any] | None = None,
+    cost_limit: float | None = None,
 ) -> Any:
     """Stream pipeline execution with node-level progress events."""
     import asyncio as _asyncio
@@ -2702,6 +2765,7 @@ async def _stream_pipeline_execution(
     from engine.pipeline import (
         PipelineExecutor,
         parse_pipeline_nodes,
+        pipeline_usage,
         serialize_pipeline_result,
     )
 
@@ -2804,6 +2868,7 @@ async def _stream_pipeline_execution(
         # Required for self-healing capture (see pipeline.py guard).
         agent_id=str(agent_id),
         tenant_id=str(tenant_id),
+        cost_limit=cost_limit,
     )
 
     # Parse pipeline nodes and inject user message as query for search nodes
@@ -2858,25 +2923,10 @@ async def _stream_pipeline_execution(
                 token_data = json.dumps({"text": final_text})
                 await event_queue.put(f"event: token\ndata: {token_data}\n\n")
 
-            # Aggregate tokens/cost from node outputs for the done event
-            _total_in = 0
-            _total_out = 0
-            _total_cost = 0.0
-            for _nid, nr in (result.node_results or {}).items():
-                out = nr.output if hasattr(nr, "output") else None
-                if isinstance(out, dict):
-                    _total_in += int(out.get("input_tokens", 0) or 0)
-                    _total_out += int(out.get("output_tokens", 0) or 0)
-                    _total_cost += float(out.get("cost", 0) or 0)
-                elif isinstance(out, str):
-                    try:
-                        p = json.loads(out)
-                        if isinstance(p, dict):
-                            _total_in += int(p.get("input_tokens", 0) or 0)
-                            _total_out += int(p.get("output_tokens", 0) or 0)
-                            _total_cost += float(p.get("cost", 0) or 0)
-                    except Exception:
-                        pass
+            _usage = pipeline_usage(result)
+            _total_in = _usage["input_tokens"]
+            _total_out = _usage["output_tokens"]
+            _total_cost = _usage["cost"]
 
             done_data = json.dumps(
                 {
@@ -3008,39 +3058,11 @@ async def _stream_pipeline_execution(
             # Aggregate tokens, cost, and tool calls from all pipeline nodes
             serialized_result = serialize_pipeline_result(pr)
             node_results_data = serialized_result.get("node_results", {})
-            total_input_tokens = 0
-            total_output_tokens = 0
-            total_cost = 0.0
-            total_tool_calls = 0
-            for _nid, nr in (node_results_data or {}).items():
-                node_output = nr.get("output") if isinstance(nr, dict) else None
-                if isinstance(node_output, dict):
-                    total_input_tokens += int(node_output.get("input_tokens", 0) or 0)
-                    total_output_tokens += int(node_output.get("output_tokens", 0) or 0)
-                    total_cost += float(node_output.get("cost", 0) or 0)
-                    total_tool_calls += int(node_output.get("tool_calls_count", 0) or 0)
-                elif isinstance(node_output, str):
-                    # Try parsing JSON output from agent_step/llm_call
-                    try:
-                        parsed = json.loads(node_output)
-                        if isinstance(parsed, dict):
-                            total_input_tokens += int(
-                                parsed.get("input_tokens", 0) or 0
-                            )
-                            total_output_tokens += int(
-                                parsed.get("output_tokens", 0) or 0
-                            )
-                            total_cost += float(parsed.get("cost", 0) or 0)
-                            total_tool_calls += int(
-                                parsed.get("tool_calls_count", 0) or 0
-                            )
-                    except (json.JSONDecodeError, TypeError, ValueError):
-                        pass
-
-            execution.input_tokens = total_input_tokens or None
-            execution.output_tokens = total_output_tokens or None
+            _usage = pipeline_usage(pr)
+            execution.input_tokens = _usage["input_tokens"] or None
+            execution.output_tokens = _usage["output_tokens"] or None
             # Zero is a real cost; NULL would read as "never recorded".
-            execution.cost = round(total_cost, 6)
+            execution.cost = _usage["cost"]
             execution.tool_calls = _pipeline_tool_calls(node_results_data) or None
 
             # Store pipeline data for flight recorder
@@ -3081,6 +3103,7 @@ async def _non_stream_pipeline_execution(
     agent_name: str = "",
     input_defaults: dict[str, Any] | None = None,
     caller: dict[str, Any] | None = None,
+    cost_limit: float | None = None,
 ) -> JSONResponse:
     """Execute pipeline and return JSON result."""
     from app.core.execution_state import publish_state, complete_state, fail_state
@@ -3123,6 +3146,7 @@ async def _non_stream_pipeline_execution(
             # Required for self-healing capture.
             agent_id=str(execution.agent_id),
             tenant_id=str(tenant_id),
+            cost_limit=cost_limit,
         )
 
         raw_nodes = pipeline_config.get("nodes", [])
@@ -3210,6 +3234,9 @@ async def _non_stream_pipeline_execution(
     if result.status != "completed" and not execution.failure_code:
         execution.failure_code = result.failure_code or "PIPELINE_NODE_FAILED"
     execution.duration_ms = result.total_duration_ms
+    execution.cost = serialized["cost"]
+    execution.input_tokens = serialized["input_tokens"] or None
+    execution.output_tokens = serialized["output_tokens"] or None
     _finalize_execution_timing(execution)
     try:
         from app.core.failure_codes import emit_outcome_metric
@@ -3247,11 +3274,9 @@ async def _non_stream_pipeline_execution(
     await db.commit()
 
     # Drift detection, the hook gates on env + tenant + agent and dedupes
-    _total_cost = 0.0
     try:
-        from app.services.execution_hooks import execution_metrics, record_terminal
+        from app.services.execution_hooks import record_terminal
 
-        _total_cost = execution_metrics(execution)["cost"]
         await record_terminal(db, execution)
     except Exception:
         pass
@@ -3265,9 +3290,64 @@ async def _non_stream_pipeline_execution(
     # have to fish through node_results to find the terminal node's
     # payload — that's the whole point of the pipeline.
     serialized["output"] = result.final_output
-    serialized["cost"] = _total_cost if "_total_cost" in locals() else 0.0
     serialized["duration_ms"] = int(result.total_duration_ms or 0)
     return success(serialized)
+
+
+async def _moderate_pipeline_input(
+    db: AsyncSession, user: User, body: Any, message: str
+) -> Any:
+    """The tenant moderation gate on a pipeline's message and text inputs. Returns redacted text, a refusal, or None."""
+    from app.core.moderation_glue import build_gate_context, persist_events
+    from engine.moderation_client import ACTION_REDACT
+    from engine.moderation_gate import ModerationBlocked, check
+
+    try:
+        ctx = await build_gate_context(db, user.tenant_id, user.id)
+    except Exception:  # noqa: BLE001
+        return None
+    if ctx.gate is None:
+        return None
+    # the free text the user wrote, as on the agent path, structured inputs such as ids and counts are data
+    fields: dict[str, str] = {}
+    # one provider call and one event per run, fields are only checked one by one to redact them
+    combined = "\n".join([message] + [f"{k}: {v}" for k, v in fields.items()])
+
+    async def _save() -> None:
+        try:
+            await persist_events(db, user.tenant_id, user.id, ctx)
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("moderation events not saved: %s", exc)
+
+    try:
+        _, decision = await check(combined, source="pre_llm", config=ctx.gate)
+        if decision.action == ACTION_REDACT:
+            message, _ = await check(message, source="pre_llm", config=ctx.gate)
+            context = dict(body.context or {})
+            for k in fields:
+                context[k], _ = await check(
+                    fields[k], source="pre_llm", config=ctx.gate
+                )
+            body.context = context
+    except ModerationBlocked as mb:
+        reason = getattr(mb.decision, "reason", None)
+        cats = getattr(mb.decision, "acted_categories", None)
+        logger.warning(
+            "pipeline input blocked by moderation: reason=%s categories=%s fields=%s",
+            reason,
+            cats,
+            ",".join(["message"] + list(fields)),
+        )
+        await _save()
+        return error(
+            "Request blocked by moderation policy.",
+            422,
+            error_code="MODERATION_BLOCKED",
+            details={"source": "pre_llm", "reason": reason, "categories": cats},
+        )
+    await _save()
+    return message
 
 
 async def _fetch_mcp_connections(
@@ -3373,6 +3453,7 @@ async def _stream_execution(
             ),
             require_tools=list(agent_model_config.get("require_tools") or []),
             user_id=str(enterprise_ctx.get("user_id") or ""),
+            cost_limit=enterprise_ctx.get("per_execution_cost_limit"),
         )
         event_source = stream_agent(exec_config)
     else:
@@ -3461,6 +3542,7 @@ async def _stream_execution(
                 agent_model_config.get("require_knowledge_search", False)
             ),
             require_tools=list(agent_model_config.get("require_tools") or []),
+            cost_limit=enterprise_ctx.get("per_execution_cost_limit"),
         )
         if max_iterations:
             _exec_kwargs["max_iterations"] = int(max_iterations)
@@ -3980,6 +4062,7 @@ async def _non_stream_execution(
         # failure_code=GROUNDING_REQUIRED_VIOLATION on the execution
         # row when the run finishes without invoking knowledge_search.
         require_knowledge_search=bool(require_knowledge_search),
+        cost_limit=enterprise_ctx.get("per_execution_cost_limit"),
     )
     if max_iterations:
         _exec_kwargs2["max_iterations"] = int(max_iterations)
@@ -4064,6 +4147,25 @@ async def _non_stream_execution(
             emit_outcome_metric(
                 outcome="FAILED",
                 failure_code="MODERATION_BLOCKED",
+                agent_type="agent",
+                tenant_id=str(tenant_id) if tenant_id else "",
+            )
+        elif getattr(result, "budget_exceeded", False):
+            from app.core.failure_codes import emit_outcome_metric
+
+            execution.status = ExecutionStatus.FAILED
+            execution.failure_code = result.failure_code or "BUDGET_EXCEEDED"
+            execution.error_message = (result.output or "")[-2000:]
+            execution.output_message = result.output
+            execution.input_tokens = result.input_tokens
+            execution.output_tokens = result.output_tokens
+            execution.cost = float(result.cost)
+            execution.duration_ms = result.duration_ms
+            execution.tool_calls = result.tool_calls if result.tool_calls else None
+            _finalize_execution_timing(execution)
+            emit_outcome_metric(
+                outcome="FAILED",
+                failure_code=execution.failure_code,
                 agent_type="agent",
                 tenant_id=str(tenant_id) if tenant_id else "",
             )

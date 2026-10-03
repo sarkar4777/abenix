@@ -17,10 +17,11 @@ import {
   Users,
   Webhook,
 } from 'lucide-react';
+import { holds, useMyPermissions } from '@/lib/capabilities';
 
 const MONETIZATION_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MONETIZATION !== 'false';
 
-const NAV_ITEMS = [
+const NAV_ITEMS: { label: string; icon: typeof User; href: string; capability?: string }[] = [
   { label: 'Profile', icon: User, href: '/settings/profile' },
   { label: 'API Keys', icon: Key, href: '/settings/api-keys' },
   ...(MONETIZATION_ENABLED ? [{ label: 'Billing', icon: CreditCard, href: '/settings/billing' }] : []),
@@ -31,7 +32,7 @@ const NAV_ITEMS = [
   { label: 'Security', icon: Lock, href: '/settings/security' },
   { label: 'Data & DLP', icon: Shield, href: '/settings/data' },
   { label: 'Privacy & GDPR', icon: Eye, href: '/settings/privacy' },
-  { label: 'Webhooks', icon: Webhook, href: '/settings/webhooks' },
+  { label: 'Events', icon: Webhook, href: '/settings/webhooks', capability: 'events.manage' },
   { label: 'Token Quotas', icon: Coins, href: '/settings/quotas' },
   { label: 'Sandbox', icon: Box, href: '/settings/sandbox' },
 ];
@@ -42,6 +43,8 @@ export default function SettingsLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const { perms } = useMyPermissions();
+  const items = NAV_ITEMS.filter((item) => !item.capability || holds(perms?.capabilities, item.capability));
 
   return (
     <div className="flex gap-6 max-w-[1400px]">
@@ -51,7 +54,7 @@ export default function SettingsLayout({
             Settings
           </h2>
           <nav className="space-y-0.5">
-            {NAV_ITEMS.map((item) => {
+            {items.map((item) => {
               const active =
                 pathname === item.href ||
                 (item.href === '/settings/profile' && pathname === '/settings');

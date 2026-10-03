@@ -4,13 +4,23 @@ A subtle bite that catches every new contributor on this codebase exactly once. 
 
 ## The trap
 
-Image tags in the helm chart are derived from the current git commit SHA. The `scripts/deploy-azure.sh build --only=<service>` command rebuilds **only** the named service. But the helm-templating step that follows rewrites the image tag on **every** deployment to the new SHA.
+`deploy-azure.sh deploy --only=<list>` and `redeploy --only=<list>` build only
+the listed images, tagged with the current short git SHA. Then, if the list
+names any core service (`api`, `web`, `worker`, `agent-runtime` or
+`cognify-worker`), the Helm step runs and sets the image tag of **every** core
+Deployment to that SHA: api, web, worker, the agent-runtime subchart, every
+runtime pool, the cognify worker and the code runner images.
 
-End state:
-- `abenix-api` and `abenix-web`: new SHA tag, image was just pushed — pods pull, become Ready.
-- `abenix-agent-runtime-*`, `abenix-worker`, `abenix-cognify-worker`: new SHA tag, **image was NOT rebuilt**, ACR doesn't have that tag — pods enter `ImagePullBackOff`.
+End state after `--only=web`:
 
-The old replicas keep serving traffic so nothing is on fire, but you have a ghost ReplicaSet behind every untouched deployment that will never become Ready.
+- `abenix-web`: new SHA, image was just pushed, pods become Ready.
+- `abenix-api`, `abenix-worker`, `abenix-cognify-worker`, `abenix-agent-runtime`, `abenix-agent-runtime-<pool>`: new SHA, **image never built**, ACR has no such tag, pods go to `ImagePullBackOff`.
+
+The old ReplicaSets keep serving, so nothing is on fire, but every untouched
+Deployment carries a ReplicaSet that will never become Ready, and the reconcile
+step at the end of the deploy fails.
+
+`deploy-azure.sh build --only=...` on its own is harmless. It runs no Helm step.
 
 ## How to spot it
 
@@ -18,41 +28,40 @@ The old replicas keep serving traffic so nothing is on fire, but you have a ghos
 kubectl get pods -n abenix | grep -E 'ImagePullBackOff|ErrImagePull'
 ```
 
-If you see multiple services in that state right after a `--only=X` build, you've hit the trap.
+Several services in that state right after an `--only` deploy means you hit it.
 
-## How to recover (in order of preference)
+## How to recover
 
-**Option 1 — Build the missing services with the same SHA.**
-
-```bash
-bash scripts/deploy-azure.sh build --only=agent-runtime,worker,cognify-worker
-# Then re-point the deployments at the new tag they just got built for:
-NEW_SHA=$(git rev-parse --short HEAD)
-kubectl set image deploy/abenix-agent-runtime-default \
-  '*=your-acr.azurecr.io/agent-runtime:'"$NEW_SHA" -n abenix
-# Repeat for the other agent-runtime pools, worker, cognify-worker.
-```
-
-**Option 2 — Roll back to the previous working tag.**
+**Option 1 — Helm rollback.** Puts every Deployment back on the previous tag.
 
 ```bash
-kubectl rollout undo deploy/abenix-agent-runtime-default -n abenix
-```
-
-**Option 3 — Helm rollback (if you used the chart's release path).**
-
-```bash
+helm history abenix -n abenix
 helm rollback abenix <previous-revision> -n abenix
+```
+
+**Option 2 — Finish the job.** Run the full deploy, which builds every image at
+the SHA Helm already points at.
+
+```bash
+bash scripts/deploy-azure.sh redeploy
 ```
 
 ## How to avoid
 
-- For any change that touches Dockerfiles, shared code, or `packages/`: do a full `bash scripts/deploy-azure.sh build` (no `--only`).
-- For a docs-only or web-only iteration, `--only=web` is safe because the web deployment is the only one using the `web` image.
-- **Never use `--only=` on a service that shares an image** (e.g. `worker` and `cognify-worker` both use the `worker` image).
+Always run the full command:
 
-## Why we haven't fixed the tooling
+```bash
+bash scripts/deploy-azure.sh redeploy
+```
 
-It's a one-line change in `scripts/deploy-azure.sh` to make `--only` *not* rewrite tags on untouched deployments. The reason we haven't is that the current behaviour, while painful, makes the SHA-pinning invariant simple to reason about, since every deployment at any point in time is pinned to one SHA, and `helm template` is the source of truth. Splitting that into per-deployment SHAs is a different model and adds drift surface.
+That is the supported way to ship any change to AKS. Images that did not
+change build quickly from the layer cache. A list with no core service in it
+skips the Helm step and does not trip this trap, but the full run is still the
+habit to keep, because the moment a core service joins the list the trap is
+back.
 
-A planned alternative is to switch to `imagePullPolicy: IfNotPresent` and tag-by-content-hash. Until that lands, this trap is real. Don't fall in.
+## Why the tooling works this way
+
+Every core Deployment at any point in time is pinned to one SHA, and the Helm
+release is the source of truth for it. Per-Deployment tags would make
+`--only` safe but would let the services drift onto different builds.

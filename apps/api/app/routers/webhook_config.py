@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -46,6 +47,14 @@ def _validate_url(url: str) -> str | None:
         if not parsed.netloc:
             return "URL must have a valid hostname"
         hostname = (parsed.hostname or "").lower()
+        # named in-cluster receivers pass, the same list delivery honours
+        allowed = {
+            h.strip().lower()
+            for h in os.environ.get("EVENTS_ALLOWED_INTERNAL_HOSTS", "").split(",")
+            if h.strip()
+        }
+        if hostname in allowed:
+            return None
         if hostname in (
             "localhost",
             "host.docker.internal",

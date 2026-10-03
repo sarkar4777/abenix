@@ -1,13 +1,11 @@
-"""Reranker that takes top-N hybrid results and returns top-K, ordered
-by cross-encoder relevance to the original query.
+"""Rerank hybrid-search candidates by relevance to the query.
 
-Provider-pluggable:
-  - `cohere` (default if `COHERE_API_KEY` set) — `rerank-english-v3.0`
-  - `llm`   (Anthropic Claude Haiku scoring; works without extra deps)
-  - `none`  — passthrough (no rerank)
+Providers, picked by RERANKER_PROVIDER or the keys present:
+  - `cohere` (automatic when `COHERE_API_KEY` is set) - `rerank-english-v3.0`
+  - `llm`    (only when RERANKER_PROVIDER=llm) - Claude Haiku scores each hit
+  - `none`   - passthrough
 
-Returns SearchResult objects with `.score` overwritten to the reranker's
-relevance score, plus `.citation` populated with page + chunk + anchor URL.
+`build_citation` turns a chunk's metadata into a document / page / chunk anchor.
 """
 
 from __future__ import annotations
@@ -42,19 +40,26 @@ class Citation:
         }
 
 
+def _first(md: dict, *keys: str) -> Any:
+    for k in keys:
+        if md.get(k) is not None:
+            return md[k]
+    return None
+
+
 def build_citation(
     metadata: dict | None, fallback_document_id: str | None = None
 ) -> Citation | None:
     if not metadata and not fallback_document_id:
         return None
     md = metadata or {}
-    doc_id = md.get("document_id") or fallback_document_id
+    doc_id = md.get("document_id") or md.get("doc_id") or fallback_document_id
     if not doc_id:
         return None
-    page = md.get("page") or md.get("page_number")
-    chunk_index = md.get("chunk_index") or md.get("chunk_idx")
-    char_start = md.get("char_offset_start") or md.get("offset_start")
-    char_end = md.get("char_offset_end") or md.get("offset_end")
+    page = _first(md, "page", "page_number")
+    chunk_index = _first(md, "chunk_index", "chunk_idx")
+    char_start = _first(md, "char_offset_start", "offset_start")
+    char_end = _first(md, "char_offset_end", "offset_end")
     document_name = md.get("document_name") or md.get("filename")
     parts = []
     if document_name:
@@ -75,14 +80,13 @@ def build_citation(
     )
 
 
-def _provider() -> str:
+def provider() -> str:
     explicit = os.environ.get("RERANKER_PROVIDER", "").strip().lower()
     if explicit in ("cohere", "llm", "none"):
         return explicit
+    # the llm scorer adds a model call to every search, so it is opt-in
     if os.environ.get("COHERE_API_KEY", "").strip():
         return "cohere"
-    if os.environ.get("ANTHROPIC_API_KEY", "").strip():
-        return "llm"
     return "none"
 
 
@@ -175,14 +179,14 @@ async def rerank(
     top_k items, with `score` overwritten."""
     if not items:
         return items
-    provider = _provider()
-    if provider == "none":
+    chosen = provider()
+    if chosen == "none":
         return items[:top_k]
     documents = [str(it.get(text_key, "")) for it in items]
     ranked: list[tuple[int, float]] | None = None
-    if provider == "cohere":
+    if chosen == "cohere":
         ranked = await _rerank_cohere(query, documents, top_k)
-    if ranked is None and provider in ("llm", "cohere"):
+    if ranked is None and chosen == "llm":
         ranked = await _rerank_llm(query, documents, top_k)
     if ranked is None:
         return items[:top_k]
@@ -191,9 +195,9 @@ async def rerank(
         if 0 <= idx < len(items):
             row = dict(items[idx])
             row["score"] = score
-            row["reranker"] = provider
+            row["reranker"] = chosen
             out.append(row)
     return out
 
 
-__all__ = ["rerank", "build_citation", "Citation"]
+__all__ = ["rerank", "build_citation", "Citation", "provider"]

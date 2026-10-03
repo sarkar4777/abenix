@@ -27,7 +27,9 @@ const AGENT = `Surcharge Desk ${RUN}`;
 const PIPELINE = `Surcharge Pipeline ${RUN}`;
 const SURCHARGE = 'REMOTE_AREA_SURCHARGE';
 
-const ids: { agent?: string; pipeline?: string } = {};
+const ids: { agent?: string; pipeline?: string; agentRun?: string; pipelineRun?: string } = {};
+const CITATION = 'Carrier tariff 2026, section 4.2';
+const VERSION_1_URL = new RegExp(`/decisions/${KEY.replace(/\./g, '\\.')}\\?version=1`);
 
 test.describe.configure({ mode: 'serial' });
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -98,6 +100,51 @@ async function openLastRun(page: Page) {
   await expect(viewRun).toBeVisible({ timeout: 20_000 });
   await viewRun.click();
   await page.waitForURL(/\/executions\//, { timeout: 20_000 });
+}
+
+function runId(page: Page) {
+  return new URL(page.url()).pathname.split('/executions/')[1]?.split(/[/?#]/)[0] || '';
+}
+
+// the decision card on a run: outcome, the rule with its source, version link, trace hash and evaluation id
+async function checkDecisionCard(scope: ReturnType<Page['locator']>, ruleKey: string) {
+  const card = scope.getByTestId('decision-card').first();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.getByTestId('decision-outcome')).toHaveText('Decided');
+  await expect(card.getByTestId('decision-outputs')).toContainText(SURCHARGE);
+  const rule = card.locator(`[data-testid="decision-rule"][data-rule="${ruleKey}"]`);
+  await expect(rule).toBeVisible();
+  await expect(rule.getByTestId('decision-citation')).toContainText(CITATION);
+  const version = card.getByTestId('decision-version-link');
+  await expect(version).toHaveText(/Version 1/);
+  await expect(version).toHaveAttribute('href', `/decisions/${encodeURIComponent(KEY)}?version=1`);
+  await expect(card.getByTestId('decision-trace-hash')).toHaveText(/^[0-9a-f]{16}$/);
+  const evaluation = card.getByTestId('decision-evaluation-id');
+  await expect(evaluation).toHaveAttribute('title', /^[0-9a-f-]{36}$/);
+  return { card, evaluationId: (await evaluation.getAttribute('title'))! };
+}
+
+// the decision's Evaluations tab lists the evaluation with a link back to the run that made it
+async function checkEvaluationListed(page: Page, execId: string, evaluationId: string, who: string) {
+  await page.getByTestId('tab-evaluations').click();
+  const tab = page.getByTestId('evaluations-tab');
+  await expect(tab).toBeVisible();
+  const row = tab.locator(`[data-testid="evaluation-row"][data-evaluation-id="${evaluationId}"]`);
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await expect(row).toHaveAttribute('data-execution-id', execId);
+  await expect(row).toContainText('Decided');
+  await expect(row).toContainText(who);
+  await expect(row.getByTestId('evaluation-run-link')).toHaveAttribute('href', `/executions/${execId}`);
+  await row.getByRole('button', { name: /Open the evaluation from/ }).click();
+  const detail = page.getByTestId('evaluation-detail');
+  await expect(detail).toHaveAttribute('data-evaluation-id', evaluationId);
+  await expect(detail.getByTestId('evaluation-detail-outcome')).toHaveText('Decided');
+  await expect(detail.getByTestId('evaluation-detail-result')).toContainText(SURCHARGE);
+  await expect(detail.getByTestId('evaluation-detail-rules')).toContainText(CITATION);
+  await expect(detail.getByTestId('evaluation-detail-trace')).toBeVisible();
+  await expect(detail.getByTestId('evaluation-reproduced')).toContainText('trace hash matches');
+  await detail.getByTestId('evaluation-detail-run-link').click();
+  await page.waitForURL(new RegExp(`/executions/${execId}`), { timeout: 20_000 });
 }
 
 async function expand(panelParent: ReturnType<Page['locator']>, title: string) {
@@ -277,6 +324,26 @@ test('the agent prices a remote heavy parcel and a London one in chat, and the r
   await expect(await expand(call, 'Arguments')).toContainText(KEY);
   await expect(await expand(call, 'Result')).toContainText(SURCHARGE);
   await expect(call).toContainText('freight.remote.surcharge');
+  ids.agentRun = runId(page);
+  const { card, evaluationId } = await checkDecisionCard(call, 'freight.remote.surcharge');
+
+  // Try opens with the run's facts filled in and gives the same answer
+  await card.getByTestId('decision-open-try').click();
+  await page.waitForURL(VERSION_1_URL, { timeout: 20_000 });
+  const tryPanel = page.getByTestId('try-panel');
+  await expect(tryPanel.getByTestId('try-preloaded')).toBeVisible();
+  await expect(tryPanel.getByTestId('try-fact-shipment.postcode')).toHaveValue('IV27');
+  await expect(page.getByTestId('try-as-of')).toHaveValue('2026-03-14');
+  await expect(tryPanel.getByTestId('try-result-value')).toContainText(SURCHARGE, { timeout: 15_000 });
+
+  // the version link lands on that version, and the evaluation leads back to the run
+  await go(page, `/executions/${ids.agentRun}`);
+  const again = page.locator('[data-testid="tool-call"][data-tool="decision_evaluate"]').first();
+  await again.getByTestId('decision-version-link').click();
+  await page.waitForURL(VERSION_1_URL, { timeout: 20_000 });
+  await expect(page.getByTestId('version-picker')).toContainText('Version 1');
+  await checkEvaluationListed(page, ids.agentRun, evaluationId, AGENT);
+  await expect(page.locator('[data-testid="tool-call"][data-tool="decision_evaluate"]').first()).toBeVisible({ timeout: 30_000 });
 
   await go(page, `/agents/${ids.agent}/chat`);
   const miss = await chat(page, 'A 120 kg pallet ships on 2026-03-14 to postcode SW1A. Which surcharge applies?');
@@ -364,6 +431,13 @@ test('a pipeline with typed inputs and a decision step is built, published and r
   await expect(step).toBeVisible({ timeout: 30_000 });
   await expect(await expand(step, 'Output')).toContainText(SURCHARGE);
   await expect(page.locator('main')).toContainText('explain');
+  ids.pipelineRun = runId(page);
+  const { evaluationId } = await checkDecisionCard(step, 'freight.remote.surcharge');
+  await step.getByTestId('decision-card').getByTestId('decision-version-link').click();
+  await page.waitForURL(VERSION_1_URL, { timeout: 20_000 });
+  await expect(page.getByTestId('version-picker')).toContainText('Version 1');
+  await checkEvaluationListed(page, ids.pipelineRun, evaluationId, PIPELINE);
+  await expect(page.locator('[data-testid="execution-step"][data-step="decide"]').first()).toBeVisible({ timeout: 30_000 });
 });
 
 test('the SDK playground runs the agent and the pipeline live and shows the code', async ({ page }) => {

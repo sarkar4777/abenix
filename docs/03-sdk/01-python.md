@@ -382,8 +382,21 @@ print(await client.decisions.tests(key))
 | `diff` | `(key, a, b)` |
 | `tests` | `(key)` |
 | `update` | `(key, *, name=None, description=None, risk_tier=None, tags=None, log_mode=None)` |
+| `list` | `(q="")` |
+| `get` | `(key)`, the decision with its versions |
+| `create` | `(name, *, key=None, rules=None, risk_tier="low", description="")` |
+| `compare` | `(key, facts, targets)`, two or more targets, each `{label, version}` or `{as_of, known_at}` |
+| `versions` | `(key)`, the `versions` list from `get` |
+| `version` | `(key, n)` |
+| `export` | `(key, version=None)` |
+| `propose_rules` | `(key, rules, *, note, mode="merge")`, new draft, import and propose in one call |
+| `add_test` | `(key, name, facts, *, expected=None, expected_outcome="decided", as_of=None)` |
+| `evaluations` | `(key, limit=50)` |
+| `reference_sets` | `()` |
+| `reference_set` | `(key)` |
+| `put_reference_set` | `(key, name, values, description="")`, creates the set on a 404, otherwise saves a new version |
 
-Also there: `list`, `get`, `create`, `compare`, `versions`, `version`, `export`, `propose_rules`, `add_test`, `evaluations`, `reference_sets`, `reference_set`, `put_reference_set`. The server's `/check` and `/versions/{n}/try` endpoints have no SDK method yet.
+No SDK method yet for `/check`, `/versions/{n}/try`, `/versions/{n}/presence`, changing or deleting a test, deleting a reference set, or archiving a decision. Use `client.http` for those.
 
 ### Sources
 
@@ -458,6 +471,85 @@ await client.approvals.return_for_changes(
 ```
 
 `return_for_changes(approval_id, reason, *, client_token=None)` raises `ValueError` when `reason` is blank. It posts a `return` signoff.
+
+---
+
+## Other sub-clients
+
+The older sub-clients. They return the `data` field and raise `httpx.HTTPStatusError` on a 4xx or 5xx, not `AbenixError`.
+
+### `executions`
+
+| Method | Calls |
+|---|---|
+| `live()` | `GET /api/executions/live`, returns a list of `LiveExecution` dataclasses (`execution_id`, `agent_id`, `agent_name`, `status`, `current_step`, `current_tool`, tokens, `cost`, `iteration`, `max_iterations`, `confidence_score`) |
+| `get(execution_id)` | `GET /api/executions/{id}`, the stored row with `status`, `output_message` and the trace |
+| `replay(execution_id)` | `GET /api/executions/{id}/replay`, the trace for step-through viewing. It does not run anything again |
+| `tree(execution_id)` | `GET /api/executions/tree/{id}`, parent plus child runs |
+| `pending_approvals()` | `GET /api/executions/approvals`, open human-approval gates in the tenant |
+| `watch_raw_sse(execution_id)` | `GET /api/executions/{id}/watch`, raw SSE bytes |
+
+Running a past execution again on its recorded input is `POST /api/governance/runs/{id}/replay`, which has no SDK method. Call it through `client.http`.
+
+### `agents`
+
+Besides `by_slug`, `create` and `update` above:
+
+- `list()` is `GET /api/agents`, the first page only (20 agents)
+- `get(agent_id)` is `GET /api/agents/{id}`
+- `find_by_slug(slug)` searches `GET /api/agents?search=` and returns the exact slug match or `None`. Prefer `by_slug`
+
+### `approvals`
+
+| Method | Notes |
+|---|---|
+| `list(*, status=None, execution_id=None, agent_id=None, kind=None, limit=200)` | `GET /api/approvals` |
+| `get(approval_id)` | `GET /api/approvals/{id}` |
+| `create(title, payload, *, required_signoffs=1, expires_seconds=86400, gate_kind=None, agent_id=None, agent_execution_id=None, client_token=None)` | `POST /api/approvals`. A reused `client_token` returns the existing approval |
+| `signoff(approval_id, decision, *, reason="", client_token=None)` | `decision` is `approve`, `deny` or `return` |
+| `approve(approval_id, *, reason="", client_token=None)` | `signoff` with `approve` |
+| `deny(approval_id, *, reason="", client_token=None)` | `signoff` with `deny` |
+| `return_for_changes(approval_id, reason, *, client_token=None)` | see above |
+| `wait_for(approval_id, *, timeout_seconds=60, poll_seconds=2.0)` | Long-polls `/wait` in chunks of up to 120 s. Returns the last row seen, still `pending` if time ran out |
+| `subscribe()` | Async iterator over `GET /api/notifications/stream?types=approval_pending,approval_resolved`. Yields `{event, data}` |
+| `configure_webhook(*, url, secret=None)` | `PUT /api/approvals/webhooks`. Needs the admin or owner role |
+
+### `knowledge`
+
+| Method | Calls |
+|---|---|
+| `bootstrap_project(slug, name, description="", collections=None)` | `POST /api/knowledge-projects/bootstrap`. Idempotent. Unknown `agent_slugs` in a collection come back in `skipped_agents` |
+| `ensure_subject_collection(project_slug, subject_type, subject_id, description="", default_visibility="private", vector_backend="pgvector")` | `POST /api/knowledge-projects/{slug}/subject-collections/ensure` |
+| `cognify(kb_id, doc_ids=None, model="claude-sonnet-4-5-20250929", chunk_size=1000, chunk_overlap=200)` | `POST /api/knowledge-engines/{kb_id}/cognify` |
+| `graph_stats(kb_id)` | `GET /api/knowledge-engines/{kb_id}/graph-stats` |
+| `search(kb_id, query, mode="hybrid", top_k=5, graph_depth=2)` | `POST /api/knowledge-engines/{kb_id}/search` |
+| `graph(kb_id, limit=100)` | `GET /api/knowledge-engines/{kb_id}/graph` |
+| `cognify_jobs(kb_id)` | `GET /api/knowledge-engines/{kb_id}/cognify-jobs` |
+
+### `chat`
+
+Persistent threads on `/api/conversations`. Every method takes an optional `act_as`.
+
+| Method | Calls |
+|---|---|
+| `create(*, agent_slug=None, agent_id=None, app_slug=None, title=None)` | `POST /api/conversations` |
+| `list(*, app_slug=None, agent_slug=None, archived=False, limit=50, offset=0)` | `GET /api/conversations`, `offset` is turned into a page number |
+| `get(thread_id)` | Thread with its messages |
+| `send(thread_id, content, *, context=None, agent_slug=None, attachments=None)` | `POST /api/conversations/{id}/turn`. Returns `{thread, user_message, assistant_message}` |
+| `rename(thread_id, title)` | `PUT` with `{title}` |
+| `archive(thread_id, *, archived=True)` | `PUT` with `{is_archived}` |
+| `delete(thread_id)` | Deletes the thread and its messages |
+
+### `tools` and `presets`
+
+- `tools.list()` and its alias `tools.catalog()` return `GET /api/tools`
+- `tools.execute(slug, arguments=None, config=None, *, timeout=None)` runs one tool through `POST /api/tools/{slug}/execute`, outside the agent loop
+- `presets.list(*, tool_slug=None, ui_group=None, asset_class=None)`, `presets.get(slug)`, `presets.upsert(body)` and `presets.delete(slug)` manage `/api/tool-presets`
+- `presets.run(slug, arguments=None, config=None, *, timeout=None)` runs a preset, your arguments merged over its defaults
+
+### `ml_models`
+
+`list()` returns `GET /api/ml-models`. It is the only method. Use `client.http` for predict and deploy.
 
 ---
 

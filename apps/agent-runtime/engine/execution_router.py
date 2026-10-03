@@ -42,6 +42,8 @@ class ExecutionConfig:
     # tenant policy as the inline path. None == no gate.
     moderation_gate: Any = None
     user_id: str = ""
+    # the agent's per_execution_cost_limit, None for no cap
+    cost_limit: float | None = None
 
 
 @dataclass
@@ -56,6 +58,7 @@ class ExecutionResult:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     model: str = ""
     error: str | None = None
+    failure_code: str = ""
 
 
 def is_remote_mode() -> bool:
@@ -132,6 +135,7 @@ async def _execute_embedded(config: ExecutionConfig) -> ExecutionResult:
             # silently no-ops.
             require_knowledge_search=bool(config.require_knowledge_search),
             moderation_gate=config.moderation_gate,
+            cost_limit=config.cost_limit,
         )
 
         result = await executor.invoke(config.message)
@@ -151,6 +155,8 @@ async def _execute_embedded(config: ExecutionConfig) -> ExecutionResult:
             duration_ms=result.duration_ms,
             tool_calls=result.tool_calls,
             model=result.model,
+            error=result.output if result.budget_exceeded else None,
+            failure_code=result.failure_code,
         )
 
     except Exception as e:
@@ -207,6 +213,7 @@ async def _stream_embedded(
             # silently defaulted both to None/False.
             require_knowledge_search=bool(config.require_knowledge_search),
             moderation_gate=config.moderation_gate,
+            cost_limit=config.cost_limit,
         )
 
         async for event in executor.stream(config.message):
@@ -244,11 +251,16 @@ async def _execute_remote(config: ExecutionConfig) -> ExecutionResult:
         # the pod's executor sees the same contract as inline.
         "require_knowledge_search": bool(config.require_knowledge_search),
         "model_config": config.model_config or {},
+        "cost_limit": config.cost_limit,
     }
 
     try:
         async with httpx.AsyncClient(timeout=RUNTIME_TIMEOUT) as client:
-            resp = await client.post(f"{RUNTIME_URL}/execute", json=payload)
+            from engine.tracing import inject_carrier
+
+            resp = await client.post(
+                f"{RUNTIME_URL}/execute", json=payload, headers=inject_carrier()
+            )
             if resp.status_code != 200:
                 return ExecutionResult(
                     output="",
@@ -263,6 +275,8 @@ async def _execute_remote(config: ExecutionConfig) -> ExecutionResult:
                 duration_ms=data.get("duration_ms", 0),
                 tool_calls=data.get("tool_calls", []),
                 model=data.get("model", ""),
+                error=data.get("error") or None,
+                failure_code=data.get("failure_code") or "",
             )
     except httpx.ConnectError:
         return ExecutionResult(
@@ -295,12 +309,18 @@ async def _stream_remote(
         # See _execute_remote — must reach the runtime pod.
         "require_knowledge_search": bool(config.require_knowledge_search),
         "model_config": config.model_config or {},
+        "cost_limit": config.cost_limit,
     }
 
     try:
         async with httpx.AsyncClient(timeout=RUNTIME_TIMEOUT) as client:
+            from engine.tracing import inject_carrier
+
             async with client.stream(
-                "POST", f"{RUNTIME_URL}/execute/stream", json=payload
+                "POST",
+                f"{RUNTIME_URL}/execute/stream",
+                json=payload,
+                headers=inject_carrier(),
             ) as resp:
                 if resp.status_code != 200:
                     yield {

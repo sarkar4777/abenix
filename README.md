@@ -33,7 +33,7 @@
 
 Most AI agent platforms give your agents amnesia — they retrieve documents, forget context, and re-derive the world model on every turn. Most also assume "agent" means "a chatbot in the cloud talking to OpenAI." That's fine for support tickets. It's not fine for a wind turbine, a refrigerated trailer, a contract worth seven figures, or a control room with a 50 ms hard limit.
 
-**Abenix gives agents a brain — and a body.** A typed graph that lives next to the knowledge base so agents traverse evidence like a researcher follows citations. Per-agent runtime pools, multi-signoff approvals, idempotency, and a dead-letter queue so you actually trust them in production. And lean edge runtimes — Python, Rust, or C — that take the same agent definition, sign it into a 12–80 MB bundle, and run it next to the equipment.
+**Abenix gives agents a brain, a body, and a rulebook.** A typed graph that lives next to the knowledge base so agents traverse evidence like a researcher follows citations. A deterministic rule engine that makes the decisions an agent should not make on its own, with risk tiers that decide who signs off and what an agent may touch. Per-agent runtime pools, multi-signoff approvals, idempotency, and a dead-letter queue so you actually trust them in production. And lean edge runtimes — Python, Rust, or C — that take the same agent definition, sign it into a 12–80 MB bundle, and run it next to the equipment.
 
 Same agent. Same definition. Cloud or edge. Built for the long-running, knowledge-heavy, accountability-mandatory work that workflow tools choke on.
 
@@ -47,7 +47,7 @@ Same agent. Same definition. Cloud or edge. Built for the long-running, knowledg
 <a id="why-abenix"></a>
 ## ✨ Why Abenix
 
-Eight things that, taken together, you do not get anywhere else open-source:
+Nine things that, taken together, you do not get anywhere else open-source:
 
 ### 1. Graph-grounded knowledge — Atlas + Knowledge Engine
 
@@ -63,7 +63,68 @@ Agents query the graph through four typed tools — `atlas_describe`, `atlas_que
 
 Token cost typically drops **5–10×** because agents read curated evidence, not noisy near-neighbours. Postgres + Neo4j — no extra vector DB to operate.
 
-### 2. The unit of deployment is an agent — not a workflow
+### 2. Agents that reason, rules that decide — governed by risk tier
+
+A language model is very good at reading a contract, a claim or a shipment note and pulling out the facts. It should not be the last word on whether a surcharge applies, a claim is covered or a trade breaches a limit. Abenix splits the job. **The agent gathers the facts. A deterministic rule engine makes the call. The platform records which rule version decided, and why.** Every change to those rules, and every risky thing an agent does, goes through controls set by a risk tier.
+
+```mermaid
+flowchart LR
+    U[User or system] --> A[Agent or pipeline]
+    A -- facts --> D{{decision_evaluate}}
+    D -- version in force on the date --> R[Outcome + rules applied + citations + trace hash]
+    R --> A
+    R -.recorded.-> F[(Flight Recorder<br/>+ evaluation log)]
+    subgraph Change control
+      W[Draft] --> C[Check: validation, conflicts, golden tests]
+      C --> P[Propose] --> S[Sign-off set by risk tier] --> V[Publish new version]
+    end
+    V -.next evaluation uses it.-> D
+```
+
+**The rule engine** runs on [GoRules ZEN](https://gorules.io) (MIT, Rust core), wrapped in a full decision service:
+
+- **Rules a business owner can read.** The no-code builder writes each rule as a sentence while you build it. A decision table takes rows pasted from Excel. The ZEN flow view handles larger graphs. All three edit the same model, and JSON import and export keeps it in Git if you want.
+- **The same answer every time.** The same facts against the same version give the same result and the same trace hash, on any pod, today or in a year.
+- **It never guesses.** A missing or wrongly typed fact comes back as `missing_facts` or `invalid_facts`, naming the field, so the agent asks for it instead of inventing it.
+- **Time travel built in.** Versions carry the dates they apply from. Ask what applied on 1 March (`as_of`), or what applied on 1 March as the rules were known then (`known_at`), for audits and back-dated cases.
+- **Safe to change.** Drafts, field-level validation, rule conflict checks, golden tests, a diff against what is live, two authors merging edits, then propose, sign-off and publish. A publish under load switches versions cleanly, with no caller seeing a mix of old and new.
+- **Callable from everywhere.** A `decision_evaluate` tool for agents, a decision step in pipelines, REST, the Python and TypeScript SDKs, and batch evaluation.
+- **Fast.** One API pod with 2 CPUs answers about 1,300 evaluations a second with 500 callers at once, and scales out with more pods.
+- **Accountable.** A decision made inside a run is stored with its version, the rules that applied, their citations and the trace hash, and shows in the run's Flight Recorder.
+
+A rule, exactly as the builder shows it:
+
+> When `shipment.date` is on or after 2026-01-01, `shipment.postcode` is in `REMOTE_POSTCODES` and `shipment.weightKg` is more than 50, then `surcharge` is `REMOTE_AREA_SURCHARGE`. *Source: Carrier tariff 2026, section 4.2.*
+
+And an agent using it, with no extra glue:
+
+```python
+result = await abenix.decisions.evaluate(
+    "freight.remote.surcharge",
+    {"shipment": {"date": "2026-03-01", "postcode": "IV27", "weightKg": 120}},
+)
+# result["outcome"] == "decided", result["result"]["surcharge"] == "REMOTE_AREA_SURCHARGE"
+# result["applied_rules"], result["trace_hash"], result["version"]
+```
+
+**Risk tiers** attach to agents, pipelines, tools and decisions. A run starts at its agent's tier and rises, never falls, when it calls a riskier tool, and the reason for each rise is kept on the run. Each tier has a policy, and a tenant can change any of it under **Admin → Risk & Controls**, effective for new runs within five seconds:
+
+| Tier | Sign-offs to publish a change | When a lower-tier run calls a tool at this tier | Output schema | Evaluation suite must pass | Escalate a waiting approval |
+|---|---|---|---|---|---|
+| **Low** | none | allowed | optional | no | off |
+| **Medium** | none | allowed | optional | no | off |
+| **High** | 1, not the author | waits for human approval | required | yes, on the exact config | after 24 h |
+| **Critical** | 2, not the author | waits for human approval | required | yes, on the exact config | after 4 h |
+
+Around that sit the controls an auditor asks for:
+
+- **Separation of duties.** Who may sign comes from capabilities in permission sets, and the author of a change cannot approve it at high or critical tier. Reviewers approve, deny, or return a change with a note that sends it back to draft.
+- **Evaluation gate.** A high-tier agent cannot be published until its golden-case suite passes against the exact configuration being published.
+- **Kill switches.** Stop a tool, an agent, a pipeline, a model or a trigger for a tenant, or everything at once. Work already running stops at its next tool call.
+- **Tamper-evident audit.** Audit rows form a hash chain checked every night, with an alert if it breaks.
+- **Provenance and replay.** Every run stores the configuration it ran with and its hash, so it can be replayed and compared later.
+
+### 3. The unit of deployment is an agent — not a workflow
 
 Every agent has its own pod pool, KEDA queue-depth scaler, NATS subject, budget cap, and telemetry channel. Flip `dedicated_mode = true` and a single agent gets its own Deployment + ScaledObject. The `/admin/scaling` page projects shared / dedicated / peak cost before you flip.
 
@@ -79,7 +140,7 @@ Pipelines don't have their own runtime — they compose Layer 1 (agent nodes rou
 
 n8n / Zapier / LangGraph are excellent when the problem is *integration-shaped* — "Salesforce row changed, drop a Slack message." Abenix earns its place when the problem is *agent-shaped*, meaning long-running reasoning, shared knowledge, audit-grade traceability, and isolation per tenant under load.
 
-### 3. Real multi-tenancy + actAs delegation
+### 4. Real multi-tenancy + actAs delegation
 
 `tenant_id` on every row. Cross-tenant reads return `404`, not `403`. Vector backends enforce the same filter at the index level. Three roles (admin / creator / user) plus per-feature flags via `/api/me/permissions`. `ResourceShare` for cross-team grants.
 
@@ -89,7 +150,7 @@ The killer feature is **actAs**: a SaaS app holding a single platform key serves
 
 **Enterprise knowledge (v2.0)**: document-level ACL on a shared KB, document versioning + supersedes, incremental Cognify, bi-temporal Atlas with as-of queries, embedding-model swap without downtime, OCR + table extraction for scanned docs, GDPR cascade delete with audit receipts, per-tenant encryption at rest. Read-only Cypher tool for agents. The 16-feature v2 reference: [`docs/02-runtime/15-v2-knowledge-enterprise.md`](docs/02-runtime/15-v2-knowledge-enterprise.md).
 
-### 4. Failure-first ops — Pipeline Surgeon, DLQ, idempotency, alerts
+### 5. Failure-first ops — Pipeline Surgeon, DLQ, idempotency, alerts
 
 Failures are first-class citizens, not exception traces in a log file:
 
@@ -99,7 +160,7 @@ Failures are first-class citizens, not exception traces in a log file:
 - **Dead-letter queue** at `/admin/dlq` — failed executions land here with one-click replay or discard.
 - **Workflow shell** — a 30-verb REPL ("kubectl for pipelines") that drives every change through the same JSON-Patch ledger so audits remain coherent.
 
-### 5. Production primitives, in the box
+### 6. Production primitives, in the box
 
 Connect agents to the systems enterprise ops actually run on, without burning a sprint per integration:
 
@@ -115,7 +176,7 @@ Connect agents to the systems enterprise ops actually run on, without burning a 
 | **Idempotency + DLQ + audit** | Replay-safe execute, dead-letter inbox, integrity-hashed audit log per tenant. |
 | **Bidirectional writes** | OPC-UA write, MQTT publish, CMMS create-work-order — agents can push setpoints, not just read sensors. |
 
-### 6. Edge runtimes — Python · Rust · C
+### 7. Edge runtimes — Python · Rust · C
 
 Cloud-built agents, edge-deployed pods. Mark an agent **Edge eligible** in the Builder, the platform compiles a signed `.agent` bundle (RSA-PSS over a deterministic tar) and ships it over MQTT to a runtime sitting next to the equipment. Three runtime variants for three classes of plant hardware:
 
@@ -127,26 +188,15 @@ Cloud-built agents, edge-deployed pods. Mark an agent **Edge eligible** in the B
 
 Same `.agent` bundle, same MQTT delivery topic, same HTTP contract. Tool budget on edge: `mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor`. OTA updates via one MQTT message. Bundle tampering refuses to load. The bit nobody else ships.
 
-### 7. Multimodal end-to-end
+### 8. Multimodal end-to-end
 
 Drop a PDF, image, audio, video, DOCX, DWG/DXF, GeoJSON, or text file anywhere Abenix accepts uploads. The platform routes the modality to the right provider (Claude / Gemini / GPT-4o for vision, Gemini for audio + video). Field technicians dictate work-order closeouts, vision models read damage photos, and agents reason over chart-shaped diagrams.
 
-### 8. One Helm chart, observability inside
+### 9. One Helm chart, observability inside
 
 `helm install abenix ./infra/helm/abenix` deploys api + web + workers + per-agent-pool runtimes + Postgres + Redis + Neo4j + NATS + KEDA + mosquitto + TimescaleDB + Prometheus + Grafana + ingress. Every pod exposes `/metrics`. The `/alerts` page groups by `failure_code`. Slack + email fan-out via env var.
 
 Same chart on AKS, EKS, GKE, minikube, bare metal. MIT license. Self-host without vendor handcuffs.
-
-### 9. Governed decisions and change control
-
-Deterministic rules sit next to the agents, and every change to them is controlled:
-
-- **Decision service on GoRules ZEN.** Versioned, bitemporal decision models that agents and pipelines call as tools. A no-code rule builder, a decision table and the ZEN flow view edit the same model, with typed facts, field validation, live Try, golden tests, diff, merge and JSON import and export. One API pod evaluates about 1,300 decisions a second at 500 concurrent callers, and a publish mid-load switches versions with no mixed answers.
-- **Risk tiers.** Low, medium, high and critical attach to agents, pipelines, tools and decisions. A run starts at its agent's tier and rises when it touches a riskier tool. Each tier's policy sets sign-offs, separation of duties, allowed models, an output schema requirement, escalation time and an evaluation gate.
-- **Approvals with separation of duties.** The tier decides how many people sign and whether the author may. Reviewers can approve, deny or return a change with a note, and approvals left waiting escalate to admins.
-- **Evaluation suites.** Golden cases with deterministic and model-judged assertions, scored runs, run and model comparison, scheduled reruns, and a gate that blocks a high-tier publish until the suite passes on the exact config.
-- **Kill switches.** Stop a tool, agent, pipeline, model or trigger for a tenant, or everything at once. Running work stops at its next tool call.
-- **Tamper-evident audit and replay.** Audit rows form a hash chain verified nightly, and every run records the config it ran with so it can be replayed.
 
 ---
 

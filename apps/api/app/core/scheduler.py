@@ -28,6 +28,7 @@ ARCHIVE_LOCK_KEY = 0x41524348  # "ARCH"
 SWEEP_LOCK_KEY = 0x5354414C  # "STAL"
 DRIFT_LOCK_KEY = 0x44524654  # "DRFT"
 ESCALATE_LOCK_KEY = 0x45534341  # "ESCA"
+VACUUM_LOCK_KEY = 0x56414355  # "VACU"
 
 
 def drift_scan_interval_seconds() -> int:
@@ -257,7 +258,7 @@ async def sweep_stale_executions() -> None:
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
-    from sqlalchemy import select, update
+    from sqlalchemy import func, or_, select, update
     from app.core.deps import async_session
 
     from models.execution import Execution, ExecutionStatus
@@ -284,6 +285,11 @@ async def sweep_stale_executions() -> None:
                     ).where(
                         Execution.status == ExecutionStatus.RUNNING,
                         Execution.created_at < cutoff,
+                        # a runtime pod still renewing its lease is alive
+                        or_(
+                            Execution.lease_expires_at.is_(None),
+                            Execution.lease_expires_at < func.now(),
+                        ),
                     )
                 )
                 found = r.all()
@@ -321,6 +327,10 @@ async def sweep_stale_executions() -> None:
                     .where(
                         Execution.id.in_(ids),
                         Execution.status == ExecutionStatus.RUNNING,
+                        or_(
+                            Execution.lease_expires_at.is_(None),
+                            Execution.lease_expires_at < func.now(),
+                        ),
                     )
                     .values(
                         status=ExecutionStatus.FAILED,
@@ -647,6 +657,16 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
 
+    scheduler.add_job(
+        enqueue_pinecone_vacuum,
+        trigger="cron",
+        hour=2,
+        minute=30,
+        id="pinecone_vacuum",
+        name="Queue the daily Pinecone orphan vacuum",
+        replace_existing=True,
+    )
+
     # Platform alerts arrive by Alertmanager webhook (routers/admin_alerts.py),
     # the Prometheus poller that used to run here is gone.
 
@@ -732,6 +752,21 @@ async def _nightly_archive() -> None:
             await run_all_archives(async_session)
     except Exception as e:
         logger.exception("nightly archive failed: %s", e)
+
+
+async def enqueue_pinecone_vacuum() -> None:
+    """Hand the vacuum to the worker's documents queue, from one replica."""
+    try:
+        from app.workers.kb_reembed import enqueue_pinecone_vacuum as _enqueue
+
+        async with advisory_lock(VACUUM_LOCK_KEY) as held:
+            if not held:
+                logger.debug("pinecone vacuum: another replica holds the lock")
+                return
+            if await _enqueue():
+                logger.info("pinecone vacuum queued")
+    except Exception as e:
+        logger.exception("pinecone vacuum enqueue failed: %s", e)
 
 
 def stop_scheduler() -> None:

@@ -1,45 +1,61 @@
 # Set up at-rest encryption (KEK)
 
-> Five commands, ~2 min. Turns the AES-256-GCM wrapping of sensitive PersonaItem + AgentMemory fields from a no-op into actual ciphertext on disk.
+> A few commands, about two minutes. Turns the AES-256-GCM wrapping of stored secrets from a pass-through into real ciphertext.
 
 ## What you're enabling
 
-The v2.0 encryption layer at [`apps/api/app/core/crypto.py`](../../apps/api/app/core/crypto.py) wraps sensitive PersonaItem + AgentMemory values with AES-256-GCM. Without a KEK, `encrypt()` short-circuits and stores plaintext. The platform still works, but the at-rest threat model isn't covered. See [`01-architecture/06-atlas-knowledge-engine.md#persona-encryption-v20`](../01-architecture/06-atlas-knowledge-engine.md) for the design.
+[`apps/api/app/core/crypto.py`](../../apps/api/app/core/crypto.py) encrypts
+these values before they are written:
 
-Key derivation chain:
+| Value | Where it is stored |
+|---|---|
+| Tool credentials saved from **Admin -> Tool Configuration**, platform scope | `platform_settings`, keys `tool.credential.<KEY>` |
+| Tool credentials saved for one tenant | `tenant_tool_credentials` |
+| Tenant Slack webhook URL | `tenants.slack_webhook_url` |
+| Approval webhook secret | `tenants.settings.approval_webhook_secret` |
+| MCP connection secrets and OAuth access tokens | MCP connection rows |
+
+Without a KEK, `encrypt()` returns the value unchanged, so these are stored as
+entered. The platform works the same either way. The Tool Configuration screen
+says which mode is in effect (`encrypted_at_rest` in
+`GET /api/admin/tool-config`).
+
+`persona_items` has `encrypted` and `key_version` columns, but nothing writes
+encrypted persona content today.
+
+Key derivation:
 
 ```mermaid
 flowchart LR
-  KMS[Azure Key Vault<br/>AWS KMS · Vault] -->|32-byte b64| ENV[ABENIX_DATA_KEY_KEK_BASE64]
+  KMS[Azure Key Vault<br/>AWS Secrets Manager · Vault] -->|32-byte b64| ENV[ABENIX_DATA_KEY_KEK_BASE64]
   ENV --> KEK[Cluster KEK<br/>32 bytes]
-  KEK -->|HMAC-SHA256| DEK_T1[DEK tenant-1]
-  KEK -->|HMAC-SHA256| DEK_T2[DEK tenant-2]
-  KEK -->|HMAC-SHA256| DEK_TN[DEK tenant-N]
-  DEK_T1 --> CT[AES-256-GCM<br/>v1:nonce‖ct‖tag]
+  KEK -->|HMAC-SHA256 of tenant id| DEK_T[DEK per tenant]
+  KEK -->|HMAC-SHA256 of the platform scope| DEK_P[DEK for platform rows]
+  DEK_T --> CT["AES-256-GCM<br/>v1:base64(nonce + ct + tag)"]
+  DEK_P --> CT
 ```
 
-Same KEK + same `tenant_id` → same DEK, every time, on every pod. No shared cache, no database table, no per-row coordination.
+Same KEK and same tenant id give the same DEK on every pod. No shared cache, no
+key table.
 
 ## Prerequisites
 
-- `kubectl` pointed at the cluster (`kubectl config current-context` shows the right one)
-- `openssl` for generating the key
-- Read+patch on the `abenix-secrets` Secret in the `abenix` namespace
-- A secret-manager backend you trust (Azure Key Vault, AWS KMS, or Vault). The raw KEK should land in the cluster Secret via your normal CSI / external-secrets pipeline — these commands show the manual fallback.
+- `kubectl` pointed at the cluster
+- `openssl` to generate the key
+- Read and patch on the `abenix-secrets` Secret in the `abenix` namespace
+- A secret manager you trust for the master copy
 
 ## Step 1 — Generate a 32-byte KEK
 
 ```bash
 KEK=$(openssl rand -base64 32)
-echo "$KEK"   # sanity check — must decode to exactly 32 bytes
 echo "$KEK" | base64 -d | wc -c   # → 32
 ```
 
-**Do not check this string in.** Treat it like a root password. Stash it in your KMS of choice immediately.
+**Do not check this string in.** Treat it like a root password and store it in
+your secret manager straight away.
 
 ## Step 2 — Store the KEK in your secret manager
-
-Pick one (the platform doesn't care which — only the env var matters at runtime):
 
 ```bash
 # Azure Key Vault
@@ -52,98 +68,93 @@ aws secretsmanager create-secret --name abenix/data-kek --secret-string "$KEK"
 vault kv put secret/abenix/data-kek value="$KEK"
 ```
 
-Production deploys should wire the secret in via external-secrets-operator (Azure Key Vault Provider for Secrets Store CSI Driver, AWS Secrets and Configuration Provider, etc.) so rotation in the KMS auto-propagates without a manual kubectl patch.
+## Step 3 — Get it into `abenix-secrets`
 
-## Step 3 — Inject into the cluster Secret
-
-The manual path (skip if you're using external-secrets):
+The supported path is the deploy script. Both `deploy.sh` and
+`deploy-azure.sh` read `ABENIX_DATA_KEY_KEK_BASE64` from the environment or
+`.env` and pass it as `secrets.dataKeyKekBase64`, which the chart writes into
+`abenix-secrets`:
 
 ```bash
-kubectl patch secret abenix-secrets -n abenix \
-  --type='json' \
-  -p="[{\"op\":\"add\",\"path\":\"/data/ABENIX_DATA_KEY_KEK_BASE64\",\"value\":\"$(echo -n "$KEK" | base64 -w0)\"}]"
+ABENIX_DATA_KEY_KEK_BASE64="$KEK" bash scripts/deploy-azure.sh redeploy
 ```
 
-Note the double base64: Kubernetes Secrets b64-encode the value, and our env var content is *already* b64 (so when the pod reads `$ABENIX_DATA_KEY_KEK_BASE64` it gets back the 32-byte-encoded-b64 string the crypto module expects).
+Keep it in `.env` afterwards. A later deploy without it renders the Secret
+without the key, and every encrypted value becomes unreadable.
 
-Verify the key landed:
+If you manage the Secret yourself, for example with external-secrets, patch it
+directly:
 
 ```bash
+kubectl patch secret abenix-secrets -n abenix --type='json' \
+  -p="[{\"op\":\"add\",\"path\":\"/data/ABENIX_DATA_KEY_KEK_BASE64\",\"value\":\"$(echo -n "$KEK" | base64 -w0)\"}]"
+
 kubectl get secret abenix-secrets -n abenix -o jsonpath='{.data.ABENIX_DATA_KEY_KEK_BASE64}' | base64 -d | base64 -d | wc -c
 # → 32
 ```
 
-## Step 4 — Roll the api pod
+The value is base64 twice, once for the Secret and once because the variable
+itself holds base64.
 
-The env var is read at process start, so a fresh pod is required:
+## Step 4 — Restart what reads it
+
+The variable is read at process start. Both the API and the agent-runtime use
+it, the runtime to decrypt tool credentials:
 
 ```bash
 kubectl rollout restart deploy/abenix-api -n abenix
-kubectl rollout status  deploy/abenix-api -n abenix --timeout=120s
-```
-
-Worker + agent-runtime pods also encrypt/decrypt on writes — roll them if they're long-lived:
-
-```bash
-kubectl rollout restart deploy/abenix-worker -n abenix
 kubectl rollout restart deploy -n abenix -l app.kubernetes.io/name=agent-runtime
+kubectl rollout status deploy/abenix-api -n abenix --timeout=120s
 ```
 
-## Step 5 — Verify encryption is live
+The chart has no checksum annotation on the Secret, so a deploy rolls these pods only when the image tag changes. Restart them anyway.
+
+## Step 5 — Verify
 
 ```bash
-# Should see the KEK injected, no "encryption disabled" warning on first persona write
-kubectl logs -n abenix deploy/abenix-api -c api --tail=200 | grep -E "ABENIX_DATA_KEY|encryption disabled|invalid ABENIX_DATA_KEY"
-# (empty output = good — the warning logs once only when KEK is missing)
+# the screen's mode, needs an admin token
+curl -s -H "Authorization: Bearer <admin token>" http://localhost:8000/api/admin/tool-config | grep -o '"encrypted_at_rest":[a-z]*'
+# → "encrypted_at_rest":true
 
-# Smoke: write a persona note via the API, confirm the column on disk is b64 not plaintext
-kubectl exec -n abenix deploy/abenix-postgresql -- \
-  psql -U abenix -d abenix -c "select substr(value, 1, 4) as prefix from persona_items where encrypted=true limit 1;"
-# Expected prefix: "v1:" (the versioned-ciphertext envelope)
+# a key saved from the screen after the restart is stored as ciphertext
+kubectl exec -n abenix abenix-postgresql-0 -- bash -c \
+  'PGPASSWORD=$POSTGRES_PASSWORD psql -U postgres -d abenix -tc "SELECT key, left(value, 3) FROM platform_settings WHERE key LIKE '"'"'tool.credential.%'"'"' LIMIT 5;"'
+# → prefix v1:
 ```
 
-If the prefix is the start of your real plaintext, encryption didn't load — most likely the env var didn't propagate to the pod. Check:
+If `encrypted_at_rest` is false, the variable did not reach the API pod:
 
 ```bash
-kubectl exec -n abenix deploy/abenix-api -c api -- printenv ABENIX_DATA_KEY_KEK_BASE64 | head -c 8
-# Should print 8 b64 characters, not empty.
+kubectl exec -n abenix deploy/abenix-api -- sh -c 'printenv ABENIX_DATA_KEY_KEK_BASE64 | head -c 8'
 ```
 
-## Backfill (optional)
+## Values saved before the KEK
 
-New writes are encrypted automatically. To encrypt rows written *before* the KEK was set, run the one-shot backfill:
+Rows written while no KEK was set stay as plaintext. There is no backfill job.
+Save each one again from its screen, Tool Configuration, tenant settings or
+approval webhooks, and it is written encrypted.
 
-```bash
-kubectl exec -n abenix deploy/abenix-api -c api -- \
-  python -m app.scripts.backfill_persona_encryption
-```
-
-Idempotent — re-runs skip already-encrypted rows. Touches `persona_items` and `agent_memories` only. Expect ~5 min per 100k rows.
+The reverse also holds. A `v1:` value read without the KEK is returned as the
+raw ciphertext string, so tools see a broken credential rather than an error.
 
 ## Rotation
 
-When you rotate the KEK (annually, or after an incident):
-
-1. Bump `KEY_VERSION` in [`crypto.py`](../../apps/api/app/core/crypto.py) from `1` to `2`.
-2. Stash both the old and new KEKs in your KMS, named `abenix-data-kek-v1` and `abenix-data-kek-v2`.
-3. Inject the new key as `ABENIX_DATA_KEY_KEK_BASE64`, and the old one as `ABENIX_DATA_KEY_KEK_V1_BASE64` (reader will dispatch by ciphertext prefix).
-4. Roll the api pod.
-5. New writes use v2. Old `v1:...` ciphertext still decrypts because the reader sees the `v1:` prefix and grabs the v1 derivation.
-6. Optional: run the backfill again — it rewrites v1 rows as v2.
+There is no rotation support. `KEY_VERSION` is 1 and the reader does not keep
+an older key. Changing the KEK makes every encrypted value unreadable, and each
+has to be entered again. If you must rotate, note which values are set, deploy
+the new KEK, then save each one again.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "encryption disabled" warning on every startup | KEK env var missing | Step 3 again, checking namespace and secret name |
-| "invalid ABENIX_DATA_KEY_KEK_BASE64" + traceback | KEK is b64 but not 32 bytes once decoded | Regenerate with `openssl rand -base64 32` — `head -c 32 /dev/urandom | base64` will produce a 44-char output that decodes to exactly 32 |
-| persona_items rows still look plaintext | Old rows from before KEK was set | Run the backfill (above) |
-| Decrypt fails after rotation with "decrypt failed for v=v1" | Old KEK not present, ciphertext is v1 | Inject `ABENIX_DATA_KEY_KEK_V1_BASE64` alongside the new key, or restore from backup |
-| All pod encryption traces missing in logs | Encrypted columns not yet written this session | Trigger a persona note save in the UI, then check again |
+| `encrypted_at_rest` is false | Variable missing on the pod | Steps 3 and 4, check namespace and Secret name |
+| Log line starting `invalid ABENIX_DATA_KEY_KEK_BASE64` | The value is not base64 or not 32 bytes once decoded | Generate again with `openssl rand -base64 32` |
+| Log line `decrypt failed for v=v1` | The KEK changed since the value was written | Put the old KEK back, or save the value again |
+| Tool says its key is invalid after a redeploy | The deploy ran without the KEK, values are still ciphertext | Put the KEK back in `.env` and redeploy |
 
 ## Related
 
-- [`01-architecture/06-atlas-knowledge-engine.md`](../01-architecture/06-atlas-knowledge-engine.md#persona-encryption-v20) — design narrative
-- [`02-runtime/15-v2-knowledge-enterprise.md`](../02-runtime/15-v2-knowledge-enterprise.md#persona-encryption) — feature reference
-- [`04-data-model/03-knowledge.md`](../04-data-model/03-knowledge.md#gdpr--persona-encryption) — schema (`encrypted`, `key_version` columns)
 - [`09-reference/01-env-vars.md`](../09-reference/01-env-vars.md) — env-var reference entry
+- [`09-reference/04-platform-settings.md`](../09-reference/04-platform-settings.md#tool-credentials) — how tool credentials are stored
+- [`08-howto/08-tool-configuration.md`](08-tool-configuration.md) — the Tool Configuration screen

@@ -852,6 +852,7 @@ class PipelineExecutor:
 
         result: NodeResult | None = None
         max_attempts = node.max_retries + 1
+        earlier = {"cost": 0.0, "input_tokens": 0, "output_tokens": 0}
 
         for attempt in range(max_attempts):
             result = await self._execute_node_once(node, node_outputs, prior_results)
@@ -860,6 +861,8 @@ class PipelineExecutor:
             # Only retry on "failed" status -- NOT on "skipped"
             if result.status != "failed" or attempt >= max_attempts - 1:
                 break
+            for k, v in node_usage(result).items():
+                earlier[k] += v
 
             # Wait with exponential backoff before retrying
             delay_s = (node.retry_delay_ms / 1000) * (2**attempt)
@@ -872,8 +875,16 @@ class PipelineExecutor:
             )
             await asyncio.sleep(delay_s)
 
-        # Fire on_node_complete callback
         assert result is not None
+        if any(earlier.values()):
+            last = node_usage(result)
+            result.metadata = {
+                **(result.metadata or {}),
+                **{k: last[k] + earlier[k] for k in earlier},
+                "earlier_attempts_cost": round(earlier["cost"], 6),
+            }
+
+        # Fire on_node_complete callback
         await self._fire_callback(
             self.on_node_complete,
             result.node_id,
@@ -1907,6 +1918,44 @@ def parse_pipeline_nodes(raw_nodes: list[dict[str, Any]]) -> list[PipelineNode]:
     return nodes
 
 
+def _is_num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def node_usage(nr: NodeResult) -> dict[str, Any]:
+    """Spend of one node whatever its status, from its metadata or else its output."""
+    src: dict[str, Any] | None = None
+    md = nr.metadata or {}
+    if _is_num(md.get("cost")):
+        src = md
+    else:
+        out = nr.output
+        if isinstance(out, str):
+            try:
+                out = json.loads(out)
+            except (TypeError, ValueError):
+                out = None
+        if isinstance(out, dict) and _is_num(out.get("cost")):
+            src = out
+    if src is None:
+        return {"cost": 0.0, "input_tokens": 0, "output_tokens": 0}
+    return {
+        "cost": float(src.get("cost") or 0),
+        "input_tokens": int(src.get("input_tokens") or 0),
+        "output_tokens": int(src.get("output_tokens") or 0),
+    }
+
+
+def pipeline_usage(result: PipelineResult) -> dict[str, Any]:
+    """What the whole run spent, failed and retried steps included."""
+    total = {"cost": 0.0, "input_tokens": 0, "output_tokens": 0}
+    for nr in (result.node_results or {}).values():
+        for k, v in node_usage(nr).items():
+            total[k] += v
+    total["cost"] = round(total["cost"], 6)
+    return total
+
+
 def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
     """Convert a PipelineResult into a JSON-serializable dict."""
     node_results = {}
@@ -1923,6 +1972,12 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
             "attempt": nr.attempt,
             "metadata": nr.metadata,
         }
+        if nr.resolved_arguments:
+            try:
+                if len(json.dumps(nr.resolved_arguments, default=str)) <= 16_000:
+                    node_results[nid]["resolved_arguments"] = nr.resolved_arguments
+            except (TypeError, ValueError):
+                pass
         # Include output for completed nodes (truncate large outputs).
         # Bumped from 10K→128K to keep multi-stage briefs (synthesiser,
         # executive briefing, etc.) intact when the
@@ -1990,4 +2045,5 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
         "risk_tier": result.risk_tier,
         "risk_reasons": result.risk_reasons,
         "failure_code": result.failure_code,
+        **pipeline_usage(result),
     }

@@ -86,6 +86,8 @@ Triggers are the inverse — they wake agents up on external events. Five kinds 
 
 Each trigger is bound to an agent. When it fires, the runtime creates an `Execution` with the trigger's payload as input and runs it through the standard pool routing.
 
+If the agent is over its `daily_cost_limit` or `daily_budget_usd` for the UTC day, the execution is written as `failed` with `failure_code: BUDGET_EXCEEDED` and a plain message, the trigger owner is notified, and a webhook or Run now call answers 429 with that code. See [Spend caps](00-agent-execution.md#spend-caps).
+
 ## Adding a new trigger kind
 
 Two files:

@@ -15,7 +15,7 @@
 
 | System | What it carries | Why it exists | Files |
 |---|---|---|---|
-| **Celery on Redis** | Background jobs — document ingestion, cognify pipelines, exports, scheduled sweepers | Long, durable, often minutes-long. Tasks have predictable shapes. | [`apps/worker/`](../../apps/worker/) |
+| **Celery on Redis** | Background jobs — document ingestion, cognify pipelines, re-embedding, the Pinecone vacuum | Long, durable, often minutes-long. Tasks have predictable shapes. | [`apps/worker/`](../../apps/worker/) |
 | **NATS JetStream** | Agent and pipeline executions dispatched from the API to the runtime pools | Sub-second dispatch, ordered delivery, consumer-side flow control. | [`apps/agent-runtime/`](../../apps/agent-runtime/), `infra/helm/abenix/templates/agent-runtime-pools.yaml` |
 | **Redis Streams** | Tool-gate semaphore counters, rate-limit token buckets, the `tools:queue` stream when `pool='runtime'`, the WS fan-out channel | Low-latency primitives that need to be visible to every api pod at once. Not a "queue" in the workflow sense. | [`apps/api/app/core/tool_gate.py`](../../apps/api/app/core/tool_gate.py), [`apps/agent-runtime/tool_stream_consumer.py`](../../apps/agent-runtime/tool_stream_consumer.py) |
 
@@ -24,11 +24,11 @@
 | Work shape | Pick | Why not the others |
 |---|---|---|
 | LLM agent execution (1-300s, ordered, UI is watching) | NATS | Celery is too coarse for SSE streaming. Redis Streams has no consumer-group ack semantics this code path needs. |
-| Document ingestion, Cognify, exports, nightly sweeps (minutes-to-hours) | Celery | NATS retention is bounded (1M messages, ~3h at 100 msg/s). Celery has retry/backoff/idempotency built in. |
+| Document ingestion, Cognify, re-embedding, the nightly vacuum (minutes-to-hours) | Celery | NATS retention is bounded (1M messages, ~3h at 100 msg/s). Celery has retry/backoff/idempotency built in. |
 | Tool-call dispatch from one pod to another (synchronous round-trip, 100ms-30s) | Redis Streams via `tool_worker_dispatch.py` | NATS would need a per-tool subject explosion. Celery's polling cadence is too slow for the api pod waiting on the reply. |
 | Distributed semaphore, rate-limit bucket, breaker state | Redis (plain INCR/Lua) | Not a queue — needs O(1) reads. |
 
-**Default: NATS for agent work, Celery for everything that's not an agent, Redis for primitives.** If you're not sure, NATS — its consumer ack + redelivery handles crash recovery for free.
+**Default: NATS for agent work, Celery for everything that's not an agent, Redis for primitives.** Queued agent runs only work on NATS. With `scaling.queueBackend: celery` agents cannot run on the pools, so the chart refuses `scaling.execRemote` or runtime pools, a pool pod exits at startup with an error saying so, and the API runs the agent inline when it cannot enqueue. Celery still runs document, cognify and KB jobs.
 
 The API server is the entry point for both. A `POST /api/documents/{id}/process` enqueues a Celery job. A `POST /api/agents/{slug}/execute` publishes a NATS message. Neither client sees the queue — they get a job_id or execution_id back and listen for completion via polling or SSE.
 
@@ -64,16 +64,18 @@ Celery's routing config lives in [`apps/worker/worker/celery_app.py`](../../apps
 
 ```python
 task_routes={
-    "worker.tasks.agent_tasks.*":      {"queue": "agents"},
     "worker.tasks.document_processor.*": {"queue": "documents"},
-    "worker.tasks.export_tasks.*":     {"queue": "exports"},
     "worker.tasks.cognify_task.*":     {"queue": "cognify"},
+    "worker.tasks.kb_reembed.*":       {"queue": "documents"},
+    "worker.tasks.pinecone_vacuum.*":  {"queue": "documents"},
 }
 ```
 
-Each route maps a Python module prefix to a queue name. Workers subscribe to specific queues by name — `celery -A worker.celery_app worker -Q documents,cognify` for the cognify worker, `celery -A worker.celery_app worker -Q exports` for the export pod, and so on. A worker that doesn't subscribe to a queue never sees its jobs.
+There is no agent route. Agent runs never go through Celery, they are queued on NATS JetStream for the agent-runtime pools.
 
-This pattern is intentional. The cognify pipeline is heavy (loads big embeddings models into RAM and keeps them resident). It runs in its own pod with `memoryLimit: 12Gi`. The export worker is lightweight. Putting them in the same queue would force the export pod to also load the cognify model, which would mean fewer export replicas per node.
+Each route maps a Python module prefix to a queue name. Workers subscribe to queues by name. The worker pod runs `-Q ${CELERY_QUEUES}`, which defaults to `documents` in `apps/worker/Dockerfile`. The cognify worker pod runs `-Q cognify` (`cognifyWorker.queue` in the chart). A worker that doesn't subscribe to a queue never sees its jobs.
+
+The split is intentional. Cognify extraction is heavy and long, so it runs in its own pod and scales on its own. Ingestion, re-embedding and the Pinecone vacuum share the lighter `documents` queue.
 
 ### Lifecycle of a Celery task
 
@@ -114,20 +116,14 @@ The runtime pools are isolated *fleets*. Each pool subscribes to one JetStream c
 
 ```
 stream: agents
-  subjects: ["agents.>"]
-  retention: limits   # discard after ack-pending TTL
-  max_msgs: 1_000_000
-  storage: file
+  subjects: ["agents.>"]       # created by the first publisher or consumer
 
-consumer: abenix-default-consumer
-  filter_subject: "agents.default"
-  ack_policy: explicit
-  ack_wait: 10m
-  max_ack_pending: 100
+consumer: abenix-default-consumer     (pull, durable, subject agents.default)
+  ack_wait: 30s                # renewed by in_progress heartbeats while the run lives
 
-consumer: abenix-chat-consumer       (filter: agents.chat)
-consumer: abenix-heavy-reasoning-consumer (filter: agents.heavy-reasoning)
-consumer: abenix-long-running-consumer    (filter: agents.long-running)
+consumer: abenix-chat-consumer             (agents.chat)
+consumer: abenix-heavy-reasoning-consumer  (agents.heavy-reasoning)
+consumer: abenix-long-running-consumer     (agents.long-running)
 ```
 
 The API server picks a subject when it publishes. The picker logic looks at agent metadata.
@@ -139,14 +135,23 @@ The API server picks a subject when it publishes. The picker logic looks at agen
 | `max_iterations > 50` or known long-running tools | `agents.long-running` | very generous wall-clock |
 | anything else | `agents.default` | the workhorse |
 
-A pool listens on its own consumer. JetStream guarantees ordered delivery per consumer, exactly-once with explicit ack within the ack_wait window. If a runtime pod dies mid-execution, the message redelivers after the ack window expires (10 minutes) and another pod picks it up. The pipe sees this as "execution timed out and retried" — visible in the executions list.
+A pool listens on its own consumer. Delivery is at least once. See [At-least-once delivery](#at-least-once-delivery) below.
 
-**What the JetStream settings actually mean:**
+### At-least-once delivery
 
-- `retention: limits` — drop messages when EITHER the message count cap OR the storage cap is hit. We size the message cap (1M) so the streaming history is ~3 hours of activity at 100 msg/sec. Older executions live in Postgres' `executions` table, so this short retention is intentional. Postgres is the source of truth, JetStream is just the dispatcher.
-- `storage: file` — JetStream persists to disk via RocksDB. Overhead ~200 bytes per message. A million-message stream ≈ 200 MB. For dev / test, set `storage: memory` to drop the disk dependency. Production always uses file.
-- `ack_wait: 10m` — how long JetStream waits for a `JS.ACK` from the consumer before redelivering. If a pod OOMs or gets killed by k8s mid-execution, the message sits in the unacked queue for 10 minutes, then another pod picks it up. The user sees "retried" in the executions list. Tune up for the long-running pool (3h ack_wait), down for chat (60s) so dead chat sessions don't replay 10 minutes later when the user has moved on.
-- `max_ack_pending: 100` — backpressure. If the consumer has 100 unacked messages in flight, JetStream stops delivering more until some are acked. This is what keeps a slow pod from getting buried under more work it can't process.
+The consumer in [`consumer.py`](../../apps/agent-runtime/consumer.py) acks a message only after the run ends, is skipped or is given up. While the run lives it sends `in_progress` to JetStream every `CONSUMER_LEASE_SECONDS / 3` seconds, so the 30 s ack window never runs out on a healthy pod.
+
+Each run also holds a lease on its `executions` row: `runner_id`, `lease_expires_at` and `delivery_attempts`. The heartbeat renews the lease every `CONSUMER_LEASE_SECONDS` (default 25). When a message arrives the consumer tries to claim the row.
+
+| Row state | What the consumer does |
+|---|---|
+| Not `running` any more | Drops the duplicate and acks |
+| `running`, another runner's lease still live | Naks with a delay until that lease runs out, then looks again |
+| `running`, no lease or an expired one | Takes over and runs the agent again from the start |
+| Picked up `CONSUMER_MAX_ATTEMPTS` (default 3) times already | Fails the run with `STALE_SWEEP` and a message saying it was not retried again |
+| Row missing | Publishes an `error` event and acks |
+
+A takeover reruns the whole agent, so tool side effects from the first attempt can happen twice after a pod crash. If a runner finds its lease taken over by another, it cancels its own copy. An undecodable message is terminated, not redelivered. The stale sweeper skips runs whose lease is still live. See [09-state-machines](09-state-machines.md).
 
 ### Why isolate the pools
 
@@ -154,7 +159,6 @@ Without isolation, one slow long-running execution (a 30-minute back-test) would
 
 - Chat pool stays warm and small-latency.
 - Heavy-reasoning pool runs costly LLM calls on dedicated pods, can scale up to 10 replicas during bursts.
-- Long-running pool has 60-minute ack_wait and accepts 1 message per replica at a time.
 - A pool maxing out does not affect the others.
 
 Per-pool isolation also means **per-pool cost budgets** are easy. You can set a Prometheus alert on `sum(rate(abenix_llm_cost_usd_provider_total[1h])) by (pool)` and catch one runaway pool before it burns the month's allowance.
@@ -462,7 +466,7 @@ pipeline_config:
 
 When this pipeline runs, the pipeline pod (in the `default` runtime pool) iterates its nodes. `timestamp` is a sub-ms inline tool call. `dsp` goes through the gate, lands on `tools:queue`, an agent-runtime pod picks it up and runs the user's uploaded code. `diagnose` enqueues to whatever pool the `iot-diagnoser` agent is configured for — possibly `heavy-reasoning`. `report` is a structured-output node, runs in-process. **No new infrastructure** — every primitive already existed.
 
-**Error propagation.** If any tool node fails (gate returns 429, tool raises, agent times out), the pipeline executor checks for an `on_error` edge defined on that node. If present, the failure routes there with the error captured in the node's output. If absent, the pipeline halts and the execution row is marked `failed` with `failed_node_id` set. Downstream nodes never run. The retry policy comes from the *outer* execution's runtime_pool (NATS redelivers after `ack_wait` if the pipeline pod itself crashed. Otherwise the pipeline is considered complete-with-failure and is not retried).
+**Error propagation.** If any tool node fails (gate returns 429, tool raises, agent times out), the pipeline executor checks for an `on_error` edge defined on that node. If present, the failure routes there with the error captured in the node's output. If absent, the pipeline halts and the execution row is marked `failed` with `failed_node_id` set. Downstream nodes never run. If the pipeline pod itself crashed, NATS redelivers the outer execution once its lease expires and another pod reruns it from the start, up to `CONSUMER_MAX_ATTEMPTS`. Otherwise the pipeline is complete-with-failure and is not retried.
 
 ### Decision tree for operators
 

@@ -1,6 +1,6 @@
 # Debugging — common failure modes + how to chase them
 
-> The 15 problems you'll actually hit, ranked by frequency, with the fastest path to a fix.
+> The problems you will actually hit, with the fastest path to a fix.
 
 ---
 
@@ -8,114 +8,116 @@
 
 When something's wrong:
 1. **Get the `execution_id`** from the UI (URL or trace panel) or from the user.
-2. **Open `/executions/{id}`** — the trace + tool waterfall + raw payload.
-3. **Click "View Trace"** to jump to Grafana Tempo for the distributed view.
-4. **`kubectl -n abenix logs ...`** if Tempo is unhelpful.
+2. **Open `/executions/{id}`** — status, `failure_code`, `error_message`, tool calls and node results.
+3. **Click "View Trace"** to jump to Grafana Tempo, when traces are exported (see [04-observability](../06-deployment/04-observability.md#traces)).
+4. **Read the pod logs** if neither helps.
 
 If you don't have the execution_id, query Postgres:
 ```sql
-SELECT id, status, failure_code, error_message
+SELECT id, status, failure_code, error_message, created_at
 FROM executions
 WHERE tenant_id = $1
   AND agent_id IN (SELECT id FROM agents WHERE slug = $2)
 ORDER BY created_at DESC LIMIT 10;
 ```
 
+Execution status is one of `running`, `completed`, `failed` or `cancelled`.
+`failure_code` comes from `apps/api/app/core/failure_codes.py`, for example
+`LLM_RATE_LIMIT`, `LLM_PROVIDER_ERROR`, `LLM_INVALID_RESPONSE`, `LLM_AUTH_ERROR`,
+`CONFIG_UNKNOWN_MODEL`, `SANDBOX_TIMEOUT`, `SANDBOX_OOM`, `TOOL_ERROR`,
+`TOOL_NOT_FOUND`, `MODERATION_BLOCKED`, `KILL_SWITCH`, `MODEL_NOT_ALLOWED`,
+`BUDGET_EXCEEDED`, `INFRA_CRASH`, `INFRA_AUTH_ERROR` and `STALE_SWEEP`. The
+`/alerts` page groups failures by it.
+
 ---
 
-## #1 — Agent output is JSON-parse-fail
+## #1 — Agent output is not the JSON you asked for
 
-**Symptom**: execution `status='completed'` but `failure_code='output_schema'`, `output.parsed=null`, `output.raw` has the LLM's text.
-
-**Cause**: The LLM didn't produce valid JSON matching `model_config.output_schema`.
+**Symptom**: the run completes but the output is prose or fenced JSON, or a
+downstream pipeline node fails to parse it. Sometimes `failure_code` is
+`LLM_INVALID_RESPONSE`.
 
 **Fix**:
-- Inspect `output.raw` — is the schema realistic? LLMs handle 5-10 fields gracefully. 30+ fields gets brittle.
-- Tighten the system prompt — explicit "Output STRICT JSON only, no prose, no fences."
-- Add an example output in the prompt's `## Output` section.
-- If the LLM consistently wraps in fences, the runtime's one-retry-with-feedback should fix it. If it persists, your prompt isn't strict enough.
+- Read `output_message` on the execution row. Is the schema realistic? 5 to 10 fields hold up, 30+ gets brittle.
+- Tighten the system prompt — "Output STRICT JSON only, no prose, no fences."
+- Add an example output to the prompt.
 
 > **Trap** — the example output in the prompt is read by the LLM as "what good looks like." If your example numbers are stale, the LLM will produce stale numbers. Use `<placeholder>` syntax for time-dependent values.
 
 ---
 
-## #2 — Tool call returns `is_error=true`
+## #2 — A tool call failed
 
-**Symptom**: trace shows a red tool node. the agent tries to recover or stops.
+**Symptom**: the tool node is red in the trace, the agent recovers or stops.
 
 **Fix**:
-- Click the tool node in the trace → view `metadata.error`.
-- Common: external API rate-limited (Tavily, EIA), auth expired (Yahoo), network timeout.
-- Check tool-specific env vars — `TAVILY_API_KEY` etc.
-
-If the tool itself raised an exception, it bubbles to the runtime which catches it and writes `is_error=true`. The exception text is in `metadata.exception`.
+- Open the tool call on `/executions/{id}`. The first `TOOL_RESULT_PERSIST_CHARS` (8000) characters of each result are kept on the row.
+- Common: the provider rate-limited, a key expired, a network timeout.
+- A tool that is not configured says so in its result. **Admin -> Tool Configuration** shows which keys are missing and where each value comes from.
 
 ---
 
-## #3 — Execution stuck on `status='running'` forever
+## #3 — Execution stuck on `running`
 
-**Symptom**: dashboard never updates. SSE doesn't deliver a terminal event.
+**Symptom**: the page never reaches a final state, the live stream sends no terminal event.
 
-**Cause**: runtime pod OOM-killed mid-loop, NATS dropped the message, or a pipeline node hung.
+**Cause**: the pod running it died mid-run (OOM or eviction), or a pipeline node hung.
 
 **Fix**:
-- Check `kubectl -n abenix top pods -l app=agent-runtime-default` for recent OOM.
-- Wait — the reconciliation sweeper in `worker` marks stuck executions failed after `agent.timeout` (default 300s).
-- Force-resolve: `UPDATE executions SET status='failed', failure_code='operator_force_resolve' WHERE id = $1`.
-
-> **Why the sweeper** — without it, an OOM-killed pod would leave the row in `running` forever. The sweeper runs every 60s and unsticks stale rows.
+- Check for restarts: `kubectl -n abenix get pods -l app.kubernetes.io/name=agent-runtime` and `kubectl -n abenix describe pod <pod>`.
+- Wait. The API scheduler's stale sweeper runs every 5 minutes and marks runs still `running` after `STALE_EXECUTION_MAX_MINUTES` (default 10) as `failed` with `failure_code=STALE_SWEEP`. The `abenix_stale_sweeps_total` metric counts them.
+- A pipeline is cut off at the `pipeline.timeout_seconds` setting (default 300) with `SANDBOX_TIMEOUT`, see [platform settings](../09-reference/04-platform-settings.md#execution-limits).
 
 ---
 
 ## #4 — LLM rate-limit storm
 
-**Symptom**: thousands of `LLM_RATE_LIMIT` errors in 5 minutes. Grafana cost chart spikes.
+**Symptom**: many runs fail with `LLM_RATE_LIMIT` within minutes. The cost panel spikes.
 
 **Fix**:
-- Identify the offender: `SELECT agent_slug, COUNT(*) FROM executions WHERE created_at > now() - interval '15 min' GROUP BY 1 ORDER BY 2 DESC;`
-- Common cause: a webhook that fans out to N agents synchronously, or a misconfigured pipeline with no `max_iterations`.
-- Short-term: pause the agent via `/agents → Edit → status=paused`.
-- Long-term: add a `client_token` for idempotency + a tenant quota.
+- Find the offender:
+  ```sql
+  SELECT a.slug, count(*) FROM executions e JOIN agents a ON a.id = e.agent_id
+  WHERE e.created_at > now() - interval '15 minutes' AND e.failure_code = 'LLM_RATE_LIMIT'
+  GROUP BY 1 ORDER BY 2 DESC;
+  ```
+- Common cause: a trigger or webhook fanning out to many runs at once, or a pipeline with a large `max_iterations`.
+- Short term: pause the trigger, or archive the agent.
+- On a Claude subscription in exclusive mode, every request goes to one model. Lower `llm.subscription.default_model` or turn exclusive off.
 
 ---
 
-## #5 — Knowledge base returns no results
+## #5 — Knowledge search returns nothing
 
-**Symptom**: `kb_search` returns empty array even though docs were uploaded.
+**Symptom**: `knowledge_search` comes back empty though documents were uploaded.
 
 **Fix**:
-- Check the KB status: `SELECT * FROM knowledge_bases WHERE id = $1`. Status should be `ready`.
-- Check chunk count: `SELECT COUNT(*) FROM kb_chunks WHERE kb_id = $1`. If 0, the ingest worker failed.
-- Logs: `kubectl -n abenix logs deploy/cognify-worker | grep <doc_id>`.
-
-Common causes:
-- PDF parser choked on a scanned image (no OCR fallback wired by default).
-- Embedding API key missing — check `OPENAI_API_KEY` / equivalent.
-- Pgvector extension not installed (`CREATE EXTENSION vector;` should have run as part of migration).
+- Check the documents: `SELECT filename, status, chunk_count, error_message FROM documents WHERE kb_id = $1`. Status should be `ready`. `degraded` means chunks were stored but the embedder was unavailable, so nothing is searchable by vector until it is re-embedded. `failed` carries the reason.
+- Check the agent can read the collection. Being listed on the collection is not enough, it needs an `AgentCollectionGrant` with READ.
+- Worker logs: `kubectl -n abenix logs deploy/abenix-worker --tail=200` and `deploy/abenix-cognify-worker`.
+- A collection embedded with one embedder answers poorly to queries embedded with another. With no OpenAI or Azure key, both sides use the local hashed embedder, see [local setup](00-local-setup.md#knowledge-bases-without-an-embedding-key).
 
 ---
 
-## #6 — Pipeline step fails but error isn't shown
-
-**Symptom**: pipeline run shows a red step but the error message is empty.
+## #6 — Pipeline step fails but the error isn't obvious
 
 **Fix**:
-- The step's child execution row has the real error. Click into the step in the trace.
-- If the step is a tool (no sub-execution), inspect `pipeline_step_runs.error_payload`.
-- Use the **validation chip** in the builder topbar — clicking it scrolls the canvas to the offending node (this was the audit's pass-1 fix).
+- Agent steps have their own child execution, linked by `parent_execution_id`. Open it for the real error.
+- For tool steps, the step's entry in `node_results` on the parent row carries the error.
+- The builder's validation chip scrolls the canvas to the offending node.
+- Failed runs can be diagnosed by the Pipeline Surgeon, see [pipeline healing](../02-runtime/10-pipeline-healing-drift.md).
 
 ---
 
 ## #7 — Frontend toast shows "Server error (500)"
 
-**Symptom**: generic 500 toast, no detail.
-
 **Fix**:
-- Open browser DevTools → Network tab → find the request → look at the response body.
-- Backend logs: `kubectl -n abenix logs -l app=abenix-api -f --tail=200`.
-- Look for the `X-Request-ID` header → grep logs for that.
+- Browser DevTools → Network → the request → response body.
+- Backend logs: `kubectl -n abenix logs -l app.kubernetes.io/name=api -f --tail=200`, or `logs/abenix-api.log` with `dev-local.sh`.
+- Every API response carries `X-Request-ID`. Grep the logs for it.
 
-If the request body had `error_code` but the toast didn't show it, your frontend code probably has `toastError("Failed", e?.message)` without considering `e?.errorCode`. Update the catch:
+If the response had `error_code` but the toast did not show it, the catch
+probably ignores `e?.errorCode`:
 
 ```ts
 toastError(
@@ -126,95 +128,87 @@ toastError(
 
 ---
 
-## #8 — Webhook signature verification fails
+## #8 — A webhook receiver rejects Abenix's signature
 
-**Symptom**: `WEBHOOK_SIGNATURE_INVALID` on inbound webhooks.
+**Symptom**: your endpoint refuses outbound event or approval webhooks.
 
 **Fix**:
-- Check the webhook secret in `tenant_settings.webhook_secrets`.
-- The webhook source must compute HMAC-SHA256 of the raw body + send as `X-Abenix-Signature: sha256=<hex>`.
-- Common cause: middleware or proxy modifies the body before the verifier runs — disable trim/whitespace mods in your reverse proxy.
+- Outbound events are signed with the subscription's signing secret, shown once when the subscription is created. Details and the exact header in [outbound events](../02-runtime/19-outbound-events.md).
+- The approval webhook (`PUT /api/approvals/webhooks`) sends `X-Abenix-Signature: sha256=<hex>`, an HMAC-SHA256 of the raw JSON body with the secret you set.
+- Verify against the raw body. A proxy or framework that re-serialises JSON breaks the signature.
+- Delivery history and replay: `GET /api/webhooks/{id}/deliveries` and `POST /api/webhooks/deliveries/{delivery_id}/redeliver`.
 
 ---
 
 ## #9 — Approval gate never resumes
 
-**Symptom**: human signs off but the execution stays `waiting_approval`.
+**Symptom**: someone signed off but the run did not continue.
 
 **Fix**:
-- Check `approvals.status` — should be `approved`.
-- Check NATS: `kubectl -n abenix exec deploy/nats -- nats consumer report exec`.
-- If the `exec.resume` message wasn't delivered, the worker's approval-router job will redeliver within 60s.
-- Force: `UPDATE approvals SET status='approved' WHERE id = $1; UPDATE executions SET status='running' WHERE id = $2;` then publish manually.
+- Check the approval row: `SELECT status, decided_at FROM approvals WHERE id = $1`. Status is `pending`, `approved`, `denied`, `expired` or `returned`.
+- `GET /api/approvals/{id}/wait?timeout_seconds=60` long-polls one approval until it leaves `pending`, useful to see what the waiting side sees.
+- If it expired before anyone decided, the run ends rather than resumes. Check the gate's `expires_seconds`.
+
+See [approvals](../02-runtime/05-approvals-hitl.md).
 
 ---
 
 ## #10 — `ImagePullBackOff` after a deploy
 
-**Symptom**: new pods can't pull the image.
-
 **Fix**:
-- Check the registry tag actually exists: `az acr repository show-tags -n your-acr --repository abenix-api --top 5`.
-- Check the AKS-ACR attach is intact: `az aks check-acr -n abenix-aks -g abenix-rg --acr your-acr`.
-- Re-attach if needed: `az aks update --attach-acr ...`.
-- For cross-ACR migration, see [`feedback_publish_public_traps`](../) for the gotchas.
+- Right after `deploy-azure.sh ... --only=...`, you hit [the --only trap](../06-deployment/deploy-only-trap.md). `helm rollback abenix -n abenix`, then `bash scripts/deploy-azure.sh redeploy` in full.
+- Check the tag exists: `az acr repository show-tags -n <acr> --repository api --top 5`.
+- Check the ACR attach: `az aks check-acr -n abenix-aks -g abenix-rg --acr <acr>.azurecr.io`. Re-run `bash scripts/deploy-azure.sh provision` to attach again.
+- Edge runtime pods: the image is pinned, never rebuilt. Do not set `EDGE_IMAGE_TAG` to the git SHA.
 
 ---
 
-## #11 — Bodhi/Abenix branding flip on `abenix-web` rollout
+## #11 — `OAuth access token has been revoked`
 
-**Symptom**: after a normal helm upgrade, the site shows "Abenix" instead of "Bodhi" (or vice versa).
+**Symptom**: every run fails with `LLM_AUTH_ERROR` on a cluster using a Claude subscription.
 
-**Fix**:
-- Bodhi is applied at deploy time via `scripts/apply-bodhi-and-deploy.sh`. The HEAD source is always Abenix-named.
-- Re-apply: `bash scripts/apply-bodhi-and-deploy.sh --with-wingman`.
-- See [`feedback_bodhi_demo_rebrand`](../) memory for the rationale.
+**Fix**: the subscription token rotated. Run `bash scripts/sync-claude-subscription.sh`, then confirm with `POST /api/admin/settings/subscription/verify`.
 
 ---
 
-## #12 — Wingman corridor shows "data unavailable"
+## #12 — Wingman shows "data unavailable"
 
 **Symptom**: home cards say "No recent scan."
 
 **Fix**:
-- The agent failed sanity. Cache is intentionally empty until the agent succeeds.
-- Trigger a fresh scan: open Price at Risk Lens → click the corridor → fires `POST /api/wingman/mispricing/.../scan`.
-- Inspect the resulting execution. usually a tool failure (Tavily key, EIA key, etc.).
-- See [`07-standalone-apps/01-wingman`](../07-standalone-apps/01-wingman.md#three-tier-resolution-for-mispricing-scans).
+- The agent failed. Wingman keeps only agent-produced numbers, so the cache stays empty until a run succeeds.
+- Trigger a fresh scan from the lens page and open the resulting execution. Usually a tool key is missing.
+- See [`07-standalone-apps/01-wingman`](../07-standalone-apps/01-wingman.md).
 
 ---
 
 ## #13 — Custom MCP server isn't loading
 
-**Symptom**: agent has `mcp_extensions` but the tools don't appear.
+**Symptom**: the connection fails to register, or its tools never appear.
 
 **Fix**:
-- Check the runtime pod logs at startup for MCP handshake errors.
-- `kubectl -n abenix logs deploy/agent-runtime-default | grep mcp`.
-- For stdio MCP servers, the child process spawn errors are most common — check the `command` and `env` fields.
-- For HTTP MCP servers, test reachability from inside the pod: `kubectl exec ... -- curl <endpoint>`.
+- `400 host '<yours>' not in MCP_ALLOWED_HOSTS` means the host is not allowed. Add it to `mcpAllowedHosts` in the Helm values, see [env vars](../09-reference/01-env-vars.md#mcp-servers).
+- For a remote server, test reachability from inside the API pod: `kubectl -n abenix exec deploy/abenix-api -- curl -sS <endpoint>`.
+- Check the API logs around the register call for the handshake error.
 
 ---
 
-## #14 — Slow page load on /agents with many agents
-
-**Symptom**: list page takes 3-5s with 200+ agents.
+## #14 — Slow pages with many records
 
 **Fix**:
-- It's the SSR render serialising 200 cards. Switch to client-side fetch (the page should already use `useApi`).
-- Add pagination — `GET /api/agents?page=1&limit=50`.
-- Collapse categories by default (already done in v1.5.x).
+- Check the request in DevTools. A list endpoint returning hundreds of rows is the usual cause, use its paging parameters.
+- `SQL_ECHO=1` on a local API logs every statement, which shows N+1 queries quickly. Never in production.
 
 ---
 
-## #15 — Sandbox tool times out
+## #15 — Code execution times out
 
-**Symptom**: `code_executor` returns `timeout_seconds exceeded`.
+**Symptom**: `code_executor` stops at 30 seconds, or a sandbox run ends with `SANDBOX_TIMEOUT`.
 
 **Fix**:
-- Default is 30s. Bump per-call: `code_executor({code: ..., timeout_seconds: 120})`.
-- Cap is 300s — beyond that, use a long-running pipeline node.
-- If the code is doing network calls, check `network=true` is passed. Default sandbox has no network egress.
+- `code_executor` is an in-process Python sandbox with a fixed 30 second limit, no network and an import allow-list. It is for small computations.
+- For real workloads use a code asset or `sandboxed_job`. Their budget is the `sandbox.timeout_seconds` setting (default 300, up to 1800).
+- A code asset needs network granted explicitly, `allow_network`, and the cluster's `SANDBOXED_JOB_ALLOW_NETWORK` has to allow it.
 
 ---
 
@@ -224,22 +218,21 @@ toastError(
 # 1. Get the execution_id from the user / UI
 EID=...
 
-# 2. Get the trace_id
+# 2. Read the row, including trace_id
 kubectl -n abenix exec deploy/abenix-api -- python -c "
 import asyncio, asyncpg, os
 async def go():
-    conn = await asyncpg.connect(os.environ['DATABASE_URL'].replace('+asyncpg',''))
+    conn = await asyncpg.connect(os.environ['DATABASE_URL'].replace('+asyncpg','').split('?')[0])
     row = await conn.fetchrow('SELECT trace_id, status, failure_code, error_message FROM executions WHERE id = \$1', '$EID')
     print(dict(row))
 asyncio.run(go())
 "
 
-# 3. Open Grafana Explore with trace_id={trace_id}
+# 3. Open Grafana Explore with that trace_id
 
-# 4. If trace empty, fall back to logs across all 4 runtime pools:
-for d in default chat heavy-reasoning long-running; do
-  kubectl -n abenix logs -l app=agent-runtime-$d --tail=500 | grep $EID
-done
+# 4. If there is no trace, grep the runtime pools and the API
+kubectl -n abenix logs -l app.kubernetes.io/name=agent-runtime --tail=500 --prefix | grep $EID
+kubectl -n abenix logs -l app.kubernetes.io/name=api --tail=500 --prefix | grep $EID
 ```
 
 ---
@@ -248,4 +241,5 @@ done
 
 - [02-runtime/04-streaming-tracing](../02-runtime/04-streaming-tracing.md) — events + OTel
 - [06-deployment/04-observability](../06-deployment/04-observability.md) — Prom + Tempo + Grafana
+- [06-deployment/disaster-recovery](../06-deployment/disaster-recovery.md) — when the platform itself is down
 - [05-testing](05-testing.md) — testing + reproducing in CI

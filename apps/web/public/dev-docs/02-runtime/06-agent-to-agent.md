@@ -56,14 +56,35 @@ Five things to notice.
 
 The tool lives in [`apps/agent-runtime/engine/tools/invoke_agent.py`](../../apps/agent-runtime/engine/tools/invoke_agent.py). It does five things in order.
 
+### Identity: the sub-agent runs as the caller
+
+Every API call the tool makes carries a short-lived access token for the user who started the parent run. The token has the same claims as a login token (`sub`, `tenant_id`, `role`, `type: access`, `exp`, `iat`) and lives 5 minutes. A fresh one is signed per request, so a long poll never outlives it.
+
+The runtime signs with the key the API verifies with. For the default `JWT_ALGORITHM=RS256` that is `JWT_PRIVATE_KEY` from the `abenix-secrets` envFrom. An `HS*` algorithm signs with `SECRET_KEY`. Inside the API process (inline runs) the tool falls back to the API's own `create_access_token`.
+
+What this means in practice:
+
+- The sub-execution row is owned by the caller, not by a service account.
+- The usual 2.5 access rules apply. The caller must own the agent, be an admin, or hold a share with EXECUTE. Platform agents are open to everyone. Anything else returns `agent slug not found or not shared with you: <slug>`.
+- If a token cannot be signed for a known user the call fails. It never quietly switches to the platform key.
+
+Runs with no user behind them (a trigger or system run) fall back to the platform key from `ABENIX_PLATFORM_API_KEY`. That path only resolves agents in the run's own tenant and logs a warning each time.
+
+The user id, role, execution id and depth reach the tool through `build_tool_registry`. The queue consumer reads them from the job payload and the inline API paths pass the authenticated user.
+
 ### 1. Resolve the agent by slug
 
 ```python
-lookup = await client.get(f"/api/agents?search={slug}&limit=5", headers=headers)
-match = next((a for a in items if (a.get("slug") or "").lower() == slug.lower()), None)
+lookup = await client.get("/api/agents", params={"slug": slug, "limit": 5}, headers=...)
 ```
 
-Search is case-insensitive. The first exact-slug match wins. A typo in the slug returns a clear "agent slug not found" tool error — the LLM sees the error and usually self-corrects on the next iteration.
+The lookup is an exact slug match and runs with the caller's token, so it only sees agents the caller can see. A same-tenant agent wins over a platform agent with the same slug. A typo or an agent the caller has no access to returns `agent slug not found or not shared with you: <slug>`. The LLM sees the error and usually self-corrects on the next iteration.
+
+An agent cannot invoke itself directly. That returns `an agent cannot invoke itself: <slug>`.
+
+### Finding a slug
+
+The slug is shown under the agent name on the agent's Info page (`/agents/<id>/info`) with a copy button. It is also the `slug` field on `GET /api/agents` and `GET /api/agents/<id>`. Slugs are lower-case with dashes, for example `arb-analyzer`.
 
 ### 2. Submit the sub-execution
 
@@ -72,10 +93,14 @@ submit_body = {
     "message": json.dumps(payload),     # the agent input, JSON-encoded
     "stream": False,
     "wait_mode": "submitted",           # returns immediately with execution_id
+    "parent_execution_id": self._execution_id,
+    "delegation_depth": self._depth + 1,
 }
 submit_r = await client.post(f"/api/agents/{agent_id}/execute", ...)
 sub_exec_id = submit_data["execution_id"]
 ```
+
+The API stores `parent_execution_id` on the new execution row and puts the depth into the queue payload (or the inline context), so the child's own `invoke_agent` knows how deep it is. The API also recomputes the depth from the stored parent chain and keeps the larger of the two, so a caller cannot reset it. The parent must be an execution in the caller's tenant.
 
 `wait_mode = "submitted"` is the key flag. The tool does not block on the platform API. It gets an execution_id back, then takes over polling itself. This gives the tool full control over the timeout and lets it emit interim progress events.
 
@@ -119,12 +144,14 @@ envelope = {
     "agent_slug": slug,
     "agent_id": agent_id,
     "execution_id": sub_exec_id,
+    "parent_execution_id": self._execution_id,
     "status": row.get("status") or "completed",
     "output": parsed,
     "duration_ms": row.get("duration_ms") or duration_ms,
     "cost_usd": row.get("cost"),
 }
-return ToolResult(content=json.dumps(envelope, default=str), metadata={"agent_slug": slug})
+return ToolResult(content=json.dumps(envelope, default=str),
+                  metadata={"agent_slug": slug, "execution_id": sub_exec_id})
 ```
 
 The envelope is what the calling LLM sees in its tool result. `output` is the sub-agent's parsed JSON. `cost_usd` lets the LLM reason about cost if it has been prompted to. The `metadata` field is for the runtime's accounting — the LLM does not read it.
@@ -223,7 +250,7 @@ This is what lets the Wingman Desk Copilot get noticeably better the more it is 
 
 ## Sub-agent budgets and safeguards
 
-Three hard limits keep multi-agent fan-outs from running away.
+Four hard limits keep multi-agent fan-outs from running away.
 
 ### Per-call timeout (240s default, 600s max)
 
@@ -233,13 +260,13 @@ Three hard limits keep multi-agent fan-outs from running away.
 
 Every agent execution has a `max_iterations` ceiling (default 25, configurable per-agent). The runtime stops after that many tool-call rounds, regardless of whether the LLM thinks it is done. This is what stops a buggy LLM that gets stuck in "call this tool again, no really" from burning the whole budget.
 
-### No re-delegation through invoke_agent
+### No privilege gain through invoke_agent
 
-`invoke_agent` uses the runtime pod's internal service key for the sub-call. It does not propagate the parent execution's X-Abenix-Subject. The platform looks up the root execution's subject via `parent_execution_id` for audit / collection-scoping purposes. This means a compromised sub-agent cannot escalate to a different subject — the chain depth is enforced at the runtime boundary.
+The sub-call runs as the same user as the parent, with that user's access. It does not propagate the parent execution's X-Abenix-Subject. The platform looks up the root execution's subject via `parent_execution_id` for audit and collection scoping. A sub-agent can never reach an agent its caller could not run by hand.
 
-### No recursion depth check (yet)
+### Depth limit of 3
 
-There is currently no explicit `max_depth` on the call tree. In practice every agent has a bounded `max_iterations` so the tree terminates, but a recursive agent that always invokes itself would do so a lot of times before the budget cuts it off. The work-around for now is "do not build an agent that invokes itself recursively without an explicit base case in the prompt". A `max_depth` setting is in the backlog.
+A top-level run is depth 0 and each `invoke_agent` hop adds one. A child at depth 3 is allowed. Anything deeper is refused with `sub-agent depth limit reached (3)`, first by the tool before it calls the API and again by the API, which recomputes depth from the stored chain. An agent invoking itself directly is refused as well. Indirect cycles (A calls B calls A) stop at the depth limit.
 
 ---
 
@@ -247,7 +274,7 @@ There is currently no explicit `max_depth` on the call tree. In practice every a
 
 When a multi-agent run goes wrong, the symptoms usually look like "the synthesised brief is missing something important" rather than a hard error. The reliable debugging sequence:
 
-1. Open the **executions tree view** for the top-level run. It shows the root + every sub with status, duration, cost.
+1. Open the top-level run in the **Flight Recorder** (`/executions/<id>`). The **Sub-agent runs** list links every child with its status and duration. A child's page shows **Started by** with a link back to its parent.
 2. Click into the slowest or most-failing sub. The sub's own execution detail shows the LLM turns and tool calls.
 3. If one sub returned `{"raw": "<text>"}` instead of structured JSON, that is the bug. The sub-agent's system prompt is not constraining its output shape. Fix it there.
 4. If a sub succeeded but its output looks fine and the brief is still wrong, the bug is in the root's synthesis prompt — it is mis-reading the structured output. Look at the LLM turn where the root sees the tool result.

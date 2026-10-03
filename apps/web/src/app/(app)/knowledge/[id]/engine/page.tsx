@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { fetchAllAgents } from '@/lib/fetch-all-agents';
+import { EmbeddingModelPanel } from '@/components/knowledge/EmbeddingModelPanel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -365,6 +366,8 @@ export default function KnowledgeEnginePage() {
           </div>
         ))}
       </div>
+
+      <EmbeddingModelPanel kbId={kbId} />
 
       {/* Entity Type Breakdown */}
       {Object.keys(entityTypes).length > 0 && (

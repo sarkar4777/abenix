@@ -1,5 +1,122 @@
+{{- define "abenix.np.dns" }}
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+{{- end }}
+{{- define "abenix.np.external" }}
+    # Internet only (LLM providers, Pinecone, Slack, customer webhooks), private ranges stay closed
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        {{- range (default (list 443) .Values.networkPolicy.externalEgressPorts) }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+{{- end }}
+{{- define "abenix.np.kubeApi" }}
+{{- $kubeApi := default dict .Values.networkPolicy.kubeApiServer }}
+{{- if $kubeApi.cidrs }}
+    # Kubernetes API server, for sandboxed jobs, code runners and model deployments
+    - to:
+        {{- range $kubeApi.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range (default (list 443 6443 8443) $kubeApi.ports) }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+{{- end }}
+{{- end }}
+{{- define "abenix.np.platformEgress" }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 6379
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: neo4j
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 7687
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+      ports:
+        - port: 4222
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api
+      ports:
+        - port: 8000
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-runtime
+      ports:
+        - port: 8001
+          protocol: TCP
+    # Traces to Tempo
+    - to:
+        - podSelector:
+            matchLabels:
+              app: abenix-tempo
+      ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP
+{{- include "abenix.np.dns" . }}
+{{- include "abenix.np.external" . }}
+{{- end }}
+{{- define "abenix.np.platformClients" }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-runtime
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: worker
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: cognify-worker
+{{- end }}
 {{- if .Values.networkPolicy.enabled | default false }}
-# -- API: can reach PostgreSQL, Redis, Neo4j, Agent-Runtime
+{{- $release := .Release.Name }}
+# -- API: the data stores, NATS, the runtime, Prometheus and Alertmanager
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -10,12 +127,11 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: api
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/instance: {{ $release }}
   policyTypes:
     - Ingress
     - Egress
   ingress:
-    # Allow from ingress controller
     - from:
         - namespaceSelector: {}
           podSelector:
@@ -24,76 +140,31 @@ spec:
       ports:
         - port: 8000
           protocol: TCP
-    # Allow from web pods
+    # Web, runtime callbacks, workers, Alertmanager's webhook, Prometheus and the standalone apps
     - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: web
-              app.kubernetes.io/instance: {{ .Release.Name }}
+        - podSelector: {}
       ports:
         - port: 8000
           protocol: TCP
   egress:
-    # PostgreSQL
+{{- include "abenix.np.platformEgress" . }}
+{{- include "abenix.np.kubeApi" . }}
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: postgresql
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app: abenix-prometheus
       ports:
-        - port: 5432
+        - port: 9090
           protocol: TCP
-    # Redis
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: redis
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: alertmanager
       ports:
-        - port: 6379
-          protocol: TCP
-    # Neo4j
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: neo4j
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - port: 7687
-          protocol: TCP
-    # Agent-Runtime
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: agent-runtime
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - port: 8001
-          protocol: TCP
-    # DNS
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-    # External APIs (LLM providers, Pinecone, Stripe)
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
-      ports:
-        - port: 443
+        - port: 9093
           protocol: TCP
 ---
-# -- Agent-Runtime: can reach Redis, Neo4j, external LLM + Pinecone APIs
+# -- Agent runtime pools: data stores, NATS, the API, the Kubernetes API
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -101,66 +172,27 @@ metadata:
   labels:
     {{- include "abenix.labels" . | nindent 4 }}
 spec:
+  # Pool pods carry no instance label, so match on name alone
   podSelector:
     matchLabels:
       app.kubernetes.io/name: agent-runtime
-      app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes:
     - Ingress
     - Egress
   ingress:
-    # Allow from API pods
     - from:
+{{- include "abenix.np.platformClients" . }}
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: api
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app: abenix-prometheus
       ports:
         - port: 8001
           protocol: TCP
   egress:
-    # Redis
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - port: 6379
-          protocol: TCP
-    # Neo4j
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: neo4j
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - port: 7687
-          protocol: TCP
-    # DNS
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-    # External APIs (LLM providers, Pinecone)
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
-      ports:
-        - port: 443
-          protocol: TCP
+{{- include "abenix.np.platformEgress" . }}
+{{- include "abenix.np.kubeApi" . }}
 ---
-# -- Workers (general + cognify): can reach Redis, PostgreSQL, Neo4j, external APIs
+# -- Celery worker
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -170,67 +202,31 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/instance: {{ .Release.Name }}
-    matchExpressions:
-      - key: app.kubernetes.io/component
-        operator: In
-        values:
-          - worker
-          - cognify-worker
+      app.kubernetes.io/name: worker
+      app.kubernetes.io/instance: {{ $release }}
   policyTypes:
     - Egress
   egress:
-    # PostgreSQL
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: postgresql
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - port: 5432
-          protocol: TCP
-    # Redis
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - port: 6379
-          protocol: TCP
-    # Neo4j
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: neo4j
-              app.kubernetes.io/instance: {{ .Release.Name }}
-      ports:
-        - port: 7687
-          protocol: TCP
-    # DNS
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-    # External APIs (LLM providers, Pinecone)
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
-      ports:
-        - port: 443
-          protocol: TCP
+{{- include "abenix.np.platformEgress" . }}
 ---
-# -- Web: can only reach API (via ingress or directly)
+# -- Cognify worker
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "abenix.fullname" . }}-cognify-worker
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: cognify-worker
+      app.kubernetes.io/instance: {{ $release }}
+  policyTypes:
+    - Egress
+  egress:
+{{- include "abenix.np.platformEgress" . }}
+---
+# -- Web: only the API
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -241,12 +237,11 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: web
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/instance: {{ $release }}
   policyTypes:
     - Ingress
     - Egress
   ingress:
-    # Allow from ingress controller
     - from:
         - namespaceSelector: {}
           podSelector:
@@ -258,100 +253,82 @@ spec:
         - port: 3000
           protocol: TCP
   egress:
-    # API
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: api
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/instance: {{ $release }}
       ports:
         - port: 8000
           protocol: TCP
-    # DNS
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+{{- include "abenix.np.dns" . }}
 ---
-# -- PostgreSQL: only from API, Workers, PgPool
+# -- PostgreSQL. Suffixed because the bitnami subchart already owns <release>-postgresql
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "abenix.fullname" . }}-postgresql
+  name: {{ include "abenix.fullname" . }}-postgresql-clients
   labels:
     {{- include "abenix.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: postgresql
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/instance: {{ $release }}
   policyTypes:
     - Ingress
   ingress:
     - from:
+{{- include "abenix.np.platformClients" . }}
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: api
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: code-runner-reaper
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: worker
-              app.kubernetes.io/instance: {{ .Release.Name }}
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: cognify-worker
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: backup
+              app.kubernetes.io/instance: {{ $release }}
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: pgpool
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/instance: {{ $release }}
+        # Read replicas stream from the primary
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+              app.kubernetes.io/instance: {{ $release }}
       ports:
         - port: 5432
           protocol: TCP
 ---
-# -- Redis: only from API, Workers, Agent-Runtime
+# -- Redis. Suffixed because the bitnami subchart already owns <release>-redis
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "abenix.fullname" . }}-redis
+  name: {{ include "abenix.fullname" . }}-redis-clients
   labels:
     {{- include "abenix.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: redis
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/instance: {{ $release }}
   policyTypes:
     - Ingress
   ingress:
     - from:
+{{- include "abenix.np.platformClients" . }}
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: api
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: code-runner-reaper
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: worker
-              app.kubernetes.io/instance: {{ .Release.Name }}
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: cognify-worker
-              app.kubernetes.io/instance: {{ .Release.Name }}
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: agent-runtime
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: redis
+              app.kubernetes.io/instance: {{ $release }}
       ports:
         - port: 6379
           protocol: TCP
 ---
-# -- Neo4j: only from API, Workers, Agent-Runtime
+# -- Neo4j
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -362,30 +339,51 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: neo4j
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/instance: {{ $release }}
   policyTypes:
     - Ingress
   ingress:
     - from:
+{{- include "abenix.np.platformClients" . }}
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: api
-              app.kubernetes.io/instance: {{ .Release.Name }}
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: worker
-              app.kubernetes.io/instance: {{ .Release.Name }}
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: cognify-worker
-              app.kubernetes.io/instance: {{ .Release.Name }}
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: agent-runtime
-              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: neo4j-backup
+              app.kubernetes.io/instance: {{ $release }}
       ports:
         - port: 7687
           protocol: TCP
         - port: 7474
           protocol: TCP
+{{- if eq (default "celery" .Values.scaling.queueBackend) "nats" }}
+---
+# -- NATS: platform pods and code runners publish and consume, Prometheus reads the monitor port
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "abenix.fullname" . }}-nats
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+{{- include "abenix.np.platformClients" . }}
+        - podSelector:
+            matchLabels:
+              app: abenix-code-runner
+      ports:
+        - port: 4222
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app: abenix-prometheus
+      ports:
+        - port: 8222
+          protocol: TCP
+{{- end }}
 {{- end }}

@@ -5,9 +5,13 @@ They live in the `platform_settings` table, are declared in
 [`apps/api/app/core/platform_settings.py`](../../apps/api/app/core/platform_settings.py),
 and are read through `get_setting()` or `get_int_setting()`.
 
-Values are cached for 30 seconds per API pod, so a change takes effect within
-half a minute. A key that has never been written falls back to the default
-declared in `DEFAULTS`, which is what the UI shows as "Platform default".
+Values are cached for 30 seconds per process, in the API and in the
+agent-runtime consumer alike, so a change takes effect within half a minute. A
+key that has never been written falls back to the default declared in
+`DEFAULTS`, which is what the UI shows as "Platform default".
+
+There are 16 keys in `DEFAULTS`, listed below. `PATCH /api/admin/settings/{key}`
+refuses any key that is not one of them.
 
 ---
 
@@ -36,6 +40,10 @@ nodes succeeded.
 | `pipeline.timeout_seconds` | 300 | 60-3600 | Wall-clock budget for a whole pipeline run. Raise it for pipelines with many LLM nodes. A node cut off by this limit reports `Pipeline timeout exceeded` and the run ends `failed` with `failure_code=SANDBOX_TIMEOUT`. |
 | `agent.max_iterations` | 10 | 1-50 | Default tool-calling loop cap. An agent can request more in its own `model_config.max_iterations`. |
 | `sandbox.timeout_seconds` | 300 | 30-1800 | Wall-clock budget for one sandboxed code execution. |
+
+`PIPELINE_TIMEOUT_SECONDS` and `SANDBOX_TIMEOUT_SECONDS` in the environment
+are only the engine's fallback for when the settings table cannot be read. A
+stored value or the `DEFAULTS` entry wins over them.
 
 **Sizing the pipeline budget.** Count the LLM nodes and allow roughly 20 to 40
 seconds each, more if a node does web research or multimodal work. OracleNet's
@@ -117,6 +125,45 @@ Keys saved with the scope on "This tenant" live in `tenant_tool_credentials`, on
 | Which tenant | The executor sets the tenant at the start of a run and the queue consumer sets it before building an executor. `GET /api/tools` resolves for the caller's tenant. |
 
 How a tool declares a key, and how the screen is generated from that: [08-howto/08-tool-configuration](../08-howto/08-tool-configuration.md).
+
+---
+
+## Endpoints
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| `GET` | `/api/admin/settings` | admin | Every key with its stored value or default, grouped by category. Secrets masked |
+| `PATCH` | `/api/admin/settings/{key}` | admin | Body `{"value": "..."}`. Model keys must be in the catalogue, int keys inside their bounds. Enabling subscription mode needs a stored or environment token |
+| `POST` | `/api/admin/settings/reset` | admin | Deletes every stored row except `tool.credential.*` |
+| `GET` | `/api/admin/settings/models` | admin | The model catalogue the pickers offer |
+| `GET` | `/api/admin/settings/models/public` | signed in | Same catalogue for non-admin pickers |
+| `GET` | `/api/admin/settings/subscription` | admin | Subscription state, token masked |
+| `POST` | `/api/admin/settings/subscription/verify` | admin | Makes one call with the token and reports the result |
+| `GET` | `/api/settings/builder_model` | signed in | Current `ai_builder.validation.model` |
+| `PUT` | `/api/settings/builder_model` | admin | Writes `ai_builder.validation.model` |
+| `GET` | `/api/settings/limits` | signed in | The three execution budgets, see above |
+
+The model picker's provider check also reads rows named
+`provider.<name>.api_key` or in category `secrets`. Nothing in the platform
+writes such rows today, so in practice that check sees only the environment.
+
+---
+
+## Tenant-scoped settings
+
+These are not in `platform_settings`. They live per tenant and a tenant admin
+changes them, so they are listed here only so you know where to look.
+
+| Setting | Stored in | Endpoint |
+|---|---|---|
+| Data retention days for executions, messages and audit log | `tenants.settings.retention` | `GET`/`PUT /api/settings/retention`. Floors 7, 30 and 365 days |
+| DLP mode `detect`, `mask` or `block` | `tenants.settings.dlp` | `GET`/`PUT /api/settings/dlp` |
+| Sandboxed job overrides `enabled`, `allow_network`, `allowed_images` | Redis hash per tenant | `GET`/`PUT /api/settings/sandbox`. Unset falls back to the `SANDBOXED_JOB_*` variables |
+| Tenant Slack webhook | `tenants.slack_webhook_url`, encrypted | `GET`/`PUT /api/settings/tenant` |
+| Approval webhook URL and secret | `tenants.settings.approval_webhook_url` and `approval_webhook_secret`, secret encrypted | `GET`/`PUT /api/approvals/webhooks` |
+| Source Watch host allow-list and pause threshold | `tenants.settings.source_watch` | `GET`/`PUT /api/sources/settings`, see [17-source-watch](../02-runtime/17-source-watch.md) |
+| Drift detection on or off | Redis key `drift:config:enabled:<tenant>` | `GET`/`PUT /api/analytics/drift-alerts/config` |
+| Tool credentials for one tenant | `tenant_tool_credentials` | Admin -> Tool Configuration, see above |
 
 ---
 

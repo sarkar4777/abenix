@@ -1,49 +1,33 @@
 # `resource_shares` — the polymorphic sharing table
 
-> One table for every kind of share. Five resource types, three permission levels, one unified RBAC predicate.
+> One table for every kind of share. Seven resource types, three permission levels.
+
+Source: [`packages/db/models/resource_share.py`](../../packages/db/models/resource_share.py)
 
 ---
 
 ## Schema
 
-```sql
-CREATE TYPE resource_kind AS ENUM (
-  'agent',
-  'pipeline',
-  'ml_model',
-  'code_asset',
-  'knowledge_base',
-  'saved_tool'
-);
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | Primary key. |
+| `tenant_id` | uuid | From `TenantMixin`. |
+| `resource_type` | varchar(64) | Plain string, not a Postgres enum. The API accepts `agent`, `pipeline`, `ml_model`, `code_asset`, `knowledge_base`, `saved_tool`, `atlas_graph`. |
+| `resource_id` | uuid | The shared row. No foreign key, the target table depends on `resource_type`. |
+| `shared_with_user_id` | uuid | Recipient, foreign key to `users`. Nullable in the model, always set by the API. |
+| `shared_with_email` | varchar(255) | Recipient email as typed. |
+| `permission` | enum `share_permission` | `VIEW`, `EXECUTE` or `EDIT`. Default `VIEW`. |
+| `shared_by` | uuid | Who created the share. |
+| `expires_at` | timestamptz | Optional. |
+| `created_at` / `updated_at` | timestamptz | From `TimestampMixin`. |
 
-CREATE TYPE share_permission AS ENUM (
-  'VIEW',     -- see + read
-  'EXECUTE',  -- run / call ("use" in the UI)
-  'EDIT'      -- modify definition
-);
+Constraints and indexes:
 
-CREATE TABLE resource_shares (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL,
-  resource_type resource_kind NOT NULL,
-  resource_id UUID NOT NULL,
-  shared_with_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  shared_with_email TEXT NOT NULL,
-  permission share_permission NOT NULL,
-  shared_by UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
-  expires_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT unique_share
-    UNIQUE (tenant_id, resource_type, resource_id, shared_with_user_id)
-);
+- `uq_resource_share_recipient` UNIQUE on `(resource_type, resource_id, shared_with_user_id)`
+- `ix_resource_shares_recipient` on `shared_with_user_id`
+- `ix_resource_shares_resource` on `(resource_type, resource_id)`
 
-CREATE INDEX resource_shares_user_lookup
-  ON resource_shares (shared_with_user_id, resource_type, permission);
-CREATE INDEX resource_shares_resource_lookup
-  ON resource_shares (resource_type, resource_id);
-```
-
-The `UNIQUE` constraint makes a share row upsertable — calling POST on the same `(tenant, type, id, recipient)` updates the permission rather than 409-ing.
+The unique constraint makes a share upsertable. POSTing the same resource and recipient again changes the permission rather than adding a row.
 
 ---
 
@@ -51,72 +35,68 @@ The `UNIQUE` constraint makes a share row upsertable — calling POST on the sam
 
 ```mermaid
 flowchart TD
-  R[API request] --> A{Caller is admin/owner?}
+  R[API request] --> A{Caller is tenant admin?}
   A -->|yes| Allow
   A -->|no| B{Caller created the resource?}
   B -->|yes| Allow
-  B -->|no| C{Action ≤ shared permission?}
-  C -->|VIEW needed, share VIEW+| Allow
-  C -->|USE needed, share USE+| Allow
-  C -->|EDIT needed, share EDIT| Allow
-  C -->|otherwise| Deny[403]
+  B -->|no| C{Share row at or above the needed level?}
+  C -->|yes| Allow
+  C -->|no| Deny[403 or not listed]
 ```
 
-Permission hierarchy: `EDIT > EXECUTE > VIEW`. Granting EDIT implies all three. granting EXECUTE implies VIEW.
+Permission ranks are `VIEW` 0, `EXECUTE` 1, `EDIT` 2. A share at a level covers every level below it.
 
-The predicate lives in [`apps/api/app/core/permissions.py`](../../apps/api/app/core/permissions.py):
+The helpers live in [`apps/api/app/core/permissions.py`](../../apps/api/app/core/permissions.py):
 
-```python
-async def user_can(user, db, *, action: Action, resource: tuple[ResourceKind, UUID]) -> bool:
-    kind, rid = resource
-    if user.role in (Role.OWNER, Role.ADMIN):
-        return True
-    if await _is_creator(db, user.id, kind, rid):
-        return True
-    required = _required_permission_for(action)   # action -> share_permission
-    share = await db.scalar(
-        select(ResourceShare).where(
-            ResourceShare.tenant_id == user.tenant_id,
-            ResourceShare.resource_type == kind,
-            ResourceShare.resource_id == rid,
-            ResourceShare.shared_with_user_id == user.id,
-        )
-    )
-    if not share:
-        return False
-    if share.expires_at and share.expires_at < datetime.utcnow():
-        return False
-    return _permission_includes(share.permission, required)
-```
+| Helper | What it does |
+|---|---|
+| `accessible_resource_ids(db, user, kind=, minimum_permission=)` | IDs of `kind` shared with the user at or above the level |
+| `apply_resource_scope(query, model, user, kind=, scope=, accessible_ids=)` | Adds the WHERE clause for list endpoints. `scope` is `all`, `mine`, `shared` or `tenant`. For a non-admin `all` means mine, shared with me, or platform-seeded (creator NULL) |
+| `assert_can_access` / `assert_can_edit` / `assert_can_delete` | Per-row checks. Delete is creator or admin only |
+| `is_admin`, `sees_other_users_resources` | Role checks. Admins see every resource in the tenant |
 
-Every endpoint that touches a per-resource entity calls this. Never bypass it — the linter (pre-commit hook) flags raw SELECTs that touch shared resources without going through the helper.
+Every query is filtered by `tenant_id` first, so a share never crosses tenants.
+
+Agents have their own wrapper, [`app/services/agent_share.py`](../../apps/api/app/services/agent_share.py), which uses the same table with `resource_type = 'agent'` and also accounts for marketplace subscriptions and platform agents.
 
 ---
 
 ## REST surface
 
-The polymorphic endpoints all live under `/api/me/shares`:
+The polymorphic endpoints live under `/api/me` in [`apps/api/app/routers/me.py`](../../apps/api/app/routers/me.py):
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/me/shares` | Create / update a share (body has `resource_type`, `resource_id`, `shared_with_email`, `permission`) |
-| `GET` | `/api/me/shares/of/{type}/{id}` | List current shares for a resource (creator + admins only) |
-| `GET` | `/api/me/shares/received` | What's been shared WITH me |
+| `POST` | `/api/me/shares` | Create or update a share. Body has `resource_type`, `resource_id`, `shared_with_email`, `permission` (`view`, `use` or `execute`, `edit`) |
+| `GET` | `/api/me/shares/of/{type}/{id}` | Current shares for a resource |
+| `GET` | `/api/me/shares/received` | What has been shared with me |
 | `GET` | `/api/me/shares/sent` | What I have shared |
-| `DELETE` | `/api/me/shares/{share_id}` | Revoke |
+| `DELETE` | `/api/me/shares/{share_id}` | Revoke. Allowed for the sharer, the resource owner or an admin |
 
-Source: [`apps/api/app/routers/me.py`](../../apps/api/app/routers/me.py).
+Only the resource's creator or an admin can create a share. The recipient gets an in-app notification.
 
-The legacy `/api/agents/{id}/shares` router still exists for backward-compat but new UI surfaces use the polymorphic endpoints.
+The agent routes `/api/agents/{id}/share`, `/api/agents/{id}/shares` and `/api/agents/shared-with-me` in `agent_sharing.py` write the same table.
+
+---
+
+## Revoke deletes the row
+
+`DELETE /api/me/shares/{id}` hard-deletes the share. There is no `revoked_at` column and no history table, so "who had access on date Y" is not answerable from `resource_shares` alone.
+
+---
+
+## The older `agent_shares` table
+
+`agent_shares` (`agent_id`, `shared_with_user_id`, `shared_with_email`, `permission`, `shared_by`) predates this table. The sharing routes used to write it. [`packages/db/seeds/seed_backfill_agent_shares.py`](../../packages/db/seeds/seed_backfill_agent_shares.py) copies its rows into `resource_shares`. Nothing in `apps/` reads it now.
 
 ---
 
 ## UI
 
-`apps/web/src/components/share/ResourceShareDialog.tsx` is the single component used on ML Models, Code Runner, Knowledge Bases, and (soon) Pipelines. Props:
+`apps/web/src/components/share/ResourceShareDialog.tsx` is the single dialog, used on the ML Models, Code Runner, Knowledge and Atlas pages.
 
 ```ts
-type Shareable = 'agent' | 'pipeline' | 'ml_model' | 'code_asset' | 'knowledge_base' | 'saved_tool';
+type Shareable = 'agent' | 'pipeline' | 'ml_model' | 'code_asset' | 'knowledge_base' | 'saved_tool' | 'atlas_graph';
 
 <ResourceShareDialog
   open={...} onClose={...}
@@ -128,36 +108,8 @@ type Shareable = 'agent' | 'pipeline' | 'ml_model' | 'code_asset' | 'knowledge_b
 
 ---
 
-## Audit
-
-Every create + delete writes an `audit_logs` row:
-
-```json
-{
-  "action": "share.create",
-  "actor_id": "alice-user-id",
-  "resource_type": "ml_model",
-  "resource_id": "<model-id>",
-  "metadata": {"recipient_email": "bob@…", "permission": "EXECUTE"}
-}
-```
-
-Compliance can answer "who had access to model X on date Y" via:
-
-```sql
-SELECT * FROM audit_logs
-WHERE resource_type = 'ml_model' AND resource_id = $1
-  AND action LIKE 'share.%'
-  AND created_at <= $2
-ORDER BY created_at;
-```
-
-Combined with `resource_shares` history (we don't delete share rows on revoke. we mark them deleted via a `revoked_at` column on a join table — see [migration 0042](../../packages/db/alembic/versions/)).
-
----
-
 ## Trap — the recipient must already be in the tenant
 
-A share can only be created for a user who is already a member of the same tenant. There's no implicit invite. If you want to share with someone external, invite them via Settings → Team first, then share.
+A share can only be created for a user who is already a member of the same tenant. There is no implicit invite. To share with someone external, invite them via Settings → Team first, then share.
 
 This is enforced server-side (404 on unknown recipient) and visible in the share dialog ("No user with email … in your tenant. Invite them first via Settings → Team.").

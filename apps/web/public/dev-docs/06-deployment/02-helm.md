@@ -1,222 +1,252 @@
 # Helm chart structure
 
-> One chart at `infra/helm/abenix/` deploys the platform core. Five subcharts handle the runtime pools + data stores. Standalone apps are deployed separately via `kubectl apply`.
+> One umbrella chart at `infra/helm/abenix/` deploys the platform core. Five local subcharts plus Bitnami Postgres and Redis come in as dependencies. Prometheus, Grafana and Tempo are plain manifests under `infra/observability/`, and the standalone apps are separate `kubectl apply` manifests.
 
 ---
 
 ## Chart tree
 
 ```
-infra/helm/abenix/
-├── Chart.yaml
-├── values.yaml                  ← defaults
-├── values-local.yaml            ← minikube/k3d overrides
-├── values-azure.yaml            ← AKS overrides
-├── templates/
-│   ├── api-deployment.yaml      ← abenix-api Deployment + Service
-│   ├── web-deployment.yaml      ← abenix-web
-│   ├── worker-deployment.yaml   ← worker + celery-beat
-│   ├── ingress.yaml
-│   ├── configmap.yaml
-│   ├── secrets-stub.yaml        ← shape only; values populated via helm --set
-│   ├── postgres.yaml            ← Timescale StatefulSet + Service
-│   ├── neo4j.yaml               ← optional
-│   ├── redis.yaml
-│   ├── nats.yaml
-│   ├── prometheus.yaml
-│   ├── grafana.yaml
-│   ├── tempo.yaml
-│   ├── serviceaccount.yaml      ← + ClusterRole abenix-cluster-reader
-│   └── _helpers.tpl
-└── charts/                      ← packaged subcharts (.tgz)
-    ├── api-0.1.0.tgz
-    ├── web-0.1.0.tgz
-    ├── worker-0.1.0.tgz
-    ├── agent-runtime-0.1.0.tgz  ← four ScaledObjects, one image
-    └── neo4j-0.1.0.tgz
+infra/helm/
+├── abenix/                         ← umbrella chart, version 0.2.0
+│   ├── Chart.yaml                  ← dependencies below
+│   ├── values.yaml                 ← defaults
+│   ├── values-local.yaml           ← minikube, used by deploy.sh local
+│   ├── values-local-runtime.yaml   ← layered on values-local by deploy.sh local-runtime
+│   ├── values-azure.yaml           ← AKS, used by deploy-azure.sh
+│   ├── values-production.yaml      ← used by deploy.sh cloud
+│   ├── templates/
+│   │   ├── configmap.yaml          ← abenix-config, non-secret env
+│   │   ├── secrets.yaml            ← abenix-secrets, secret env + generated passwords
+│   │   ├── agent-runtime-pools.yaml← one Deployment + Service (+ ScaledObject) per scaling pool
+│   │   ├── nats-jetstream.yaml     ← NATS StatefulSet when queueBackend is nats
+│   │   ├── code-runners.yaml       ← runner NATS login, network policies, reaper CronJob
+│   │   ├── cognify-worker-deployment.yaml
+│   │   ├── alertmanager-*.yaml     ← Alertmanager Deployment, Service, ConfigMap
+│   │   ├── prometheus-rules.yaml   ← alert rules as a ConfigMap
+│   │   ├── scaling-alerts.yaml     ← pool scaling alerts as a ConfigMap
+│   │   ├── slo-configmap.yaml
+│   │   ├── shared-data-pvc.yaml    ← abenix-shared-data when sharedData.usePVC
+│   │   ├── ml-models-pvc.yaml      ← ml-models-storage when mlModels.enabled
+│   │   ├── archives-pvc.yaml
+│   │   ├── sandboxed-job-rbac.yaml ← Role + RoleBinding for Jobs and runner Deployments
+│   │   ├── backup-cronjob.yaml
+│   │   ├── backup-pvc.yaml
+│   │   ├── networkpolicy.yaml
+│   │   ├── pdb.yaml
+│   │   ├── ingress.yaml
+│   │   ├── servicemonitor.yaml
+│   │   └── _helpers.tpl
+│   └── charts/                     ← packaged dependencies (.tgz)
+├── api/  web/  worker/  agent-runtime/  neo4j/   ← subchart sources
+├── mosquitto/  timescaledb/                      ← installed as their own releases
+└── edge-runtime/  edge-runtime-rust/  edge-runtime-c/
 ```
 
-> **Trap** — the `charts/*.tgz` files are committed and updated by hand via `helm dep update`. If a sub-chart's templates change without `helm dep update`, the parent helm install picks up the **stale** tarball. The CI lint step catches this.
+| Dependency | Source | Notes |
+|---|---|---|
+| `api`, `web`, `worker`, `agent-runtime`, `neo4j` | `file://../<name>` | Each has its own Deployment, Service and HPA templates |
+| `postgresql` 15.5.38 | Bitnami | Image is the pgvector build from `infra/docker/Dockerfile.postgres-pgvector` |
+| `redis` 19.6.4 | Bitnami | |
+
+Both deploy scripts run `helm dependency update` before every install, which
+repacks `charts/*.tgz` from the subchart sources. That is why the tarballs show
+as modified after a deploy. A plain `helm upgrade` without that step installs
+whatever tarball is committed, so run `helm dependency update infra/helm/abenix`
+first if you changed a subchart.
 
 ---
 
-## values.yaml — top-level shape
+## values.yaml, the parts you will change
 
-```yaml
-image:
-  registry: localhost:5000     # overridden in values-azure.yaml
-  pullPolicy: IfNotPresent
-  tag: latest                  # overridden by --set image.tag=<sha>
+Image repositories and tags are per subchart. The deploy scripts pass them with
+`--set`, for example `api.image.repository`, `api.image.tag` and
+`api.image.pullPolicy`, and the same for `web`, `worker`, `agent-runtime` and
+`cognifyWorker`.
 
-api:
-  replicas: 2
-  image:
-    repository: abenix/api
-  resources:
-    requests: {cpu: 200m, memory: 512Mi}
-    limits:   {cpu: 1000m, memory: 2Gi}
-  env:
-    DATABASE_URL: ${DATABASE_URL}
-    REDIS_URL: redis://redis:6379/0
-    NATS_URL: nats://nats:4222
-    JWT_SECRET: ${JWT_SECRET}
-    ML_MODELS_DIR: /data/ml-models
+| Key | Default | What it does |
+|---|---|---|
+| `environment` | `production` | `ENVIRONMENT`. `DEBUG` is `false` only when this is `production` |
+| `logLevel` | `info` | `LOG_LEVEL` |
+| `runtimeMode` | `embedded` | `RUNTIME_MODE`. `remote` hands runs to the runtime pods |
+| `frontendUrl` | `http://localhost:3000` | `FRONTEND_URL` |
+| `corsOrigins` | `["http://localhost:3000"]` | `CORS_ORIGINS` |
+| `databaseName` | `abenix` | Backup target database |
+| `objectStorage.type` | `local` | `STORAGE_BACKEND`. `s3` or `azure` adds the bucket or container env and secrets |
+| `objectStorage.uploadDir` / `exportDir` / `mlModelsDir` / `codeAssetStore` / `codeAssetBuildCache` | under `/data` | The matching path variables |
+| `sharedData.usePVC` | `false` | `true` mounts the RWX claim `abenix-shared-data` at `/data` instead of the host path |
+| `sharedDataHostPath` | `/var/lib/abenix/data` | Host path behind `/data` on single-node clusters |
+| `mlModels.enabled` | `false` | Creates `ml-models-storage` and mounts it on the runtime pools |
+| `mlModels.servingImage` | `""` | `ML_MODEL_SERVING_IMAGE`, falls back to the local registry image |
+| `archives.pvc.enabled` | `false` | Archive claim, local storage mode only. Pair with `api.archivesPVC.enabled` |
+| `sandboxedJob.enabled` / `allowNetwork` / `allowedImages` / `namespace` | `"true"` / unset / list / `""` | `SANDBOXED_JOB_*`. `enabled` also renders the RBAC |
+| `meeting.livekit.url` / `meetUrl`, `meeting.ttsVoice`, `meeting.deferNotifyWebhookUrl` | | LiveKit and meeting tool env |
+| `progress.channelPrefix` / `parentKeyPrefix` / `parentTtl` | `progress:` / `parent:` / `1800` | `PROGRESS_*` |
+| `postProcessorModules` | `""` | `POST_PROCESSOR_MODULES` |
+| `mcpAllowedHosts` | `""` | `MCP_ALLOWED_HOSTS`. Empty falls back to `uat-mcp.<namespace>.svc.cluster.local` |
+| `eventsAllowedInternalHosts` | `""` | `EVENTS_ALLOWED_INTERNAL_HOSTS`. Exact host names outbound webhooks may save and call although they are cluster-internal or resolve to private addresses |
+| `pinecone.indexName` | `abenix` | `PINECONE_INDEX_NAME`. The template falls back to `agentforge-knowledge` only when this is empty |
+| `azureEmbeddingDeployment` | `text-embedding-3-small` | `AZURE_EMBEDDING_DEPLOYMENT` |
+| `streaming.*` | release hosts, `abenix` / `abenix` / `abenix_tsdb` | Builds `MQTT_URL` and `TSDB_URL` |
+| `edge.allowUnsigned` | `false` | `EDGE_ALLOW_UNSIGNED` on the API |
+| `ingress.enabled` / `className` / `host` / `tls.*` | `true` / `nginx` / `app.abenix.io` | One host, `/api` to the API, `/` to web. Local values turn it off. `deploy-azure.sh` applies its own `abenix-ingress` instead |
+| `networkPolicy.enabled` | `false` | Per-service allow lists, see [06-k8s-specifics](06-k8s-specifics.md#network-policies). On in the production values |
+| `networkPolicy.externalEgressPorts` | `[443]` | Outside ports platform pods may call |
+| `networkPolicy.kubeApiServer.cidrs` / `ports` | empty / `[443, 6443, 8443]` | Kubernetes API server addresses the api and runtime pods may reach. Empty adds no rule |
+| `backup.enabled` | `false` | Daily `pg_dump` CronJob, plus the Neo4j APOC export with `backup.neo4j.enabled` |
+| `backup.persistentVolume.enabled` / `storageClass` / `accessMode` / `size` | `false` / empty / `ReadWriteOnce` / `20Gi` | Creates the `<release>-backup` PVC, kept on uninstall. Without it backups land in an `emptyDir`. See [disaster-recovery](disaster-recovery.md#backups) |
+| `backup.s3Bucket` / `uploaderImage` | empty / agent-runtime image | With `objectStorage.type: s3`, the bucket the dump is uploaded to (empty uses `objectStorage.bucket`) and the `boto3` image that uploads it. Credentials come from `STORAGE_S3_ACCESS_KEY` / `STORAGE_S3_SECRET_KEY` in `abenix-secrets`, or the pod's cloud role when empty |
+| `backup.neo4j.keep` / `image` | `7` / agent-runtime image | Neo4j exports kept, and the image the export runs in |
+| `monitoring.enabled` | `false` | ServiceMonitors for clusters running the Prometheus operator |
+| `alerting.*` | | Alertmanager and webhook settings, see [04-observability](04-observability.md) |
 
-web:
-  replicas: 2
-  env:
-    NEXT_PUBLIC_API_URL: https://api.example.com
-    NEXT_PUBLIC_GRAFANA_URL: https://grafana.example.com
-    NEXT_PUBLIC_TEMPO_URL: https://tempo.example.com
+### Scaling and NATS
 
-worker:
-  replicas: 2
-  enabled: true
+| Key | Default | What it does |
+|---|---|---|
+| `scaling.enabled` | `false` | Renders one runtime Deployment per entry in `scaling.pools` |
+| `scaling.execRemote` | `false` | `SCALING_EXEC_REMOTE`. Needs `queueBackend: nats`, the render fails otherwise |
+| `scaling.queueBackend` | `celery` | `QUEUE_BACKEND`. `nats` also renders the NATS StatefulSet and sets `NATS_URL` and `NATS_USER`. Queued agent runs only work on `nats`. `celery` still runs document, cognify and KB jobs |
+| `scaling.agentRuntimeImage` | `{}` | Image for the pools and the runner reaper. Empty uses `agent-runtime.image` |
+| `scaling.keda.enabled` | `false` | Adds a ScaledObject per pool. KEDA has to be installed |
+| `scaling.keda.prometheusUrl` | unset | Adds a p95 latency trigger to each pool's ScaledObject |
+| `scaling.alerts.enabled` | `false` | Renders `scaling-alerts.yaml` |
+| `scaling.pools[]` | `[]` | `key`, `min_replicas`, `max_replicas`, `concurrency_per_replica`, `keda_queue_trigger`, `resources`, `nodeAffinity`. With `scaling.enabled` the render fails unless `queueBackend` is `nats` |
+| `nats.cluster.replicas` | `1` | NATS StatefulSet replicas |
+| `nats.jetstream.fileStorage.size` | `1Gi` | NATS volume size. The template falls back to `5Gi` when unset |
 
-agent-runtime:
-  enabled: true
-  pools:
-    default:       {minReplicas: 2,  maxReplicas: 20, requestCpu: 500m, requestMem: 1Gi}
-    chat:          {minReplicas: 1,  maxReplicas: 10, requestCpu: 250m, requestMem: 512Mi}
-    heavy:         {minReplicas: 1,  maxReplicas: 4,  requestCpu: 1000m, requestMem: 4Gi}
-    longRunning:   {minReplicas: 1,  maxReplicas: 2,  requestCpu: 500m, requestMem: 2Gi}
+The keys `nats.enabled`, `nats.cluster.enabled` and `nats.jetstream.enabled`
+exist in the values files but no template reads them. NATS is on exactly when
+`scaling.queueBackend` is `nats`.
 
-postgres:
-  enabled: true
-  storageClassName: managed-premium      # AKS; gp2 on EKS
-  storageSize: 100Gi
-  replication: false                     # set true for HA
+### Warm code runners
 
-neo4j:
-  enabled: true
-  storageSize: 50Gi
+| Key | Default | What it does |
+|---|---|---|
+| `codeRunners.enabled` | `false` | Turns warm runners on. Fails the render unless `scaling.queueBackend` is `nats`. Off sets only `CODE_RUNNER_MODE=job` |
+| `codeRunners.mode` | `auto` | `CODE_RUNNER_MODE` |
+| `codeRunners.registry` / `imageTag` / `pullPolicy` | `""` (falls back to `localhost:5000/abenix`) / `latest` / `IfNotPresent` | `deploy-azure.sh` sets registry and tag to the ACR build |
+| `codeRunners.pools[]` | `python-3.12` -> `code-runner-python` | Builds `CODE_RUNNER_IMAGES` |
+| `codeRunners.concurrency` / `maxReplicas` / `idleSeconds` / `drainSeconds` / `graceSeconds` | `4` / `5` / `900` / `120` / `930` | |
+| `codeRunners.minWarmByTier` / `hotCallsPerHour` / `defaultTier` | `low=0,medium=0,high=1,critical=1` / `30` / `medium` | |
+| `codeRunners.fetchTokenTtl` / `apiUrl` | `21600` / `""` (release API service) | |
+| `codeRunners.runtimeClassName` / `workspaceSize` / `scratchSize` | `""` / `2Gi` / `1Gi` | |
+| `codeRunners.resources.exec` / `.gateway` | see values | JSON resources for the two containers |
+| `codeRunners.networkPolicy` | `true` | Renders the `none` and `open` runner policies |
+| `codeRunners.keda.enabled` / `prometheusUrl` | `false` / `""` | `CODE_RUNNER_KEDA` and `CODE_RUNNER_PROMETHEUS_URL` |
+| `codeRunners.nats.user` / `password` | `coderun` / `""` | Runner NATS login. Empty password is generated on install and kept |
+| `codeRunners.reaper.schedule` | `*/2 * * * *` | CronJob that drains old versions and scales idle runners to zero |
 
-ingress:
-  className: nginx
-  hosts:
-    api: api.example.com
-    web: example.com
-    grafana: grafana.example.com
-    tempo: tempo.example.com
+### Secrets
 
-observability:
-  prometheus: {enabled: true, retention: 30d}
-  grafana:    {enabled: true, adminPasswordSecret: grafana-admin}
-  tempo:      {enabled: true, retention: 7d, storageSize: 50Gi}
+`secrets.*` feed `abenix-secrets`. The deploy scripts fill them with `--set`
+from `.env`. Never commit real values.
 
-secrets:
-  # populated via --set on deploy; never committed
-  anthropicApiKey: ""
-  openaiApiKey: ""
-  googleApiKey: ""
-  pineconeApiKey: ""
-  tavilyApiKey: ""
-  ...
-```
+| Key | Becomes | Notes |
+|---|---|---|
+| `databaseUrl` | `DATABASE_URL` | |
+| `redisPassword` | part of `REDIS_URL` and `CELERY_*` | |
+| `postgresPassword` | `POSTGRES_PASSWORD` | Bitnami admin password |
+| `jwtSecret` | `SECRET_KEY` | Default `change-me` |
+| `anthropicApiKey`, `openaiApiKey`, `googleApiKey`, `azureOpenaiApiKey`, `azureOpenaiApiBase`, `azureOpenaiApiVersion` | provider keys | |
+| `claudeSubscriptionToken` | `CLAUDE_SUBSCRIPTION_TOKEN` | |
+| `neo4jPassword` | `NEO4J_PASSWORD` | Default `abenix-neo4j-pass` |
+| `pineconeApiKey`, `tavilyApiKey`, `braveSearchApiKey`, `serpapiApiKey`, `serperApiKey`, `searchProvider`, `newsApiKey`, `fredApiKey`, `alphaVantageApiKey`, `mediastackApiKey`, `entsoeApiKey`, `eiaApiKey`, `stripeSecretKey` | the matching variables | |
+| `alertWebhookToken` | `ALERT_WEBHOOK_TOKEN` | Empty means generated once and kept |
+| `natsPassword` / `natsSysPassword` | `NATS_PASSWORD` / `NATS_SYS_PASSWORD` | Empty means generated per install and kept on upgrade |
+| `dataKeyKekBase64` | `ABENIX_DATA_KEY_KEK_BASE64` | Rendered only when set |
+| `edgeSigningKeyPem` / `edgeSigningPubkeyPem` | `EDGE_SIGNING_KEY_PEM` / `EDGE_SIGNING_PUBKEY_PEM` | Rendered only when set. Scripts pass them with `--set-file` |
+| `storageS3AccessKey` / `storageS3SecretKey` / `storageAzureConnectionString` | storage credentials | Rendered for the matching `objectStorage.type` |
 
-`values-local.yaml` flips:
-- `postgres.replication: false`
-- `postgres.storageClassName: standard`
-- `agent-runtime.pools.*.minReplicas: 1` (cap costs locally)
-- `ingress.hosts: localhost.*`
+### Generated passwords
 
-`values-azure.yaml` adjusts:
-- `image.registry: your-acr.azurecr.io`
-- `postgres.storageClassName: managed-premium`
-- production hostnames
+`ALERT_WEBHOOK_TOKEN`, `NATS_PASSWORD`, `NATS_SYS_PASSWORD` and the runner
+password in `<release>-code-runner-nats` are generated with `randAlphaNum` the
+first time the chart renders. On later upgrades the template `lookup`s the live
+Secret and reuses the value, so pods and NATS keep agreeing. Two consequences:
+
+- `helm template` and `--dry-run` cannot see the live Secret, so they print a
+  fresh random value each time. That output is not what the cluster holds.
+- Deleting `abenix-secrets` by hand rotates all three on the next upgrade.
+  Roll the API, runtime pools and NATS afterwards so they pick up the new
+  values together.
 
 ---
 
-## ConfigMap + Secrets convention
+## What the overlays change
 
-Each service gets a ConfigMap of non-sensitive env + a Secret of sensitive env. Pods reference both via `envFrom`:
+`values-local.yaml`, used by `deploy.sh local`:
+
+- `environment: development`, `logLevel: debug`, `runtimeMode: remote`
+- images from `localhost:5000/abenix/*` with `pullPolicy: Never`, Postgres from the locally built pgvector image
+- standalone Postgres and Redis, small resources, ingress off
+- `scaling.enabled`, `execRemote`, `queueBackend: nats`, one `default` pool, KEDA on with the local Prometheus
+- `codeRunners.enabled` with `maxReplicas: 2`, KEDA off so runners scale on CPU
+- `mlModels.enabled`, `edge.allowUnsigned: true`, local secrets including `jwtSecret`
+
+`values-local-runtime.yaml` is layered on top by `deploy.sh local-runtime` to
+run the full set of runtime pools on minikube.
+
+`values-azure.yaml`, used by `deploy-azure.sh`:
+
+- `environment: staging`, `runtimeMode: embedded`
+- four pools `default` (min 1), `chat`, `heavy-reasoning` and `long-running` (min 0), KEDA and scaling alerts on
+- `codeRunners.enabled` with KEDA on runner load, `pullPolicy: Always`
+- `sharedData.usePVC` and `archives.pvc` on `azurefile-csi`, `backup.enabled`
+- progress prefixes and post-processor modules for the standalone apps
+
+`values-production.yaml` is what `deploy.sh cloud` uses against the current
+kubectl context.
+
+---
+
+## ConfigMap and Secret convention
+
+Every core pod loads both with `envFrom`:
 
 ```yaml
 envFrom:
-  - configMapRef: {name: api-config}
-  - secretRef:    {name: api-secrets}
+  - secretRef:    {name: abenix-secrets}
+  - configMapRef: {name: abenix-config}
 ```
 
-Adding a new env var:
-1. Add to `templates/configmap.yaml` (non-sensitive) or `templates/secrets-stub.yaml` (sensitive).
-2. Plumb in `values.yaml` so it's overridable.
-3. The pod inherits via envFrom on next rollout.
+The pool Deployments add a few explicit `env` entries on top, which win over
+`envFrom`: `RUNTIME_POOL`, `RUNTIME_MODE=remote`, `QUEUE_BACKEND`,
+`AGENT_CONCURRENCY`, the NATS login, `LIVEKIT_URL`, the `/data` paths,
+`OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_TRACES_SAMPLER_ARG=1.0`. They do not
+set `REDIS_URL`, so the authenticated one from the Secret is used.
 
-Secrets stub looks like:
-```yaml
-apiVersion: v1
-kind: Secret
-metadata: {name: api-secrets, namespace: abenix}
-type: Opaque
-stringData:
-  ANTHROPIC_API_KEY: "{{ .Values.secrets.anthropicApiKey }}"
-  OPENAI_API_KEY: "{{ .Values.secrets.openaiApiKey }}"
-  JWT_SECRET: "{{ .Values.secrets.jwtSecret }}"
-```
+Adding a variable:
+
+1. Add it to `templates/configmap.yaml`, or to `templates/secrets.yaml` if it is sensitive.
+2. Plumb it from a value in `values.yaml` so it can be overridden.
+3. Pods pick it up on their next rollout. A ConfigMap change alone does not restart anything.
 
 ---
 
-## ServiceMonitor + Prometheus scrape
+## Prometheus scraping
 
-Each pod exposes `/metrics` on its main HTTP port. The chart creates ServiceMonitors so Prometheus auto-scrapes:
-
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata: {name: abenix-api}
-spec:
-  selector: {matchLabels: {app.kubernetes.io/name: api}}
-  endpoints:
-  - port: http
-    path: /metrics
-    interval: 30s
-```
-
-Custom metrics emitted by the app code (Prometheus `Counter`/`Histogram`) appear automatically.
+The cluster runs the plain Prometheus from `infra/observability/prometheus.yaml`,
+not the operator. It scrapes the API at `/api/metrics`, every agent-runtime
+service on port `http` at `/metrics`, and runner pods on their `metrics` port.
+`monitoring.enabled` renders ServiceMonitors instead, for clusters that do run
+the operator. Details in [04-observability](04-observability.md).
 
 ---
 
-## Standalone-app manifests (kubectl apply)
+## Standalone-app manifests
 
-Each vertical lives in `<app>/k8s/<app>.yaml`. Shape:
+Each app lives in `<app>/k8s/<app>.yaml` and is applied with `kubectl`, not
+Helm. The deploy scripts substitute the image and tag before applying, and
+create each app's Secret separately so values are never committed.
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata: {name: wingman-api, namespace: abenix}
-spec:
-  replicas: 1
-  template:
-    spec:
-      containers:
-      - name: api
-        image: localhost:5000/abenix/wingman-api:latest    # sed-replaced by deploy script
-        envFrom:
-        - secretRef:   {name: wingman-secrets}
-        - configMapRef: {name: wingman-config}
-        volumeMounts:
-        - {name: shared-data, mountPath: /data}
-        livenessProbe:  {httpGet: {path: /health, port: 8006}}
-        readinessProbe: {httpGet: {path: /health, port: 8006}}
-      volumes:
-      - {name: shared-data, hostPath: {path: /tmp/abenix-shared-data, type: DirectoryOrCreate}}
----
-apiVersion: v1
-kind: Service
-metadata: {name: wingman-api}
-spec:
-  selector: {app: wingman-api}
-  ports: [{port: 8006}]
-```
-
-The deploy script `sed`-substitutes the image tag and `kubectl apply`s. Secrets are created in a separate dry-run-apply step so values aren't committed.
-
-> **Why not helm for standalone apps** — independent release cadences. A wingman bug fix should not require a platform helm release.
+> **Why not Helm for the apps** — independent release cadences. An app fix should not require a platform Helm release.
 
 ---
 
 ## See also
 
-- [00-overview](00-overview.md) — the full deploy flow
-- [03-keda](03-keda.md) — autoscaling rules
-- [04-observability](04-observability.md) — Prom + Grafana + Tempo
+- [00-overview](00-overview.md) — the deploy flow
+- [03-keda](03-keda.md) — autoscaling
+- [04-observability](04-observability.md) — Prometheus, Grafana, Tempo, Alertmanager
+- [09-reference/01-env-vars](../09-reference/01-env-vars.md) — every variable the chart sets

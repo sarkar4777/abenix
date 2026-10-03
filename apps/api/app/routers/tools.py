@@ -906,15 +906,9 @@ TOOL_CATALOG = [
         "category": "enterprise",
     },
     {
-        "id": "atlas_cypher",
-        "name": "Atlas — Cypher (read-only)",
-        "description": "Run a read-only Cypher query against the Atlas knowledge graph. CREATE/MERGE/DELETE/SET/REMOVE/CALL apoc/LOAD CSV are rejected by a server-side validator. Tenant + graph context are injected automatically. Row cap 1000, timeout 10s.",
-        "category": "enterprise",
-    },
-    {
         "id": "atlas_as_of",
-        "name": "Atlas — As-Of (bi-temporal)",
-        "description": "Query the Atlas graph as it existed at a specific timestamp. Uses the bi-temporal edge columns (valid_from / valid_to) for audit, compliance, and 'what did we know on date X' agent workflows.",
+        "name": "Atlas — As-Of",
+        "description": "Show an Atlas graph as it stood at a past moment, from the newest saved snapshot at or before that time, or the live graph when nothing changed since. For audit and 'what did the ontology say on date X' questions.",
         "category": "enterprise",
     },
     {

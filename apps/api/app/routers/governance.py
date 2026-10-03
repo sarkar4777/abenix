@@ -791,6 +791,11 @@ async def replay_run(
         system_prompt, mc = agent.system_prompt or "", dict(agent.model_config_ or {})
     if mc.get("mode") == "pipeline":
         return error("Pipeline runs replay from a step on the run page.", 400)
+    from app.core.budget_gate import budget_error, per_run_cost_limit
+
+    over = await budget_error(db, agent, user.tenant_id)
+    if over is not None:
+        return over
     model = body.model or mc.get("model") or "claude-sonnet-4-5-20250929"
     new = Execution(
         tenant_id=user.tenant_id,
@@ -834,12 +839,18 @@ async def replay_run(
         tenant_id=str(user.tenant_id),
         tool_config=mc.get("tool_config"),
         agent_name=agent.name,
+        cost_limit=per_run_cost_limit(agent),
     )
     await db.close()
+    fail_code = None
     try:
         result = await executor.invoke(ex.input_message or "")
-        failed = bool(result.governance_refusal)
+        failed = bool(result.governance_refusal) or result.budget_exceeded
         err_msg = (result.governance_refusal or {}).get("message")
+        if result.governance_refusal:
+            fail_code = result.governance_refusal.get("code")
+        elif result.budget_exceeded:
+            fail_code, err_msg = result.failure_code, result.output[-2000:]
     except Exception as e:  # noqa: BLE001
         result, failed, err_msg = None, True, str(e)[:1000]
     from app.core.deps import async_session
@@ -862,6 +873,8 @@ async def replay_run(
             row.risk_reasons = result.risk_reasons or None
         if err_msg:
             row.error_message = err_msg
+        if fail_code:
+            row.failure_code = fail_code
         await log_action(
             s,
             user.tenant_id,
@@ -898,6 +911,7 @@ async def replay_run(
                 "tools": after_tools,
                 "cost": float(result.cost) if result else 0.0,
                 "error": err_msg,
+                "failure_code": fail_code,
             },
             "same_output": bool(result)
             and (result.output or "").strip() == (ex.output_message or "").strip(),

@@ -388,6 +388,9 @@ async def start_meeting(
             "Authorize the bot with a topic allow-list before starting.",
             400,
         )
+    over = await _meeting_budget_error(db, m, user)
+    if over is not None:
+        return over
     m.status = MeetingStatus.LIVE.value
     m.started_at = datetime.now(timezone.utc)
     await db.commit()
@@ -428,6 +431,10 @@ async def redispatch_bot(
             m.agent_id = uuid.UUID(new_agent_id)
         except Exception:
             return error("invalid agent_id", 400)
+
+    over = await _meeting_budget_error(db, m, user)
+    if over is not None:
+        return over
 
     # Bump status back to live + clear ended_at if it was killed
     m.status = MeetingStatus.LIVE.value
@@ -698,6 +705,35 @@ async def _load(meeting_id: str, user: User, db: AsyncSession) -> Meeting | None
     return q.scalars().first()
 
 
+async def _meeting_agent(db: AsyncSession, m: Meeting) -> Any:
+    """The agent a meeting runs, its own or the built-in Meeting Representative."""
+    from models.agent import Agent
+
+    agent = await db.get(Agent, m.agent_id) if m.agent_id else None
+    if agent is None:
+        agent = (
+            (
+                await db.execute(
+                    select(Agent).where(Agent.slug == "meeting-representative")
+                )
+            )
+            .scalars()
+            .first()
+        )
+    return agent
+
+
+async def _meeting_budget_error(
+    db: AsyncSession, m: Meeting, user: User
+) -> JSONResponse | None:
+    from app.core.budget_gate import budget_error
+
+    agent = await _meeting_agent(db, m)
+    if agent is None:
+        return None
+    return await budget_error(db, agent, user.tenant_id)
+
+
 async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
     """Run the Meeting Representative agent in-process for this meeting."""
     import logging as _logging
@@ -767,6 +803,17 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
                 )
                 return
 
+            from app.core.budget_gate import budget_breach, per_run_cost_limit
+
+            breach = await budget_breach(db2, agent, user.tenant_id)
+            if breach is not None:
+                await sessmod.append_decision(
+                    str(m.id), "leave", f"Bot not started: {breach.message}"
+                )
+                await engine.dispose()
+                return
+            cost_limit = per_run_cost_limit(agent)
+
             mc = agent.model_config_ or {}
             model = mc.get("model", "claude-sonnet-4-5-20250929")
             temperature = mc.get("temperature", 0.2)
@@ -805,6 +852,7 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
         detail={"execution_id": execution_id, "model": model},
     )
 
+    final_done: dict[str, Any] = {}
     try:
         tool_registry = build_tool_registry(
             tool_names,
@@ -825,6 +873,9 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
             temperature=temperature,
             agent_id=str(agent.id),
             max_iterations=max_iter,
+            execution_id=execution_id,
+            tenant_id=str(user.tenant_id),
+            cost_limit=cost_limit,
         )
         # Run the agent — will block until it terminates (leave or kill).
         # We mirror EVERY tool call + tool result into the decision log so
@@ -874,6 +925,11 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
                     )
                 elif evt.event == "done":
                     d = evt.data if isinstance(evt.data, dict) else {}
+                    final_done.update(d)
+                    if d.get("failure_code") == "BUDGET_EXCEEDED":
+                        await sessmod.append_decision(
+                            str(m.id), "leave", str(d.get("error") or "")[:300]
+                        )
                     out = (d.get("output") or "")[:200]
                     if out:
                         await sessmod.append_decision(
@@ -914,9 +970,12 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
         try:
             async with Session() as db3:
                 ex = await db3.get(Execution, execution.id)
+                if ex and final_done:
+                    _record_meeting_done(ex, final_done)
                 if ex and ex.status == ExecutionStatus.RUNNING:
                     ex.status = ExecutionStatus.COMPLETED
                     ex.completed_at = datetime.now(timezone.utc)
+                if ex:
                     await db3.commit()
         except Exception:
             pass
@@ -924,3 +983,22 @@ async def _run_meeting_agent(m: Meeting, user: User, body: dict) -> None:
             await engine.dispose()
         except Exception:
             pass
+
+
+def _record_meeting_done(ex: Any, done: dict[str, Any]) -> None:
+    """Spend and outcome from the executor's done event onto the meeting's execution row."""
+    from models.execution import ExecutionStatus
+
+    ex.cost = float(done.get("cost") or 0.0)
+    ex.input_tokens = int(done.get("input_tokens") or 0)
+    ex.output_tokens = int(done.get("output_tokens") or 0)
+    if done.get("duration_ms") is not None:
+        ex.duration_ms = int(done["duration_ms"])
+    code = done.get("failure_code") or (
+        "MODERATION_BLOCKED" if done.get("moderation_blocked") else None
+    )
+    if ex.status == ExecutionStatus.RUNNING and (code or done.get("error")):
+        ex.status = ExecutionStatus.FAILED
+        ex.failure_code = code
+        ex.error_message = str(done.get("error") or code)[:2000]
+        ex.completed_at = datetime.now(timezone.utc)

@@ -8,6 +8,8 @@ This is the doc most worth reading end-to-end. Once you've internalised this seq
 
 ## The canonical example: "User clicks 'Run' on an agent"
 
+This is the pool path, used when `scaling.execRemote` is on (local and Azure overlays) and the agent's `runtime_pool` is not `inline`. The inline path is the same up to step 5, then the API pod runs the loop itself.
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -16,260 +18,259 @@ sequenceDiagram
   participant API as abenix-api (FastAPI)
   participant PG as Postgres
   participant N as NATS JetStream
-  participant R as agent-runtime
+  participant RD as Redis
+  participant R as agent-runtime pool
   participant LLM as Anthropic / OpenAI / Google
   participant Tool as Tool (e.g. eia_open_data)
 
   U->>W: click "Run"
-  W->>API: POST /api/agents/{id}/execute<br/>body: {input, wait_mode}
-  API->>API: AuthGuard + TenantMiddleware<br/>+ ratelimit
-  API->>PG: INSERT execution<br/>(status='queued')
-  API->>N: publish exec.start<br/>{execution_id, agent_id, input}
-  alt wait_mode = "submitted"
-    API-->>W: 202 Accepted<br/>{execution_id, status}
-    W-->>U: poll /api/executions/{id}
-  else wait_mode = "stream"
+  W->>API: POST /api/agents/{id_or_slug}/execute<br/>body: {message, context, stream, wait, wait_mode}
+  API->>API: middleware chain,<br/>get_current_user, limits
+  API->>PG: INSERT execution<br/>(status='running')
+  API->>N: publish agents.{pool}<br/>{task_id, payload}
+  alt stream = true
+    API->>RD: SUBSCRIBE exec:events:{id}
     API-->>W: SSE stream open
-  else wait_mode = "complete"
-    API->>API: hold connection<br/>until terminal
+  else wait = true
+    API->>RD: SUBSCRIBE exec:events:{id}
+    API->>API: hold until done,<br/>a gate opens, or wait_timeout_seconds
+  else submitted
+    API-->>W: 200 {execution_id, task_id, pool, mode: async}
   end
 
-  N->>R: consume exec.start
-  R->>PG: UPDATE execution<br/>SET status='running'
-  R->>PG: SELECT agent.model_config<br/>+ tool_config + tools
+  N->>R: pull from abenix-{pool}-consumer
+  R->>PG: load agent, mark started
+  R->>RD: publish start
 
-  loop Agent step loop (up to max_iterations)
-    R->>LLM: chat.completions<br/>(messages + tool schemas)
-    LLM-->>R: assistant message<br/>(text or tool_call[])
-    alt tool_call
-      R->>R: lookup tool in registry
-      R->>Tool: tool.execute(args)
+  loop Agent loop (up to max_iterations)
+    R->>LLM: messages + tool schemas
+    LLM-->>R: text or tool calls
+    alt tool call
+      R->>R: governance checks,<br/>then tool.execute(args)
+      R->>Tool: call
       Tool-->>R: ToolResult
-      R->>PG: INSERT tool_invocation
-      R->>N: publish exec.tool_result
-      Note over R: append tool result<br/>to message history
-    else final text
-      R->>R: break loop
+      R->>RD: publish tool_call / tool_result
+    else text
+      R->>RD: publish token
     end
   end
 
-  R->>PG: UPDATE execution<br/>SET status='completed',<br/>output=…, cost=…
-  R->>N: publish exec.completed
-
-  N-->>API: consume exec.completed
-  API-->>W: SSE event (terminal)
+  R->>PG: UPDATE execution<br/>status, output, cost, tool_calls
+  R->>RD: publish done (or error)
+  RD-->>API: event
+  API-->>W: SSE event: done
   W-->>U: render result
 ```
 
-20 numbered steps. Some collapse together (the agent loop often runs in 200ms with no tool call). others fan out (a single agent run can do 30 tool calls before terminating).
+Some steps collapse (an agent loop with no tool call is one LLM round trip). Others fan out (one run can make dozens of tool calls).
 
 ---
 
 ## Step-by-step deep dive
 
-### 1-3. Auth + rate limit + tenant resolution
+### 1-3. Middleware, auth and limits
 
-The first three middlewares run in a fixed order, defined in [`apps/api/app/main.py:100-122`](../../apps/api/app/main.py#L100-L122):
+The middlewares are registered in [`apps/api/app/main.py`](../../apps/api/app/main.py):
 
 ```python
-app.add_middleware(IPWhitelistMiddleware)       # 1. block listed IPs
-app.add_middleware(ObservabilityMiddleware)     # 2. start OTel span, emit metrics
-app.add_middleware(BodySizeLimitMiddleware)     # 3. cap request body size
-app.add_middleware(RateLimitMiddleware)         # 4. per-tenant rps cap
-app.add_middleware(TenantMiddleware)            # 5. JWT/API-key -> tenant_id
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(IPWhitelistMiddleware)
+app.add_middleware(ObservabilityMiddleware)
+app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(TenantMiddleware)
+app.add_middleware(CORSMiddleware, ...)
 ```
 
-By the time the route handler runs, `request.state.tenant_id` and `request.state.user` are set. The handler uses the `user: User = Depends(get_current_user)` dependency to access them.
+Starlette makes the last one registered the outermost. A request passes CORS, then `TenantMiddleware`, `RateLimitMiddleware`, `BodySizeLimitMiddleware`, `ObservabilityMiddleware`, `IPWhitelistMiddleware`, `SecurityHeadersMiddleware`, and then the route. CORS is outermost on purpose, so 401, 403, 429 and 5xx responses still carry the CORS headers.
 
-> **Why** — middleware order matters. Body-size limit must come *before* rate-limit so a 10GB request is rejected before counting against the cap. Tenant resolution must come last because it's the most expensive step (DB lookup for API keys).
+- `TenantMiddleware` reads `X-API-Key` (keys start with `af_`, looked up by hash and cached) or the JWT and sets `request.state.tenant_id`.
+- `RateLimitMiddleware` applies per-user and per-IP sliding windows kept in Redis under `abenix:ratelimit:*`.
+- The handler gets the user from `Depends(get_current_user)`. That dependency also honours `X-Abenix-Subject` when the API key has the `can_delegate` scope.
+
+Inside `execute_agent` ([`apps/api/app/routers/agents.py`](../../apps/api/app/routers/agents.py)) the handler resolves the agent by UUID or slug, checks share access, applies an `Idempotency-Key` header if present, then `check_limit` (the tenant's daily execution cap for its plan) and `check_user_quota` (monthly token and cost allowance). Either one refuses with 429 before any row is written.
 
 ### 4. Execution row creation
 
-The handler at [`apps/api/app/routers/agents.py`](../../apps/api/app/routers/agents.py) creates an `executions` row immediately. The status starts as `queued`. The execution_id (UUID) is the **stable identifier** that flows through every subsequent hop — every log line, every metric, every event references it.
+The handler creates the `executions` row before anything runs. It starts as `running`. The `ExecutionStatus` enum has only `running`, `completed`, `failed` and `cancelled`. A database trigger stamps provenance on insert, see [governance](07-governance.md#run-provenance).
 
 ```python
 execution = Execution(
     tenant_id=user.tenant_id,
     agent_id=agent.id,
-    actor_id=user.id,
-    subject=acting_subject,        # actAs pattern
-    input_payload=body.input,
-    status=ExecutionStatus.QUEUED,
+    user_id=user.id,
+    subject_id=_subj_id,          # actAs
+    subject_type=_subj_type,
+    input_message=sanitized_message,
+    status=ExecutionStatus.RUNNING,
+    model_used=model if not is_pipeline else "pipeline",
+    started_at=datetime.now(timezone.utc),
+    parent_execution_id=parent_execution_id,
 )
 db.add(execution)
 await db.commit()
 ```
 
-### 5. Enqueue to NATS
+The execution id is the stable identifier for every later hop, log line, metric and event.
+
+### 5. Enqueue
 
 ```python
-await nats.publish("exec.start", {
-    "execution_id": str(execution.id),
-    "tenant_id": str(user.tenant_id),
-    "agent_slug": agent.slug,
-    "runtime_pool": agent.model_config_.get("runtime_pool", "default"),
-})
+agent_pool = getattr(agent, "runtime_pool", None) or "default"
+if settings.scaling_exec_remote and agent_pool != "inline":
+    backend = get_queue_backend()
+    task_id = await backend.submit(agent_pool, payload)
 ```
 
-The `runtime_pool` field determines which agent-runtime pool consumes the message. KEDA scales each pool based on the queue depth for its subject — see [06-deployment/03-keda](../06-deployment/03-keda.md).
+`payload` carries `execution_id`, `agent_id`, `tenant_id`, `user_id`, `role`, `api_key_id`, `message`, `context`, `is_pipeline`, `parent_execution_id`, `delegation_depth` and `model_override`. The NATS backend ([`apps/agent-runtime/engine/queue_backend.py`](../../apps/agent-runtime/engine/queue_backend.py)) publishes it to `agents.<pool>` on the JetStream stream `agents`, with the W3C `traceparent` in the envelope's `trace` field so the runtime continues the API's trace. Queued runs need NATS. The Celery backend refuses to enqueue agents. If the enqueue fails for any reason the API falls back to running the agent inline.
+
+KEDA scales each pool on the lag of its consumer, see [06-deployment/03-keda](../06-deployment/03-keda.md).
 
 ### 6-7. Response negotiation
 
-The same endpoint supports three `wait_mode` values:
+`ExecuteRequest` ([`apps/api/app/schemas/agents.py`](../../apps/api/app/schemas/agents.py)) has `stream` (default `true`), `wait` (tri-state) and `wait_mode`.
 
-| `wait_mode` | Behaviour |
+| Request | Behaviour |
 |---|---|
-| `submitted` (default) | Returns `202 Accepted` with the `execution_id`. Client polls `/api/executions/{id}` or subscribes to the event stream separately. |
-| `stream` | Returns an SSE stream from `/api/executions/{id}/events`. |
-| `complete` | Holds the connection open until the execution reaches a terminal status. Has a hard 300s timeout. |
+| `stream: true` | SSE stream of the run's events, ending with `done` or `error` |
+| `wait: true` or `wait_mode: "completed"` | Holds the connection until the run ends, up to `wait_timeout_seconds` (default 180, max 1800). A run that fails still answers 200 with `status: "failed"` and the `execution_id` |
+| `wait_mode: "until_gate"` | Like `completed`, but returns early when a human approval gate opens |
+| `wait: false` or `wait_mode: "submitted"` | Returns at once with `execution_id`. On the pool path the body also has `task_id`, `pool` and `mode: "async"` |
 
-The SDK exposes this as `client.execute(slug, input, wait="…")`. See [03-sdk/00-overview](../03-sdk/00-overview.md).
+When `wait` is omitted, API-key callers (the SDKs) get `wait: true` and `stream: false`. Browser callers keep the stream. The SDK exposes this as `execute(slug, message, wait=...)`, see [03-sdk/00-overview](../03-sdk/00-overview.md).
 
 ### 8-9. Agent runtime picks up
 
-The agent-runtime pod for the assigned pool consumes from NATS. It:
-1. Sets the OTel span context from the message headers (distributed tracing carries across the queue).
-2. Updates `executions.status = 'running'`.
-3. Loads the full agent definition from Postgres — `system_prompt`, `model_config`, declared tools, `mcp_extensions`, `pipeline_config` if any.
+The pool pod runs [`apps/agent-runtime/consumer.py`](../../apps/agent-runtime/consumer.py). It pulls one message at a time from its durable consumer, up to `AGENT_CONCURRENCY` runs in flight, and acks the message as soon as it starts the run. For each run it:
 
-The `agent_runtime_id` (set by the pod) is recorded on the execution row for forensic purposes.
+1. Loads the execution and the agent (system prompt, `model_config`, tools, MCP extensions, `pipeline_config`), and the moderation gate.
+2. Sets `started_at` and publishes a `start` event.
+3. Builds `AgentExecutor` or `PipelineExecutor`, which opens a governance run context at the agent's risk tier, see [governance](07-governance.md).
 
 ### 10. The agent loop
 
 ```mermaid
 flowchart TD
   S[Start] --> P[Build prompt:<br/>system + history + user input]
-  P --> L[Call LLM<br/>chat.completions]
+  P --> L[Call LLM]
   L --> D{Response shape?}
-  D -->|tool_calls| TC[For each tool_call:<br/>lookup, execute, log]
+  D -->|tool_calls| TC[For each tool_call:<br/>governance check, execute]
   TC --> A[Append tool results<br/>to message history]
   A --> I{Iteration < max?}
   I -->|yes| L
-  I -->|no — cap hit| E[Emit cap-warning + finalize]
-  D -->|final text| F[Parse output_schema<br/>if defined]
-  F --> X[Persist + emit completed]
+  I -->|no, cap hit| E[Answer from what it gathered]
+  D -->|final text| F[Post-process against<br/>output_schema if set]
+  F --> X[Persist + publish done]
   E --> X
 ```
 
-Key parameters that govern the loop, all on `model_config`:
+Fields on `model_config` that govern the loop:
 
 | Field | Default | Effect |
 |---|---|---|
-| `max_iterations` | 10 | Hard cap on tool-call rounds. Hit = `status='completed'` with a warning. |
-| `max_tokens` | 8192 | Per-call generation cap. |
-| `temperature` | 0.2 | LLM creativity. |
-| `tools` | `[]` | List of tool slugs the agent can call. |
-| `tool_config` | `{}` | Per-tool overrides — `parameter_defaults`, `max_calls`, `require_approval`, `usage_instructions`. |
-| `output_schema` | `null` | If set, the final assistant message must parse as JSON matching this schema. otherwise the runtime retries the final step. |
-| `mcp_extensions` | `null` | Adds MCP servers as tool sources — see [02-runtime/03-mcp](../02-runtime/03-mcp.md). |
+| `model` | `claude-sonnet-4-5-20250929` | LLM to call, subject to the tier's allowed models |
+| `max_iterations` | platform setting `agent.max_iterations`, 10 | Cap on loop rounds. When hit, the agent answers from what it gathered |
+| `max_tokens` | 4096 | Per-call generation cap |
+| `temperature` | 0.7 | Sampling temperature |
+| `tools` | `[]` | Tool names the agent can call |
+| `tool_config` | `{}` | Per-tool settings such as `parameter_defaults` |
+| `output_schema` | none | Validates and normalises the final output. Problems ride on the `done` event as `validation_warnings`, there is no retry |
+| `mcp_extensions` | none | Adds MCP servers as tool sources, see [02-runtime/03-mcp](../02-runtime/03-mcp.md) |
+| `risk_tier` | `low` | The run's starting tier |
 
 ### 11-12. Tool calls
 
-Every tool call goes through the registry at [`apps/agent-runtime/engine/tools/__init__.py`](../../apps/agent-runtime/engine/tools/__init__.py). The registry maps `tool_slug → ToolClass`, instantiates with tenant + execution context, and calls `await tool.execute(args)`. See [02-runtime/02-tools](../02-runtime/02-tools.md) for the full framework.
+`build_tool_registry` in [`apps/agent-runtime/engine/agent_executor.py`](../../apps/agent-runtime/engine/agent_executor.py) maps tool names to classes and instantiates them with tenant and execution context into a `ToolRegistry` ([`engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py)). Every `execute` goes through one wrapper that checks kill switches and the tool's risk tier first. See [02-runtime/02-tools](../02-runtime/02-tools.md).
 
-Every successful or failed tool call writes a `ml_model_invocations` / `tool_invocations` row. The `/executions/{id}` page renders these as the **trace waterfall**.
+The run's tool calls end up in `executions.tool_calls`. ML model, code asset and KB query tools also write a row each to `ml_model_invocations`, `code_asset_invocations` and `kb_query_invocations`. The `/executions/{id}` page renders the trace from these.
 
 ### 13-14. Streaming events
 
-Throughout the loop, the runtime emits events to NATS (the same execution_id is the partitioning key). Event types:
+Events go to Redis, not NATS. Both the API ([`apps/api/app/core/execution_bus.py`](../../apps/api/app/core/execution_bus.py)) and the consumer publish to the channel `exec:events:<execution_id>` and append to the list `exec:events:<execution_id>:log`, capped at 500 events with a 1 h TTL.
 
-- `exec.iteration.start` — new loop iteration
-- `exec.llm.request` / `exec.llm.response` — LLM round-trip
-- `exec.tool.start` / `exec.tool.end` — tool call
-- `exec.text` — assistant text fragment (for streaming UIs)
-- `exec.completed` / `exec.failed` — terminal
+Event names on that channel:
 
-The API server consumes the same subject on behalf of the connected SSE client. The flow:
+- `start` — the runtime picked the run up
+- `token` — assistant text
+- `tool_call` / `tool_result` — a tool round trip
+- `node_start` / `node_complete` — pipeline nodes
+- `moderation` — the moderation gate acted
+- `done` / `error` — terminal
 
 ```mermaid
 sequenceDiagram
   participant R as agent-runtime
-  participant N as NATS
+  participant RD as Redis
   participant API as abenix-api
   participant W as browser
 
-  W->>API: GET /api/executions/{id}/events<br/>(SSE)
-  API->>N: subscribe exec.{id}.*
-  R->>N: publish exec.llm.response
-  N-->>API: deliver
-  API-->>W: data: {type, payload}<br/><blank line>
-  R->>N: publish exec.tool.start
-  N-->>API: deliver
-  API-->>W: data: {type, payload}
-  R->>N: publish exec.completed
-  N-->>API: deliver
-  API-->>W: data: {type, payload}<br/>event: terminal
+  W->>API: GET /api/executions/{id}/stream (SSE)
+  API->>RD: LRANGE exec:events:{id}:log
+  API-->>W: replayed events
+  API->>RD: SUBSCRIBE exec:events:{id}
+  R->>RD: PUBLISH token
+  RD-->>API: deliver
+  API-->>W: event: token
+  R->>RD: PUBLISH done
+  RD-->>API: deliver
+  API-->>W: event: done
   API->>API: close SSE
 ```
 
+`GET /api/executions/{id}/stream` replays the log and then follows live. `GET /api/executions/{id}/watch` streams DAG snapshots for pipelines. Tool-level narration for a whole agent tree goes on a separate channel, `progress:<root_execution_id>`, see [05-architectural-patterns](05-architectural-patterns.md#16-sse-bridge-over-redis-pubsub).
+
 ### 15. Persist results
 
-The terminal step in the runtime is two writes:
+When the loop ends the consumer writes the terminal state (`status`, `output_message`, `cost` and the per-provider costs, tokens, `duration_ms`, `tool_calls`, `failure_code`, `trace_id`) and only then publishes `done` or `error`. A subscriber that sees `done` always finds the row at its terminal state. A database trigger on `executions` then writes an `execution.completed` or `execution.failed` row to `event_outbox` for webhook subscribers, whichever code path finished the run.
 
-```python
-async with db.begin():
-    execution.status = ExecutionStatus.COMPLETED
-    execution.output = final_output           # parsed against output_schema
-    execution.duration_ms = elapsed_ms
-    execution.cost_usd = sum_of_llm_costs
-    await db.commit()
-await nats.publish("exec.completed", {...})
-```
-
-These happen in a single Postgres transaction. The NATS publish happens *after* the commit, so a reader subscribing to NATS for `exec.completed` will always find a row at terminal state.
-
-> **Trap** — if the runtime pod dies between the commit and the publish, the execution row is consistent but no `exec.completed` event ever fires. The reconciler job (in `worker`) catches these stragglers every 60s and emits the missing event.
+> **Trap** — the runtime acks the NATS message only after the run ends. If the pod dies mid-run, JetStream redelivers it once the ack window lapses, and another pod takes over when the run's lease on the row has expired. The takeover reruns the agent from the start, so tool side effects can repeat. After 3 pickups (`CONSUMER_MAX_ATTEMPTS`) the run fails with `STALE_SWEEP`. See [08-queue-scaling](../02-runtime/08-queue-scaling.md#at-least-once-delivery).
 
 ### 16. Stragglers + sweeper
 
-A Celery beat job in [`apps/worker/jobs/executions_reconcile.py`](../../apps/worker/worker/tasks/) runs every 60s and:
+`sweep_stale_executions` in [`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py) runs every 5 minutes in the API pod, one replica at a time under an advisory lock. It:
 
-1. Finds executions with `status='running'` and `updated_at` older than `agent.timeout`.
-2. Marks them `failed` with `failure_code='runtime_died_or_timeout'`.
-3. Emits the missing `exec.completed`.
+1. Finds executions still `running` whose `created_at` is older than `STALE_EXECUTION_MAX_MINUTES` (default 10).
+2. Skips runs parked on a human approval gate (`hitl:waiting:<id>` in Redis) and runs whose queue lease (`lease_expires_at`) is still live.
+3. Marks the rest `failed` with `failure_code='STALE_SWEEP'`, then notifies the owners in-app.
 
-This is what unsticks the dashboard when an agent-runtime pod gets OOM-killed mid-loop.
+This is what unsticks the dashboard when a pod gets OOM-killed mid-loop.
 
 ---
 
 ## Where the data lives at each stage
 
-| Stage | Postgres tables touched | NATS subjects | Other |
+| Stage | Postgres tables touched | Queues and channels | Other |
 |---|---|---|---|
-| 1-3 Middleware | none (token decode) | none | (Redis for rate-limit counters) |
-| 4 Insert | `executions` | none | |
-| 5 Enqueue | none | `exec.start` | |
-| 8-9 Pickup | `executions` (status update), `agents`, `tool_configs` | none | |
-| 11-12 Tool | `tool_invocations`, `ml_model_invocations` | none | Tool-specific stores (S3, Neo4j, external) |
-| 13-14 Stream | none | `exec.*` (many) | |
-| 15 Terminal | `executions` (final), `audit_logs` | `exec.completed` | |
+| 1-3 Middleware | `api_keys` on a cache miss | none | Redis rate-limit counters |
+| 4 Insert | `executions`, `execution_config_snapshots` (trigger), `execution_idempotency` if keyed | none | |
+| 5 Enqueue | none | NATS `agents.<pool>` | |
+| 8-9 Pickup | `executions` (lease claim), `agents`, `moderation_policies` | none | |
+| 11-12 Tool | `*_invocations` for ML, code asset and KB tools | `progress:<root>` | Tool-specific stores |
+| 13-14 Stream | none | Redis `exec:events:<id>` | |
+| 15 Terminal | `executions`, `event_outbox` (trigger) | Redis `done` / `error` | |
 
 ---
 
+## Variant: inline execution
+
+With `runtimeMode: embedded`, `scaling.execRemote` off, or an agent on `runtime_pool: inline`, the API pod runs `AgentExecutor` itself. With `stream: true` the SSE comes straight from the executor. Otherwise the request holds until the run ends. Everything else, the row, the governance checks, the terminal write, is the same.
+
 ## Variant: pipeline execution
 
-When the agent's `model_config.mode = 'pipeline'`, the runtime delegates to the **pipeline engine** instead of running a single LLM loop. The pipeline engine is a topo-sorted DAG executor that runs each node (which itself may be a single-LLM agent, a tool call, a switch, a for-each, or a sub-pipeline). See [02-runtime/01-pipelines](../02-runtime/01-pipelines.md).
+When `model_config.mode = 'pipeline'`, the runtime hands the run to `PipelineExecutor` ([`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py)) instead of a single LLM loop. It is a topologically sorted DAG executor whose nodes are tools, agent steps, conditions, switches, for-each loops, merges or sub-pipelines. See [02-runtime/01-pipelines](../02-runtime/01-pipelines.md).
 
-The lifecycle around the engine (4-7 + 15-16) is identical — only the loop inside step 10 differs.
+The lifecycle around it (steps 4-7 and 15-16) is identical. Only step 10 differs, and pipelines publish `node_start` and `node_complete` instead of tokens.
 
 ---
 
 ## Variant: approval gate fires
 
-If a tool in the loop is `approval_gate`, the runtime:
+Approval gates block inside the running pod. They do not save the loop and exit.
 
-1. Inserts an `approvals` row with `status='pending'`.
-2. Emits `exec.approval.requested` to NATS.
-3. **Pauses** by writing `executions.status='waiting_approval'` and exiting the runtime loop.
+- **`approval_gate` tool** — creates an `approvals` row through `POST /api/approvals`, then polls it every 2 s until it leaves `pending` or expires.
+- **`human_approval` tool and tier escalation** — when a run calls a tool above its tier and the tier policy says ask a person, the tool wrapper opens a `human_approval` gate. It writes `hitl:approval:<execution_id>:<gate_id>` and `hitl:pending:<tenant>` in Redis and polls every 2 s until someone decides on the Approvals page or the timeout passes (default 3600 s, at most 7200 s).
 
-The execution is durable in Postgres. When a human signs off via the Approvals page, the API:
-
-1. Updates the approval row.
-2. If signoffs >= required: emits `exec.resume` to NATS.
-
-A runtime pod consumes `exec.resume`, restores the saved message history from Postgres, and resumes from where it left off.
-
-> **Why** — durably pausing in the database (not in-memory) means we can OOM-kill the runtime pod, restart it from a fresh image, and resume the agent. Critical for long-running compliance workflows.
+Both set `hitl:waiting:<execution_id>` so the stale sweeper leaves the run alone while it waits. The run stays `running` the whole time. SDK callers that do not want to block on a person use `wait_mode: "until_gate"`.
 
 See [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
 

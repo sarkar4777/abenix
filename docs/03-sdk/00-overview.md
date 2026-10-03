@@ -139,7 +139,7 @@ How each SDK surfaces it differs:
 | SDK | Newer clients | Older methods |
 |---|---|---|
 | Python | `AbenixError` / `AbenixDecisionError` with `status`, `code`, `details`, message via `str(e)` | `httpx.HTTPStatusError`, read `e.response` |
-| TypeScript | `AbenixError` / `AbenixDecisionError` with `status`, `code`, `details`, `message` | plain `Error` with the server message |
+| TypeScript | `AbenixError` / `AbenixDecisionError` with `status`, `code`, `details`, `message` | plain `Error` with the server message. `executions` and `agents` do not check the status |
 | Java | n/a | `AbenixException` (unchecked), status and body in the message only |
 
 Codes you may see:
@@ -150,7 +150,7 @@ Codes you may see:
 | `BUSY` | 503, every DB connection is in use. `Retry-After: 2` |
 | `STALE_DRAFT` | 409, someone saved the decision draft after you read it |
 | `INVALID_REPLICAS` / `INVALID_RESOURCE_PRESET` | ML model deploy validation |
-| `IN_USE` | 409, the agent has dependents. `details.dependents` lists them |
+| `IN_USE` | 409, the agent or code asset has dependents. `details.dependents` lists them |
 | `EVAL_GATE` | 409, eval suites block the agent change. `details.suites` |
 | `AGENT_DELETED` | 410 on execute, the agent was archived |
 
@@ -189,18 +189,25 @@ With that in place, the platform-side execution joins the same trace and you see
 
 ## Clients and server areas
 
-Each sub-client on `Abenix` wraps one area of the REST API. Python has more methods than TypeScript on some of these, see [02-typescript](02-typescript.md#platform-clients) for the gaps.
+Each sub-client on `Abenix` wraps one area of the REST API. Python has the most methods, see [02-typescript](02-typescript.md#platform-clients) and [03-java](03-java.md#other-clients) for what each lacks.
 
-| Client | Server area | Detail |
-|---|---|---|
-| `client.me()`, `client.permissions()` | `/api/me`, `/api/me/permissions` | who the key acts as, its role and capabilities |
-| `client.agents` | `/api/agents` | list, get, `by_slug`, `create`, `update` |
-| `client.decisions` | `/api/decisions`, `/api/decision-reference-sets` | [08-howto/09-decisions](../08-howto/09-decisions.md) |
-| `client.sources` | `/api/sources` | [02-runtime/17-source-watch](../02-runtime/17-source-watch.md) |
-| `client.events` | `/api/webhooks` | [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md) |
-| `client.approvals` | `/api/approvals` | [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md) |
-| `client.executions` | `/api/executions` | live, get, replay, tree |
-| `client.knowledge` | `/api/knowledge-engines`, `/api/knowledge-projects` | cognify, search, graph |
+| Client | Server area | Python | TypeScript | Java |
+|---|---|---|---|---|
+| `me()`, `permissions()` | `/api/me`, `/api/me/permissions` | both | `permissions` | none |
+| `agents` | `/api/agents` | list, get, `find_by_slug`, `by_slug`, `create`, `update` | list, get | list, get, `findBySlug` |
+| `decisions` | `/api/decisions`, `/api/decision-reference-sets` | 27 methods | 18 methods | none |
+| `sources` | `/api/sources` | 16 methods | 12 methods | none |
+| `events` | `/api/webhooks` | 9 methods incl. `redeliver`, `verify_signature` | 7 methods, no `test` or `redeliver` | none |
+| `approvals` | `/api/approvals` | 10 methods | 10 methods | 8 methods, no `return_for_changes` or `subscribe` |
+| `executions` | `/api/executions` | live, get, replay, tree, pending approvals, raw watch | same minus raw watch | same minus raw watch |
+| `knowledge` | `/api/knowledge-engines`, `/api/knowledge-projects` | cognify, search, graph, jobs, project bootstrap | cognify, search, graph, jobs | cognify, search, graph, jobs |
+| `chat` | `/api/conversations` | 7 methods | none | 7 methods |
+| `tools`, `presets` | `/api/tools`, `/api/tool-presets` | yes | none | yes |
+| `ml_models` | `/api/ml-models` | list only | none | list only |
+
+Detail pages: decisions in [08-howto/09-decisions](../08-howto/09-decisions.md), sources in [02-runtime/17-source-watch](../02-runtime/17-source-watch.md), events in [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md), approvals in [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
+
+No SDK wraps evaluation suites, governance (permission sets, risk tiers, kill switches, audit, run replay) or tool configuration. Call those routes from the [REST reference](../09-reference/00-rest-api.md) directly, in Python through `client.http`.
 
 The newer calls (`me`, `permissions`, `agents.by_slug/create/update`, `decisions`, `sources`, `events`) raise a typed error on any 4xx or 5xx. Decision calls raise `AbenixDecisionError`, the rest raise `AbenixError`. Both carry `status` (HTTP status), `code` (the server's `error_code`, such as `STALE_DRAFT`), `details` and the message. In Python the message is `str(e)`. In TypeScript it is `e.message`. `AbenixDecisionError` subclasses `AbenixError` in Python only.
 

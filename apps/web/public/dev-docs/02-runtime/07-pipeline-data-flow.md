@@ -25,7 +25,7 @@ The engine in [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime
 
 `{{fetch}}` resolves to the full output of the `fetch` node — its tool result object, structured. `{{fetch.body}}` would resolve to just the body. Dot-paths drill into nested JSON.
 
-`depends_on` is the **only** edge that affects scheduling. The template engine doesn't add an implicit dependency just because you used `{{some_node.x}}` — if `some_node` isn't in `depends_on`, the template fires before it has run and resolves to `[not available]`. Always pair the template with the dependency.
+A template that names another step adds that step to `depends_on` when the pipeline is parsed, so `{{some_node.x}}` always waits for `some_node`. Listing the dependency yourself is still clearer to read.
 
 ### 2. Explicit `input_mappings`
 
@@ -78,6 +78,8 @@ else:
 ```
 
 The whole-value vs embedded distinction matters. **`arguments.payload: "{{plan.actions}}"`** delivers the structured list `[{"id": 1}, …]` to the next tool. **`arguments.payload: "actions are {{plan.actions}}"`** delivers the *string* `"actions are [{\"id\": 1}, ...]"` because it has to interpolate inside a wider string.
+
+A step can be named by its id or by its label. The builder gives steps generated ids like `step_1790931980212_b8m3`, so a step labelled `score` is reached with `{{score.response}}`. Labels are lowercased and anything that is not a letter, digit or underscore becomes `_`, so `Exposure Check` is `{{exposure_check.response}}`. A label only works when it is unique in the pipeline, and an id always wins over a label with the same text. The validator applies the same rule, so an unknown name is still an error.
 
 If a template references a node that has not run (skipped by a condition, or upstream failed), the value resolves to the literal string `[not available]`. Downstream tools see a string, not `None`. This is intentional — it surfaces the gap as a visible value the LLM can reason about rather than failing silently with a null.
 

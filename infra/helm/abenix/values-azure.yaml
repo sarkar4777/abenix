@@ -208,8 +208,6 @@ service:
 # ── Feature toggles matching values-local.yaml ─────────────────────────────
 networkPolicy:
   enabled: false
-backup:
-  enabled: false
 mlModels:
   enabled: true
   # azurefile-csi (Azure Files) is required because the PVC declares
@@ -360,6 +358,7 @@ backup:
   persistentVolume:
     enabled: true
     storageClass: azurefile-csi
+    accessMode: ReadWriteMany
     size: 50Gi
   neo4j:
     enabled: true

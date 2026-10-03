@@ -5,7 +5,9 @@
   2. DOCX / PPTX / XLSX / HTML / EPUB / RTF → office (unstructured).
   3. CSV / TSV / JSON / TXT / MD → plain UTF-8 read.
   4. PNG / JPG / TIFF → vision_pdf single page.
-  5. Audio (MP3 / WAV / M4A) → audio extractor (Whisper).
+  5. Anything else → read as UTF-8 text.
+
+DOCX falls back to python-docx when unstructured is not installed.
 
 Returns (`blocks`, `method`, `quality_score`) where quality_score is
 [0,1] indicating how confident we are that we got the full content.
@@ -19,6 +21,14 @@ from pathlib import Path
 from .base import ExtractedBlock
 
 logger = logging.getLogger(__name__)
+
+
+_MIME_EXT = {
+    "pdf": "pdf",
+    "vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "plain": "txt",
+    "markdown": "md",
+}
 
 
 def _ext(blob_path: str) -> str:
@@ -45,10 +55,38 @@ async def _read_text(blob_path: str) -> list[ExtractedBlock]:
     ]
 
 
+async def _read_docx(blob_path: str) -> list[ExtractedBlock]:
+    try:
+        from docx import Document
+    except ImportError:
+        return []
+    try:
+        doc = Document(blob_path)
+    except Exception:
+        logger.exception("python-docx could not open %s", blob_path)
+        return []
+    text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    if not text.strip():
+        return []
+    return [
+        ExtractedBlock(
+            text=text,
+            paragraph_idx=0,
+            char_offset_start=0,
+            char_offset_end=len(text),
+            metadata={"extractor": "docx"},
+        )
+    ]
+
+
 async def extract_document(
-    blob_path: str, content_type: str | None = None
+    blob_path: str,
+    content_type: str | None = None,
+    file_type: str | None = None,
 ) -> tuple[list[ExtractedBlock], str, float]:
-    ext = _ext(blob_path)
+    """file_type (the stored extension) wins over the path suffix, which a temp download may lack."""
+    hint = (file_type or "").lower().rsplit("/", 1)[-1].lstrip(".")
+    ext = _MIME_EXT.get(hint, hint) or _ext(blob_path)
     blocks: list[ExtractedBlock] = []
     method = "unknown"
     quality = 0.0
@@ -91,6 +129,10 @@ async def extract_document(
         )
         method = "office"
         quality = 0.9 if blocks else 0.0
+        if not blocks and ext == "docx":
+            blocks = await _read_docx(blob_path)
+            method = "docx"
+            quality = 0.85 if blocks else 0.0
     elif ext in ("txt", "md", "json", "csv", "tsv", "log"):
         blocks = await _read_text(blob_path)
         method = "text_plain"
@@ -104,6 +146,8 @@ async def extract_document(
         method = "vision_image"
         quality = 0.7 if blocks else 0.0
     else:
-        logger.warning("no extractor for ext=%s path=%s", ext, blob_path)
+        blocks = await _read_text(blob_path)
+        method = "text_plain"
+        quality = 0.5 if blocks else 0.0
 
     return blocks, method, quality

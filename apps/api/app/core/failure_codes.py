@@ -50,7 +50,7 @@ _RULES: list[tuple[str, str]] = [
     (r"tool.*not.*found|unknown\s+tool", "TOOL_NOT_FOUND"),
     (r"toolerror|tool.*error|tool.*exception", "TOOL_ERROR"),
     # Budget / quota
-    (r"budget|quota|insufficient.*credit", "BUDGET_EXCEEDED"),
+    (r"budget|quota|insufficient.*credit|spending\s+limit", "BUDGET_EXCEEDED"),
     (r"rate.?limit.*user|too.*many.*requests", "RATE_LIMITED"),
     # Infra
     (r"connection\s*(refused|reset)|broken.*pipe|server\s*disconnect", "INFRA_CRASH"),

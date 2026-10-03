@@ -98,7 +98,7 @@ export default function PrivacyPage() {
       if (!res.error) {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
-        window.location.href = '/login';
+        window.location.href = '/';
       } else {
         toastError('Failed to delete account', res.error);
       }

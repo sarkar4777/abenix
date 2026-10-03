@@ -1,4 +1,4 @@
-"""Queue-backend abstraction — Celery (default) or NATS JetStream."""
+"""Queue-backend abstraction. NATS JetStream runs queued agents, Celery is refused."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ import json
 import logging
 import os
 import uuid
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 logger = logging.getLogger(__name__)
+
+# the JetStream default, so a durable created before this line behaves the same
+ACK_WAIT_SECONDS = 30
 
 
 class QueueBackend:
@@ -20,49 +23,56 @@ class QueueBackend:
     async def stream(self, queue_name: str) -> AsyncIterator[dict]: ...
 
 
+CELERY_UNSUPPORTED = (
+    "QUEUE_BACKEND=celery cannot run agents on the runtime pools. Queued agent "
+    "execution runs on NATS JetStream only: set scaling.queueBackend=nats, or "
+    "set scaling.execRemote=false to run agents inline in the API."
+)
+
+
 class CeleryBackend(QueueBackend):
-    """Thin wrapper over the existing Celery app. Preserves current
-    behaviour 1:1 so turning this on changes nothing."""
-
-    def __init__(self) -> None:
-        try:
-            from worker.celery_app import celery_app, execute_agent_task  # type: ignore
-
-            self.celery_app = celery_app
-            self._execute = execute_agent_task
-        except Exception as e:
-            logger.warning("CeleryBackend failed to import worker tasks: %s", e)
-            self.celery_app = None
-            self._execute = None
+    """Placeholder for QUEUE_BACKEND=celery. Agent runs are not queued on Celery."""
 
     async def submit(self, queue_name: str, payload: dict) -> str:
-        if self._execute is None:
-            raise RuntimeError("Celery not available; install celery + redis")
-        # Route to per-pool queue name. If the caller already used a
-        # full queue name it passes through unchanged.
-        queue = queue_name if "." in queue_name else f"celery.pool.{queue_name}"
-        # apply_async to named queue; Celery routes via its broker.
-        async_result = self._execute.apply_async(kwargs=payload, queue=queue)
-        return async_result.id
+        raise RuntimeError(CELERY_UNSUPPORTED)
 
     async def status(self, task_id: str) -> dict:
-        if self.celery_app is None:
-            return {"state": "UNKNOWN", "result": None}
-        res = self.celery_app.AsyncResult(task_id)
-        return {"state": res.state, "result": res.result if res.ready() else None}
+        return {"state": "UNKNOWN", "result": None, "note": CELERY_UNSUPPORTED}
 
-    async def stream(self, queue_name: str) -> AsyncIterator[dict]:
-        # Celery doesn't stream natively — this path is only for NATS.
-        # We yield nothing so a caller that iterates on `stream` for
-        # celery just gets an empty iterator (consumer runs in celery
-        # worker instead).
-        if False:
-            yield {}
+    async def stream(self, queue_name: str) -> AsyncIterator["QueueMessage"]:
+        raise RuntimeError(CELERY_UNSUPPORTED)
+        yield  # pragma: no cover
+
+
+class QueueMessage:
+    """One delivery. The consumer acks it when the run is finished, not when it starts."""
+
+    def __init__(self, data: dict, msg: Any = None) -> None:
+        self.data = data
+        self._msg = msg
+
+    @property
+    def num_delivered(self) -> int:
+        try:
+            return int(self._msg.metadata.num_delivered)
+        except Exception:
+            return 1
+
+    async def ack(self) -> None:
+        if self._msg is not None:
+            await self._msg.ack()
+
+    async def nak(self, delay: float | None = None) -> None:
+        if self._msg is not None:
+            await self._msg.nak(delay=delay)
+
+    async def in_progress(self) -> None:
+        if self._msg is not None:
+            await self._msg.in_progress()
 
 
 class NATSBackend(QueueBackend):
-    """JetStream-backed queue. Imports are lazy so Celery deployments
-    don't pay the dependency cost."""
+    """JetStream-backed queue, delivered at least once."""
 
     def __init__(self) -> None:
         try:
@@ -99,7 +109,13 @@ class NATSBackend(QueueBackend):
         await self._ensure()
         task_id = str(uuid.uuid4())
         subject = f"agents.{queue_name}"
-        body = json.dumps({"task_id": task_id, "payload": payload}).encode()
+        envelope: dict[str, Any] = {"task_id": task_id, "payload": payload}
+        from engine.tracing import inject_carrier
+
+        carrier = inject_carrier()
+        if carrier:
+            envelope["trace"] = carrier
+        body = json.dumps(envelope).encode()
         await self._js.publish(subject, body)
         return task_id
 
@@ -113,31 +129,36 @@ class NATSBackend(QueueBackend):
             "note": "Use the executions endpoint for NATS-backed status",
         }
 
-    async def stream(self, queue_name: str) -> AsyncIterator[dict]:
+    async def stream(self, queue_name: str) -> AsyncIterator[QueueMessage]:
         await self._ensure()
         subject = f"agents.{queue_name}"
+        try:
+            from nats.js.api import ConsumerConfig  # type: ignore
+
+            config = ConsumerConfig(ack_wait=ACK_WAIT_SECONDS)
+        except Exception:
+            config = None
         psub = await self._js.pull_subscribe(
             subject,
             durable=f"abenix-{queue_name}-consumer",
+            config=config,
         )
         try:
             while True:
                 try:
                     msgs = await psub.fetch(1, timeout=5)
                 except Exception:
-                    # Nothing pending — just keep polling. Prevents a
-                    # tight loop against JetStream and yields cleanly if
-                    # the consumer is cancelled by an outer task.
                     await asyncio.sleep(0)
                     continue
                 for msg in msgs:
                     try:
                         data = json.loads(msg.data.decode("utf-8"))
-                        yield data
-                        await msg.ack()
                     except Exception as e:
-                        logger.exception("NATS stream decode failed: %s", e)
-                        await msg.nak()
+                        # undecodable forever, redelivering it would loop
+                        logger.exception("NATS message decode failed: %s", e)
+                        await msg.term()
+                        continue
+                    yield QueueMessage(data, msg)
         finally:
             try:
                 await psub.unsubscribe()
@@ -149,23 +170,15 @@ _backend: Optional[QueueBackend] = None
 
 
 def get_queue_backend() -> QueueBackend:
-    """Return the active queue backend. Honours QUEUE_BACKEND env;
-    falls back to Celery if NATS is requested but unavailable."""
+    """Return the backend named by QUEUE_BACKEND. Only nats runs queued agents."""
     global _backend
     if _backend is not None:
         return _backend
 
     requested = os.environ.get("QUEUE_BACKEND", "celery").lower()
     if requested == "nats":
-        candidate = NATSBackend()
-        if candidate._nats is None:
-            logger.warning(
-                "QUEUE_BACKEND=nats but nats-py missing — falling back to Celery"
-            )
-            _backend = CeleryBackend()
-        else:
-            logger.info("Using NATS JetStream queue backend")
-            _backend = candidate
+        _backend = NATSBackend()
     else:
+        logger.warning(CELERY_UNSUPPORTED)
         _backend = CeleryBackend()
     return _backend

@@ -15,6 +15,18 @@ WORKDIR /app
 RUN rm -f /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-* -rf 2>/dev/null; true
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Next.js inlines NEXT_PUBLIC_* into the bundle at build time, so they must be set here.
+# Empty means the code's own fallback, which is what an unset variable gave before.
+ARG NEXT_PUBLIC_API_URL=""
+ARG NEXT_PUBLIC_APP_URL=""
+ARG NEXT_PUBLIC_ENABLE_MONETIZATION=""
+ARG NEXT_PUBLIC_AUDIT_NATIVE=""
+ARG NEXT_PUBLIC_GRAFANA_URL=""
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV NEXT_PUBLIC_ENABLE_MONETIZATION=${NEXT_PUBLIC_ENABLE_MONETIZATION}
+ENV NEXT_PUBLIC_AUDIT_NATIVE=${NEXT_PUBLIC_AUDIT_NATIVE}
+ENV NEXT_PUBLIC_GRAFANA_URL=${NEXT_PUBLIC_GRAFANA_URL}
 RUN npm run build --workspace=@abenix/web
 
 FROM base AS runner

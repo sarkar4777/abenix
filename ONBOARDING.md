@@ -1,6 +1,6 @@
-# Onboarding — 30 minutes to a working local Abenix
+# Onboarding, 30 minutes to a working local Abenix
 
-This is the path to "I can log in, run an agent, and ship a one-line change". It assumes you have git, docker, node 20+, and python 3.12 already installed.
+This is the path to "I can log in, run an agent, and ship a one-line change". It assumes you have git, Docker, Node 20+ and Python 3.12 installed. On Windows use Git Bash or WSL, the scripts are bash.
 
 ## 1. Fork and clone (2 min)
 
@@ -9,154 +9,117 @@ git clone git@github.com:<your-username>/abenix.git
 cd abenix
 ```
 
-## 2. Bring up the data plane (3 min)
-
-Postgres and Redis are the only services Abenix can't run without. Boot them with docker-compose:
+## 2. Set an LLM key (1 min)
 
 ```bash
-docker compose up -d postgres redis
+cp .env.example .env
 ```
 
-Verify:
-
-```bash
-docker compose ps
-# postgres should be "healthy", redis "healthy"
-```
-
-## 3. Install language toolchains (5 min)
-
-```bash
-# Node toolchain (web + e2e)
-npm ci
-
-# Python toolchain (api + agent-runtime + worker)
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e apps/api -e apps/agent-runtime -e apps/worker -e packages/db
-pip install black ruff pytest pytest-asyncio
-```
-
-## 4. Set the one required key (1 min)
-
-The platform is multi-LLM but Anthropic is the default. Anything you'll demo needs at least this:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...   # add to ~/.bashrc / ~/.zshrc to persist
-```
+Open `.env` and set at least `ANTHROPIC_API_KEY`. The platform is multi-LLM but Anthropic is the default. `scripts/dev-local.sh` reads `.env` on every start, so the API, the agent runtime and the worker all see it.
 
 Optional but useful:
-- `OPENAI_API_KEY` — moderation gate + GPT-* models
-- `TAVILY_API_KEY` — `tavily_search` tool
-- `PINECONE_API_KEY` — Pinecone-backed vector recall
+- `OPENAI_API_KEY`, for the moderation gate, GPT models and embeddings
+- `TAVILY_API_KEY`, for `tavily_search`
+- `PINECONE_API_KEY`, for Pinecone-backed vector recall
 
-The full catalogue is in [the Integrations page docs](docs/integrations.md) (also visible in-product at `/settings/integrations` once logged in).
+Tool keys do not have to live in `.env`. Once you are signed in, an admin can paste them under **Admin -> Tool Configuration**, which lists every key a built-in tool reads, see [docs/08-howto/08-tool-configuration.md](docs/08-howto/08-tool-configuration.md). `/settings/integrations` shows the same list to everyone.
 
 ### Production-only secret: at-rest encryption KEK
 
-When you take this to production, also set `ABENIX_DATA_KEY_KEK_BASE64` — a 32-byte base64 key that wraps the per-tenant DEK for AES-256-GCM encryption of sensitive PersonaItem + AgentMemory fields. Local dev runs fine without it (encryption is a silent no-op + a warning logs once). Generate + inject via [`docs/08-howto/06-encryption-setup.md`](docs/08-howto/06-encryption-setup.md) — five commands, ~2 min.
+When you take this to production, also set `ABENIX_DATA_KEY_KEK_BASE64`, a 32-byte base64 key that wraps the per-tenant keys for AES-256-GCM encryption of sensitive persona and memory fields and of saved tool credentials. Local dev runs fine without it, values are stored as entered and a warning logs once. Setup is in [docs/08-howto/06-encryption-setup.md](docs/08-howto/06-encryption-setup.md).
 
-## 5. Run migrations + seed (3 min)
-
-```bash
-cd packages/db
-alembic upgrade head
-cd ../..
-
-python scripts/seed-standalone-keys.sh    # provisions demo admin@abenix.dev / Admin123456
-```
-
-## 6. Boot the platform (5 min)
-
-In separate terminals (or use the helper):
-
-```bash
-# Terminal A — API
-cd apps/api && uvicorn app.main:app --reload --port 8000
-
-# Terminal B — agent runtime (default pool)
-cd apps/agent-runtime && python -m engine.consumer --pool default
-
-# Terminal C — web
-cd apps/web && npm run dev
-```
-
-Or in one shot:
+## 3. Boot everything (10 min the first time)
 
 ```bash
 bash scripts/dev-local.sh
 ```
 
-## 7. Sign in (1 min)
+It asks which standalone apps to start, then:
 
-Open <http://localhost:3000>. Click "Admin Demo" or sign in with:
+1. stops anything it left running, and any `kubectl port-forward` that would shadow local ports,
+2. runs `docker compose up -d`: Postgres, Redis, NATS, Neo4j, TimescaleDB, MinIO, Mosquitto, pgAdmin and the three edge runtimes,
+3. installs npm packages and `pip install -r requirements.txt` when they are missing,
+4. runs `packages/db/bootstrap.py` and `alembic upgrade heads`, then checks the schema,
+5. seeds the shipped agents, the default accounts, subject policies, portfolio schemas and sample ML models,
+6. starts the API on 8000, the web app on 3000, a Celery worker, the NATS consumer for the `default` agent pool, and the apps you picked.
+
+`APPS=none bash scripts/dev-local.sh` skips the prompt and starts the core platform only. `--status` prints what is up, `--stop` stops it all, `--restart` does both. Logs are in `.local-logs/`.
+
+If you would rather run the whole thing on a local Kubernetes cluster, `bash scripts/deploy.sh local` is the other path, see [docs/08-howto/00-local-setup.md](docs/08-howto/00-local-setup.md).
+
+## 4. Sign in (1 min)
+
+Open <http://localhost:3000>. Click **Admin Demo**, or sign in with:
 
 - **email**: `admin@abenix.dev`
 - **password**: `Admin123456`
 
-You should land on `/dashboard` with a populated sidebar.
+`demo@abenix.dev` / `Demo123456` is a second seeded account. You should land on `/dashboard` with a populated sidebar.
 
-## 8. Smoke a real flow (5 min)
+## 5. Smoke a real flow (5 min)
 
-1. Sidebar → **Agents** → pick any seeded agent → **Run**.
-2. Watch the live trace appear in `/executions/live`.
-3. Sidebar → **Settings → DLP** → set mode to "mask" → save → reload. Value persists. (This is the JSONB regression we caught in v1.10.0.)
-4. Sidebar → **Settings → Integrations** → click "Setup" on any provider. Copy the kubectl / .env snippet.
+1. Sidebar -> **My Agents** -> open a seeded agent and send it a message.
+2. Watch the run under **Monitor -> Live Debug** (`/executions/live`), then open it from **Executions** to see the Flight Recorder.
+3. **Build -> Decisions** -> start from the surcharge example, use **Try it**, and see the rule that applied.
+4. **Admin -> Risk & Controls** shows the four risk tiers and the kill switches. **Run & Test -> Evaluations** and **Build -> Source Watch** are the other 2.5 surfaces.
+5. **Settings -> Data & DLP** -> change the mode, save, reload. The value persists.
 
-## 9. Run the gate (3 min)
+## 6. Run the gate (3 min)
 
-Before you push anything, run:
+Before you push anything:
 
 ```bash
 bash scripts/check-before-push.sh
 ```
 
-This runs the same checks CI will (black, ruff, pytest, eslint, tsc, web build). If it's green locally, CI will be green.
-
-To skip the slow web build when iterating fast:
+It runs black, ruff, `pytest tests/unit/`, the agent seed lint, the README image check, the standalone app tests, pip-audit, ESLint, `tsc`, vitest, the Next build and the docs checks. CI also runs `scripts/check-tool-config.py`, `scripts/gen-tool-docs.py --check` and the agent runtime tests, so run those too when you touch tools.
 
 ```bash
-bash scripts/check-before-push.sh --fast
+bash scripts/check-before-push.sh --fast     # skip the Next build
+bash scripts/check-before-push.sh --python   # Python half only
 ```
 
-## 10. Make a tiny first change (3 min)
+## 7. Make a tiny first change (3 min)
 
 Pick something small to land:
 
-- Fix a typo in a docstring or markdown file.
+- Fix a typo in a docstring or a doc.
 - Add a missing test case.
 - Improve an error message.
 
-Open a PR. The template will ask for a summary, a test plan, and a screenshot if your change is user-visible.
+Open a PR. The template asks for a summary, a test plan and a screenshot if the change is user-visible.
 
 ## Common stumbles
 
 | Symptom | Fix |
 |---|---|
-| `psycopg2.OperationalError` on api startup | postgres isn't healthy yet — `docker compose ps` |
-| `redis.exceptions.ConnectionError` | same — `docker compose up -d redis` |
-| Web shows "Connection failed" on login | API isn't on `:8000`. Check terminal A |
-| `alembic upgrade head` fails on duplicate column | a previous local schema is out of sync — `docker compose down -v` then start over |
-| `ANTHROPIC_API_KEY missing` in agent run | the agent runtime needs it too — `export` before running `python -m engine.consumer` |
-| Tests pass locally but CI is red | versions differ — `pip install black==24.8.0 ruff==0.6.9` to match CI |
+| The API exits at start with a database connection error | Postgres is not healthy yet. `docker compose ps`, then `bash scripts/dev-local.sh --restart` |
+| `redis.exceptions.ConnectionError` | `docker compose up -d redis` |
+| Web shows "Connection failed" on login | The API is not on `:8000`. `bash scripts/dev-local.sh --status`, then read `.local-logs/abenix-api.log` |
+| Schema drift reported after migrations | An old local schema is out of sync. `docker compose down -v`, then start again |
+| An agent run fails with a missing `ANTHROPIC_API_KEY` | Set it in `.env` and run `bash scripts/dev-local.sh --restart` so every process picks it up |
+| A tool answers "X is not configured" | Paste the key under **Admin -> Tool Configuration** |
+| A changed `NEXT_PUBLIC_*` value does nothing in the cluster | These are fixed when the web image is built, `kubectl set env` cannot change them. Set it in `.env` and rebuild the web image with the deploy script. On Azure the Grafana link is built from the ingress host of the last deploy when `NEXT_PUBLIC_GRAFANA_URL` is unset |
+| Tests pass locally but CI is red | Versions differ. `check-before-push.sh` pins black 24.8.0 and ruff 0.6.9 to match CI |
 
 ## Optional: SSO local test
 
 To test Google sign-in locally:
 
 1. Create an OAuth client at <https://console.cloud.google.com/apis/credentials>. Authorized redirect URI: `http://localhost:8000/api/auth/oidc/google/callback`.
-2. Export:
+2. Add to `.env`:
    ```bash
-   export GOOGLE_OIDC_CLIENT_ID=...
-   export GOOGLE_OIDC_CLIENT_SECRET=...
-   export PUBLIC_API_BASE_URL=http://localhost:8000
-   export WEB_BASE_URL=http://localhost:3000
+   GOOGLE_OIDC_CLIENT_ID=...
+   GOOGLE_OIDC_CLIENT_SECRET=...
+   PUBLIC_API_BASE_URL=http://localhost:8000
+   WEB_BASE_URL=http://localhost:3000
    ```
-3. Restart the API. The login page now shows a "Google" button.
-4. GitHub and Microsoft follow the same pattern — see [docs/sso.md](docs/sso.md) for end-to-end provider setup.
+3. `bash scripts/dev-local.sh --restart`. The login page now shows a Google button.
+4. GitHub and Microsoft follow the same pattern, see [docs/sso.md](docs/sso.md).
 
 ## What next
 
-- Browse [ARCHITECTURE.md](ARCHITECTURE.md) for the full map.
-- Look at the latest 5 merged PRs to see what conventions land.
+- [ARCHITECTURE.md](ARCHITECTURE.md) for the map of the repo.
+- The how-tos in [docs/08-howto/](docs/08-howto/): add a tool, add an agent, decisions, evaluation suites, governance, Source Watch and events, testing.
+- Look at the latest merged PRs to see what conventions land.
 - The maintainer is `sarkar4777`. Ping in your PR if you're blocked.

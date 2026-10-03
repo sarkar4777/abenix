@@ -6,7 +6,7 @@ Source: [`packages/db/models/agent.py`](../../packages/db/models/agent.py)
 
 ## `agents`
 
-One row per agent. Tenant-scoped through `TenantMixin`, so every query the API
+One row per agent or pipeline. Tenant-scoped through `TenantMixin`, so every query the API
 issues is filtered by `tenant_id` and nothing crosses a tenant boundary by
 accident.
 
@@ -14,19 +14,21 @@ accident.
 |---|---|---|
 | `id` | uuid | Primary key. |
 | `tenant_id` | uuid | Owning tenant. |
-| `creator_id` | uuid | User who created it. |
+| `creator_id` | uuid | User who created it. NULL for platform-seeded agents. |
 | `name` | text | Display name. |
 | `slug` | text | URL-safe identifier. The SDK and pipeline `agent_slug` references resolve against this. |
 | `description` | text | Shown on the agent card and info page. |
 | `system_prompt` | text | The prompt. Can be long, so it is `Text` rather than a bounded string. |
-| `model_config` | jsonb | Model, sampling, iteration cap and tool list. Mapped in Python as `model_config_` because `model_config` collides with a Pydantic attribute. |
+| `model_config` | jsonb | Model, sampling, iteration cap, tool list, pipeline nodes, risk tier. Mapped in Python as `model_config_` because `model_config` collides with a Pydantic attribute. |
 | `agent_type` | enum | `custom`, `oob`, `vertical`. `oob` are the seeded out-of-the-box agents. |
 | `category` | text | Grouping for the marketplace. |
 | `status` | enum | `draft`, `pending_review`, `active`, `rejected`, `archived`. |
-| `is_published` | bool | Visible in the marketplace. |
-| `version` / `version_tag` | text | Revision identity, see below. |
-| `parent_agent_id` | uuid | Set on a revision, pointing at the agent it was branched from. |
-| `traffic_weight` | float | Share of traffic for a canary revision. |
+| `rejection_reason` | text | Set when marketplace review rejects it. |
+| `is_published` / `marketplace_price` | bool / numeric | Marketplace listing. |
+| `version` / `version_tag` | text | Version label and canary tag, see below. |
+| `parent_agent_id` | uuid | Set on a canary variant, pointing at the agent it was branched from. |
+| `traffic_weight` | float | Share of traffic for a canary variant. |
+| `icon_url` | text | Card icon. |
 
 ### `model_config`
 
@@ -38,9 +40,13 @@ model_config:
   temperature: 0.0
   max_tokens: 1024
   max_iterations: 3
+  risk_tier: high          # low | medium | high | critical, default low
+  output_schema: {...}     # optional JSON Schema
+  input_variables:
+    - name: region
+      default: EMEA
   tools:
     - pii_redactor
-    - text_analyzer
     - knowledge_search
     - moderation_vet
 ```
@@ -54,44 +60,63 @@ mode is exclusive the router pins every call to the configured subscription
 model, and the executions row records both, see
 [02-executions](02-executions.md).
 
+`risk_tier` is read by the `executions_provenance` trigger, by the activation check
+(an output schema and an allowed model may be required) and by the eval gate. See
+[05-governance-decisions](05-governance-decisions.md).
+
+`input_variables` are the declared inputs. Each `default` is applied into the run
+context under whatever the caller sent, and the pipeline validator treats the names
+as valid template targets.
+
 ---
 
-## Revisions and canary
+## Revisions
 
-A revision is another `agents` row with `parent_agent_id` pointing at the
+Every config save writes an `agent_revisions` row.
+
+| Column | Notes |
+|---|---|
+| `agent_id` | The agent. |
+| `revision_number` | Monotonic per agent. The provenance trigger stamps the latest one on each run as `executions.agent_revision`. |
+| `changed_by` | User. |
+| `change_type` | For example `config_update`. |
+| `previous_state` / `new_state` | jsonb snapshots of name, description, prompt, `model_config`, category, status. |
+| `diff_summary` | Short human summary of what changed. |
+
+## Canary variants
+
+A canary is another `agents` row with `parent_agent_id` pointing at the
 original and its own `version_tag`. `traffic_weight` splits traffic between
 them, which is how a new prompt is tried against a slice of real load before it
 replaces the incumbent.
-
-There is no separate revisions table. Listing revisions means selecting rows
-that share a `parent_agent_id`.
 
 ---
 
 ## Cost and scaling columns
 
-These sit on the agent rather than in a side table because the dispatcher reads
+The pool columns sit on the agent rather than in a side table because the dispatcher reads
 them on every run and a join would be on the hot path.
 
 | Column | Effect |
 |---|---|
-| `per_execution_cost_limit` | A single run that exceeds this is stopped. |
-| `daily_cost_limit` / `daily_budget_usd` | Tenant-day budget. The alert webhook archives the agent when a P4 budget alert fires. |
-| `runtime_pool` | Which agent-runtime pool executes it. |
+| `per_execution_cost_limit` / `daily_cost_limit` / `daily_budget_usd` | Spend caps, 0 or less means none. `daily_cost_limit` caps the agent's spend across all callers per UTC day, `daily_budget_usd` caps one tenant's spend on it per UTC day. A run over either is refused with 429 `BUDGET_EXCEEDED`. `per_execution_cost_limit` caps one run: an agent stops with `BUDGET_EXCEEDED` when it wants another step after reaching it, a pipeline fails its next node. `/admin/scaling` edits `daily_budget_usd`. See [Spend caps](../02-runtime/00-agent-execution.md#spend-caps). Pausing an agent from `/admin/scaling` sets `status = archived`. |
+| `runtime_pool` | Which agent-runtime pool executes it, default `default`. `inline` keeps the run on the API pod. |
 | `min_replicas` / `max_replicas` / `concurrency_per_replica` | Per-pool KEDA bounds. |
 | `rate_limit_qps` | Per-agent throttle. |
 | `dedicated_mode` | Gives the agent its own pod instead of sharing a pool. |
 
-See [02-runtime/08-queue-scaling](../02-runtime/08-queue-scaling.md) for how the
+The scaling columns and `daily_budget_usd` are added by idempotent `ALTER TABLE`
+statements in the API startup hook rather than by a migration. See
+[02-runtime/08-queue-scaling](../02-runtime/08-queue-scaling.md) for how the
 pool values become a `ScaledObject`.
 
 ---
 
 ## Pipelines
 
-A pipeline is an agent whose `agent_type` is a pipeline and whose
-`model_config` carries a `pipeline_config` with a node list. It is not a
-separate table. That is why a pipeline run shows up in `executions` with
+A pipeline is an `agents` row whose `model_config.mode` is `pipeline` and whose
+`model_config.pipeline_config` carries a node list. It is not a separate table.
+That is why a pipeline run shows up in `executions` with
 `model_used = "pipeline"` rather than a model id.
 
 Nodes are either a tool step or a nested agent step:
@@ -114,6 +139,11 @@ Full node grammar and the templating rules are in
 [02-runtime/01-pipelines](../02-runtime/01-pipelines.md) and
 [02-runtime/07-pipeline-data-flow](../02-runtime/07-pipeline-data-flow.md).
 
+### `pipeline_states`
+
+A key/value store scoped to one pipeline (`agent_id`, `key`, jsonb `value`), so a
+pipeline can carry data from one run to the next.
+
 ---
 
 ## Related tables
@@ -121,9 +151,13 @@ Full node grammar and the templating rules are in
 | Table | Relationship |
 |---|---|
 | `executions` | One per run. See [02-executions](02-executions.md). |
-| `knowledge_bases` | Many-to-many. Which KBs the agent can search. |
-| `agent_mcp_tools` | MCP tools attached beyond the built-in registry. |
-| `reviews` | Marketplace ratings. |
+| `agent_comments` | Threaded comments (`parent_id`), optionally tied to a `revision_id`, with `is_resolved`. |
+| `agent_favorites` | A user's starred agents, grouped by an optional `collection` name. |
+| `agent_triggers` | `trigger_type` `webhook` (with `webhook_token`) or `schedule` (with `cron_expression`, `next_run_at`). Holds `default_message`, `default_context`, `run_count`, `last_status`. |
+| `knowledge_collections` | A collection can name an owning `agent_id`. Read access for agents is granted through `agent_collection_grants`. See [03-knowledge](03-knowledge.md). |
+| `agent_mcp_tools` | MCP tools attached beyond the built-in registry. See [07-tools-and-operations](07-tools-and-operations.md). |
+| `eval_suites` | Suites that test this agent or pipeline. See [06-evals-sources-events](06-evals-sources-events.md). |
+| `reviews` / `subscriptions` | Marketplace ratings and subscriptions. |
 | `resource_shares` | Per-user access. See [04-resource-shares](04-resource-shares.md). |
 
 ---

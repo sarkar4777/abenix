@@ -6,43 +6,41 @@ A map of the repo so a new contributor knows where to land.
 
 Five things ship from this monorepo:
 
-1. **Abenix platform** — the core product. API, web, agent-runtime workers, background worker, edge runtimes.
-2. **Standalone apps** — domain-specific UIs that proxy through the platform: `wingman/`, `industrial-iot/`, `mideasttourism/`, `contractiq/`, `resolveai/`, `claimsiq/`.
-3. **SDKs** — `packages/sdk/python/` is canonical, copied into every standalone app's `api/sdk/` so they can talk to the platform without a vendored HTTP client.
-4. **Helm chart** — `infra/helm/abenix/` deploys the whole platform plus selected standalones to k8s.
-5. **The public mirror** — `scripts/publish-public.sh` strips sensitive pieces and rewrites history to the public repo on every release.
+1. **Abenix platform**, the core product. API, web, agent-runtime pools, the Celery worker, warm code runners, edge runtimes.
+2. **Standalone apps**, domain UIs that call the platform through the SDK: `contractiq/`, `wingman/`, `industrial-iot/`, `mideasttourism/`, `resolveai/`, `pharmavigil/`, and `claimsiq/` (Java and Vaadin).
+3. **SDKs**. `packages/sdk/python/abenix_sdk/` is canonical. `scripts/sync-sdks.sh` copies it into `packages/agent-sdk/` and every Python standalone's `api/sdk/`, and `--check` fails on drift. `packages/sdk/js/` is the TypeScript SDK (`@abenix/sdk`) and `packages/sdk/react/` holds React bindings.
+4. **Helm chart**. `infra/helm/abenix/` deploys the platform. Standalone apps deploy from their own `<app>/k8s/` manifests.
+5. **The public mirror**. `scripts/publish-public.sh` strips sensitive pieces and rewrites history to the public repo on every release.
 
 ## Top-level layout
 
 ```
 .
 ├── apps/                      # platform services
-│   ├── api/                   # FastAPI — every HTTP route, RBAC, persistence
-│   ├── agent-runtime/         # the workers that execute agents (pooled)
-│   ├── worker/                # background jobs (cron, webhooks, sweepers)
-│   ├── web/                   # Next.js SPA (Tailwind, framer-motion)
-│   ├── edge/                  # Python edge runtime (offline agent execution)
-│   ├── edge-c/                # C edge runtime (constrained devices)
-│   └── edge-rust/             # Rust edge runtime (medium-resource devices)
+│   ├── api/                   # FastAPI, every HTTP route, RBAC, persistence, the scheduler
+│   ├── agent-runtime/         # engine/ (executor, pipelines, tools, decisions), consumer.py per pool
+│   ├── worker/                # Celery: document processing, cognify, KB re-embed
+│   ├── web/                   # Next.js app (Tailwind, framer-motion)
+│   ├── code-runner/           # warm runner gateway for code assets
+│   ├── edge-runtime/          # Python edge runtime (offline agent execution)
+│   ├── edge-runtime-c/        # C edge runtime (constrained devices)
+│   └── edge-runtime-rust/     # Rust edge runtime (medium-resource devices)
 ├── packages/
-│   ├── db/                    # SQLAlchemy models + alembic migrations
-│   ├── agent-sdk/             # Python SDK consumers import
-│   └── sdk/python/abenix_sdk/ # canonical SDK source (synced to consumers)
-├── contractiq/                # standalone ETRM/contracts app
-├── wingman/                   # standalone commodities trading copilot
-├── industrial-iot/            # standalone IoT/predictive maintenance app
-├── mideasttourism/              # standalone Mideast Tourism app
-├── resolveai/                 # standalone customer-support app
-├── claimsiq/                  # standalone insurance-claims app
-├── infra/helm/abenix/         # the Helm chart that deploys everything
-├── docker/                    # Dockerfiles for non-app images
-├── scripts/                   # ops scripts (deploy, build, e2e, publish)
-├── e2e/                       # Playwright E2E suites
-├── tests/unit/                # pure-python unit tests (CI gate)
-└── docs/                      # architecture, ops, release guides
+│   ├── db/                    # SQLAlchemy models, alembic migrations, seeds
+│   ├── sdk/                   # python/ (canonical), js/, react/
+│   ├── agent-sdk/             # synced copy of the Python SDK
+│   ├── mcp-servers/           # MCP servers (BigQuery, Exasol, migration, SQL transform)
+│   └── shared/                # shared TypeScript package
+├── contractiq/ wingman/ industrial-iot/ mideasttourism/ resolveai/ pharmavigil/ claimsiq/
+├── infra/helm/abenix/         # the Helm chart and its values-*.yaml
+├── docker/                    # Dockerfile.api, .web, .worker, .agent-runtime, .model-serving
+├── scripts/                   # deploy, dev, lint, UAT, load and publish scripts
+├── e2e/                       # Playwright specs (uat_*.spec.ts) and fixtures
+├── tests/                     # unit/ (CI gate), integration/, load/
+└── docs/                      # developer docs, also served in-app at /dev-docs
 ```
 
-## Request flow — agent execution
+## Request flow, agent execution
 
 ```mermaid
 sequenceDiagram
@@ -50,24 +48,30 @@ sequenceDiagram
   participant B as Browser / SDK
   participant API as apps/api
   participant DB as Postgres
-  participant Q as Redis Streams
-  participant R as apps/agent-runtime
+  participant Q as NATS JetStream
+  participant R as agent-runtime pool
   participant T as External tools<br/>(Anthropic, Tavily, ...)
 
   B->>API: POST /api/agents/{id}/execute
   API->>DB: insert Execution row
-  API->>Q: enqueue on exec_q:<pool>
-  API-->>B: 202 { execution_id }
+  API->>Q: publish on agents.<pool>
+  API-->>B: execution_id (or the result when wait=true)
   B->>API: GET /api/executions/{id}/watch (SSE)
   R->>Q: consume
   R->>T: tool invocations
   T-->>R: tool results
-  R-->>API: status + events (pub/sub)
+  R-->>API: progress events (Redis pub/sub)
   API-->>B: stream events
-  R->>DB: update Execution + ToolInvocation rows
+  R->>DB: update Execution and tool invocation rows
 ```
 
-Agent code lives in `apps/agent-runtime/engine/`. Tools register themselves in `engine/tools/__init__.py`. The agent runtime pulls work from one of four Redis Streams pools (`chat`, `default`, `heavy-reasoning`, `long-running`) — pool choice is per-agent config and lets KEDA scale each pool independently.
+Agent code lives in `apps/agent-runtime/engine/`. Tools are registered in `_ensure_tool_classes()` in `engine/agent_executor.py`. Each agent has a `runtime_pool`: `default`, `chat`, `heavy-reasoning` or `long-running` run on their own consumer Deployment so KEDA can scale each one on queue depth, and `inline` runs on the API pod for the lowest streaming latency. Queued runs need NATS JetStream (`scaling.queueBackend: nats`), which `values-local.yaml` and `values-azure.yaml` set. The chart refuses `scaling.execRemote` or pools with the default `celery`, and Celery then only runs document, cognify and KB jobs. With `scaling.execRemote` off every run is inline.
+
+Spend caps sit on the agent row. `daily_cost_limit` and `daily_budget_usd` are checked before any run starts on every path, including a2a and batch, which now write execution rows like every other run, and a refusal is 429 `BUDGET_EXCEEDED`. `per_execution_cost_limit` stops a run when it wants another step after reaching the limit, leaving a `budget_stop` step in the Flight Recorder. A pipeline run's cost is the sum over every step, failed and retried ones included. See [docs/02-runtime/00-agent-execution.md](docs/02-runtime/00-agent-execution.md#spend-caps).
+
+Delivery is at least once. The runtime acks a message only after the run ends and holds a lease on the execution row (`runner_id`, `lease_expires_at`, `delivery_attempts`) while it runs. If the pod dies, another pod reruns the agent from the start once the lease expires, so tool side effects can repeat. After 3 pickups the run fails with `STALE_SWEEP`. The W3C `traceparent` rides in the message and on child-agent calls, so one trace covers API, queue, runtime and child runs. See [docs/02-runtime/08-queue-scaling.md](docs/02-runtime/08-queue-scaling.md#at-least-once-delivery).
+
+Every run carries a risk tier and checks the tenant's kill switches before it starts and at each tool call, see [Governance and risk](#governance-and-risk-25) below.
 
 ## Data model — where things live
 
@@ -75,17 +79,22 @@ Everything is tenant-scoped via `tenant_id`. The model lives in [packages/db/mod
 
 | Table | What it holds |
 |---|---|
-| `tenants` | top of the isolation tree; tenant-level settings (DLP, retention) live in the JSONB `settings` column, which is `MutableDict`-wrapped |
-| `users` | password-auth or SSO; `auth_provider` + `external_id` identifies SSO users |
+| `tenants` | top of the isolation tree. Tenant-level settings (DLP, retention) live in the JSONB `settings` column, which is `MutableDict`-wrapped |
+| `users` | password-auth or SSO. `auth_provider` + `external_id` identifies SSO users |
 | `agents` | agent definitions (system prompt, tools, model config, optional DSL) |
-| `executions` | one row per run; node-result trace + token + cost accounting |
-| `tool_invocations` | one row per tool call inside an execution; the source of audit data |
-| `webhooks` | tenant-owned outbound HTTP endpoints; HMAC-signed deliveries logged in `webhook_deliveries` |
-| `api_keys` | `af_*` keys for SDK callers; raw key shown once on create |
+| `executions` | one row per run, node-result trace + token + cost accounting |
+| `tool_invocations` | one row per tool call inside an execution, the source of audit data |
+| `webhooks` | event subscriptions, each a signed webhook or an agent or pipeline to start. Deliveries live in `webhook_deliveries`, pending events in `event_outbox` |
+| `api_keys` | `af_*` keys for SDK callers, raw key shown once on create |
 | `approvals` | HITL gates with signoff |
-| `mcp_connections` | per-user MCP servers wired into agents at runtime |
-| `code_assets`, `knowledge_bases`, `ml_models` | uploadable artifacts |
-| `activity_log` | append-only audit trail |
+| `user_mcp_connections` | per-user MCP servers wired into agents at runtime |
+| `code_assets`, `knowledge_collections`, `ml_models` | uploadable artifacts |
+| `activity_logs` | append-only audit trail, hash-chained per tenant |
+| `decision_models`, `decision_versions`, `decision_tests`, `decision_evaluations`, `reference_sets`, `reference_set_versions` | versioned business rules, golden tests, recorded evaluations and named value lists |
+| `eval_suites`, `eval_cases`, `eval_runs`, `eval_results` | evaluation suites and their scored runs |
+| `watch_sources`, `source_snapshots`, `source_changes` | Source Watch |
+| `risk_policies`, `kill_switches`, `permission_sets`, `permission_assignments`, `execution_config_snapshots` | governance |
+| `tenant_tool_credentials`, `platform_settings` | tool configuration saved per tenant, and platform-wide settings including `tool.credential.*` |
 
 ## SSO (Google / GitHub / Microsoft)
 
@@ -99,7 +108,7 @@ SSO flow (new in v1.11): three endpoints in [sso.py](apps/api/app/routers/sso.py
 2. `GET /api/auth/oidc/{provider}/start?return_to=/dashboard` — signs a short-lived state JWT (return_to + nonce + provider, 10-min expiry) and 302s to the provider's authorize endpoint.
 3. `GET /api/auth/oidc/{provider}/callback?code=...&state=...` — verifies state, exchanges code, fetches userinfo, upserts the user (match by `(auth_provider, external_id)` then by email then new), issues access + refresh tokens, 302s to `${WEB_BASE_URL}/auth/callback#access_token=...&refresh_token=...&return_to=...`. The SPA's [/auth/callback page](apps/web/src/app/auth/callback/page.tsx) stashes the tokens in localStorage and forwards.
 
-State is a signed JWT (HS256, same secret as access tokens) — no Redis needed. The `users.auth_provider` + `users.external_id` columns (added in migration `a7b8c9d0e1f2`) carry the SSO link; the pair is unique-indexed so callback resolves in one query.
+State is a signed JWT (HS256, same secret as access tokens) — no Redis needed. The `users.auth_provider` + `users.external_id` columns (added in migration `a7b8c9d0e1f2`) carry the SSO link. The pair is unique-indexed so callback resolves in one query.
 
 End-user docs in [docs/sso.md](docs/sso.md). Per-provider setup, env vars, and the kubectl one-liner are there.
 
@@ -113,7 +122,7 @@ A KB is one collection of documents, with vectors stored either in Pinecone (def
 
 ```mermaid
 flowchart LR
-  U["Upload PDF / DOCX / PNG / Audio"] --> D["documents row"]
+  U["Upload PDF / DOCX / TXT / CSV / MD / JSON"] --> D["documents row"]
   D --> EX["extractors/dispatch.py"]
   EX -->|text-extractable PDF| T["text_pdf"]
   EX -->|scanned PDF| V["vision_pdf<br/>Claude Haiku via PyMuPDF"]
@@ -135,7 +144,7 @@ Key columns on `documents` (v2.0):
 
 | Column | Role |
 |---|---|
-| `is_current` | search default filters `is_current=true`; superseded versions excluded |
+| `is_current` | search default filters `is_current=true`, superseded versions excluded |
 | `parent_document_id` | head of the version chain |
 | `version_number` | monotonic counter (1, 2, 3, …) |
 | `superseded_by` | pointer to the row that replaced this one |
@@ -144,15 +153,19 @@ Key columns on `documents` (v2.0):
 | `extraction_method` | `text_pdf` / `vision_pdf` / `office` / `text_plain` / `vision_image` |
 | `extraction_quality` | 0.0-1.0 inferred from chars-per-page, flag low-quality docs |
 
-Document-level ACL (`document_grants`) pre-filters the vector candidate pool BEFORE similarity scoring, with a 60s Redis cache keyed on `(user, kb_id)`. A KB shared at the collection level can still partition individual docs across teams.
+Ingest records `extraction_method` and `extraction_quality`, and each chunk keeps its page number. Vision OCR needs PyMuPDF and `ANTHROPIC_API_KEY` on the worker.
 
-Hybrid retrieval — vector similarity + graph traversal + reranker — lives in `apps/api/app/services/knowledge/hybrid_search.py`. The reranker hook in `services/reranker.py` plugs Cohere `rerank-english-v3.0` (when `COHERE_API_KEY` is set) or Claude Haiku scoring (fallback). Every returned chunk carries a `Citation{document_id, page, chunk_index, char_offset_start/end, anchor_url}`.
+Document-level ACL (`document_grants`) is checked before similarity scoring. A document with no grants is visible to everyone who can read the collection. The first grant restricts it to its grantees (users or agents), tenant admins, the collection creator and holders of WRITE or ADMIN on the collection. The document list hides restricted documents too. Only collection editors add or remove grants.
+
+Hybrid retrieval, vector similarity plus graph traversal plus reranker, lives in `apps/agent-runtime/engine/knowledge/hybrid_search.py`. The reranker in `engine/knowledge/reranker.py` runs Cohere `rerank-english-v3.0` when `COHERE_API_KEY` is set, and the Claude Haiku scorer only with `RERANKER_PROVIDER=llm`. Every chunk hit carries `metadata.citation` with `document_id`, `page`, `chunk_index` and character offsets.
+
+Each collection embeds with its own `embedding_model`, one of `text-embedding-3-small`, `text-embedding-3-large` (at 1536 dimensions), `text-embedding-ada-002` or `local-hashing-v1`. `POST /api/knowledge/{kb}/reembed` re-reads and re-chunks every document with the new model, then switches the collection in one step. `GET` on the same path reports progress.
 
 ### Atlas — the typed knowledge graph
 
 Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_graphs`, `atlas_nodes`, `atlas_edges`) for ACL and audit. Five starter ontologies ship in `ATLAS_STARTERS`: FIBO Core, FIX Protocol, EMIR, ISDA, ETRM EOD. New ontologies are a YAML drop.
 
-**Six agent tools** access Atlas:
+**Five agent tools** access Atlas:
 
 | Tool | What it does | When agents pick it |
 |---|---|---|
@@ -160,8 +173,7 @@ Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_
 | `atlas_query` | typed pattern query against the graph | "find contracts where notional > $50M with >3 unconfirmed trades" |
 | `atlas_traverse` | walk N hops along typed edges | "trace the supply chain from raw material to finished product" |
 | `atlas_search_grounded` | hybrid keyword + embedding search over node properties | "find the clause about late delivery" |
-| `atlas_cypher` *(v2.0)* | **read-only Cypher sandbox**. Validator rejects CREATE/MERGE/DELETE/SET/REMOVE/LOAD CSV/CALL apoc. Auto-injects `$abenix_tenant_id` and `$abenix_graph_id`. Row cap 1000, timeout 10s | "MATCH (p:Person)-[r:WORKS_FOR]->(c:Company) WHERE c.revenue > 1B RETURN p, r, c" |
-| `atlas_as_of` *(v2.0)* | **bi-temporal query** at any timestamp | "what did we know about contract X on 2025-01-15?" |
+| `atlas_as_of` *(v2.0)* | the graph as it stood at a past moment, from the newest snapshot at or before it, or the live graph when nothing changed since. Inputs `graph_id`, `as_of`, `label_like`, `kind`, `limit` | "what did the ontology say about counterparties on 2025-01-15?" |
 
 **Bi-temporal columns** (v2.0) on `atlas_nodes` and `atlas_edges`:
 
@@ -170,7 +182,7 @@ Atlas lives in **Neo4j** (graph structure) with mirror rows in Postgres (`atlas_
 - `recorded_at` — when we learned it
 - `source_anchors` — JSONB array of `[{document_id, page, chunk_id, confidence}, …]` per source
 
-When a document is replaced, edges derived from the old version close out (`valid_to = supersede_time`) and new edges open with `valid_from = now`. Default Cypher uses `WHERE valid_to IS NULL` so routine queries see only current state.
+`atlas_as_of` keeps live rows inside their `valid_from` and `valid_to`.
 
 ### Cognify — the document → graph pipeline
 
@@ -179,17 +191,17 @@ Stages:
 2. **Entity proposer** — LLM-driven against the active ontology, with per-tenant `auto_accept_threshold`.
 3. **Relationship proposer** — types edges between proposed entities.
 4. **Schema validator** — proposal must conform to the active ontology, else rejected.
-5. **Human review or auto-accept** — above-threshold proposals land directly; the rest queue in `cognify_conflicts` for `/settings/cognify` resolution.
+5. **Threshold and conflicts** — proposals below `auto_accept_threshold` are left out of the graph and counted in the job report. When sources disagree on an entity's type, `conflict_action` decides, and with `flag` an open row lands in `cognify_conflicts` for `/settings/cognify`. Resolving it writes the chosen type to the graph.
 6. **Graph writer** — MERGE-by-canonical-name with the v2 bi-temporal columns set.
 
 **Per-tenant `cognify_configs`**:
 
 | Field | Default | Notes |
 |---|---|---|
-| `auto_accept_threshold` | 0.85 | proposals at this confidence land without review |
-| `conflict_action` | `flag` | also: `split`, `lower_conf_wins`, `higher_conf_wins` |
-| `max_parallel_docs` | 8 | in-job `asyncio.gather + Semaphore(N)` |
-| `daily_budget_usd` | unset | hard cap on extraction LLM spend per tenant per day |
+| `auto_accept_threshold` | 0.85 | proposals below it stay out of the graph |
+| `conflict_action` | `flag` | for entity-type disagreements. Also `split`, `lower_conf_wins`, `higher_conf_wins` |
+| `max_parallel_docs` | 8 | documents processed at once in a job |
+| `daily_budget_usd` | unset | once the tenant's Cognify spend for the UTC day reaches it, jobs stop taking documents |
 
 **Incremental cognify** (v2.0) only fetches `documents` where `cognified_at IS NULL OR updated_at > cognified_at`. Adding 100 new docs to a 10k-doc KB no longer re-processes the entire corpus.
 
@@ -203,7 +215,7 @@ v2.0 additions:
 
 ### GDPR cascade
 
-`POST /api/gdpr/users/{id}/purge` cascades across five stores: postgres (soft-delete), Pinecone (vectors by metadata filter, retried 3×), Neo4j (DETACH DELETE nodes with the user_id property), `/data` blobs, and trajectory memory. Every per-store attempt writes a `gdpr_purge_log` row. `GET /api/gdpr/users/{id}/receipts` exposes the audit trail for regulators.
+`POST /api/gdpr/users/{id}/purge` cascades across five stores for a user in the caller's tenant: postgres (persona items soft-deleted, agent memories only for agents the person created, the user row scrubbed, every message in the person's conversations and their conversation titles replaced with `[erased]`, their runs' input, output and traces cleared, audit rows keeping their salted digest with the salt dropped), Pinecone (the person's persona vectors, retried 3 times), Neo4j (Cognify entities naming the person by email, or by full name on person entities, plus their Postgres graph rows), blobs (code asset archives and ML model files the person uploaded and nothing still uses, the person's storage folder, and their cloned voice at the provider), and trajectory memory (records from the person's runs). Every per-store attempt writes a `gdpr_purge_log` row with `affected_count`. `GET /api/gdpr/users/{id}/receipts` exposes the audit trail, and `/settings/gdpr` shows the count as Removed.
 
 ### Migration story
 
@@ -222,23 +234,50 @@ So `bash scripts/deploy-azure.sh deploy` on a fresh AKS cluster works end-to-end
 | KB REST | [`apps/api/app/routers/knowledge.py`](apps/api/app/routers/knowledge.py) (prefix `/api/knowledge-bases`) |
 | v2 admin endpoints (versioning, reembed, cognify config, conflicts) | [`apps/api/app/routers/knowledge_v2.py`](apps/api/app/routers/knowledge_v2.py) (prefix `/api/knowledge`) |
 | Document grants | [`apps/api/app/routers/document_grants.py`](apps/api/app/routers/document_grants.py) |
-| Doc-level ACL pre-filter | [`apps/api/app/services/document_access.py`](apps/api/app/services/document_access.py) |
+| Doc-level ACL pre-filter | [`apps/agent-runtime/engine/knowledge/document_acl.py`](apps/agent-runtime/engine/knowledge/document_acl.py), [`apps/api/app/services/document_access.py`](apps/api/app/services/document_access.py) |
 | Atlas REST | [`apps/api/app/routers/atlas.py`](apps/api/app/routers/atlas.py) |
 | Cognify REST | [`apps/api/app/routers/knowledge_engine.py`](apps/api/app/routers/knowledge_engine.py) |
-| Cognify pipeline | [`apps/api/app/services/knowledge_engine/cognify_pipeline.py`](apps/api/app/services/knowledge_engine/cognify_pipeline.py) |
-| Extractors | [`apps/api/app/services/extractors/`](apps/api/app/services/extractors/) |
-| Reranker + Citation | [`apps/api/app/services/reranker.py`](apps/api/app/services/reranker.py) |
+| Cognify pipeline | [`apps/agent-runtime/engine/knowledge/cognify_pipeline.py`](apps/agent-runtime/engine/knowledge/cognify_pipeline.py) |
+| Extractors | [`apps/agent-runtime/engine/knowledge/extractors/`](apps/agent-runtime/engine/knowledge/extractors/) |
+| Reranker + Citation | [`apps/agent-runtime/engine/knowledge/reranker.py`](apps/agent-runtime/engine/knowledge/reranker.py) |
 | GDPR | [`apps/api/app/services/gdpr_purge.py`](apps/api/app/services/gdpr_purge.py), [`apps/api/app/routers/gdpr.py`](apps/api/app/routers/gdpr.py) |
 | Persona | [`apps/api/app/routers/persona.py`](apps/api/app/routers/persona.py) |
 | Crypto | [`apps/api/app/core/crypto.py`](apps/api/app/core/crypto.py) |
-| Atlas tools (incl. cypher + as_of) | [`apps/agent-runtime/engine/tools/atlas_tools.py`](apps/agent-runtime/engine/tools/atlas_tools.py), [`apps/agent-runtime/engine/tools/atlas_cypher.py`](apps/agent-runtime/engine/tools/atlas_cypher.py) |
+| Atlas tools (incl. as_of) | [`apps/agent-runtime/engine/tools/atlas_tools.py`](apps/agent-runtime/engine/tools/atlas_tools.py) |
 | KB re-embed worker | [`apps/worker/worker/tasks/kb_reembed.py`](apps/worker/worker/tasks/kb_reembed.py) |
-| Pinecone vacuum worker | [`apps/worker/worker/tasks/pinecone_vacuum.py`](apps/worker/worker/tasks/pinecone_vacuum.py) |
+| Pinecone vacuum worker, queued daily at 02:30 UTC | [`apps/worker/worker/tasks/pinecone_vacuum.py`](apps/worker/worker/tasks/pinecone_vacuum.py) |
+| Embedding models | [`packages/db/embedding_models.py`](packages/db/embedding_models.py) |
 | Bootstrap (drift recovery) | [`packages/db/bootstrap.py`](packages/db/bootstrap.py) |
 | db-migrate init container | [`infra/helm/api/templates/deployment.yaml`](infra/helm/api/templates/deployment.yaml) |
 | Models | [`packages/db/models/knowledge_base.py`](packages/db/models/knowledge_base.py), [`atlas.py`](packages/db/models/atlas.py), [`meeting.py`](packages/db/models/meeting.py) (PersonaItem), [`document_grant.py`](packages/db/models/document_grant.py), [`cognify_config.py`](packages/db/models/cognify_config.py), [`gdpr_purge_log.py`](packages/db/models/gdpr_purge_log.py) |
 | Full v2 reference doc | [`docs/02-runtime/15-v2-knowledge-enterprise.md`](docs/02-runtime/15-v2-knowledge-enterprise.md) |
 | User-facing versioning explainer | [`docs/document-versioning.md`](docs/document-versioning.md) |
+
+## Rules, governance and the 2.5 surfaces
+
+### Decisions
+
+Versioned business rules evaluated by the ZEN engine, so the same facts and version always give the same answer with a trace. Each version applies over a period and can be asked as of any date and as known on any date. Drafts go through check, propose, sign-off by risk tier and publish. Agents and pipelines call them through the `decision_*` tools, apps through `forge.decisions`. Evaluation is stateless in every API pod, compiled decisions are cached by content hash and publishing tells every pod over Redis. See [docs/08-howto/09-decisions.md](docs/08-howto/09-decisions.md).
+
+### Governance and risk (2.5)
+
+Every agent, pipeline, tool, decision, source and code asset has a risk tier, `low` to `critical`. Each tenant has a policy per tier (sign-offs, what happens when a run calls a tool above its tier, allowed models, whether an output schema and passing evaluation suites are required). Kill switches stop a scope or one target, and runtime pods pick them up within five seconds. Capabilities such as `killswitch.manage` come from role defaults plus permission sets. The activity log is hash-chained and verified nightly, and each run records the configuration it ran with so it can be replayed. Code is in `apps/api/app/routers/governance.py`, `apps/api/app/core/capabilities.py`, `apps/agent-runtime/engine/risk.py` and `engine/governance.py`. See [docs/01-architecture/07-governance.md](docs/01-architecture/07-governance.md) and [docs/08-howto/11-governance.md](docs/08-howto/11-governance.md).
+
+### Evaluation suites
+
+Golden cases with assertions, run through the agent's normal execute path inside the API, scored, compared run to run, and used as a publish gate for tiers whose policy requires it. Code is in `apps/api/app/routers/evals.py` and `apps/api/app/services/eval_*.py`. See [docs/08-howto/10-evals.md](docs/08-howto/10-evals.md).
+
+### Source Watch and events
+
+The API scheduler checks due sources every 30 seconds, keeps immutable snapshots and records changes. Changes, decision versions, approvals, kill switches, finished runs and finished eval runs are written to `event_outbox` in the same transaction as the change. A dispatcher job every two seconds fans them out to subscriptions and delivers HMAC-signed webhooks (`X-Abenix-Signature`) or starts an agent or pipeline, with retries and a dead state. See [docs/08-howto/12-source-watch-and-events.md](docs/08-howto/12-source-watch-and-events.md).
+
+### Warm code runners
+
+A `code_asset` call can run in a warm pod that holds one tenant's build of one asset version, called over NATS request and reply, instead of a one-off Job. `CODE_RUNNER_MODE` picks `auto`, `warm` or `job`. The gateway is `apps/code-runner/`, the controller `apps/agent-runtime/engine/code_runners.py`, the chart values `codeRunners.*`. See [docs/02-runtime/16-warm-code-runners.md](docs/02-runtime/16-warm-code-runners.md).
+
+### Tool configuration
+
+A tool declares the keys it needs as `config_fields` and reads them through `self.cfg()`. Values resolve from a tenant value, a platform value, the environment, `packages/db/seeds/tool_defaults.yaml`, then the declared default. **Admin -> Tool Configuration** is generated from the declarations, and `scripts/check-tool-config.py` keeps tools honest in CI. See [docs/08-howto/08-tool-configuration.md](docs/08-howto/08-tool-configuration.md).
 
 ## Routers — where each feature lives
 
@@ -252,7 +291,12 @@ So `bash scripts/deploy-azure.sh deploy` on a fresh AKS cluster works end-to-end
 | ML models | [apps/api/app/routers/ml_models.py](apps/api/app/routers/ml_models.py) |
 | Code assets | [apps/api/app/routers/code_assets.py](apps/api/app/routers/code_assets.py) |
 | MCP connect + install | [apps/api/app/routers/mcp.py](apps/api/app/routers/mcp.py) |
-| Webhooks | [apps/api/app/routers/webhook_config.py](apps/api/app/routers/webhook_config.py) |
+| Event subscriptions and webhooks | [apps/api/app/routers/webhook_config.py](apps/api/app/routers/webhook_config.py) |
+| Decisions and reference sets | [apps/api/app/routers/decisions.py](apps/api/app/routers/decisions.py) |
+| Governance (risk, kill switches, permission sets, audit) | [apps/api/app/routers/governance.py](apps/api/app/routers/governance.py) |
+| Evaluation suites | [apps/api/app/routers/evals.py](apps/api/app/routers/evals.py) |
+| Source Watch | [apps/api/app/routers/sources.py](apps/api/app/routers/sources.py) |
+| Tool configuration (admin) | [apps/api/app/routers/admin_tool_config.py](apps/api/app/routers/admin_tool_config.py) |
 | Approvals (HITL) | [apps/api/app/routers/approvals.py](apps/api/app/routers/approvals.py) |
 | Edge | [apps/api/app/routers/edge.py](apps/api/app/routers/edge.py) |
 | Tools registry | [apps/api/app/routers/tools.py](apps/api/app/routers/tools.py) |
@@ -261,29 +305,28 @@ So `bash scripts/deploy-azure.sh deploy` on a fresh AKS cluster works end-to-end
 
 ## How to add a new...
 
-**A new tool**: drop a single Python file under `apps/agent-runtime/engine/tools/`. Inherit from `BaseTool`, register in `engine/tools/__init__.py`. The tool will surface in the registry, the agent picker, the Builder palette, and `/api/tools` automatically.
+**A new tool**: one Python file under `apps/agent-runtime/engine/tools/`. Inherit from `BaseTool`, set `name`, `description`, `input_schema`, `risk_tier` and any `config_fields`, and register it in `_ensure_tool_classes()` in `engine/agent_executor.py`. It then shows up in the registry, the builder palette, `/api/tools` and, if it declares keys, **Admin -> Tool Configuration**. Walkthrough in [docs/08-howto/01-add-a-tool.md](docs/08-howto/01-add-a-tool.md).
 
-**A new LLM provider**: mirror `_run_anthropic` / `_run_gemini` / `_run_openai` in [apps/api/app/routers/bpm_analyzer.py](apps/api/app/routers/bpm_analyzer.py). Provider keys go in env, surfaced via `/settings/integrations`.
+**A new LLM provider**: subclass `LLMProvider` in [apps/agent-runtime/engine/llm_router.py](apps/agent-runtime/engine/llm_router.py), next to `AnthropicProvider`, `OpenAIProvider`, `GoogleProvider` and `AzureOpenAIProvider`, and declare its key in `PROVIDER_CONFIG_FIELDS` in `engine/provider_credentials.py` so it appears on the Tool Configuration screen.
 
-**A new endpoint**: create the router under `apps/api/app/routers/`, register it in `apps/api/app/main.py`. Always return `success()` / `error()` from `app.core.responses` so the envelope is consistent. Add at least one happy-path test in `tests/unit/`.
+**A new endpoint**: create the router under `apps/api/app/routers/`, register it in `apps/api/app/main.py`. Return `success()` / `error()` from `app.core.responses` so the envelope is consistent. Gate it with `require_capability("<key>")` from `app.core.capabilities` when it belongs to a capability. Add at least one test in `tests/unit/`.
 
-**A new standalone app**: copy an existing standalone (`wingman/` is the cleanest reference), update `api/main.py` to set `app.title` and `app.routes`, point its SDK at the platform via `ABENIX_BASE_URL` + `ABENIX_API_KEY`, add a helm sub-chart under `infra/helm/`.
+**A new standalone app**: copy an existing one (`wingman/` is the cleanest reference), point its SDK client at the platform with an API URL and key from its environment, add its manifest under `<app>/k8s/`, and add it to `APP_REGISTRY` in `scripts/lib/select-apps.sh` so `dev-local.sh` and `deploy.sh` offer it.
 
 ## Build + deploy — the part that bites new contributors
 
-- **Image tags are derived from the git commit SHA** — `your-acr.azurecr.io/api:<sha>`. The Helm chart pins a single tag per image across all deployments using that image.
+- **Image tags are derived from the git commit SHA**, `IMAGE_TAG` defaults to `git rev-parse --short HEAD`. The Helm chart pins a single tag per image across all deployments using that image.
 - **`scripts/deploy-azure.sh build --only=<service>` rewrites the helm template** to the latest SHA for ALL deployments — not just the one you built. This is the [`--only` trap](docs/06-deployment/deploy-only-trap.md): if you build only `api`, helm still rewrites `agent-runtime` and `worker` deployments to a tag that doesn't exist, and those pods go ImagePullBackOff while the old replicas keep serving.
 - **Recovery**: rebuild the missing services with the current SHA, or `kubectl set image deploy/X ...` back to the last known good tag, or `helm rollback`.
-- **The safe pattern**: do `bash scripts/deploy-azure.sh build` (no `--only`) on any change that touches Dockerfiles or shared code. Use `--only` only when you're certain the helm template won't fan out.
+- **The safe pattern**: `bash scripts/deploy-azure.sh redeploy` with no `--only`, which builds every image and lands schemas, seeds and helm together.
 
 ## Tests
 
-- `tests/unit/` — pure-Python primitives (failure-code classifier, pipeline parser, response envelopes, security, moderation, tool registry). Runs in CI. **No live services.**
-- `e2e/` — Playwright suites. Run against a deployed cluster (or a local dev stack). Three headline files:
-  - `uat_enterprise_edge.spec.ts` — settings, JSONB persistence, RBAC edges
-  - `uat_critical_paths.spec.ts` — auth, agents, pipelines, KBs, ML, webhooks, approvals, observability
-  - `uat_ui_journeys.spec.ts` — browser-driven user journeys across the SPA
-- `apps/*/tests/` — older live-DB suites, kept for future revival.
+- `tests/unit/` is pure Python with no live services and gates CI, along with `apps/agent-runtime/tests/` and the lint scripts (`lint-agent-seeds.py`, `check-tool-config.py`, `gen-tool-docs.py --check` and others).
+- `e2e/` holds 69 `uat_*.spec.ts` Playwright specs that run against a local stack or a deployed cluster. `scripts/uat.sh` runs the 13 that form the deploy gate. The 2.5 surfaces have their own specs: `uat_rules_to_agents`, `uat_decisions`, `uat_governance`, `uat_evals`, `uat_source_watch`, `uat_tool_config`.
+- `apps/api/tests/` needs a reachable Postgres, `tests/integration/` needs a running API and `ABENIX_INTEGRATION=1`.
+
+Details, env vars and the CI matrix are in [docs/08-howto/05-testing.md](docs/08-howto/05-testing.md).
 
 ## Where to start as a new contributor
 

@@ -85,15 +85,15 @@ class ApprovalGateTool(BaseTool):
             },
             "agent_execution_id": {
                 "type": "string",
-                "description": "Execution UUID — wired automatically when the runtime supplies it",
+                "description": "Execution UUID, filled from the running agent when left out",
             },
             "agent_id": {
                 "type": "string",
-                "description": "Agent UUID — wired automatically when the runtime supplies it",
+                "description": "Agent UUID, filled from the running agent when left out",
             },
             "auth_token": {
                 "type": "string",
-                "description": "JWT/API key for the API call; runtime fills this from execution context",
+                "description": "JWT or API key for the API call, by default a short-lived token for the user the run belongs to",
             },
         },
         "required": ["payload"],
@@ -101,15 +101,50 @@ class ApprovalGateTool(BaseTool):
 
     POLL_INTERVAL_SECONDS = 2.0
 
+    def __init__(
+        self,
+        execution_id: str = "",
+        agent_id: str = "",
+        tenant_id: str = "",
+        user_id: str = "",
+        user_role: str = "",
+    ) -> None:
+        self._execution_id = execution_id
+        self._agent_id = agent_id
+        self._tenant_id = tenant_id
+        self._user_id = user_id
+        self._user_role = user_role
+
+    def _run_token(self) -> str:
+        # the approval is created as the user the run belongs to
+        if not (self._user_id and self._tenant_id):
+            return ""
+        try:
+            from engine.tools.invoke_agent import mint_user_token
+
+            return mint_user_token(self._user_id, self._tenant_id, self._user_role)
+        except Exception:  # noqa: BLE001
+            return ""
+
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
         payload = arguments.get("payload") or {}
         title = arguments.get("title") or "Action requires approval"
         required = int(arguments.get("required_signoffs") or 1)
         expires_seconds = int(arguments.get("expires_seconds") or 1800)
-        agent_execution_id = arguments.get("agent_execution_id")
-        agent_id = arguments.get("agent_id")
-        auth_token = arguments.get("auth_token") or os.environ.get(
-            "INTERNAL_API_TOKEN", ""
+        from engine import governance
+
+        run = governance.current()
+        agent_execution_id = (
+            arguments.get("agent_execution_id")
+            or self._execution_id
+            or (run.execution_id if run else "")
+            or None
+        )
+        agent_id = arguments.get("agent_id") or self._agent_id or None
+        auth_token = (
+            arguments.get("auth_token")
+            or self._run_token()
+            or os.environ.get("INTERNAL_API_TOKEN", "")
         )
 
         api = _api_base_url()
@@ -131,9 +166,6 @@ class ApprovalGateTool(BaseTool):
         gate_kind = arguments.get("kind") or arguments.get("gate_kind")
         if gate_kind:
             body["gate_kind"] = gate_kind
-        from engine import governance
-
-        run = governance.current()
         if run is not None and run.tier != "low":
             # the API raises the sign-off count to what the tenant requires at this tier
             body["risk_tier"] = run.tier

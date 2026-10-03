@@ -1,22 +1,25 @@
 # Deployment overview
 
-> From `git clone` to a production cluster. Two paths — local (minikube / k3d) and cloud (AKS today. GKE + EKS variants on the roadmap).
+> From `git clone` to a running cluster. Two scripted paths, local minikube and Azure AKS. `deploy.sh cloud` also installs onto whatever cluster your kubectl context points at.
 
 ---
 
-## Two deploy paths, one script entry
+## Two deploy paths, one chart
 
 | Path | Use case | Script |
 |---|---|---|
-| **Local** | Developer laptop, CI integration tests, demos without internet | [`scripts/deploy.sh`](../../scripts/deploy.sh) |
-| **AKS** | Production / staging on Azure Kubernetes Service | [`scripts/deploy-azure.sh`](../../scripts/deploy-azure.sh) |
+| **Local** | Developer laptop, demos, the UAT gate | [`scripts/deploy.sh`](../../scripts/deploy.sh) |
+| **AKS** | Shared staging on Azure Kubernetes Service | [`scripts/deploy-azure.sh`](../../scripts/deploy-azure.sh) |
 
-Both scripts share the same helm chart at [`infra/helm/abenix/`](../../infra/helm/abenix/) and the same Dockerfiles under [`docker/`](../../docker/). The only differences are:
-- where the cluster lives
-- where images get pushed (local registry vs ACR)
-- whether autoscalers + ingresses are wired
+Both install the Helm chart at [`infra/helm/abenix/`](../../infra/helm/abenix/)
+and build the core images from the Dockerfiles under [`docker/`](../../docker/).
+The differences are where the cluster lives, where images go (minikube's Docker
+daemon or ACR), and which values overlay is used (`values-local.yaml` or
+`values-azure.yaml`).
 
-> **Why one chart for both** — keeping local and prod identical eliminates a class of "works on my machine" bugs. The helm `values-local.yaml` and `values-azure.yaml` files override only the bits that genuinely differ (replica counts, storage class, ingress hostname).
+For working on the code without a cluster, `scripts/dev-local.sh` runs the
+processes directly against docker compose. See
+[08-howto/00-local-setup](../08-howto/00-local-setup.md).
 
 ---
 
@@ -24,130 +27,144 @@ Both scripts share the same helm chart at [`infra/helm/abenix/`](../../infra/hel
 
 ```mermaid
 flowchart LR
-  G["git clone"] --> P["Phase 1<br/>Provision infra<br/>create AKS or start minikube"]
-  P --> B["Phase 2<br/>Build + push images<br/>15 images per release"]
-  B --> H["Phase 3<br/>Helm upgrade<br/>main abenix chart"]
-  H --> S["Phase 4<br/>Deploy standalone apps<br/>wingman, contractiq, etc."]
-  S --> SD["Phase 5<br/>Seed agents + KBs + ML models"]
-  SD --> T["Phase 6<br/>Smoke tests + UAT"]
+  G["git clone"] --> P["Provision<br/>minikube, or RG + ACR + AKS"]
+  P --> B["Build + push images"]
+  B --> H["Helm upgrade<br/>abenix chart"]
+  H --> S["Migrations + seeds"]
+  S --> A["Standalone apps<br/>kubectl apply"]
+  A --> R["Reconcile<br/>cluster must settle clean"]
 ```
 
-Each phase is idempotent. Re-running the script after a partial failure picks up where it left off.
+Each step is idempotent. Re-running after a partial failure picks up where it
+left off.
 
 ---
 
-## Phase 1 — provision
-
-### Local
+## Local
 
 ```bash
 bash scripts/deploy.sh local
 ```
 
-What it does:
-1. Starts a local Docker registry on `:5000` (or uses one already up).
-2. Starts minikube (`--driver=docker`, 4 CPUs, 8GB RAM by default).
-3. Enables the ingress addon.
-4. Installs KEDA via helm into the `keda` namespace.
+| Command | What it does |
+|---|---|
+| `local` | Minikube with the platform, standalone apps, seeds and port forwards |
+| `local-runtime` | Same, layering `values-local-runtime.yaml` for the full runtime pool set |
+| `cloud` | Builds and pushes to `REGISTRY` (default `ghcr.io/abenix`), installs with `values-production.yaml` on the current context |
+| `build` | Images only |
+| `reload <svc>` | Rebuilds one image and restarts it. Core: `api`, `web`, `worker`, `agent-runtime`, `edge-runtime`. Apps: `<app>-api`, `<app>-web`, `claimsiq` |
+| `forwards` | Re-establishes every port forward and reports which answer |
+| `observability` | Installs Prometheus, Grafana and Tempo only |
+| `status` / `destroy` | Health check, tear down |
 
-### AKS
+What `local` does:
+
+1. Starts minikube if needed (`--driver=docker --cpus=4 --memory=8192 --disk-size=30g`) and enables the `ingress`, `metrics-server` and `storage-provisioner` addons. `FRESH=true` recreates it from scratch.
+2. Points Docker at minikube's daemon and builds images there, tagged `localhost:5000/abenix/<svc>`. There is no registry container. The local values pull with `pullPolicy: Never`. The pgvector Postgres image is built the same way.
+3. Installs KEDA into the `keda` namespace when the local values ask for it.
+4. Installs mosquitto and timescaledb as their own releases, then the `abenix` chart with `values-local.yaml`.
+5. Seeds, applies the standalone apps you picked, installs the observability stack and starts port forwards.
+
+`WEB_PORT` and `API_PORT` move the forwarded ports. `APPS` picks the standalone
+apps without the prompt.
+
+---
+
+## AKS
 
 ```bash
-source scripts/azure.env       # sets ACR_NAME, AZ_RESOURCE_GROUP, AKS_NAME
+source scripts/azure.env       # optional, pins AZ_RESOURCE_GROUP, ACR_NAME, AKS_NAME
 bash scripts/deploy-azure.sh provision
+bash scripts/deploy-azure.sh deploy
 ```
 
-What it does:
-1. Creates resource group (idempotent).
-2. Creates Azure Container Registry (`your-acr.azurecr.io`).
-3. Creates AKS cluster (3-5 nodes, B-series VMs by default).
-4. Attaches ACR to AKS so pulls auth automatically.
-5. Installs ingress-nginx, KEDA.
+| Command | What it does |
+|---|---|
+| `provision` | Resource group, ACR, AKS, ACR attach, ingress-nginx, KEDA |
+| `build` | `provision`, then build and push every image |
+| `deploy` | Build and push, then deploy everything. `--skip-build` uses what ACR already has |
+| `redeploy` | Build and push, then deploy everything. The day-to-day command after a code change |
+| `seed` | Re-run the seeds and reconcile standalone API keys |
+| `seed-keys` | Reconcile standalone API keys only |
+| `test` | Playwright suites against the AKS endpoints. `E2E_PROJECT`, `E2E_ONLY` narrow it |
+| `status` | Pods, services, ingress and health checks, with every URL |
+| `destroy` | Remove the release and namespace, and the cluster and resource group unless `--keep-cluster` |
+| `all` | `provision`, build, deploy, `status`, `test` |
 
-You only run this once per environment. `provision` is separate from `deploy` so you don't accidentally recreate the cluster.
+Defaults: resource group `abenix-rg`, location `westeurope`, cluster
+`abenix-aks` with 3 `Standard_D4s_v5` nodes, ACR name derived from the
+subscription and resource group. All are environment overrides.
+
+### Always redeploy in full
+
+```bash
+bash scripts/deploy-azure.sh redeploy
+```
+
+Do not use `--only` for platform changes. The Helm step rewrites the image tag
+on every core Deployment to the current SHA, so any image `--only` skipped is
+missing from ACR at that tag and its pods go to `ImagePullBackOff`. Recovery is
+`helm rollback abenix -n abenix`. See [deploy-only-trap](deploy-only-trap.md).
+
+### What a deploy runs
+
+1. **SDK drift gate.** `scripts/sync-sdks.sh --check` must pass, or the script stops. `SKIP_SDK_SYNC_CHECK=1` bypasses it.
+2. **Images.** `api`, `web`, `worker`, `agent-runtime`, `code-runner-python`, `code-runner-node`, then each standalone app's images, built one after another with `docker buildx --platform=linux/amd64 --push`, tagged with the short SHA and `latest`. The cognify worker reuses the `worker` image. Edge runtime images are not rebuilt, they stay on the version pinned in their charts.
+3. **KEDA, mosquitto, timescaledb.**
+4. **Helm.** Roughly:
+
+   ```bash
+   helm upgrade --install abenix infra/helm/abenix -n abenix \
+     --values infra/helm/abenix/values-azure.yaml \
+     --set api.image.repository=<acr>/api --set api.image.tag=<sha> \
+     ...                                   # same for web, worker, agent-runtime, cognifyWorker
+     --set codeRunners.registry=<acr> --set codeRunners.imageTag=<sha> \
+     <secrets from .env> --timeout 15m --wait=false
+   ```
+
+5. **Edge runtime** release, then a wait of up to 600 seconds for pods.
+6. **JWT keys.** Generates an RSA pair into `abenix-secrets` if none is there.
+7. **Migrations.** The API pod's `db-migrate` init container already runs `python -m bootstrap`, `alembic upgrade heads` and `python -m bootstrap verify` from `/app/packages/db` on every rollout. The script also creates the database if missing and runs the same steps in a running API pod.
+8. **Seeds**, then checks that the subscription token works, that the runtime can read a model file the API stored, and which tool credentials are set.
+9. **LiveKit and the standalone apps**, each with `kubectl apply`.
+10. **Standalone API keys** reconciled by `scripts/seed-standalone-keys.sh`.
+11. **Observability and ingress.**
+12. **Reconcile.** The script exits non-zero if any pod is still unhealthy after a settle window of `RECONCILE_WAIT_SECS` (default 300).
 
 ---
 
-## Phase 2 — build + push
+## Seeds
 
-```bash
-bash scripts/deploy-azure.sh build
+Both scripts run these from an API pod:
+
+```
+packages/db/seeds/seed_agents.py
+packages/db/seeds/seed_users.py
+packages/db/seeds/seed_llm_pricing.py
+packages/db/seeds/seed_portfolio_schemas.py
+packages/db/seeds/seed_kb.py
+packages/db/seeds/seed_kb_agent_grants.py
+packages/db/seeds/seed_atlas.py
+packages/db/seeds/seed_ml_models.py
+packages/db/seeds/seed_code_assets.py
+packages/db/seeds/seed_backfill_agent_shares.py
 ```
 
-Builds 15 images in parallel:
-- `api`, `web`, `worker` — platform core
-- `agent-runtime` — runtime image (4 deployments share it)
-- `edge-runtime`, `edge-runtime-rust`, `edge-runtime-c` — optional edge
-- `wingman-api`, `wingman-web` — Wingman
-- `contractiq-api`, `contractiq-web` — E&C-Copilot
-- `mideasttourism-api`, `mideasttourism-web` — Mideast Tourism
-- `resolveai-api`, `resolveai-web` — ResolveAI
-- `industrial-iot-api`, `industrial-iot-web` — Industrial-IoT
-- `claimsiq-api`, `claimsiq-web` — ClaimsIQ
-
-All tagged with `${IMAGE_TAG}` (default `$(git rev-parse --short HEAD)`).
-
-`scripts/sync-sdks.sh` runs first to ensure the vendored SDK copies are in sync with the canonical at `packages/sdk/python/abenix_sdk/`.
-
-Filter what gets built with `--only`:
-```bash
-bash scripts/deploy-azure.sh build --only=api,web,wingman-api
-```
+Each is idempotent. `seed_kb.py` chunks and embeds the sample documents itself,
+using the built-in local embedder when no OpenAI or Azure key is configured.
 
 ---
 
-## Phase 3 — helm upgrade (main chart)
+## UAT
 
 ```bash
-helm upgrade abenix infra/helm/abenix \
-  --install -n abenix --create-namespace \
-  --values infra/helm/abenix/values-azure.yaml \
-  --set image.tag=${IMAGE_TAG}
+bash scripts/uat.sh
 ```
 
-Renders the chart and applies. Out: ~30 resources across Deployments, Services, ConfigMaps, Secrets, ScaledObjects, Ingress, ServiceMonitors.
-
-Wait condition: every Deployment becomes Ready within 600s, or the script aborts.
-
-Schema migration: a Job pod runs `alembic upgrade head` against the new schema before the apps switch over.
-
----
-
-## Phase 4 — standalone apps (kubectl apply)
-
-Each standalone app has its own manifest at `<app>/k8s/<app>.yaml` and is **not** part of the helm chart. The deploy script `sed`-substitutes the image tag and `kubectl apply`s.
-
-Why not helm: standalone apps are independent products. Bundling them into the main chart would couple their release cadence. As-is, you can ship a wingman fix without touching the platform helm release.
-
-> **Trap** — the helm-vs-kubectl split means `helm uninstall abenix` does NOT clean up standalone apps. Use `kubectl delete -f <app>/k8s/<app>.yaml` for those.
-
----
-
-## Phase 5 — seed
-
-```bash
-# inside an api pod:
-python /app/packages/db/seeds/seed_agents.py        # 70+ agents
-python /app/packages/db/seeds/seed_users.py          # demo admin user
-python /app/packages/db/seeds/seed_ml_models.py      # 8 sample models
-python /app/packages/db/seeds/seed_code_assets.py    # 5 sample code assets
-python /app/packages/db/seeds/seed_kb.py             # 2 sample KBs
-python /app/packages/db/seeds/seed_atlas.py          # ontology seed
-```
-
-The deploy script runs all of them in order. Each seed script is idempotent (skip-if-exists).
-
----
-
-## Phase 6 — smoke tests
-
-```bash
-bash scripts/uat.sh sanity      # 61 fast tests
-bash scripts/uat.sh deep        # +31 slow tests
-bash scripts/uat.sh industrial  # +19 industrial-iot specific
-```
-
-The deploy script blocks on `sanity` passing before exiting.
+Runs the sanity (61 tests), deep (31) and industrial (about 18) browser specs in
+that order and stops at the first failure. It expects forwards on 3000 and 8000.
+No deploy script runs it for you. `deploy-azure.sh test` and `all` run the
+Playwright suites instead.
 
 ---
 
@@ -168,8 +185,19 @@ Full table of ports in [08-howto/00-local-setup](../08-howto/00-local-setup.md).
 
 ### AKS
 
-Every surface gets a hostname under the ingress controller's load-balancer IP,
-resolved through `nip.io` so nothing has to go in DNS or `/etc/hosts`.
+The cluster web image is built with `NEXT_PUBLIC_API_URL` unset, so the browser
+calls `http://localhost:8000`. Use the port forward script:
+
+```bash
+bash scripts/portforward-azure.sh            # start, also: stop, status, restart, urls, open, pods
+```
+
+It forwards web 3000, API 8000, the standalone apps on 3001 to 3006 and 8001 to
+8006, Grafana 3010, Prometheus 9090 and Tempo 3200. Only use this script for
+forwards, so `stop` can clean them all up.
+
+The deploy also applies an `abenix-ingress` with hosts under the load balancer
+IP through `nip.io`, so nothing has to go in DNS or `/etc/hosts`:
 
 | Surface | Host |
 |---|---|
@@ -198,16 +226,26 @@ The deploy writes the hostname to `.azure-endpoint` at the repo root, and
 
 ---
 
+## Where uploaded code and models live
+
+Code assets and ML models are written to the data volume first, under `/data/code-assets` and `/data/ml-models`. Every pod that reads them has to see the same files, and the platform does not rely on that alone.
+
+- **Shared volumes.** On one node `/data` is a host path every pod mounts. With `sharedData.usePVC` (on in the Azure values) the API, worker, cognify worker and runtime pools mount the ReadWriteMany claim `abenix-shared-data` instead. Models also sit on `ml-models-storage`, mounted by the API and the runtime everywhere. The API's init container copies anything an older layout held into these claims, never overwriting.
+- **Durable copy.** With `objectStorage.type` set to `s3` or `azure`, every upload, new version and seeded file is mirrored to object storage under `artifacts/<path under /data>`. Any API replica that lacks a file restores it before serving it, so replicas, restarts and rescheduling never lose one. With the local backend this step does nothing.
+- **Pull on demand.** A runtime pod that cannot see a model fetches it from `GET /api/ml-models/{id}/fetch`, and a sandbox fetches a large code asset from `GET /api/code-assets/{id}/fetch`. Both take only a ten minute token signed for that one file and cache what they fetched.
+- **Self-healing seeds.** The seeds restore a seeded model or code archive whose database row outlived its file. A code asset a user has replaced with their own version is never overwritten.
+- **Deploy check.** After seeding, `deploy.sh` and `deploy-azure.sh` confirm the runtime reads a model file the API stored and warn when it cannot.
+
+Running the processes directly on a workstation, they share one filesystem and all of this reduces to plain files.
+
+---
+
 ## Day-2 operations
 
-### Rolling a single service
+### Rolling out a change
 
-```bash
-# build + push + roll just wingman-api
-bash scripts/deploy-azure.sh redeploy --only=wingman-api
-```
-
-> **Trap** — `--only` rebuilds and re-applies the kubectl manifest for the targeted standalone app. **For the helm-managed services (api, web, agent-runtime, worker) it does NOT skip the helm upgrade** — helm re-renders all images at the new tag. If you want to roll *just* `abenix-api`, the safest is `kubectl set image deploy/abenix-api api=…<tag>` (direct image set) rather than `--only`.
+Local: `bash scripts/deploy.sh reload <svc>` for one core service or app.
+AKS: `bash scripts/deploy-azure.sh redeploy`, in full.
 
 ### Rolling back
 
@@ -215,9 +253,11 @@ bash scripts/deploy-azure.sh redeploy --only=wingman-api
 # Helm-managed services
 helm rollback abenix -n abenix
 
-# Standalone apps — re-apply the manifest with the prior tag
-kubectl set image deploy/wingman-api api=your-acr.azurecr.io/wingman-api:<prior-tag>
+# A standalone app, back to its previous ReplicaSet
+kubectl -n abenix rollout undo deploy/wingman-api
 ```
+
+> **Trap** — `helm uninstall abenix` does not remove the standalone apps. Use `kubectl delete -f <app>/k8s/<app>.yaml` for those.
 
 ### Migration safety
 
@@ -228,34 +268,21 @@ For schema migrations with risk:
 4. Verify backfill is complete.
 5. Deploy the contract (drop old column / make new NOT NULL) — separate release.
 
-See [packages/db/migrations/](../../packages/db/alembic/versions/) for prior examples.
+Prior examples are in [`packages/db/alembic/versions/`](../../packages/db/alembic/versions/).
 
 ---
 
 ## Edge runtimes
 
-For deployments where some agents need to run on-prem (low latency, data residency), the edge runtimes are deployed separately. They register with the cloud abenix-api on a heartbeat:
-
-```mermaid
-sequenceDiagram
-  participant Edge as edge-runtime (factory)
-  participant Cloud as abenix-api (cloud)
-  participant DB as cloud Postgres
-
-  Edge->>Cloud: POST /api/edge/heartbeat<br/>{node_id, capabilities}
-  Cloud->>DB: update edge_nodes row
-  Cloud-->>Edge: 200, agent_assignments
-  Edge->>Cloud: pull agent definitions
-  Cloud-->>Edge: agent yamls + tools
-```
-
-The edge node executes agents locally, then ships execution rows to the cloud asynchronously.
+Gateways that run agents on site register with the API every 60 seconds and
+receive signed bundles over MQTT or HTTP. They are installed separately, see
+[05-edge-runtime](05-edge-runtime.md).
 
 ---
 
 ## See also
 
-- [01-images](01-images.md) — Dockerfile structure + build optimisations
+- [01-images](01-images.md) — which Dockerfiles are built and why there are two sets
 - [02-helm](02-helm.md) — chart values + templates
 - [03-keda](03-keda.md) — autoscaling per runtime pool
 - [04-observability](04-observability.md) — Prometheus + Grafana + Tempo setup

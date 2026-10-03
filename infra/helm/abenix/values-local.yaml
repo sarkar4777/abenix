@@ -106,7 +106,7 @@ agent-runtime:
     - configMapRef:
         name: abenix-config
 
-# -- Worker (Celery — documents + agents queues) -----------------------------
+# -- Worker (Celery — documents queue) --------------------------------------
 worker:
   replicaCount: 1
   image:

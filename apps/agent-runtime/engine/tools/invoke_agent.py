@@ -120,6 +120,15 @@ def mint_fetch_token(
     return signing_input.decode() + "." + _b64url(sig) if sig is not None else ""
 
 
+def _error_body(resp: Any) -> dict[str, Any]:
+    try:
+        body = resp.json() or {}
+    except Exception:
+        return {}
+    err = body.get("error") if isinstance(body, dict) else None
+    return err if isinstance(err, dict) else {}
+
+
 class InvokeAgentTool(BaseTool):
     name = "invoke_agent"
     risk_tier = "low"
@@ -296,13 +305,26 @@ class InvokeAgentTool(BaseTool):
                 }
                 if self._execution_id:
                     submit_body["parent_execution_id"] = self._execution_id
+                from engine.tracing import inject_carrier
+
                 submit_r = await client.post(
                     f"/api/agents/{agent_id}/execute",
-                    headers=self._headers() or {},
+                    headers={**(self._headers() or {}), **inject_carrier()},
                     content=json.dumps(submit_body),
                 )
                 if submit_r.status_code in (403, 404):
                     return not_found
+                if submit_r.status_code == 429:
+                    err = _error_body(submit_r)
+                    return ToolResult(
+                        content=err.get("message")
+                        or f"agent {slug} is over its limits, try later",
+                        is_error=True,
+                        metadata={
+                            "agent_slug": slug,
+                            "failure_code": err.get("error_code") or "RATE_LIMITED",
+                        },
+                    )
                 if submit_r.status_code != 200:
                     return ToolResult(
                         content=f"agent execute submit failed: HTTP {submit_r.status_code} {submit_r.text[:300]}",

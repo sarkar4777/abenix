@@ -1,3 +1,5 @@
+import { currentPath, signInUrl } from '@/lib/auth-redirect';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 type ToastType = 'error' | 'warning' | 'info';
@@ -158,7 +160,7 @@ export async function apiFetch<T = unknown>(
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       if (typeof window !== 'undefined') {
-        window.location.href = '/login';
+        window.location.href = signInUrl(currentPath(), { expired: true });
       }
       const detail: ApiErrorDetail = { message: 'Session expired', code: 401, error_code: 'SESSION_EXPIRED' };
       if (shouldThrow) throw new ApiError(detail);

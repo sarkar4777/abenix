@@ -391,3 +391,76 @@ export const CLIENT_SAMPLE = {
   then: { surcharge: 'REMOTE_AREA_SURCHARGE' },
   provenance: { sourceSnapshotId: 'snapshot-123', citations: ['Carrier tariff 2026, section 4.2'] },
 };
+
+// what decision_evaluate keeps on a run's tool call, see engine/decisions/service.py evaluation_summary
+export interface DecisionRecord {
+  key: string;
+  name?: string;
+  version: number;
+  version_id?: string;
+  outcome: 'decided' | 'no_match' | 'missing_facts' | 'invalid_facts';
+  result: any;
+  result_truncated?: boolean;
+  applied_rules: { key: string; id?: string; description?: string; citations: string[] }[];
+  missing_facts: string[];
+  invalid_facts: { fact: string; expected?: string; got?: string; value?: string }[];
+  explanation?: string | null;
+  facts?: Record<string, any> | null;
+  facts_truncated?: boolean;
+  trace_hash: string;
+  evaluation_id?: string | null;
+  duration_us?: number;
+  as_of?: string | null;
+  known_at?: string | null;
+}
+
+export const OUTCOME_TEXT: Record<string, string> = {
+  decided: 'Decided',
+  no_match: 'No rule applies',
+  missing_facts: 'Missing facts',
+  invalid_facts: 'Facts with the wrong type',
+};
+
+export const OUTCOME_CHIP: Record<string, string> = {
+  decided: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10',
+  no_match: 'text-slate-300 border-slate-600 bg-slate-800/40',
+  missing_facts: 'text-amber-300 border-amber-500/30 bg-amber-500/10',
+  invalid_facts: 'text-rose-300 border-rose-500/30 bg-rose-500/10',
+};
+
+const TRY_SESSION_KEY = 'abenix.decisionTry';
+const TRY_URL_LIMIT = 6000;
+
+export interface TryPreload { facts: Record<string, any>; as_of?: string | null }
+
+// link that opens the decision's Try panel with these facts filled in
+export function tryHref(key: string, version: number | null | undefined, preload: TryPreload): string {
+  const base = `/decisions/${encodeURIComponent(key)}?${version ? `version=${version}&` : ''}tab=rules`;
+  const payload = JSON.stringify({ facts: preload.facts || {}, as_of: preload.as_of || null });
+  const enc = encodeURIComponent(payload);
+  if (enc.length <= TRY_URL_LIMIT) return `${base}&try=${enc}`;
+  try { sessionStorage.setItem(TRY_SESSION_KEY, JSON.stringify({ key, ...JSON.parse(payload) })); } catch { /* storage off */ }
+  return `${base}&try=session`;
+}
+
+export function readTryPreload(key: string, raw: string | null): TryPreload | null {
+  if (!raw) return null;
+  try {
+    if (raw === 'session') {
+      const v = JSON.parse(sessionStorage.getItem(TRY_SESSION_KEY) || 'null');
+      if (!v || v.key !== key) return null;
+      return { facts: v.facts && typeof v.facts === 'object' ? v.facts : {}, as_of: v.as_of || null };
+    }
+    const v = JSON.parse(raw);
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    const facts = v.facts && typeof v.facts === 'object' && !Array.isArray(v.facts) ? v.facts : {};
+    return { facts, as_of: typeof v.as_of === 'string' ? v.as_of : null };
+  } catch {
+    return null;
+  }
+}
+
+export function formatDuration(us?: number | null): string {
+  if (!us) return '';
+  return us < 1000 ? `${us} µs` : `${(us / 1000).toFixed(1)} ms`;
+}

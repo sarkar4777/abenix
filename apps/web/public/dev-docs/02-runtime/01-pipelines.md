@@ -1,138 +1,200 @@
 # Pipelines — the DAG engine
 
-> When a single agent isn't enough — chain agents together with branching, looping, error-routing, and parallel fan-out. The pipeline engine is a topo-sorted DAG executor with first-class support for these patterns.
+> When a single agent isn't enough, chain tools and agents together with conditions, switches, loops, error routing and parallel fan-out. The pipeline engine is a layered DAG executor.
 
 ---
 
 ## Why pipelines (and when not to)
 
 A single agent is right when:
-- One LLM call (with a few tool calls) is enough to produce the answer.
+- One LLM loop (with a few tool calls) is enough to produce the answer.
 - The answer fits in one prompt's context window.
 - You don't need branching or retry-per-step semantics.
 
 A pipeline is right when:
 - You need to chain multiple agents (`extract_clauses → classify → flag_risks`).
-- You need branching based on a step's output (`if classify=='breach' then escalate else log`).
+- You need branching based on a step's output (`if classify == 'breach' then escalate else log`).
 - You need to fan out over a list (for each clause, run the risk-extractor).
-- You need a step that can fail independently and roll back.
-
-> **Trap** — pipelines add 200-500ms of orchestration overhead per step. For a 3-step pipeline where each step is a 200ms LLM call, the orchestration is ~50% of total latency. If you don't need branching/looping, do it in one agent with a tighter system prompt.
+- You need a step that can fail without stopping the rest.
 
 ---
 
 ## Anatomy of a pipeline
 
-A pipeline lives on `agents.model_config_.pipeline_config` (JSONB). Shape:
+A pipeline is an agent with `mode: pipeline`. Its DAG is stored in the agent's `model_config` JSONB under `pipeline_config`. In a seed YAML keep `pipeline_config` at the top level, next to `model_config`. The 400 that execute returns when `pipeline_config` is missing names nesting it under `model_config` in the seed as the usual cause.
 
 ```yaml
+mode: pipeline
+model_config:
+  tools: [database_query, agent_step, human_approval]
+  input_variables:
+    - {name: case_id, type: string, required: true}
 pipeline_config:
   nodes:
-    - id: step-1
-      type: agent
-      agent_slug: wingman-broker-classifier
-      inputs:
-        text: "{{context.broker_email_body}}"
-    - id: step-2
-      type: switch
-      condition: "{{step-1.intent}} == 'offer'"
-      branches:
-        true: step-3-parse
-        false: step-3-ignore
-    - id: step-3-parse
-      type: agent
-      agent_slug: wingman-broker-parser
-      inputs:
-        text: "{{context.broker_email_body}}"
-    - id: step-3-ignore
+    - id: load_case
       type: tool
-      tool_slug: log
-      arguments:
-        message: "Non-offer email; no action."
-  edges:
-    - {from: step-1, to: step-2}
-    - {from: step-2, to: step-3-parse}
-    - {from: step-2, to: step-3-ignore}
-  output:
-    from: step-3-parse
-    field: parsed_offer
+      tool: database_query
+      input:
+        sql: "SELECT * FROM cases WHERE id = :case_id"
+        params: {case_id: "{{input.case_id}}"}
+    - id: qa_review
+      type: agent
+      agent_slug: resolveai-qa-reviewer
+      input: "Case: {{load_case.rows.0}}"
+      context:
+        case_id: "{{input.case_id}}"
+    - id: report
+      type: structured
+      output:
+        score: "{{qa_review.score}}"
+        case: "{{input.case_id}}"
 ```
 
-**Nodes** are units of work. **Edges** wire output → input. **Output** picks the final result.
+There are no edges. A node runs after the nodes in its `depends_on`, plus every node its templates name (`{{load_case.x}}` adds `load_case`). Every tool a node calls must be in `model_config.tools`, including `agent_step` for `type: agent` nodes. A missing one fails the node with "Unknown tool". The ad-hoc execute endpoint adds `agent_step` by itself.
 
 ### Node types
 
-| `type` | Purpose | Key fields |
+`type` picks how a node runs.
+
+| `type` | Runs | Key fields |
 |---|---|---|
-| `agent` | Run another agent (single LLM loop) | `agent_slug`, `inputs` |
-| `pipeline` | Run another pipeline (recursion allowed) | `pipeline_slug`, `inputs` |
-| `tool` | Run a single tool directly (no LLM) | `tool_slug`, `arguments` |
-| `switch` | Branch based on a condition | `condition`, `branches` |
-| `for_each` | Fan out over a list | `over`, `as`, `body` |
-| `parallel` | Run N children concurrently, merge results | `children`, `merge` |
-| `human` | Pause for an approval gate (same as a tool but DAG-aware) | `required_signoffs`, `expires_seconds` |
-| `code` | Run a code asset | `asset_id`, `input_data` |
-| `ml_predict` | Call an ML model deployment | `model_name`, `input_data` |
+| `tool` (default) | One tool call, no LLM unless the tool calls one | `tool_name` or `tool`, `arguments`, and `input` (a dict is merged into the arguments, anything else becomes `arguments.input`) |
+| `agent` | A seeded agent through the `agent_step` tool, with that agent's system prompt, model, tools, `max_iterations` and temperature | `agent_slug` or `agent_id`, `input` (the message), `context` (appended to the message as a `[Pipeline context]` block) |
+| `structured` | No call. Template-resolves `output` (or `fields`) and returns it as one dict, parsing values that look like JSON | `output` |
+
+Some tool names are built into the engine and never reach the registry:
+
+| `tool_name` | Does | Config |
+|---|---|---|
+| `__switch__` | Evaluates cases against an upstream field and activates the matching targets | `switch` |
+| `__merge__` | Combines upstream outputs | `merge` |
+| `wait` | Sleeps `seconds`, at most 300 | `arguments.seconds` |
+| `state_get`, `state_set` | Read or write a value in `pipeline_states`, keyed by agent and `key`, kept across runs | `arguments.key`, `arguments.value` |
+
+Any node can also carry these:
+
+| Field | Effect |
+|---|---|
+| `depends_on` | Nodes that must finish first. An unknown id fails the run before anything starts, with `unknown dependency: <id>` |
+| `condition` | `{source_node, field, operator, value}`. Skips the node when false |
+| `required_if` | A template. Skips the node when it resolves to empty, `false`, `0`, `none`, `null`, `[]` or `[not available]` |
+| `input_mappings` | `{arg: {source_node, source_field}}`. Copies an upstream field into an argument. `source_field` defaults to `__all__` |
+| `for_each` | `{source_node, source_field, item_variable, max_concurrency}`. Runs the node once per list item |
+| `while_loop` | `{condition, body_nodes, max_iterations}`. Reruns the body nodes while the condition holds, at most 50 times by default |
+| `max_retries`, `retry_delay_ms` | Retries a failed node with exponential backoff, `retry_delay_ms × 2^attempt` |
+| `timeout_seconds` | Per-node timeout for the tool call |
+| `on_error` | `stop` (default), `continue` or `error_branch` |
+| `error_branch_node` | The node to run when this one fails and `on_error` is `error_branch` |
+| `label` | Display name. Templates may name a step by its unique label instead of its id |
+
+Condition operators are `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `contains`, `not_contains`, `in` and `not_in`. A missing field is false for everything except `eq` and `neq`.
+
+The ad-hoc `POST /api/pipelines/{agent_id}/execute` takes the same nodes through a Pydantic schema that knows `type: tool | agent`, up to 50 nodes, `max_retries` 0 to 5, `retry_delay_ms` 100 to 30,000, `timeout_seconds` 1 to 300 and `for_each.max_concurrency` 1 to 50.
+
+### Switch and merge
+
+```yaml
+- id: classify
+  tool_name: llm_route
+  arguments: {message: "{{context.message}}"}
+- id: route_switch
+  tool_name: "__switch__"
+  depends_on: [classify]
+  switch:
+    source_node: classify
+    field: route
+    cases:
+      - {operator: eq, value: billing, target_node: billing_handler}
+      - {operator: eq, value: technical, target_node: technical_handler}
+    default_node: technical_handler
+- id: billing_handler
+  tool_name: llm_call
+  depends_on: [route_switch]
+  arguments: {prompt: "Draft a billing reply for: {{context.message}}"}
+```
+
+Cases are tried in order and the first match activates its target. With no match, `default_node` is activated. A node that depends on a switch and was not activated is skipped. The switch's output is `{route, target_node, actual_value, __switch_targets}`, where `route` is the matched case value or `default`.
+
+`__merge__` modes are `append` (concatenate the `source_nodes` outputs), `zip` and `join` on `join_field`.
 
 ### Templating
 
-`{{...}}` is the templating syntax. Available variables:
-- `context.*` — original pipeline inputs.
-- `<step_id>.*` — the JSON output of that step.
-- `iteration` — when inside a `for_each`, the current item.
-- `now` — current ISO timestamp.
+`{{path}}` resolves against the run's outputs by dotted path. Only letters, digits, `_` and dots are matched, so list indexes are path parts, `{{load_case.rows.0}}`. A bracket index such as `rows[0]` is not a template and is left as text.
 
-Templates are eagerly resolved at step start (no lazy evaluation).
+| Root | Is |
+|---|---|
+| `input.*` | The run's input. `input.message` falls back to `user_message`, `prompt`, `body`, `ticket_content` or `content` |
+| `context.*` | The run's context, as sent |
+| `<node_id>.*` | That node's output. An agent node's `{"response": "<json>"}` wrapper is looked through, and JSON inside code fences or followed by prose is parsed |
+| any context key | Context keys are also available flat, `{{user_message}}` |
+
+A template that is the whole value keeps the type, so a list stays a list. Inside a longer string, lists and dicts are written as JSON. A path that resolves to nothing becomes `[not available]`. Templates are resolved when the node starts.
+
+Arguments named `input_message`, `input`, `message`, `prompt`, `text`, `content` or `user_message` that are still empty or `[not available]` are filled with the run's message.
+
+A pair such as `asset_id_from_node: validate` and `asset_id_field: alarm.asset` is replaced by `asset_id: <resolved value>` before the tool sees it, unless `asset_id` already has a value.
+
+### Declared inputs
+
+`model_config.input_variables` declares a pipeline's inputs, for example `{name, type, required, default, description}`. At run time each declared `default` is put into the context underneath whatever the caller sent, so a caller value always wins. Declared names are valid template targets for the validator, so `{{context.forecast_days}}` passes validation when `forecast_days` is declared. The engine does not reject a run that is missing a required input. The template resolves to `[not available]`.
 
 ---
 
 ## Execution model
 
-The engine is in [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py). It runs in the same pod as a single-agent execution — it's just a different path on the runtime.
+The engine is [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py). Queue-routed pipelines run in the agent-runtime consumer, the inline API path runs them in the API process.
 
 ```mermaid
 flowchart TB
-  S[Start] --> T[Topo-sort nodes]
-  T --> Q[Build a frontier queue<br/>of nodes whose deps are satisfied]
-  Q --> P{Frontier empty?}
-  P -->|no| D[Dispatch ready node]
-  D --> X{Node succeeded?}
-  X -->|yes| U[Update node_results<br/>+ check children]
-  X -->|no — fail-fast pipeline| F[Mark pipeline failed<br/>cancel running children]
-  X -->|no — failure-isolated pipeline| C[Route to error branch<br/>or skip downstream]
-  U --> Q
-  C --> Q
-  P -->|yes| E[Emit output]
+  S[Start] --> V{Unknown dependency<br/>or cycle?}
+  V -->|yes| X[Fail the run]
+  V -->|no| L[Topo-sort into layers]
+  L --> T{Pipeline timeout<br/>passed?}
+  T -->|yes| TF[Fail the remaining layer]
+  T -->|no| R[Run every node in the layer at once]
+  R --> O[Record outputs<br/>mark switch targets]
+  O --> E{Error branch<br/>scheduled?}
+  E -->|yes| EB[Run error branch nodes]
+  E -->|no| N{More layers?}
+  EB --> N
+  N -->|yes| T
+  N -->|no| F[Final output = last completed node]
 ```
 
 Important behaviours:
-- **Parallelism**: a node enters the dispatch queue as soon as ALL its predecessors complete. Independent branches run concurrently up to `pipeline.max_concurrency` (default 4).
-- **Fail-fast vs failure-isolated**: configurable per pipeline. Fail-fast aborts on first error. isolated routes errors via `onError` edges and keeps others alive.
-- **Cancellation**: when a pipeline is force-cancelled, in-flight nodes get a `cancel` signal via NATS. tool implementations should honour it.
+
+- **Layers.** Nodes are sorted into layers by dependency. Every node in a layer starts at once. There is no cap on concurrency within a layer. `for_each` caps its items with `max_concurrency` (default 10).
+- **Pipeline timeout.** `PIPELINE_TIMEOUT_SECONDS` (default 300) or the admin setting `pipeline.timeout_seconds`. It is checked before each layer, not during one. A layer that starts late fails all its nodes with "Pipeline timeout exceeded".
+- **Failures.** With `on_error: stop` the node fails and its dependents are skipped with "Dependency '<id>' failed". Other branches keep going. With `continue` the node counts as done and dependents see `{__error_continue, error, status: failed}` as its output. With `error_branch` the named node runs after the layer, and can read `__error_from_<id>`.
+- **Final output.** The output of the last node that completed, in run order.
+- **Cost budget.** The ad-hoc execute endpoint takes `cost_limit`. A node that would start after the budget is used fails with "Cost budget exceeded". The run's cost counts every step, failed and retried ones included, so the budget and analytics see what was really spent.
+- **Governance.** A pipeline is a governed run like an agent. Kill switch scope `pipeline` with the pipeline agent's id is checked at start and refuses the run with `failure_code: KILL_SWITCH`. Its starting tier is the higher of the agent's stored tier and the caller's. Nested agents and tools raise it, and the final tier and reasons are written to the execution. See [00-agent-execution](00-agent-execution.md#governance-at-run-start).
+- **Self-healing.** A failed node is captured for the Pipeline Surgeon, and each completed node's output is kept as the last good sample. See [10-pipeline-healing-drift](10-pipeline-healing-drift.md).
+
+Node statuses are `completed`, `failed`, `skipped` and `timeout`, plus `partial` for a `for_each` node where some items failed. The pipeline status is `completed`, `partial` (something failed and something completed) or `failed` (something failed and nothing completed). The queue consumer writes the execution as `completed` only for `completed`. `partial` and `failed` both become a `failed` execution with `PIPELINE_NODE_FAILED`. See [09-state-machines](09-state-machines.md#pipeline-runs).
 
 ---
 
-## The pipeline_runs row vs the executions row
+## Where a run is recorded
 
-Both exist. They serve different purposes:
+There is one row per run, in `executions`. A pipeline's per-node results go on that row:
 
-| Row | Purpose | Granularity |
-|---|---|---|
-| `executions` | One per top-level pipeline run. treats the whole pipeline as one execution | parent |
-| `pipeline_runs` | One per pipeline run | parent (1:1 with executions when pipeline) |
-| `pipeline_step_runs` | One per node execution inside a pipeline | child |
+| Column | Holds |
+|---|---|
+| `node_results` | Per node: status, tool, duration, error, attempt, metadata, resolved arguments (when under 16,000 characters of JSON), and output for completed nodes (up to 128,000 characters, then cut and flagged `output_truncated`) |
+| `tool_calls` | One entry per node, for the trace views |
+| `execution_trace` | `pipeline_status`, `execution_path`, `failed_nodes`, `skipped_nodes`, `node_results` and `steps`, one row per node in run order |
+| `failure_code`, `risk_tier`, `risk_reasons` | As for an agent run |
 
-For a 10-node pipeline, you get 1 execution row + 1 pipeline_run row + 10 step_run rows.
-
-Why two parent rows: `executions` is the unified surface for the trace waterfall (agent + pipeline + future modes). `pipeline_runs` carries pipeline-specific fields (max_concurrency, isolation_mode, etc.) without bloating `executions`.
+`pipeline_states` holds the cross-run key-value data that `state_get` and `state_set` use. There are no separate pipeline run tables.
 
 ---
 
 ## Builder support
 
-The frontend Pipeline Builder ([`apps/web/src/components/builder/pipeline/`](../../apps/web/src/components/builder/pipeline/)) is a React Flow canvas. Nodes drag in from a left palette. edges drag between handles. Save serialises to `pipeline_config` JSON.
+The frontend Pipeline Builder ([`apps/web/src/components/builder/pipeline/`](../../apps/web/src/components/builder/pipeline/)) is a React Flow canvas. Nodes drag in from a left palette and edges drag between handles. Edges become `depends_on`. Save serialises to `pipeline_config` JSON.
 
-The builder validates client-side using [`PipelineStore.validate()`](../../apps/web/src/components/builder/pipeline/usePipelineStore.ts) — checks for cycles, unknown tools, dangling edges, missing template vars. Server-side validation is identical and runs on save (defence in depth).
+The builder validates as you edit through [`usePipelineStore`](../../apps/web/src/components/builder/pipeline/usePipelineStore.ts), which refuses a connection that would make a cycle and calls the server validator. The server side is `engine/pipeline_validator.py`, behind `POST /api/pipelines/validate`, `/validate-smart` and `/{agent_id}/validate`.
 
 See [05-ui/01-builder-canvas](../05-ui/01-builder-canvas.md) for the UI patterns.
 
@@ -141,60 +203,44 @@ See [05-ui/01-builder-canvas](../05-ui/01-builder-canvas.md) for the UI patterns
 ## Common pipeline patterns
 
 ### Pattern 1 — Extract → Classify → Route
-The most common. One pipeline, three agents, one switch.
-Used by: E&C-Copilot clause review, Wingman broker inbox triage.
+One pipeline, a classifier, one `__switch__`, one handler per branch.
 
 ### Pattern 2 — Map / for-each
-Fan a per-item agent over a list. E.g. for each clause in a contract, run risk analysis.
+Run a node once per item of an upstream list.
 ```yaml
-- id: per-clause
-  type: for_each
-  over: "{{extract.clauses}}"
-  as: clause
-  body:
-    type: agent
+- id: per_clause
+  tool_name: agent_step
+  arguments:
     agent_slug: clause-risk-analyzer
-    inputs:
-      clause: "{{clause}}"
+  for_each:
+    source_node: extract
+    source_field: clauses
+    item_variable: input_message
+    max_concurrency: 5
 ```
-The `for_each` runs up to `max_concurrency` items concurrently.
+Each item is passed in the argument named by `item_variable`, so name it after an argument the tool reads. Templates do not see the item. The node's output is the list of item outputs.
 
 ### Pattern 3 — Parallel fan-out, merge
-Run 3 perspectives concurrently, merge.
+Nodes that share no dependency run in the same layer, at once. A `__merge__` node recombines them.
 ```yaml
-- id: perspectives
-  type: parallel
-  children:
-    - {id: legal, type: agent, agent_slug: legal-reviewer, ...}
-    - {id: risk, type: agent, agent_slug: risk-reviewer, ...}
-    - {id: ops, type: agent, agent_slug: ops-reviewer, ...}
-  merge:
-    type: combine
-    fields:
-      legal: "legal.opinion"
-      risk: "risk.opinion"
-      ops: "ops.opinion"
+- {id: legal, type: agent, agent_slug: legal-reviewer, input: "{{input.message}}"}
+- {id: risk, type: agent, agent_slug: risk-reviewer, input: "{{input.message}}"}
+- id: combined
+  tool_name: "__merge__"
+  depends_on: [legal, risk]
+  merge: {mode: append, source_nodes: [legal, risk]}
 ```
 
 ### Pattern 4 — Human in the loop
-Insert an `approval_gate` step. Pipeline pauses durably.
-```yaml
-- id: gate
-  type: human
-  title: "Approve sending the contract draft"
-  payload:
-    counterparty: "{{extract.counterparty}}"
-    amount_usd: "{{extract.amount_usd}}"
-  required_signoffs: 1
-  expires_seconds: 86400
-```
+A `type: tool` node calling `human_approval` or `approval_gate`. The node blocks until someone decides, and counts against the pipeline timeout like any other node. See [05-approvals-hitl](05-approvals-hitl.md#pipelines).
 
 ---
 
 ## See also
 
-- [00-agent-execution](00-agent-execution.md) — single-agent loop (a pipeline's step is often a single agent)
-- [05-approvals-hitl](05-approvals-hitl.md) — pause/resume mechanics
+- [00-agent-execution](00-agent-execution.md) — single-agent loop (an agent node runs one)
+- [07-pipeline-data-flow](07-pipeline-data-flow.md) — how data moves between nodes
+- [05-approvals-hitl](05-approvals-hitl.md) — approval gates
 - [05-ui/01-builder-canvas](../05-ui/01-builder-canvas.md) — drag-drop builder
 - [08-howto/02-add-an-agent](../08-howto/02-add-an-agent.md) — agent yaml format used by pipeline steps
 
@@ -204,10 +250,12 @@ Insert an `approval_gate` step. Pipeline pauses durably.
 
 | What | Where |
 |---|---|
-| **Pipeline executor (DAG engine)** | [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) |
+| **Pipeline executor (DAG engine)** | [`apps/agent-runtime/engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) — `parse_pipeline_nodes`, `PipelineExecutor` |
+| **Validator** | [`apps/agent-runtime/engine/pipeline_validator.py`](../../apps/agent-runtime/engine/pipeline_validator.py) |
 | **Pipeline schema (Pydantic validation)** | [`apps/api/app/schemas/pipelines.py`](../../apps/api/app/schemas/pipelines.py) |
-| **Pipeline REST router** | [`apps/api/app/routers/pipelines.py`](../../apps/api/app/routers/pipelines.py) |
+| **Pipeline REST router** | [`apps/api/app/routers/pipelines.py`](../../apps/api/app/routers/pipelines.py) — execute, execute-saved, execute-stream, state, replay, validate |
+| **Input defaults** | [`apps/api/app/routers/agents.py`](../../apps/api/app/routers/agents.py) `_input_defaults`, [`apps/agent-runtime/consumer.py`](../../apps/agent-runtime/consumer.py) |
 | **Pipeline state model** | [`packages/db/models/pipeline_state.py`](../../packages/db/models/pipeline_state.py) |
-| **Builder canvas** | [`apps/web/src/app/(app)/builder/page.tsx`](../../apps/web/src/app/(app)/builder/page.tsx) |
-| **Tests** | [`apps/agent-runtime/tests/test_pipeline.py`](../../apps/agent-runtime/tests/test_pipeline.py) |
+| **Builder canvas** | [`apps/web/src/components/builder/pipeline/`](../../apps/web/src/components/builder/pipeline/) |
+| **Tests** | [`apps/agent-runtime/tests/test_pipeline.py`](../../apps/agent-runtime/tests/test_pipeline.py), `test_pipeline_advanced.py` |
 | **Workflow shell (JSON-Patch REPL)** | [`apps/api/app/routers/workflow_shell.py`](../../apps/api/app/routers/workflow_shell.py) |

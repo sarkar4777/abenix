@@ -4,14 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
-  AlertTriangle, ArrowLeft, Check, CheckCircle2, ChevronDown, Download, FilePlus2, FileUp, GitBranch, History,
+  Activity, AlertTriangle, ArrowLeft, Check, CheckCircle2, ChevronDown, Download, FilePlus2, FileUp, GitBranch, History,
   ListChecks, Loader2, Rocket, Scale, Send, ShieldCheck, Table2, TestTube2, Undo2, Users, Workflow, X,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
 import {
-  STATE_LABEL, STATE_STYLE, mergeDocs, type MergeResult, type Problem, type RuleDoc, type Tier,
+  STATE_LABEL, STATE_STYLE, mergeDocs, readTryPreload, type MergeResult, type Problem, type RuleDoc, type Tier,
   type Validation, type VersionFull, type VersionSummary,
 } from '@/lib/decisions';
 import { TIER_STYLE } from '@/components/governance/TierPolicies';
@@ -24,13 +24,14 @@ import TestsTab from '@/components/decisions/TestsTab';
 import HistoryTab from '@/components/decisions/HistoryTab';
 import FlowView from '@/components/decisions/FlowView';
 import MergeDialog from '@/components/decisions/MergeDialog';
+import EvaluationsTab from '@/components/decisions/EvaluationsTab';
 
 interface Model {
   id: string; key: string; name: string; description: string; risk_tier: Tier; tags: string[]; log_mode: string;
   versions: VersionSummary[]; test_count: number;
   policy: { publish_approvals: { min_approvers: number; exclude_author: boolean; capability: string } };
 }
-type Tab = 'rules' | 'table' | 'flow' | 'facts' | 'tests' | 'history';
+type Tab = 'rules' | 'table' | 'flow' | 'facts' | 'tests' | 'history' | 'evaluations';
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error' | 'conflict';
 
 const TABS: { id: Tab; label: string; icon: typeof Scale; needsBuilder?: boolean }[] = [
@@ -40,6 +41,7 @@ const TABS: { id: Tab; label: string; icon: typeof Scale; needsBuilder?: boolean
   { id: 'facts', label: 'Facts and outcomes', icon: ListChecks, needsBuilder: true },
   { id: 'tests', label: 'Golden tests', icon: TestTube2 },
   { id: 'history', label: 'History', icon: History },
+  { id: 'evaluations', label: 'Evaluations', icon: Activity },
 ];
 
 function pickDefault(vs: VersionSummary[]): number {
@@ -70,7 +72,12 @@ export default function DecisionWorkspace() {
   const [problems, setProblems] = useState<Problem[]>([]);
   const [overlaps, setOverlaps] = useState<any[]>([]);
   const [validation, setValidation] = useState<Validation | null>(null);
-  const [tab, setTab] = useState<Tab>('rules');
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = search.get('tab');
+    return TABS.some((x) => x.id === t) ? (t as Tab) : 'rules';
+  });
+  const [tryPreload] = useState(() => readTryPreload(decisionKey, search.get('try')));
+  const [initialEvaluation] = useState(() => search.get('evaluation'));
   const [selectedRule, setSelectedRule] = useState<string | null>(null);
   const [merge, setMerge] = useState<{ who: string; result: MergeResult; theirs: VersionFull } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -110,6 +117,7 @@ export default function DecisionWorkspace() {
       load(versionNo);
       const url = new URL(window.location.href);
       url.searchParams.set('version', String(versionNo));
+      url.searchParams.delete('try');
       window.history.replaceState(null, '', url.toString());
     }
   }, [versionNo, load]);
@@ -377,9 +385,10 @@ export default function DecisionWorkspace() {
           {tab === 'flow' && <FlowView content={version.content} hasBuilder={!!doc} editable={!readOnly} onChangeContent={(j) => { setDoc(null); onFlowContent(j); }} />}
           {tab === 'tests' && <TestsTab decisionKey={decisionKey} version={version.version} validation={validation} onRun={check} canEdit={canAuthor} />}
           {tab === 'history' && <HistoryTab decisionKey={decisionKey} versions={model.versions} current={version.version} onOpen={(n) => setVersionNo(n)} />}
+          {tab === 'evaluations' && <EvaluationsTab decisionKey={decisionKey} versions={model.versions} initialEvaluation={initialEvaluation} onOpenVersion={(n) => { setVersionNo(n); setTab('rules'); }} />}
         </div>
         {showTry && ['rules', 'table', 'facts', 'flow'].includes(tab) && (
-          <TryPanel decisionKey={decisionKey} version={version.version} doc={doc} live={version.state === 'draft' && !!doc} onSelectRule={selectRule} onSavedTest={refreshModel} canSaveTest={canAuthor} />
+          <TryPanel decisionKey={decisionKey} version={version.version} doc={doc} live={version.state === 'draft' && !!doc} onSelectRule={selectRule} onSavedTest={refreshModel} canSaveTest={canAuthor} preload={tryPreload} />
         )}
       </div>
 

@@ -748,14 +748,17 @@ async def list_documents(
     if not kb or not await user_can_access_collection(db, user=user, kb=kb):
         return error("Knowledge base not found", 404)
 
+    from app.services.document_access import hidden_document_ids
+
+    hidden = await hidden_document_ids(db, user, [kb_id])
     result = await db.execute(
         select(Document)
         .where(Document.kb_id == kb_id)
         .order_by(Document.created_at.desc())
     )
-    docs = result.scalars().all()
+    docs = [d for d in result.scalars().all() if d.id not in hidden]
     data = [_serialize_doc(d) for d in docs]
-    return success(data, meta={"count": len(data)})
+    return success(data, meta={"count": len(data), "hidden": len(hidden)})
 
 
 @router.delete("/{kb_id}/documents/{doc_id}")
@@ -787,7 +790,7 @@ async def delete_document(
         return error("Document not found", 404)
 
     _delete_file(doc.storage_url)
-    _delete_pinecone_vectors(str(kb_id), str(doc_id))
+    _delete_pinecone_vectors(str(kb_id), str(doc_id), doc.chunk_count or 0)
 
     await db.delete(doc)
 
@@ -846,7 +849,7 @@ def _delete_file(storage_url: str) -> None:
         pass
 
 
-def _delete_pinecone_vectors(kb_id: str, doc_id: str) -> None:
+def _delete_pinecone_vectors(kb_id: str, doc_id: str, chunk_count: int = 0) -> None:
     api_key = os.environ.get("PINECONE_API_KEY", "")
     index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
     if not api_key:
@@ -856,10 +859,21 @@ def _delete_pinecone_vectors(kb_id: str, doc_id: str) -> None:
 
         pc = Pinecone(api_key=api_key)
         index = pc.Index(index_name)
-        index.delete(
-            filter={"doc_id": {"$eq": doc_id}},
-            namespace=kb_id,
-        )
+    except Exception:
+        return
+    # serverless indexes refuse delete-by-filter, ids work everywhere
+    ids = [f"{doc_id}_{i}" for i in range(chunk_count)]
+    try:
+        for page in index.list(prefix=f"{doc_id}_", namespace=kb_id):
+            ids.extend(page if isinstance(page, (list, tuple)) else [page])
+    except Exception:
+        pass
+    ids = sorted(set(ids))
+    try:
+        for i in range(0, len(ids), 1000):
+            index.delete(ids=ids[i : i + 1000], namespace=kb_id)
+        if not ids:
+            index.delete(filter={"doc_id": {"$eq": doc_id}}, namespace=kb_id)
     except Exception:
         pass
 

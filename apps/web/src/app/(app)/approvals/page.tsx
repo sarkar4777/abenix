@@ -217,11 +217,9 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
                 <a href={row.payload.link as string} className="text-cyan-300 hover:underline">Review the rules and what changes</a>
               )}
               {typeof row.payload?.summary === 'string' && <span className="text-slate-400">{row.payload.summary as string}</span>}
-              {row.policy && (
-                <span className="text-slate-500">
-                  Needs {row.policy.capability || 'approvals.sign'}{row.policy.exclude_requester ? ', and not the person who proposed it' : ''}
-                </span>
-              )}
+              <span className="text-slate-500">
+                Needs decisions.review{row.policy ? ` and ${row.policy.capability || 'approvals.sign'}` : ''}{row.policy?.exclude_requester ? ', and not the person who proposed it' : ''}
+              </span>
             </div>
           )}
         </div>

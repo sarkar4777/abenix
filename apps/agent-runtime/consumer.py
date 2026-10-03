@@ -145,7 +145,19 @@ async def _load_execution(execution_id: str) -> dict[str, Any] | None:
             "pipeline_config": model_cfg.get("pipeline_config"),
             "tenant_id": str(execution.tenant_id),
             "kb_ids": kb_ids,
+            "per_execution_cost_limit": getattr(
+                agent, "per_execution_cost_limit", None
+            ),
         }
+
+
+def _run_cost_cap(loaded: dict[str, Any], payload: dict[str, Any]) -> float | None:
+    """The agent's per-run cap, tightened by a cost_limit the caller sent."""
+    from engine.agent_budget import run_cost_limit
+
+    return run_cost_limit(
+        loaded.get("per_execution_cost_limit"), payload.get("cost_limit")
+    )
 
 
 async def _load_moderation_gate(
@@ -268,6 +280,216 @@ async def _mark_started(execution_id: str) -> None:
         await db.commit()
 
 
+LEASE_SECONDS = max(6, int(os.environ.get("CONSUMER_LEASE_SECONDS", "25")))
+MAX_ATTEMPTS = max(1, int(os.environ.get("CONSUMER_MAX_ATTEMPTS", "3")))
+RUNNER_ID = (
+    f"{os.environ.get('HOSTNAME') or 'runtime'}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+)
+
+
+async def _claim(execution_id: str) -> tuple[str, float]:
+    """Take the run's lease. Returns (claimed|done|owned|missing|exhausted, seconds left on another lease)."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, or_, select, update
+
+    from models.execution import Execution, ExecutionStatus  # type: ignore
+
+    eid = uuid.UUID(execution_id)
+    Session = await _get_session_factory()
+    async with Session() as db:
+        got = (
+            await db.execute(
+                update(Execution)
+                .where(
+                    Execution.id == eid,
+                    Execution.status == ExecutionStatus.RUNNING,
+                    Execution.delivery_attempts < MAX_ATTEMPTS,
+                    or_(
+                        Execution.lease_expires_at.is_(None),
+                        Execution.lease_expires_at < func.now(),
+                        Execution.runner_id == RUNNER_ID,
+                    ),
+                )
+                .values(
+                    runner_id=RUNNER_ID,
+                    lease_expires_at=func.now() + timedelta(seconds=LEASE_SECONDS),
+                    delivery_attempts=Execution.delivery_attempts + 1,
+                )
+                .returning(Execution.delivery_attempts)
+                .execution_options(synchronize_session=False)
+            )
+        ).first()
+        if got is not None:
+            await db.commit()
+            return "claimed", 0.0
+        cur = (
+            await db.execute(
+                select(
+                    Execution.status,
+                    Execution.runner_id,
+                    func.extract("epoch", Execution.lease_expires_at - func.now()),
+                ).where(Execution.id == eid)
+            )
+        ).first()
+        await db.commit()
+    if cur is None:
+        return "missing", 0.0
+    status, runner, left = cur
+    if status != ExecutionStatus.RUNNING:
+        return "done", 0.0
+    left = float(left) if left is not None else 0.0
+    if left > 0 and runner != RUNNER_ID:
+        return "owned", left
+    return "exhausted", 0.0
+
+
+async def _renew(execution_id: str) -> bool:
+    """Extend our lease. False only when another runner has taken the run over."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, select, update
+
+    from models.execution import Execution, ExecutionStatus  # type: ignore
+
+    eid = uuid.UUID(execution_id)
+    Session = await _get_session_factory()
+    async with Session() as db:
+        res = await db.execute(
+            update(Execution)
+            .where(
+                Execution.id == eid,
+                Execution.runner_id == RUNNER_ID,
+                Execution.status == ExecutionStatus.RUNNING,
+            )
+            .values(lease_expires_at=func.now() + timedelta(seconds=LEASE_SECONDS))
+            .execution_options(synchronize_session=False)
+        )
+        if res.rowcount:
+            await db.commit()
+            return True
+        runner = (
+            await db.execute(select(Execution.runner_id).where(Execution.id == eid))
+        ).scalar()
+        await db.commit()
+    return runner in (None, RUNNER_ID)
+
+
+async def _heartbeat(qm: Any, execution_id: str, run: dict[str, Any]) -> None:
+    """Keep the delivery and the lease alive while the run is queued or running."""
+    every = LEASE_SECONDS / 3
+    while True:
+        await asyncio.sleep(every)
+        try:
+            await qm.in_progress()
+        except Exception as e:
+            logger.debug("consumer: in_progress failed for %s: %s", execution_id, e)
+        task = run.get("task")
+        if task is None:
+            continue
+        try:
+            if not await _renew(execution_id):
+                logger.warning(
+                    "consumer: %s was taken over by another runner, stopping here",
+                    execution_id,
+                )
+                run["lost"] = True
+                task.cancel()
+                return
+        except Exception as e:
+            logger.warning("consumer: lease renew failed for %s: %s", execution_id, e)
+
+
+async def _give_up(execution_id: str, trigger_id: str | None) -> None:
+    msg = (
+        f"The run was picked up {MAX_ATTEMPTS} times and the worker stopped each "
+        "time before it finished, so it was not retried again."
+    )
+    await _mark_done(
+        execution_id,
+        "failed",
+        None,
+        msg,
+        failure_code="STALE_SWEEP",
+        trigger_id=trigger_id,
+    )
+    await _publish(execution_id, {"event": "error", "error": msg})
+
+
+async def _run_traced(payload: dict, carrier: dict | None) -> None:
+    from engine.tracing import extract_carrier, get_tracer
+
+    ctx = extract_carrier(carrier) if carrier else None
+    with get_tracer("abenix.consumer").start_as_current_span(
+        "agent_runtime.run",
+        context=ctx,
+        attributes={
+            "abenix.execution_id": str(payload.get("execution_id") or ""),
+            "abenix.pool": os.environ.get("RUNTIME_POOL", "default"),
+        },
+    ):
+        await _run_one(payload)
+
+
+async def _handle_delivery(qm: Any, gate: asyncio.Semaphore) -> None:
+    """Run one queued execution and ack only once it is finished, skipped or given up."""
+    data = qm.data if isinstance(qm.data, dict) else {}
+    payload = data.get("payload") or data
+    execution_id = str(payload.get("execution_id") or "")
+    if not execution_id:
+        logger.error("consumer: payload missing execution_id: %s", payload)
+        await qm.ack()
+        return
+    run: dict[str, Any] = {}
+    hb = asyncio.create_task(_heartbeat(qm, execution_id, run))
+    try:
+        async with gate:
+            state, left = await _claim(execution_id)
+            if state == "claimed":
+                if qm.num_delivered > 1:
+                    logger.warning(
+                        "consumer: taking over %s on delivery %d",
+                        execution_id,
+                        qm.num_delivered,
+                    )
+                run["task"] = asyncio.create_task(
+                    _run_traced(payload, data.get("trace"))
+                )
+                try:
+                    await run["task"]
+                except asyncio.CancelledError:
+                    if not run.get("lost"):
+                        raise
+            elif state == "owned":
+                # the owner may be dead, look again once its lease has run out
+                await qm.nak(delay=left + 1)
+                return
+            elif state == "exhausted":
+                await _give_up(execution_id, payload.get("trigger_id"))
+            elif state == "missing":
+                logger.warning(
+                    "consumer: execution %s not found; skipping", execution_id
+                )
+                await _publish(
+                    execution_id, {"event": "error", "error": "execution row missing"}
+                )
+            else:
+                logger.info(
+                    "consumer: %s already finished, dropping duplicate", execution_id
+                )
+        await qm.ack()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("consumer: delivery for %s failed, will retry", execution_id)
+        try:
+            await qm.nak(delay=10)
+        except Exception:
+            pass
+    finally:
+        hb.cancel()
+
+
 async def _pipeline_timeout() -> int:
     """Admin-configurable pipeline budget, falling back to the engine default.
 
@@ -300,6 +522,9 @@ def _merge_tool_trace(tool_calls: list[dict[str, Any]], trace: dict[str, Any]) -
             tc["duration_ms"] = trace.get("duration_ms")
             if trace.get("output_summary"):
                 tc["output_summary"] = trace["output_summary"]
+            record = (trace.get("metadata") or {}).get("decision_record")
+            if record:
+                tc["decision_record"] = record
             return
 
 
@@ -312,18 +537,20 @@ def _pipeline_tool_calls(node_results: dict[str, Any] | None) -> list[dict[str, 
         preview = nr.get("output")
         if not isinstance(preview, str):
             preview = json.dumps(preview, default=str) if preview is not None else ""
-        out.append(
-            {
-                "name": nr["tool_name"],
-                "node_id": nid,
-                "arguments": nr.get("resolved_arguments") or {},
-                "result_preview": preview[:500],
-                "result": preview[:8000],
-                "label": nr.get("label") or "",
-                "is_error": nr.get("status") == "failed",
-                "duration_ms": nr.get("duration_ms"),
-            }
-        )
+        entry = {
+            "name": nr["tool_name"],
+            "node_id": nid,
+            "arguments": nr.get("resolved_arguments") or {},
+            "result_preview": preview[:500],
+            "result": preview[:8000],
+            "label": nr.get("label") or "",
+            "is_error": nr.get("status") == "failed",
+            "duration_ms": nr.get("duration_ms"),
+        }
+        record = (nr.get("metadata") or {}).get("decision_record")
+        if record:
+            entry["decision_record"] = record
+        out.append(entry)
     return out
 
 
@@ -681,6 +908,7 @@ async def _run_one(payload: dict) -> None:
                 tenant_id=loaded.get("tenant_id"),
                 kb_ids=loaded.get("kb_ids") or [],
                 execution_id=execution_id,
+                agent_name=agent_name,
                 user_id=user_id or "",
                 user_role=payload.get("role") or "",
                 delegation_depth=int(payload.get("delegation_depth") or 0),
@@ -693,6 +921,7 @@ async def _run_one(payload: dict) -> None:
                 agent_id=loaded["agent_id"],
                 tenant_id=tenant_id,
                 db_url=os.environ.get("DATABASE_URL", ""),
+                cost_limit=_run_cost_cap(loaded, payload),
             )
             # Inject execution_id into context so the executor's healing
             # capture path can attribute the diff back to this run.
@@ -765,6 +994,9 @@ async def _run_one(payload: dict) -> None:
                 pipeline_status,
                 final_text,
                 err_text,
+                input_tokens=serialized["input_tokens"] or None,
+                output_tokens=serialized["output_tokens"] or None,
+                cost=serialized["cost"],
                 node_results=serialized.get("node_results"),
                 tool_calls=_pipeline_tool_calls(serialized.get("node_results")) or None,
                 execution_trace={
@@ -785,16 +1017,14 @@ async def _run_one(payload: dict) -> None:
                 risk_tier=serialized.get("risk_tier") or None,
                 risk_reasons=serialized.get("risk_reasons") or None,
             )
-            # Debit api_keys / users so customer quotas stay enforced on
-            # queue-routed pipeline runs. Pipelines aggregate token counts
-            # on the result object the same way agent runs do.
-            if pipeline_status == "completed":
-                _pipe_in = int(getattr(result, "input_tokens", 0) or 0)
-                _pipe_out = int(getattr(result, "output_tokens", 0) or 0)
-                _pipe_cost = float(getattr(result, "cost", 0.0) or 0.0)
-                await _update_usage_counters(
-                    api_key_id, user_id, _pipe_in, _pipe_out, _pipe_cost
-                )
+            # failed steps spent real money, so quotas are debited either way
+            await _update_usage_counters(
+                api_key_id,
+                user_id,
+                serialized["input_tokens"],
+                serialized["output_tokens"],
+                serialized["cost"],
+            )
             _emit_outcome(
                 outcome="SUCCESS" if pipeline_status == "completed" else "FAILED",
                 failure_code=(
@@ -905,6 +1135,7 @@ async def _run_one(payload: dict) -> None:
                 require_knowledge_search=_require_kb,
                 require_tools=list(loaded["model_cfg"].get("require_tools") or []),
                 moderation_gate=_moderation_gate,
+                cost_limit=_run_cost_cap(loaded, payload),
             )
             # Stream so per-iteration events reach Redis pub/sub live; invoke() only emits start+done.
             from types import SimpleNamespace
@@ -1304,6 +1535,12 @@ async def main() -> None:
     except Exception as e:
         logger.warning("consumer: tracing init failed (continuing without): %s", e)
 
+    if backend_name != "nats":
+        from engine.queue_backend import CELERY_UNSUPPORTED  # type: ignore
+
+        logger.error("consumer: %s", CELERY_UNSUPPORTED)
+        raise SystemExit(1)
+
     logger.info("consumer: starting pool=%s backend=%s", pool, backend_name)
 
     health_port = int(os.environ.get("HEALTH_PORT", "8001"))
@@ -1338,18 +1575,6 @@ async def main() -> None:
         except Exception:
             pass
 
-    # Celery consumption is handled by the existing celery worker image —
-    # the Wave-2 consumer is only meaningful for NATS today.
-    if backend_name != "nats":
-        logger.warning(
-            "consumer: QUEUE_BACKEND=%s — consumer is a no-op (Celery workers "
-            "consume via their own entrypoint). Exiting idle.",
-            backend_name,
-        )
-        # Sleep forever so the pod stays alive under liveness probes.
-        await stop.wait()
-        return
-
     max_concurrency = int(
         os.environ.get("AGENT_CONCURRENCY")
         or os.environ.get("CONSUMER_MAX_CONCURRENCY")
@@ -1359,23 +1584,19 @@ async def main() -> None:
     in_flight: set[asyncio.Task[Any]] = set()
     logger.info("consumer: concurrency cap = %d", max_concurrency)
 
-    async def _bounded(p: dict[str, Any]) -> None:
-        async with concurrency_gate:
-            try:
-                await _run_one(p)
-            except Exception:
-                logger.exception("consumer: _run_one crashed")
-
     try:
-        async for msg in backend.stream(pool):
+        async for qm in backend.stream(pool):
             if stop.is_set():
                 break
-            task_id = msg.get("task_id", "?")
-            payload = msg.get("payload") or msg
+            data = qm.data if isinstance(qm.data, dict) else {}
             await concurrency_gate.acquire()
             concurrency_gate.release()
-            logger.info("consumer: picked task %s from agents.%s", task_id, pool)
-            t = asyncio.create_task(_bounded(payload))
+            logger.info(
+                "consumer: picked task %s from agents.%s",
+                data.get("task_id", "?"),
+                pool,
+            )
+            t = asyncio.create_task(_handle_delivery(qm, concurrency_gate))
             in_flight.add(t)
             t.add_done_callback(in_flight.discard)
     except Exception as e:

@@ -1,15 +1,13 @@
 # Python SDK
 
-> The reference implementation. Async-first, threadsafe, OTel-instrumented out of the box.
+> The reference implementation. Async only, built on `httpx`.
 
-Install:
+Install from the monorepo:
 ```bash
-pip install abenix-sdk
-# or, in this monorepo:
 cd packages/sdk/python && pip install -e .
 ```
 
-The SDK ships as a single package `abenix_sdk` and is vendored into every standalone app under `<app>/api/sdk/`. The vendored copy is kept in sync with `packages/sdk/python/abenix_sdk` by [`scripts/sync-sdks.sh`](../../scripts/sync-sdks.sh) which runs as part of every CI build.
+The package is `abenix-sdk`, needs Python 3.10+, and has one dependency, `httpx`. It is also vendored into `packages/agent-sdk/` and into each standalone app under `<app>/api/sdk/`. Those copies must match `packages/sdk/python/abenix_sdk`. [`scripts/sync-sdks.sh`](../../scripts/sync-sdks.sh) copies them over, and `--check` fails on drift. `dev-local.sh` and `deploy-azure.sh` both run the check.
 
 ---
 
@@ -20,38 +18,20 @@ import asyncio
 from abenix_sdk import Abenix
 
 async def main():
-    async with Abenix(api_url="http://localhost:8000", api_key="af_xxx") as client:
-        result = await client.execute(
-            "wingman-market-brief",
-            input_data={},
-            wait="complete",
-        )
-        print(result.output)
+    async with Abenix(api_key="af_xxx", base_url="http://localhost:8000") as client:
+        result = await client.execute("wingman-market-brief", "Brief me on today's crude market")
+        print(result.status, result.output)
 
 asyncio.run(main())
 ```
 
-That's the full surface for a typical call. No SSE handling, no JSON munging — the SDK does it.
+`execute` blocks until the run finishes unless you ask otherwise. No SSE handling, no JSON munging.
 
 ---
 
-## Sync vs async
+## Async only
 
-The Python SDK has both a sync and async surface. They share zero code paths under the hood — the sync client uses `requests`, the async client uses `httpx`. Both expose the same method names.
-
-```python
-from abenix_sdk import Abenix, AbenixSync
-
-# Async (preferred for FastAPI / asyncio apps)
-async with Abenix(...) as client:
-    result = await client.execute(...)
-
-# Sync (for scripts, Jupyter, Django views, etc.)
-with AbenixSync(...) as client:
-    result = client.execute(...)
-```
-
-Within a single process you can mix the two — there's no shared state.
+There is no sync client. Every method is a coroutine. From a script or a notebook, wrap the calls in `asyncio.run(...)`.
 
 ---
 
@@ -61,79 +41,132 @@ Within a single process you can mix the two — there's no shared state.
 class Abenix:
     def __init__(
         self,
-        api_url: str,
-        api_key: str | None = None,
-        token: str | None = None,
-        timeout: float = 30.0,
-        retries: int = 3,
-        otel_tracer: trace.Tracer | None = None,
+        api_key: str,
+        base_url: str = "http://localhost:8000",
+        timeout: float = 120.0,
+        act_as: ActingSubject | None = None,
     ): ...
-    
-    async def __aenter__(self): ...
-    async def __aexit__(self, *exc): ...
-    
-    def with_subject(self, subject: ActingSubject) -> "Abenix": ...
-    
-    # Primary surface
-    async def execute(self, slug: str, input_data: dict, wait: str = "submitted", ...) -> ExecutionResult: ...
-    
+
+    async def me(self) -> dict: ...
+    async def permissions(self) -> dict: ...
+    async def execute(self, agent_slug_or_id: str, message: str, act_as: ActingSubject | None = None,
+                      *, wait: bool | str | None = None, **kwargs) -> ExecutionResult: ...
+    async def stream(self, agent_slug_or_id: str, message: str, act_as: ActingSubject | None = None,
+                     **kwargs) -> AsyncIterator[StreamEvent]: ...
+    async def watch(self, execution_id: str) -> AsyncIterator[DagSnapshot]: ...
+    async def approve(self, execution_id: str, gate_id: str, comment: str = "") -> None: ...
+    async def reject(self, execution_id: str, gate_id: str, comment: str = "") -> None: ...
+    def set_act_as(self, act_as: ActingSubject | None) -> None: ...
+    async def close(self) -> None: ...
+
     # Sub-clients
     executions: ExecutionsClient
     agents: AgentsClient
     knowledge: KnowledgeClient
-    ml_models: MLModelsClient
-    code_assets: CodeAssetsClient
+    chat: ChatClient
     approvals: ApprovalsClient
+    tools: ToolsClient
+    presets: PresetsClient
+    ml_models: MLModelsClient
+    decisions: DecisionsClient
+    sources: SourcesClient
+    events: EventsClient
+
+    http: httpx.AsyncClient   # authenticated client for endpoints with no typed method
 ```
 
-### Authentication options
+- `timeout` is in seconds and applies to every request. `execute` also derives the server-side wait from it (`timeout - 5`, clamped to 5..1800, or 180 when `timeout` is 10 or less).
+- `async with` closes the underlying `httpx.AsyncClient` on exit. Without it, call `await client.close()`.
+- `agent_slug_or_id` takes a slug or a UUID. A slug is resolved through `/api/agents?search=` and then a paged scan. An unknown slug raises `ValueError`.
+- `approve` and `reject` are the old gate-id shape. Prefer `client.approvals.approve(approval_id)`.
 
-Pick one:
-- `api_key="af_..."` — service account key. Sent as `X-API-Key`.
-- `token="ey..."` — JWT (issued by `/api/auth/login`). Sent as `Authorization: Bearer …`. Will auto-refresh if a refresh token was supplied.
+### Authentication
 
-The SDK does **not** support OAuth flows directly. If you're using an external IdP (Okta, Auth0), exchange for a JWT via `/api/auth/exchange` and pass it in.
+API key only, sent as `X-API-Key`. Leading and trailing whitespace is stripped, so a key read from a mounted secret with a trailing newline still works. There is no JWT or OAuth option.
 
-### `with_subject` — actAs
+### actAs
 
-Returns a **shallow copy** of the client with `X-Abenix-Subject` set on subsequent calls. Doesn't mutate the original.
+Pass `act_as` per call, or set a default with the constructor or `set_act_as`. A per-call subject wins over the default.
 
 ```python
-service = Abenix(api_url, api_key=svc_key)
+from abenix_sdk import Abenix, ActingSubject
 
-# Two parallel threads, two different subjects, one client pool:
-alice = service.with_subject(ActingSubject(subject_type="wingman", subject_id="alice"))
-bob = service.with_subject(ActingSubject(subject_type="wingman", subject_id="bob"))
+client = Abenix(api_key=svc_key, base_url=api_url)
+
+alice = ActingSubject(subject_type="wingman", subject_id="alice", email="alice@yourcorp.com")
+bob = ActingSubject(subject_type="wingman", subject_id="bob")
 
 await asyncio.gather(
-    alice.execute(...),
-    bob.execute(...),
+    client.execute("wingman-market-brief", "Brief me", act_as=alice),
+    client.execute("wingman-market-brief", "Brief me", act_as=bob),
 )
 ```
 
+`set_act_as` changes the client in place, so for concurrent requests on behalf of different users pass `act_as` on each call. The subject goes out as `X-Abenix-Subject`, a JSON object with `subject_type`, `subject_id` and the optional `email`, `display_name`, `metadata`. `execute`, `stream`, `chat`, `tools` and `presets` send it. The other sub-clients do not. The API key needs the `can_delegate` scope.
+
 ---
 
-## `ExecutionResult`
+## `execute` and `ExecutionResult`
 
 ```python
 @dataclass
 class ExecutionResult:
-    execution_id: UUID
-    status: str                  # "running" | "completed" | "failed" | "waiting_approval" | "cancelled"
-    output: dict | None          # parsed output (matches agent.output_schema if set)
-    raw_output: str | None       # raw LLM text if output couldn't be parsed
-    cost_usd: float
-    duration_ms: int
-    failure_code: str | None
-    error_message: str | None
-    approval_ref: ApprovalRef | None
+    output: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost: float = 0.0
+    duration_ms: int = 0
+    model: str = ""
+    tool_calls: list[dict] = field(default_factory=list)
+    confidence_score: float | None = None
+    errors: list[dict] = field(default_factory=list)
+    execution_id: str | None = None
+    status: str = "completed"               # completed | failed | paused | running
+    paused_at: ApprovalRef | None = None    # set when status == "paused"
+
+@dataclass
+class ApprovalRef:
+    approval_id: str
+    title: str = ""
+    payload: dict = field(default_factory=dict)
+    required_signoffs: int = 1
+    expires_at: str | None = None
+    gate_kind: str | None = None
 ```
 
-`output` is `None` until `status` is terminal. Use the field-by-field accessor on `ExecutionResult.terminal_or_raise()` if you want an exception on non-success:
+`output` is the agent's final text. A failed run does not raise, so check `status`.
+
+| `wait` | Behaviour |
+|---|---|
+| omitted, `True` or `"completed"` | Blocks until the run ends. If the server answers in async mode, the SDK polls `/api/executions/{id}` until a terminal status or the wait timeout. |
+| `"submitted"` | Returns at once with `execution_id` and `status` (usually `"running"`). `output` is empty. |
+| `"until_gate"` | Blocks, but returns early with `status="paused"` and `paused_at` when a HITL gate opens. |
+| `False` | Asks the server not to wait, but the async fallback still polls. Use `"submitted"` to get the id back without waiting. |
+
+Extra keyword arguments go into the request body. `context={...}` passes input variables to an agent or pipeline.
 
 ```python
-result = (await client.execute("...", input_data, wait="complete")).terminal_or_raise()
-print(result.output["fair_value_spread_usd_mt"])
+res = await client.execute(
+    "contract-execute-flow",
+    "Execute the Acme renewal",
+    wait="until_gate",
+    context={"counterparty_id": cp_id, "amount_usd": 2_400_000},
+)
+
+if res.status == "paused":
+    gate = res.paused_at
+    print(gate.approval_id, gate.title, gate.payload)
+    approval = await client.approvals.wait_for(gate.approval_id, timeout_seconds=3600)
+    if approval.get("status") == "approved":
+        async for snap in client.watch(res.execution_id):
+            if snap.is_terminal:
+                break
+        row = await client.executions.get(res.execution_id)
+        print(row["status"], row["output_message"])
+elif res.status == "completed":
+    print(res.output)
+else:
+    print("run ended as", res.status)
 ```
 
 ---
@@ -141,103 +174,416 @@ print(result.output["fair_value_spread_usd_mt"])
 ## Streaming
 
 ```python
-async for event in client.execute("...", input_data, wait="stream"):
-    if event.type == "tool.end":
-        print(f"  tool {event.tool_slug} returned in {event.latency_ms}ms")
-    elif event.type == "completed":
-        print(f"  done: {event.output}")
+async for event in client.stream("deep-research", "Analyze market trends for EVs"):
+    if event.type == "token":
+        print(event.text, end="")
+    elif event.type == "tool_call":
+        print(f"\n  tool {event.name}")
+    elif event.type == "done":
+        print(f"\n  cost ${event.cost} in {event.duration_ms}ms")
+    elif event.type == "error":
+        print("\n  failed:", event.message, event.error_code)
 ```
 
-Each event is an `ExecEvent` dataclass — `type`, plus type-specific fields. The iterator closes after the terminal event.
+Each event is a `StreamEvent` dataclass. `type` is one of `token`, `tool_call`, `tool_result`, `node_start`, `node_complete`, `done`, `error`, with type-specific fields such as `text`, `name`, `arguments`, `result`, `node_id`, `status`, `duration_ms`, `cost`, `message`. The iterator ends when the server closes the stream. There is no automatic reconnect.
 
-If the connection drops, the iterator raises `AbenixDisconnected`. Re-subscribe with `client.executions.events(execution_id, since=last_event_id)`:
+To follow a run started elsewhere, use `watch`. It yields a `DagSnapshot` per `snapshot` event (status, progress, nodes, edges, cost so far) and stops on `end`.
 
 ```python
-last_id = None
-while True:
-    try:
-        async for event in client.executions.events(execution_id, since=last_id):
-            handle(event)
-            last_id = event.id
-            if event.is_terminal:
-                return
-    except AbenixDisconnected:
-        await asyncio.sleep(1)
+async for snap in client.watch(execution_id):
+    print(snap.status, snap.progress)
+    if snap.is_terminal:
+        break
 ```
+
+`client.executions.watch_raw_sse(execution_id)` yields the raw SSE bytes instead, for proxying the stream to a browser unchanged.
 
 ---
 
 ## OpenTelemetry integration
 
-The SDK auto-instruments if `OTEL_TRACES_EXPORTER` is set or you pass a `tracer`:
+The client itself has no tracing code. `abenix_sdk.tracing.init_tracing` sets up OTel for your service and instruments `httpx`, so SDK calls carry a W3C `traceparent` header and the platform-side run joins your trace.
 
 ```python
-from opentelemetry import trace
-client = Abenix(api_url, api_key=key, otel_tracer=trace.get_tracer("my_service"))
+from abenix_sdk.tracing import init_tracing
+
+init_tracing("wingman-api", fastapi_app=app)
 ```
 
-Without an OTel setup, the SDK still propagates the W3C `traceparent` header from the current span if there's an active tracer. With no tracer at all, the header is omitted and the platform creates a root span.
-
-The standalone apps' SDK helpers (`abenix_sdk.tracing.install_default_tracing`) do the wiring:
-
-```python
-from abenix_sdk.tracing import install_default_tracing
-install_default_tracing(service_name="wingman-api")
-```
-
-This sets up the exporter, instruments FastAPI + httpx + asyncpg, and adds the PII redaction processor. See [`packages/sdk/python/abenix_sdk/tracing.py`](../../packages/sdk/python/abenix_sdk/tracing.py).
+`init_tracing(service_name, fastapi_app=None)` does nothing and returns `False` unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_TEMPO_ENDPOINT`) is set and the OpenTelemetry packages are installed. The SDK does not install them. It needs the OTel SDK, the OTLP gRPC exporter, and the `httpx` and `fastapi` instrumentations. Sampling reads `OTEL_TRACES_SAMPLER_ARG` (default `0.1`). It also adds a span processor that redacts prompt, tool and body attributes. `current_trace_id()` returns the active trace id or `None`. See [`packages/sdk/python/abenix_sdk/tracing.py`](../../packages/sdk/python/abenix_sdk/tracing.py).
 
 ---
 
 ## Error handling
 
+What a failure raises depends on the method.
+
+| Methods | Raises |
+|---|---|
+| `me`, `permissions`, `agents.by_slug/create/update`, `sources`, `events` | `AbenixError` |
+| `decisions` | `AbenixDecisionError` (a subclass of `AbenixError`) |
+| `execute`, `stream`, `watch`, `executions`, `approvals`, `knowledge`, `chat`, `tools`, `presets`, `ml_models`, `agents.list/get/find_by_slug` | `httpx.HTTPStatusError` |
+| `execute` or `stream` with an unknown slug, `approvals.return_for_changes` with a blank reason, `events.subscribe([])`, `decisions.import_rules` with a bad `mode` | `ValueError` |
+
+`approve` and `reject` on the client do not check the response at all.
+
+`AbenixError` carries `status`, `code` and `details`, and the message is `str(e)`. See [Errors from these clients](#errors-from-these-clients). For `httpx.HTTPStatusError`, read the envelope from the response:
+
 ```python
-from abenix_sdk import AbenixError
+import httpx
 
 try:
-    result = await client.execute(...)
-except AbenixError as e:
-    if e.error_code == "RATE_LIMITED":
-        await asyncio.sleep(int(e.headers.get("Retry-After", "5")))
-        result = await client.execute(...)
-    elif e.error_code == "VALIDATION_ERROR":
-        print("Bad input:", e.details)
+    result = await client.execute("invoice-triage", "Route INV-1042")
+except httpx.HTTPStatusError as e:
+    err = e.response.json().get("error") or {}
+    if e.response.status_code == 429:
+        await asyncio.sleep(int(e.response.headers.get("Retry-After", "5")))
     else:
+        print(e.response.status_code, err.get("error_code"), err.get("message"))
         raise
 ```
 
-Specific exception subclasses for the common cases — `AbenixRateLimited`, `AbenixValidationError`, `AbenixNotFound`, `AbenixForbidden`, `AbenixServerError` — let you write `except AbenixRateLimited:` directly.
+The SDK does not retry anything itself.
+
+---
+
+## Platform clients
+
+These calls return the `data` field of the response and raise on any 4xx or 5xx. The examples assume a client built like this:
+
+```python
+from abenix_sdk import Abenix, AbenixError, AbenixDecisionError
+
+client = Abenix(api_key="af_xxx", base_url="http://localhost:8000")
+```
+
+### Errors from these clients
+
+```python
+class AbenixError(Exception):
+    status: int          # HTTP status
+    code: str | None     # server error_code, e.g. "STALE_DRAFT"
+    details: Any         # extra context from the envelope
+
+class AbenixDecisionError(AbenixError): ...
+```
+
+There is no `message` attribute. Use `str(e)`. Decision calls raise `AbenixDecisionError` and everything else here raises `AbenixError`, so `except AbenixError` catches both.
+
+```python
+try:
+    await client.decisions.get("no-such-decision")
+except AbenixDecisionError as e:
+    print(e.status, e.code, str(e))
+```
+
+### `me()` and `permissions()`
+
+```python
+me = await client.me()
+perms = await client.permissions()
+print(perms["email"], perms["role"])
+if "decisions.publish" not in perms["capabilities"]:
+    print("this key cannot publish decisions")
+```
+
+`permissions()` returns `user_id`, `tenant_id`, `email`, `name`, `role`, `is_admin`, `features` and `capabilities`.
+
+### Agents
+
+```python
+agent = await client.agents.by_slug("invoice-triage")
+if agent is None:
+    agent = await client.agents.create({
+        "name": "Invoice Triage",
+        "slug": "invoice-triage",
+        "system_prompt": "Route each invoice to the right queue.",
+        "model_config": {"model": "claude-sonnet-4-5-20250929", "tools": ["calculator"]},
+    })
+await client.agents.update(agent["id"], {"description": "Routes invoices"})
+```
+
+- `by_slug(slug)` returns `None` on 404 and raises on anything else.
+- `create(body)` takes the same fields as `POST /api/agents`, including `model_config`.
+- `update(agent_id, body)` sends a `PUT`. A `name` in the body renames the slug too, so leave it out to keep the slug.
+
+### Decisions
+
+Versioned business rules. See [08-howto/09-decisions](../08-howto/09-decisions.md) for the model.
+
+```python
+res = await client.decisions.evaluate(
+    "credit-limit",
+    {"segment": "smb", "annual_revenue": 1_200_000},
+    as_of="2026-10-01",
+)
+if res["outcome"] == "decided":
+    print(res["result"], res["applied_rules"])
+elif res["outcome"] == "missing_facts":
+    print("need", res["missing_facts"])
+
+batch = await client.decisions.evaluate_batch(
+    "credit-limit",
+    [{"facts": {"segment": "smb", "annual_revenue": 900_000}},
+     {"facts": {"segment": "enterprise", "annual_revenue": 40_000_000}}],
+)
+print(batch["counts"])
+```
+
+`outcome` is one of `decided`, `no_match`, `missing_facts`, `invalid_facts`. Missing facts are never guessed.
+
+Changing rules goes through a draft. Every draft carries an `etag`. Pass it back on `save_draft` or `import_rules` and the SDK sends it as `If-Match`. If someone saved the draft in between, the call fails with `code == "STALE_DRAFT"` and `details["current"]` holds their version. Each successful save returns the new `etag`.
+
+```python
+key = "credit-limit"
+draft = await client.decisions.new_draft(key, note="Raise SMB cap")
+n, etag = draft["version"], draft["etag"]
+
+try:
+    saved = await client.decisions.import_rules(key, n, rules, mode="merge", etag=etag)
+    saved = await client.decisions.save_draft(
+        key, n, etag=saved["etag"], valid_from="2026-11-01", change_note="SMB cap to 250k",
+    )
+except AbenixDecisionError as e:
+    if e.code == "STALE_DRAFT":
+        print("someone else saved, reload", e.details["current"]["etag"])
+    raise
+
+print(saved["problems"])                                # [] when the draft compiles
+print(await client.decisions.validate(key, n))
+print(await client.decisions.diff(key, n - 1, n))
+print(await client.decisions.publish_plan(key, n))      # what publishing would supersede
+await client.decisions.propose(key, n, note="SMB cap to 250k")
+# await client.decisions.withdraw(key, n)                # pull it back to draft
+```
+
+After sign-off:
+
+```python
+await client.decisions.publish(key, n, expected_current=n - 1)
+await client.decisions.retire(key, n - 1)
+await client.decisions.update(key, risk_tier="medium", tags=["credit"])
+print(await client.decisions.tests(key))
+```
+
+| Method | Signature |
+|---|---|
+| `evaluate` | `(key, facts, *, as_of=None, known_at=None, version=None, trace=True, persist=False, idempotency_key=None)` |
+| `evaluate_batch` | `(key, items, *, as_of=None, version=None)` |
+| `new_draft` | `(key, *, note="", from_version=None)` |
+| `save_draft` | `(key, version, *, etag=None, authoring=None, content=None, valid_from=None, valid_to=None, clear_valid_from=False, clear_valid_to=False, change_note=None, provenance=None)` |
+| `import_rules` | `(key, version, rules, *, mode="merge", etag=None)`, `mode` is `merge` or `replace` |
+| `validate` | `(key, version)` |
+| `propose` | `(key, version, *, note="")` |
+| `withdraw` | `(key, version)` |
+| `publish_plan` | `(key, version)` |
+| `publish` | `(key, version, *, expected_current=None)` |
+| `retire` | `(key, version)` |
+| `diff` | `(key, a, b)` |
+| `tests` | `(key)` |
+| `update` | `(key, *, name=None, description=None, risk_tier=None, tags=None, log_mode=None)` |
+| `list` | `(q="")` |
+| `get` | `(key)`, the decision with its versions |
+| `create` | `(name, *, key=None, rules=None, risk_tier="low", description="")` |
+| `compare` | `(key, facts, targets)`, two or more targets, each `{label, version}` or `{as_of, known_at}` |
+| `versions` | `(key)`, the `versions` list from `get` |
+| `version` | `(key, n)` |
+| `export` | `(key, version=None)` |
+| `propose_rules` | `(key, rules, *, note, mode="merge")`, new draft, import and propose in one call |
+| `add_test` | `(key, name, facts, *, expected=None, expected_outcome="decided", as_of=None)` |
+| `evaluations` | `(key, limit=50)` |
+| `reference_sets` | `()` |
+| `reference_set` | `(key)` |
+| `put_reference_set` | `(key, name, values, description="")`, creates the set on a 404, otherwise saves a new version |
+
+No SDK method yet for `/check`, `/versions/{n}/try`, `/versions/{n}/presence`, changing or deleting a test, deleting a reference set, or archiving a decision. Use `client.http` for those.
+
+### Sources
+
+Watched pages and feeds. See [02-runtime/17-source-watch](../02-runtime/17-source-watch.md).
+
+```python
+src = await client.sources.create(
+    "EU AI Act page",
+    "https://example.org/ai-act",
+    kind="html",
+    cadence_minutes=1440,
+    selector="main",
+    jurisdiction="EU",
+    tags=["ai-act"],
+)
+result = await client.sources.check_now(src["id"])
+print(result["outcome"])
+
+for ch in await client.sources.changes(limit=20):
+    full = await client.sources.change(ch["id"])
+```
+
+Other methods: `list(q="")`, `get`, `update(source_id, **fields)`, `delete`, `pause(source_id, reason="")`, `resume`, `snapshots(source_id, limit=100)`, `snapshot(snapshot_id, *, full=False)`, `source_changes(source_id, limit=100)`, `validate_url(url)`, `preview(url, *, kind=None, selector=None)`, `settings()`.
+
+### Events
+
+Platform events sent to a webhook, or used to start an agent or pipeline. See [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md).
+
+```python
+print([e["type"] for e in await client.events.catalog()])
+
+sub = await client.events.subscribe(
+    ["decision.published", "source.changed"],
+    url="https://hooks.example.com/abenix",
+    name="rules feed",
+)
+secret = sub["signing_secret"]          # returned once, store it
+
+failed = await client.events.deliveries(sub["id"], limit=20, status="failed")
+for d in failed:
+    await client.events.redeliver(d["id"])
+```
+
+`subscribe(events, *, url=None, name="", filter=None, target_type="webhook", target=None)` raises `ValueError` on an empty list. Also there: `list`, `update`, `delete`, `test`.
+
+On the receiving side, check each delivery with the static `EventsClient.verify_signature(secret, body, signature)`. It computes `"sha256=" + HMAC-SHA256(secret, body)` and compares it to the `X-Abenix-Signature` header in constant time. Pass the raw body, not re-serialised JSON. It returns `False` when the secret or header is missing.
+
+```python
+from fastapi import FastAPI, Request, HTTPException
+from abenix_sdk import EventsClient
+
+app = FastAPI()
+
+@app.post("/abenix")
+async def hook(request: Request):
+    raw = await request.body()
+    if not EventsClient.verify_signature(SECRET, raw, request.headers.get("X-Abenix-Signature")):
+        raise HTTPException(401)
+    event = await request.json()
+    print(request.headers["X-Abenix-Event"], event["id"])
+    return {"ok": True}
+```
+
+### Approvals: return for changes
+
+Sends an approval back to the requester instead of approving or denying it. A decision version goes back to draft. See [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
+
+```python
+await client.approvals.return_for_changes(
+    approval_id, "Cap should be 200k, not 250k", client_token="ret-123",
+)
+```
+
+`return_for_changes(approval_id, reason, *, client_token=None)` raises `ValueError` when `reason` is blank. It posts a `return` signoff.
+
+---
+
+## Other sub-clients
+
+The older sub-clients. They return the `data` field and raise `httpx.HTTPStatusError` on a 4xx or 5xx, not `AbenixError`.
+
+### `executions`
+
+| Method | Calls |
+|---|---|
+| `live()` | `GET /api/executions/live`, returns a list of `LiveExecution` dataclasses (`execution_id`, `agent_id`, `agent_name`, `status`, `current_step`, `current_tool`, tokens, `cost`, `iteration`, `max_iterations`, `confidence_score`) |
+| `get(execution_id)` | `GET /api/executions/{id}`, the stored row with `status`, `output_message` and the trace |
+| `replay(execution_id)` | `GET /api/executions/{id}/replay`, the trace for step-through viewing. It does not run anything again |
+| `tree(execution_id)` | `GET /api/executions/tree/{id}`, parent plus child runs |
+| `pending_approvals()` | `GET /api/executions/approvals`, open human-approval gates in the tenant |
+| `watch_raw_sse(execution_id)` | `GET /api/executions/{id}/watch`, raw SSE bytes |
+
+Running a past execution again on its recorded input is `POST /api/governance/runs/{id}/replay`, which has no SDK method. Call it through `client.http`.
+
+### `agents`
+
+Besides `by_slug`, `create` and `update` above:
+
+- `list()` is `GET /api/agents`, the first page only (20 agents)
+- `get(agent_id)` is `GET /api/agents/{id}`
+- `find_by_slug(slug)` searches `GET /api/agents?search=` and returns the exact slug match or `None`. Prefer `by_slug`
+
+### `approvals`
+
+| Method | Notes |
+|---|---|
+| `list(*, status=None, execution_id=None, agent_id=None, kind=None, limit=200)` | `GET /api/approvals` |
+| `get(approval_id)` | `GET /api/approvals/{id}` |
+| `create(title, payload, *, required_signoffs=1, expires_seconds=86400, gate_kind=None, agent_id=None, agent_execution_id=None, client_token=None)` | `POST /api/approvals`. A reused `client_token` returns the existing approval |
+| `signoff(approval_id, decision, *, reason="", client_token=None)` | `decision` is `approve`, `deny` or `return` |
+| `approve(approval_id, *, reason="", client_token=None)` | `signoff` with `approve` |
+| `deny(approval_id, *, reason="", client_token=None)` | `signoff` with `deny` |
+| `return_for_changes(approval_id, reason, *, client_token=None)` | see above |
+| `wait_for(approval_id, *, timeout_seconds=60, poll_seconds=2.0)` | Long-polls `/wait` in chunks of up to 120 s. Returns the last row seen, still `pending` if time ran out |
+| `subscribe()` | Async iterator over `GET /api/notifications/stream?types=approval_pending,approval_resolved`. Yields `{event, data}` |
+| `configure_webhook(*, url, secret=None)` | `PUT /api/approvals/webhooks`. Needs the admin or owner role |
+
+### `knowledge`
+
+| Method | Calls |
+|---|---|
+| `bootstrap_project(slug, name, description="", collections=None)` | `POST /api/knowledge-projects/bootstrap`. Idempotent. Unknown `agent_slugs` in a collection come back in `skipped_agents` |
+| `ensure_subject_collection(project_slug, subject_type, subject_id, description="", default_visibility="private", vector_backend="pgvector")` | `POST /api/knowledge-projects/{slug}/subject-collections/ensure` |
+| `cognify(kb_id, doc_ids=None, model="claude-sonnet-4-5-20250929", chunk_size=1000, chunk_overlap=200)` | `POST /api/knowledge-engines/{kb_id}/cognify` |
+| `graph_stats(kb_id)` | `GET /api/knowledge-engines/{kb_id}/graph-stats` |
+| `search(kb_id, query, mode="hybrid", top_k=5, graph_depth=2)` | `POST /api/knowledge-engines/{kb_id}/search` |
+| `graph(kb_id, limit=100)` | `GET /api/knowledge-engines/{kb_id}/graph` |
+| `cognify_jobs(kb_id)` | `GET /api/knowledge-engines/{kb_id}/cognify-jobs` |
+
+### `chat`
+
+Persistent threads on `/api/conversations`. Every method takes an optional `act_as`.
+
+| Method | Calls |
+|---|---|
+| `create(*, agent_slug=None, agent_id=None, app_slug=None, title=None)` | `POST /api/conversations` |
+| `list(*, app_slug=None, agent_slug=None, archived=False, limit=50, offset=0)` | `GET /api/conversations`, `offset` is turned into a page number |
+| `get(thread_id)` | Thread with its messages |
+| `send(thread_id, content, *, context=None, agent_slug=None, attachments=None)` | `POST /api/conversations/{id}/turn`. Returns `{thread, user_message, assistant_message}` |
+| `rename(thread_id, title)` | `PUT` with `{title}` |
+| `archive(thread_id, *, archived=True)` | `PUT` with `{is_archived}` |
+| `delete(thread_id)` | Deletes the thread and its messages |
+
+### `tools` and `presets`
+
+- `tools.list()` and its alias `tools.catalog()` return `GET /api/tools`
+- `tools.execute(slug, arguments=None, config=None, *, timeout=None)` runs one tool through `POST /api/tools/{slug}/execute`, outside the agent loop
+- `presets.list(*, tool_slug=None, ui_group=None, asset_class=None)`, `presets.get(slug)`, `presets.upsert(body)` and `presets.delete(slug)` manage `/api/tool-presets`
+- `presets.run(slug, arguments=None, config=None, *, timeout=None)` runs a preset, your arguments merged over its defaults
+
+### `ml_models`
+
+`list()` returns `GET /api/ml-models`. It is the only method. Use `client.http` for predict and deploy.
 
 ---
 
 ## Sample: a typical Wingman endpoint
 
 ```python
-# wingman/api/main.py — fragment
+# wingman/api/main.py, fragment
+import os
 from abenix_sdk import Abenix, ActingSubject
+
+abenix = Abenix(
+    api_key=os.environ["WINGMAN_ABENIX_API_KEY"],
+    base_url=os.environ["ABENIX_API_URL"],
+)
 
 @app.post("/api/wingman/mispricing/{corridor_id}/scan")
 async def scan_corridor(corridor_id: str, current_user: WingmanUser = Depends(auth)):
-    async with Abenix(
-        api_url=os.environ["ABENIX_API_URL"],
-        api_key=os.environ["WINGMAN_ABENIX_API_KEY"],
-    ) as client:
-        subject = ActingSubject(
-            subject_type="wingman",
-            subject_id=current_user.id,
-            email=current_user.email,
-            display_name=current_user.display_name,
-        )
-        result = await client.with_subject(subject).execute(
-            "wingman-mispricing-extractor",
-            input_data={"corridor": {"id": corridor_id}},
-            wait="submitted",
-            client_token=f"scan-{corridor_id}-{int(time.time())}",
-        )
-        return {"execution_id": str(result.execution_id), "status": result.status}
+    subject = ActingSubject(
+        subject_type="wingman",
+        subject_id=current_user.id,
+        email=current_user.email,
+        display_name=current_user.display_name,
+    )
+    result = await abenix.execute(
+        "wingman-mispricing-extractor",
+        f"Scan corridor {corridor_id}",
+        act_as=subject,
+        wait="submitted",
+        context={"corridor": {"id": corridor_id}},
+    )
+    return {"execution_id": result.execution_id, "status": result.status}
 ```
 
-That's it. Wingman holds no business logic. the agent does.
+One client for the whole app, the subject passed per call. Wingman holds no business logic. The agent does.
 
 ---
 
@@ -246,4 +592,4 @@ That's it. Wingman holds no business logic. the agent does.
 - [00-overview](00-overview.md) — design philosophy + actAs explainer
 - [02-typescript](02-typescript.md) — TS SDK
 - [03-java](03-java.md) — Java SDK
-- [09-reference/00-rest-api](../09-reference/00-rest-api.md) — underlying REST surface (rarely needed. SDK covers everything)
+- [09-reference/00-rest-api](../09-reference/00-rest-api.md) — underlying REST surface, for endpoints with no SDK method (call them through `client.http`)

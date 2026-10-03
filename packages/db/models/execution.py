@@ -102,6 +102,14 @@ class Execution(UUIDMixin, TenantMixin, Base):
     agent_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provenance: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # queue lease, a redelivered message only takes over once the owner stops renewing
+    runner_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    delivery_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     agent: Mapped["Agent"] = relationship(back_populates="executions")
     user: Mapped["User"] = relationship(back_populates="executions")

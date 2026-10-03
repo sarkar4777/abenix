@@ -77,6 +77,22 @@ For projects with internal imports (Go modules, Java packages, Python with `setu
 
 The three reference multi-file projects in `tests/code-assets/` exercise this path: Go HTTP fetcher, Java JSON transformer, Perl text munger.
 
+## Versions
+
+Upload new version on an asset replaces the code behind it. Agents and pipelines keep the same asset id and pick up the new code on their next call. The new archive is analysed first and only goes live if analysis succeeds. If it fails, the current version stays live and the reason comes back.
+
+Each upload bumps `version` and keeps the replaced archive in `version_history`, so any earlier version can be restored from the asset page. Restoring makes it live as a new version number. History keeps `CODE_ASSET_MAX_VERSIONS` entries (20 by default) and deletes archives that fall off the end. Uploads to one asset are serialised with a row lock and every upload and restore is audited.
+
+Endpoints: `POST /api/code-assets/{id}/versions` with a file or a git URL, and `POST /api/code-assets/{id}/versions/{n}/restore`. Both need ownership, an edit share or admin.
+
+## How the sandbox gets the code
+
+Small assets travel inline on stdin. An asset larger than `CODE_ASSET_MAX_INLINE_BYTES` is fetched by the sandbox pod from `GET /api/code-assets/{id}/fetch`, authorised by a ten minute token the runtime signs for that one asset. The token is not a user token, so an agent shared with someone works for them without sharing the asset itself.
+
+## Deleting an asset
+
+Delete first lists the agents and pipelines that call the asset (`GET /api/code-assets/{id}/dependents`). The API refuses with `409 IN_USE` unless the caller confirms with `force=true`.
+
 ## Bring-your-own-repo from git
 
 `POST /api/code-assets` accepts `{ source_url: "https://github.com/..." }` instead of an uploaded zip. The API clones, packages as tar.gz, and runs the same analyzer. Authentication via tenant-configured deploy key (`GITHUB_DEPLOY_KEY` env var) for private repos.
@@ -116,3 +132,4 @@ A walkthrough for Crystal landed in commit `bcb8076` (deleted later because nobo
 
 - [`02-runtime/02-tools.md`](02-tools.md) — how a `code_asset` node fits the tool framework
 - [`/settings/sandbox`](../05-ui/03-page-catalogue.md) — the admin UI for the sandbox allow-list
+- [`02-runtime/16-warm-code-runners.md`](16-warm-code-runners.md) — warm per-tenant runners that answer calls over NATS instead of starting a Job each time
