@@ -1338,5 +1338,16 @@
       "bug"
     ],
     "number": 180
+  },
+  {
+    "title": "High tier drafts ran in production without passing release checks",
+    "area": "governance",
+    "problem": "Release checks such as the evaluation gate run at publish, but a high or critical tier agent left as a draft could still be called by API keys, triggers, pipelines and other agents, and the builder banner wrongly said drafts could not be used in chat, pipelines or the SDK.",
+    "fix": "High and critical tier drafts are refused with 409 DRAFT_NOT_RELEASED for API keys, triggers, pipeline agent steps and calls from other runs, while people can still test them from the builder and chat. The banner now says who can run a draft.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 181
   }
 ]

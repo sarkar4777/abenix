@@ -361,7 +361,7 @@ def _patch_step(monkeypatch, result, cap=0.2):
         return None
 
     async def settings(agent_id, db_url):
-        return {}, cap
+        return {}, cap, "active"
 
     monkeypatch.setattr(agent_step, "_budget_breach", no_breach)
     monkeypatch.setattr(agent_step, "_agent_settings", settings)

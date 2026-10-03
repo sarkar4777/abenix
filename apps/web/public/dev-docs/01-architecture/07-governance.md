@@ -53,6 +53,8 @@ Platform defaults:
 
 With `require_eval_pass` on, publishing an agent is refused with 409 and `EVAL_GATE` unless every gating suite has a completed run against the exact configuration being published that met its threshold. Runs with a model override do not count. An agent with no gating suites is not blocked. See [evaluation suites](../02-runtime/18-evaluation-suites.md).
 
+Those checks run when an agent is published, so a high or critical tier agent that is still a draft has not passed them. People can test such a draft from the builder and chat, signed in as themselves. Every other caller is refused with 409 `DRAFT_NOT_RELEASED` and a message to publish it first: API keys and the SDK, calls from another run (`invoke_agent` and pipeline agent steps), and triggers, which record the run as failed with that code. Low and medium tier drafts run for their owner and anyone they are shared with, as before.
+
 Approvals raised by tiered runs carry the same sign-off rules and escalation. See [approvals](../02-runtime/05-approvals-hitl.md#tier-floor).
 
 The admin screen stores only the settings that differ from the platform default (`PUT /api/governance/risk/{tier}`, `DELETE` to go back to defaults), so later default changes still reach the tenant. Changes apply to new runs within five seconds.

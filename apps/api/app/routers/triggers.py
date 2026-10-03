@@ -455,6 +455,34 @@ async def dispatch_execution(
                 pass
         return execution, False
 
+    from engine.risk import (
+        DRAFT_NOT_RELEASED,
+        draft_needs_release,
+        draft_release_message,
+    )
+
+    if draft_needs_release(getattr(agent, "status", None), model_cfg.get("risk_tier")):
+        msg = draft_release_message(agent.name, model_cfg.get("risk_tier"))
+        execution.status = ExecutionStatus.FAILED
+        execution.error_message = msg
+        execution.failure_code = DRAFT_NOT_RELEASED
+        execution.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        if trigger_id:
+            try:
+                await _notify_trigger_failure(
+                    db,
+                    tenant_id=execution.tenant_id,
+                    user_id=user.id,
+                    trigger_id=trigger_id,
+                    execution_id=str(execution.id),
+                    error=msg,
+                )
+                await db.commit()
+            except Exception:
+                pass
+        return execution, False
+
     if settings.scaling_exec_remote and pool != "inline":
         try:
             runtime_path = Path(__file__).resolve().parents[3] / "agent-runtime"
@@ -522,6 +550,13 @@ def _not_dispatched_error(execution: Any) -> Any:
             execution.error_message,
             429,
             error_code="BUDGET_EXCEEDED",
+            details={"execution_id": str(execution.id)},
+        )
+    if getattr(execution, "failure_code", None) == "DRAFT_NOT_RELEASED":
+        return error(
+            execution.error_message,
+            409,
+            error_code="DRAFT_NOT_RELEASED",
             details={"execution_id": str(execution.id)},
         )
     return error("Trigger execution could not be queued", 503)
