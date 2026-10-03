@@ -9,10 +9,12 @@ from engine.provider_credentials import PROVIDER_CONFIG_FIELDS
 from engine.tools.base import BaseTool, ToolResult
 
 
-async def _agent_settings(agent_id: str, db_url: str) -> tuple[dict[str, Any], Any]:
-    """model_config and per-run cost cap of a saved agent, empty for an inline step or on any failure."""
+async def _agent_settings(
+    agent_id: str, db_url: str
+) -> tuple[dict[str, Any], Any, Any]:
+    """model_config, per-run cost cap and status of a saved agent, empty for an inline step or on any failure."""
     if not agent_id or not db_url:
-        return {}, None
+        return {}, None, None
     try:
         from sqlalchemy import text as _t
         from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,12 +23,12 @@ async def _agent_settings(agent_id: str, db_url: str) -> tuple[dict[str, Any], A
 
         engine = await _get_pipeline_engine(db_url)
         if engine is None:
-            return {}, None
+            return {}, None, None
         async with AsyncSession(engine) as session:
             row = (
                 await session.execute(
                     _t(
-                        "SELECT model_config, per_execution_cost_limit FROM agents "
+                        "SELECT model_config, per_execution_cost_limit, status FROM agents "
                         "WHERE id = CAST(:aid AS uuid)"
                     ).bindparams(aid=agent_id)
                 )
@@ -34,9 +36,13 @@ async def _agent_settings(agent_id: str, db_url: str) -> tuple[dict[str, Any], A
         cfg = row[0] if row else {}
         if isinstance(cfg, str):
             cfg = json.loads(cfg)
-        return (cfg if isinstance(cfg, dict) else {}), (row[1] if row else None)
+        return (
+            (cfg if isinstance(cfg, dict) else {}),
+            (row[1] if row else None),
+            (row[2] if row else None),
+        )
     except Exception:
-        return {}, None
+        return {}, None, None
 
 
 async def _budget_breach(agent_id: str, tenant_id: str, db_url: str) -> Any:
@@ -237,9 +243,26 @@ class AgentStepTool(BaseTool):
 
             # the agent's own tool settings, e.g. which code asset it is bound to
             child_agent_id = str(arguments.get("__agent_id__") or "")
-            agent_cfg, cost_cap = await _agent_settings(
+            agent_cfg, cost_cap, child_status = await _agent_settings(
                 child_agent_id, _os.environ.get("DATABASE_URL", "")
             )
+            from engine.risk import (
+                DRAFT_NOT_RELEASED,
+                draft_needs_release,
+                draft_release_message,
+            )
+
+            if draft_needs_release(child_status, agent_cfg.get("risk_tier")):
+                name = str(
+                    arguments.get("__agent_name__")
+                    or arguments.get("agent_slug")
+                    or "This agent"
+                )
+                return ToolResult(
+                    content=draft_release_message(name, agent_cfg.get("risk_tier")),
+                    is_error=True,
+                    metadata={"failure_code": DRAFT_NOT_RELEASED},
+                )
             tool_cfg = agent_cfg.get("tool_config") or {}
             if tool_cfg:
                 from engine.agent_executor import resolve_asset_schemas

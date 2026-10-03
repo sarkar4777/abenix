@@ -60,6 +60,7 @@
 - Decisions with an archived key can be restored instead of failing with 500, and permission-set signers can approve agent gates.
 - Chat renders markdown tables, headings and lists.
 - The pipeline builder understands agent steps written as type: agent, so they no longer show as unknown with false errors and survive a save.
+- High and critical tier drafts can only be tested by people from the builder and chat. API keys, triggers, pipelines and other agents get 409 DRAFT_NOT_RELEASED until the agent is published and has passed its tier's release checks. The builder banner says who can run a draft.
 
 ## v2.5.1 — 2026-10-02
 

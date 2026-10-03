@@ -166,7 +166,7 @@ export default function BuilderTopBar({
             className="hidden md:inline text-[11px] text-amber-300/90 truncate"
             data-testid="builder-next-step"
           >
-            Saved as draft. Publish to use it in chat, pipelines and the SDK playground.
+            Saved as draft. You and people you share it with can run it. Publish to make it available to your organisation.
           </span>
         )}
       </div>

@@ -2170,6 +2170,20 @@ async def execute_agent(
     )
     if _deleg_err:
         return error(_deleg_err, 400)
+    from engine.risk import (
+        DRAFT_NOT_RELEASED,
+        draft_needs_release,
+        draft_release_message,
+    )
+
+    # people test drafts from the builder and chat, API keys and other runs need a released agent
+    _tier = (agent.model_config_ or {}).get("risk_tier")
+    if draft_needs_release(agent.status, _tier) and (
+        getattr(user, "_api_key_id", None) or parent_execution_id
+    ):
+        return error(
+            draft_release_message(agent.name, _tier), 409, error_code=DRAFT_NOT_RELEASED
+        )
     _user_role = getattr(getattr(user, "role", None), "value", None) or str(
         getattr(user, "role", "") or "user"
     )

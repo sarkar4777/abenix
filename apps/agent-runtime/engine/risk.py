@@ -151,3 +151,21 @@ def model_allowed(policy: dict[str, Any], model: str) -> bool:
         m == a.lower() or (a.endswith("*") and m.startswith(a[:-1].lower()))
         for a in allowed
     )
+
+
+RELEASE_REQUIRED_TIERS = ("high", "critical")
+DRAFT_NOT_RELEASED = "DRAFT_NOT_RELEASED"
+
+
+def draft_needs_release(status: Any, tier: Any) -> bool:
+    """A high or critical tier draft has not passed its release checks, so only people testing it may run it."""
+    s = str(getattr(status, "value", status) or "").lower()
+    return s == "draft" and normalize(tier) in RELEASE_REQUIRED_TIERS
+
+
+def draft_release_message(name: str, tier: Any) -> str:
+    return (
+        f"{name} is a {normalize(tier)} risk draft. Publish it first, so it passes the "
+        "tier's release checks, before pipelines, triggers, other agents or API keys call it. "
+        "You can still test it from the builder and chat."
+    )

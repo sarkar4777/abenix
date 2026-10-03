@@ -1615,6 +1615,7 @@ if (result.isPaused()) {
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
             <p>Every agent, pipeline, tool and decision carries a risk tier: Low, Medium, High or Critical. The tier decides how much sign-off a change needs and what happens when a run reaches for something riskier than itself.</p>
+            <p><strong className="text-white">Drafts at High and Critical.</strong> The tier&apos;s checks run when you publish. Until then you can test the agent from the builder and chat, but API keys, the SDK, triggers, pipelines and other agents get a message to publish it first.</p>
             <ul className="list-disc pl-5 space-y-1 text-[13px]">
               <li><strong className="text-white">Low</strong> reads data and drafts text a person reads anyway.</li>
               <li><strong className="text-white">Medium</strong> writes to internal systems or produces output other teams rely on.</li>
