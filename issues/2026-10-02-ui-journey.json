@@ -1228,5 +1228,104 @@
       "bug"
     ],
     "number": 170
+  },
+  {
+    "title": "C and Rust gateways rejected every platform-signed bundle",
+    "area": "edge",
+    "problem": "The compiler signed the whole bundle including the signature entry, which the C gateway cannot verify, so every bundle failed with bundle_signature_invalid.",
+    "fix": "Bundles are signed over the archive with signature.sig left out, the view all three runtimes verify, and older bundles still load on Python and Rust.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 171
+  },
+  {
+    "title": "C manifest parser and Rust runtime ignored edge tools",
+    "area": "edge",
+    "problem": "The C parser dropped tool lists in PyYAML's layout so code_executor was never whitelisted, the Rust runtime ignored params.code, and Rust MQTT dropped bundles larger than 10 KiB.",
+    "fix": "The C parser reads both list layouts, Rust runs params.code when code_executor is allowed, and the Rust MQTT packet limit is 8 MiB.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 172
+  },
+  {
+    "title": "Local deploy never registered an edge gateway",
+    "area": "deploy",
+    "problem": "deploy.sh local did not build the Rust or C images and gave no gateway a token, signing key or endpoint.",
+    "fix": "It builds the edge images, mints gateway tokens through the API and passes the signing key and endpoint.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 173
+  },
+  {
+    "title": "The builder's Edge compatible toggle was never saved",
+    "area": "builder",
+    "problem": "Turning on Edge compatible in the builder was lost on save and reload.",
+    "fix": "The toggle and its MQTT topics are saved and loaded, covered by a UI spec.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 174
+  },
+  {
+    "title": "Pipeline agent steps and runtime settings ignored their limits",
+    "area": "runtime",
+    "problem": "Nested agents in a pipeline were capped at 20 tool calls and 300 s whatever their own settings said, and the runtime pod ignored the admin pipeline and sandbox timeouts.",
+    "fix": "agent_step honours the agent's own limits and the runtime reads the admin timeouts.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 175
+  },
+  {
+    "title": "Creating a decision with an archived key returned 500",
+    "area": "decisions",
+    "problem": "Reusing the key of an archived decision crashed the create call.",
+    "fix": "Create returns 409 naming the archived decision and POST /api/decisions/{key}/restore brings it back.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 176
+  },
+  {
+    "title": "Permission-set signers could not approve agent gates",
+    "area": "approvals",
+    "problem": "A user given approvals.sign through a permission set got 403 on human_approval gates.",
+    "fix": "Agent gates honour capabilities from permission sets.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 177
+  },
+  {
+    "title": "Live DAG stayed empty for queued pipelines",
+    "area": "observability",
+    "problem": "The live DAG showed 0 nodes for the whole run of a queued pipeline.",
+    "fix": "It follows the run's node events.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 178
+  },
+  {
+    "title": "Chat could not show tables, headings or lists",
+    "area": "web",
+    "problem": "Agent answers with markdown tables rendered as raw text.",
+    "fix": "Chat renders GitHub-flavoured markdown with styled tables.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 179
   }
 ]

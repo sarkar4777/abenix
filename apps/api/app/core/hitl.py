@@ -215,7 +215,11 @@ async def approver_denial(
             return "You requested this change, so someone else has to approve it."
         return None
     if not can_approve(user):
-        return "Only admins and creators can sign off on approvals"
+        # a permission set that grants approvals.sign counts as much as the role
+        from app.core.capabilities import has_capability
+
+        if not await has_capability(db, user, "approvals.sign"):
+            return "Only admins and creators can sign off on approvals"
     return None
 
 

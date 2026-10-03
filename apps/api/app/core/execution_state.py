@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -270,3 +271,37 @@ async def get_execution_tree(execution_id: str) -> dict[str, Any]:
             children.append(child_state)
 
     return {"parent": parent_state, "children": children}
+
+
+def node_statuses_from_events(events: list[dict[str, Any]]) -> dict[str, str]:
+    """Per-node status replayed from a run's node_start and node_complete events."""
+    out: dict[str, str] = {}
+    for e in events:
+        nid = e.get("node_id")
+        if not nid:
+            continue
+        # for_each items report as node[i], the graph only knows the node
+        nid = re.sub(r"\[\d+\]$", "", str(nid))
+        if e.get("event") == "node_start":
+            out.setdefault(nid, "running")
+        elif e.get("event") == "node_complete":
+            out[nid] = str(e.get("status") or "completed")
+    return out
+
+
+async def node_statuses_from_log(execution_id: str) -> dict[str, str]:
+    """Node statuses from the event log, for runs whose runtime only publishes events."""
+    r = await _get_redis()
+    if r is None:
+        return {}
+    try:
+        raw = await r.lrange(f"exec:events:{execution_id}:log", 0, -1)
+    except Exception:
+        return {}
+    events = []
+    for item in raw or []:
+        try:
+            events.append(json.loads(item))
+        except (TypeError, ValueError):
+            continue
+    return node_statuses_from_events(events)

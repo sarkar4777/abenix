@@ -119,6 +119,13 @@ interface AgentConfig {
   knowledge_collection_ids?: string[];
   atlas_graphs?: string[];
   agent_type?: 'custom' | 'oob';
+  edge_compatible?: boolean;
+  edge_constraints?: {
+    max_payload_bytes?: number;
+    max_runtime_seconds?: number;
+    mqtt_subscribe?: string[];
+    mqtt_publish?: string[];
+  };
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -460,6 +467,8 @@ export default function BuilderPage() {
           knowledge_collection_ids: a.knowledge_collection_ids || mc.knowledge_collection_ids || [],
           atlas_graphs: Array.isArray(mc.atlas_graphs) ? mc.atlas_graphs : [],
           agent_type: (a.agent_type || mc.agent_type || 'custom') as 'custom' | 'oob',
+          edge_compatible: !!mc.edge_compatible,
+          edge_constraints: mc.edge_constraints || undefined,
         };
         setConfig(loaded);
         setAgentStatus(typeof a.status === 'string' ? a.status.toLowerCase() : null);
@@ -782,6 +791,9 @@ export default function BuilderPage() {
     modelConfig.knowledge_collection_ids = config.knowledge_collection_ids || [];
     if (config.max_iterations) modelConfig.max_iterations = config.max_iterations;
     if (config.risk_tier) modelConfig.risk_tier = config.risk_tier;
+    // edge settings from the Advanced tab, dropped before so the toggle never stuck
+    if (config.edge_compatible) modelConfig.edge_compatible = true;
+    if (config.edge_compatible && config.edge_constraints) modelConfig.edge_constraints = config.edge_constraints;
 
     // Output schema — store as parsed JSON if valid, otherwise the raw
     // string so the user doesn't lose work. Post-process layer reads

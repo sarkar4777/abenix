@@ -44,8 +44,8 @@ temperature: 0.2
 max_iterations: 3
 max_tokens: 256
 tools:
-  - current_time
-  - mqtt_publish
+- current_time
+- code_executor
 edge_constraints:
   max_payload_bytes: 4096
   max_runtime_seconds: 5
@@ -153,6 +153,11 @@ echo "  exec = $EXEC"
 echo "$EXEC" | grep -q '"slug":"smoke-agent"' || { echo "FAIL: slug missing"; exit 1; }
 echo "$EXEC" | grep -q '"echo":"hello-edge-c"' || { echo "FAIL: echo missing"; exit 1; }
 echo "$EXEC" | grep -q '"duration_ms"' || { echo "FAIL: duration_ms missing"; exit 1; }
+
+echo "[7/7] POST execute with params.code (platform manifests list tools unindented)"
+CODE="$(curl -sS -H "Content-Type: application/json"               -d '{"message":"","params":{"code":"print(6*7)"}}'               "http://127.0.0.1:${PORT}/agents/smoke-agent/execute")"
+echo "  code = $CODE"
+echo "$CODE" | grep -q '"stdout":"42' || { echo "FAIL: code_executor did not run"; exit 1; }
 
 echo
 echo "PASS: edge-runtime-c smoke test"

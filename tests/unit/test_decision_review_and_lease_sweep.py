@@ -121,3 +121,13 @@ async def test_sweeper_skips_runs_whose_lease_is_still_renewed():
     sql = db.sql[0]
     assert "executions.lease_expires_at IS NULL" in sql
     assert "executions.lease_expires_at < now()" in sql
+
+
+@pytest.mark.asyncio
+async def test_signing_granted_by_a_permission_set_opens_gates_without_a_policy():
+    u = _user("user")
+    with patch.object(caps, "capabilities_for", _granted("approvals.sign")):
+        assert await approver_denial(None, u, uuid.uuid4(), None, "human_approval") is None
+    with patch.object(caps, "capabilities_for", _granted()):
+        why = await approver_denial(None, u, uuid.uuid4(), None, "human_approval")
+    assert why and "admins and creators" in why

@@ -232,3 +232,44 @@ def test_signature_covers_tenant_id(runtime_env):
     registry = rt.Registry(rt.Config())
     with pytest.raises(rt.BundleError, match="bundle_signature_invalid"):
         registry.install_bundle(forged)
+
+
+def _compile_signed(agent, key: rsa.RSAPrivateKey) -> bytes:
+    manifest = edge_compiler._manifest_from_agent(agent)
+    unsigned = edge_compiler._build_unsigned_tar(manifest, agent.system_prompt)
+    return edge_compiler.sign_bundle(unsigned, key)
+
+
+def test_signature_covers_bundle_minus_signature_entry():
+    # The C gateway verifies by cutting signature.sig out of the received bytes
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    bundle = _compile_signed(_agent("tenant-a"), key)
+    start, end, data_start, size = edge_compiler.signature_span(bundle)
+    assert size == 256 and end - start == 1024
+    view = bundle[:start] + bundle[end:]
+    key.public_key().verify(
+        bundle[data_start : data_start + size],
+        view,
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
+        hashes.SHA256(),
+    )
+    with tarfile.open(fileobj=io.BytesIO(bundle), mode="r") as tar:
+        assert [m.name for m in tar.getmembers()] == [
+            "agent.yaml",
+            "system_prompt.md",
+            "signature.sig",
+        ]
+
+
+def test_runtime_loads_stripped_signature_bundle_and_rejects_tamper(runtime_env):
+    monkeypatch, key, rt = runtime_env
+    bundle = _compile_signed(_agent("tenant-a"), key)
+    agent = rt.Registry(rt.Config()).install_bundle(bundle)
+    assert agent.slug == "pump-watch"
+
+    forged = _retag_tenant(bundle, "tenant-b")
+    with pytest.raises(rt.BundleError, match="bundle_signature_invalid"):
+        rt.Registry(rt.Config()).install_bundle(forged)

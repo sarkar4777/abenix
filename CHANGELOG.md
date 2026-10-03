@@ -55,6 +55,10 @@
 - The user guide and developer docs were checked against the code and rewritten where they were wrong.
 - Pipeline runs pass the tenant moderation gate before they start, the same as agent runs.
 - Card-number moderation patterns only fire on numbers that pass the Luhn check, so ids and counts no longer block requests. Moderation events are saved when a pipeline input is blocked.
+- Edge: platform-signed bundles load on the C and Rust gateways, the C manifest parser and Rust runtime honour edge tools, Rust takes full bundles over MQTT, local deploy builds and registers the Rust and C gateways, and the builder saves the Edge compatible toggle.
+- Pipeline agent steps honour the agent's own limits and the runtime reads the admin timeouts. The live DAG follows queued pipelines.
+- Decisions with an archived key can be restored instead of failing with 500, and permission-set signers can approve agent gates.
+- Chat renders markdown tables, headings and lists.
 
 ## v2.5.1 — 2026-10-02
 

@@ -175,3 +175,107 @@ async fn invalid_signature_rejected() {
     );
 }
 
+
+// laid out like the platform compiler: placeholder signature entry, record padding,
+// then the signature computed over the bytes with that entry cut out
+fn build_platform_bundle(slug: &str, tools: &[&str], key: &RsaPrivateKey) -> Vec<u8> {
+    let tool_lines: String = tools.iter().map(|t| format!("  - {t}\n")).collect();
+    let manifest_yaml = format!(
+        "name: Platform Agent\nslug: {slug}\nversion: 0.1.0\nmodel: claude-haiku-4-5\n\
+temperature: 0.1\nmax_iterations: 2\nmax_tokens: 256\ntools:\n{tool_lines}\
+edge_constraints:\n  max_payload_bytes: 4096\n  max_runtime_seconds: 5\n",
+    );
+    let members: Vec<(String, Vec<u8>)> = vec![
+        ("agent.yaml".into(), manifest_yaml.into_bytes()),
+        ("system_prompt.md".into(), b"edge agent".to_vec()),
+        ("signature.sig".into(), vec![0u8; 256]),
+    ];
+    let mut out = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut out);
+        for (name, data) in &members {
+            let mut header = tar::Header::new_ustar();
+            header.set_size(data.len() as u64);
+            header.set_mtime(1_700_000_000);
+            header.set_mode(0o644);
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_cksum();
+            builder.append_data(&mut header, name, &data[..]).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    // python tarfile pads to a 10240 byte record
+    let padded = out.len().div_ceil(10240) * 10240;
+    out.resize(padded, 0);
+
+    let stripped = edge_runtime_rust::strip_signature(&out);
+    assert_eq!(stripped.len(), out.len() - 1024);
+    let signing_key = SigningKey::<Sha256>::new(key.clone());
+    let sig = signing_key
+        .sign_with_rng(&mut rand::thread_rng(), &stripped)
+        .to_bytes()
+        .to_vec();
+    // signature.sig is the third entry, its data starts after two 1024 byte members and its header
+    let data_start = 1024 * 2 + 512;
+    out[data_start..data_start + 256].copy_from_slice(&sig);
+    out
+}
+
+fn key_and_pub(tmp: &TempDir) -> (RsaPrivateKey, PathBuf) {
+    let key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let pub_pem = RsaPublicKey::from(&key)
+        .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+        .unwrap();
+    let pub_path = tmp.path().join("pub.pem");
+    std::fs::write(&pub_path, pub_pem).unwrap();
+    (key, pub_path)
+}
+
+#[tokio::test]
+async fn platform_signed_bundle_loads() {
+    let tmp = TempDir::new().unwrap();
+    let (key, pub_path) = key_and_pub(&tmp);
+    let bundle = build_platform_bundle("platform-agent", &["current_time"], &key);
+    let registry = Registry::new(Config::for_test(tmp.path().join("p"), pub_path, "p".into()));
+    let loaded = registry.install_bundle(&bundle).await;
+    assert!(loaded.is_ok(), "platform bundle rejected: {:?}", loaded.err());
+
+    let mut tampered = bundle.clone();
+    tampered[600] ^= 0x01;
+    assert!(registry.install_bundle(&tampered).await.is_err());
+}
+
+#[tokio::test]
+async fn params_code_runs_only_when_code_executor_allowed() {
+    if std::process::Command::new("python3").arg("-c").arg("pass").status().is_err() {
+        eprintln!("python3 not on PATH, skipping");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let (key, pub_path) = key_and_pub(&tmp);
+    let cfg = Config::for_test(tmp.path().join("c"), pub_path, "c".into());
+    let registry = Registry::new(cfg.clone());
+
+    let allowed = registry
+        .install_bundle(&build_platform_bundle("coder", &["code_executor"], &key))
+        .await
+        .unwrap();
+    let v = edge_runtime_rust::execute_agent(&cfg, &allowed, "", &serde_json::json!({"code": "print(6*7)"})).await;
+    assert_eq!(v["result"]["ok"], true, "{v}");
+    assert_eq!(v["result"]["stdout"].as_str().unwrap().trim(), "42");
+
+    let denied = registry
+        .install_bundle(&build_platform_bundle("no-coder", &["current_time"], &key))
+        .await
+        .unwrap();
+    let v = edge_runtime_rust::execute_agent(&cfg, &denied, "", &serde_json::json!({"code": "print(1)"})).await;
+    assert_eq!(v["result"]["ok"], false);
+    assert!(v["result"]["error"].as_str().unwrap().contains("code_executor"));
+}
+
+#[test]
+fn mqtt_accepts_a_full_bundle() {
+    let opts = edge_runtime_rust::mqtt_options("gw", "localhost".into(), 1883);
+    // the smallest platform bundle is one 10240 byte tar record plus the publish header
+    assert!(opts.max_packet_size() > 10240 + 512);
+}
