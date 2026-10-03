@@ -119,6 +119,7 @@ def _check_type_from_aggregate(agg: float, extra_signals_triggered: bool) -> str
 
 class KYCScorerTool(BaseTool):
     name = "kyc_scorer"
+    risk_tier = "medium"
     description = (
         "Deterministic KYC risk scorer — turns the three header indicators "
         "(Country Corruption Index rank, Annual Contracted Volume / Notional, "

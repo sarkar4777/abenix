@@ -34,6 +34,9 @@ _SECRET_KEYS = (
 class MCPToolWrapper(BaseTool):
     """Wraps an MCP server tool as a BaseTool so it plugs into ToolRegistry."""
 
+    # reaches systems or runs code the platform did not write
+    risk_tier = "medium"
+
     def __init__(
         self,
         client: MCPClient,

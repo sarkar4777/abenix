@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useId } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, X, Loader2 } from 'lucide-react';
 import { type LucideIcon } from 'lucide-react';
@@ -56,6 +56,7 @@ export default function ConfirmModal({
   }, [open]);
 
   const isDanger = variant === 'danger';
+  const uid = useId();
 
   return (
     <AnimatePresence>
@@ -73,6 +74,10 @@ export default function ConfirmModal({
 
           {/* Modal */}
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${uid}-title`}
+            aria-describedby={`${uid}-desc`}
             className="relative z-10 mx-4 w-full max-w-md rounded-2xl border border-slate-700/50 bg-slate-800/95 p-6 shadow-2xl backdrop-blur-xl"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -82,6 +87,7 @@ export default function ConfirmModal({
             {/* Close button */}
             <button
               onClick={onClose}
+              aria-label="Close"
               className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-700/50 hover:text-slate-200"
             >
               <X size={16} />
@@ -102,12 +108,12 @@ export default function ConfirmModal({
               </div>
 
               {/* Title */}
-              <h3 className="mt-4 text-lg font-semibold text-white">
+              <h3 id={`${uid}-title`} className="mt-4 text-lg font-semibold text-white">
                 {title}
               </h3>
 
               {/* Description */}
-              <p className="mt-2 text-sm leading-relaxed text-slate-400">
+              <p id={`${uid}-desc`} className="mt-2 text-sm leading-relaxed text-slate-400">
                 {description}
               </p>
 
@@ -116,6 +122,7 @@ export default function ConfirmModal({
                 <button
                   onClick={onClose}
                   disabled={loading}
+                  autoFocus
                   className="flex-1 rounded-lg border border-slate-600 bg-slate-700/50 px-4 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {cancelLabel}

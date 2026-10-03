@@ -111,4 +111,31 @@ def test_approval_status_enum_values() -> None:
         "approved",
         "denied",
         "expired",
+        "returned",
     }
+
+
+def test_return_for_correction_wins_over_pending_approvals() -> None:
+    from types import SimpleNamespace
+
+    from app.routers.approvals import _evaluate_status
+
+    a = SimpleNamespace(
+        signoffs=[{"decision": "approve"}, {"decision": "return", "reason": "fix the threshold"}],
+        required_signoffs=3,
+        expires_at=None,
+    )
+    assert _evaluate_status(a) == ApprovalStatus.returned
+    a.signoffs.append({"decision": "deny"})
+    assert _evaluate_status(a) == ApprovalStatus.denied
+
+
+def test_escalation_hours_validated() -> None:
+    from engine.risk import DEFAULT_POLICIES, validate_policy
+
+    assert DEFAULT_POLICIES["critical"]["publish_approvals"]["escalate_after_hours"] == 4
+    assert DEFAULT_POLICIES["low"]["publish_approvals"]["escalate_after_hours"] == 0
+    ok = {"publish_approvals": {"min_approvers": 1, "escalate_after_hours": 8}}
+    assert validate_policy(ok) == []
+    bad = {"publish_approvals": {"min_approvers": 1, "escalate_after_hours": -1}}
+    assert any("escalate_after_hours" in p for p in validate_policy(bad))

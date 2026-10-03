@@ -284,6 +284,7 @@ async def _bailii(name: str) -> list[dict[str, Any]]:
 
 class RegulatoryEnforcementTool(BaseTool):
     name = "regulatory_enforcement"
+    risk_tier = "low"
     description = (
         "Primary-source regulatory enforcement and litigation lookup. Hits "
         "authoritative regulator and court bulletins directly — SEC EDGAR "

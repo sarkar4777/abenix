@@ -156,6 +156,7 @@ def _format(s: dict[str, Any]) -> str:
 
 class CloudCostTool(BaseTool):
     name = "cloud_cost"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "AWS_ACCESS_KEY_ID",

@@ -12,6 +12,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class WeatherSimulatorTool(BaseTool):
     name = "weather_simulator"
+    risk_tier = "low"
     description = (
         "Simulate weather scenarios and their impact on operations. Generates "
         "solar irradiance, wind speed, temperature, precipitation, and extreme "

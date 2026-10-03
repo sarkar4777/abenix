@@ -27,6 +27,7 @@ QUOTA_LOCK_KEY = 0x51554F54  # "QUOT"
 ARCHIVE_LOCK_KEY = 0x41524348  # "ARCH"
 SWEEP_LOCK_KEY = 0x5354414C  # "STAL"
 DRIFT_LOCK_KEY = 0x44524654  # "DRFT"
+ESCALATE_LOCK_KEY = 0x45534341  # "ESCA"
 
 
 def drift_scan_interval_seconds() -> int:
@@ -87,6 +88,8 @@ async def advisory_lock(key: int) -> AsyncIterator[bool]:
             r = await db.execute(
                 text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": key}
             )
+            # this session sits idle on purpose while the guarded job runs
+            await db.execute(text("SET LOCAL idle_in_transaction_session_timeout = 0"))
             yield bool(r.scalar())
 
 
@@ -169,6 +172,7 @@ async def _run_trigger(trigger_id: str, agent_id: str) -> None:
             check_trigger_eligibility,
             deactivate_trigger,
             dispatch_execution,
+            trigger_stopped,
         )
         from models.agent import Agent  # type: ignore
         from models.agent_trigger import AgentTrigger  # type: ignore
@@ -182,6 +186,11 @@ async def _run_trigger(trigger_id: str, agent_id: str) -> None:
             ).scalar_one_or_none()
             if trigger is None:
                 logger.warning("trigger %s vanished between claim and fire", trigger_id)
+                return
+            stopped = await trigger_stopped(trigger)
+            if stopped:
+                # this run is skipped, the schedule carries on once resumed
+                logger.info("trigger %s skipped: %s", trigger_id, stopped)
                 return
             agent = (
                 await db.execute(_select(Agent).where(Agent.id == agent_id))
@@ -528,6 +537,15 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
+        _run_eval_schedules,
+        trigger="interval",
+        seconds=60,
+        id="eval_schedules",
+        name="Scheduled and model-change evaluation suite runs",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
         reconcile_active_executions_gauge,
         trigger="interval",
         minutes=5,
@@ -559,6 +577,67 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
+        _link_audit_chain,
+        trigger="interval",
+        seconds=30,
+        id="link_audit_chain",
+        name="Link new audit rows into the tamper-evident chain",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        _dispatch_events,
+        trigger="interval",
+        seconds=2,
+        id="dispatch_events",
+        name="Fan out platform events and deliver them",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    scheduler.add_job(
+        _watch_sources,
+        trigger="interval",
+        seconds=30,
+        id="watch_sources",
+        name="Check watched sources that are due",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
+
+    scheduler.add_job(
+        _prune_events,
+        trigger="cron",
+        hour=4,
+        minute=5,
+        id="prune_events",
+        name="Drop delivered events past retention",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        _verify_audit_chain,
+        trigger="cron",
+        hour=3,
+        minute=15,
+        id="verify_audit_chain",
+        name="Verify every tenant's audit chain",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        _escalate_approvals,
+        trigger="interval",
+        minutes=15,
+        id="escalate_approvals",
+        name="Escalate tiered approvals nobody has acted on",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    scheduler.add_job(
         _nightly_archive,
         trigger="cron",
         hour=2,
@@ -573,6 +652,72 @@ def start_scheduler() -> None:
 
     scheduler.start()
     logger.info("Cron trigger scheduler started (checking every 30 seconds)")
+
+
+async def _link_audit_chain() -> None:
+    from app.services.audit_chain import run_chainer
+
+    # drain the backlog in one tick, the lock keeps it to one replica
+    for _ in range(25):
+        if await run_chainer() == 0:
+            break
+
+
+async def _dispatch_events() -> None:
+    from app.services.events import dispatch_once
+
+    await dispatch_once()
+
+
+async def _watch_sources() -> None:
+    from app.services.source_watch import run_due
+
+    try:
+        await run_due()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("source watch failed: %s", e)
+
+
+async def _prune_events() -> None:
+    from app.services.events import prune
+
+    try:
+        await prune()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("event prune failed: %s", e)
+
+
+async def _run_eval_schedules() -> None:
+    from app.services.eval_runner import EVAL_LOCK_KEY, scheduler_tick
+
+    try:
+        async with advisory_lock(EVAL_LOCK_KEY) as held:
+            if held:
+                await scheduler_tick()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("eval schedule tick failed: %s", e)
+
+
+async def _verify_audit_chain() -> None:
+    from app.services.audit_chain import run_nightly_verify
+
+    await run_nightly_verify()
+
+
+async def _escalate_approvals() -> None:
+    from app.core.deps import async_session
+    from app.routers.approvals import escalate_overdue
+
+    try:
+        async with advisory_lock(ESCALATE_LOCK_KEY) as held:
+            if not held:
+                return
+            async with async_session() as db:
+                n = await escalate_overdue(db)
+            if n:
+                logger.info("escalated %d overdue approvals", n)
+    except Exception:
+        logger.exception("approval escalation failed")
 
 
 async def _nightly_archive() -> None:

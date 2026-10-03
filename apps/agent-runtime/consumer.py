@@ -56,6 +56,17 @@ async def _get_session_factory():
             pool_size=pool_size,
             max_overflow=max_overflow,
             pool_recycle=3600,
+            connect_args=(
+                {
+                    "server_settings": {
+                        "idle_in_transaction_session_timeout": os.environ.get(
+                            "DB_IDLE_TXN_TIMEOUT_MS", "300000"
+                        )
+                    }
+                }
+                if "asyncpg" in db_url
+                else {}
+            ),
         )
         _session_factory = sessionmaker(
             _engine, class_=AsyncSession, expire_on_commit=False
@@ -334,6 +345,8 @@ async def _mark_done(
     model_used: str | None = None,
     confidence_score: float | None = None,
     trigger_id: str | None = None,
+    risk_tier: str | None = None,
+    risk_reasons: list[dict[str, Any]] | None = None,
 ) -> None:
     from datetime import datetime, timezone
     from sqlalchemy import select, update
@@ -373,6 +386,11 @@ async def _mark_done(
         values["confidence_score"] = confidence_score
     if failure_code:
         values["failure_code"] = failure_code
+    # the database stamped the starting tier, this is where the run ended up
+    if risk_tier:
+        values["risk_tier"] = risk_tier
+    if risk_reasons:
+        values["risk_reasons"] = risk_reasons
     if trace_id:
         values["trace_id"] = trace_id
     else:
@@ -759,9 +777,13 @@ async def _run_one(payload: dict) -> None:
                 },
                 duration_ms=serialized.get("total_duration_ms"),
                 failure_code=(
-                    None if pipeline_status == "completed" else "PIPELINE_NODE_FAILED"
+                    None
+                    if pipeline_status == "completed"
+                    else serialized.get("failure_code") or "PIPELINE_NODE_FAILED"
                 ),
                 trigger_id=trigger_id,
+                risk_tier=serialized.get("risk_tier") or None,
+                risk_reasons=serialized.get("risk_reasons") or None,
             )
             # Debit api_keys / users so customer quotas stay enforced on
             # queue-routed pipeline runs. Pipelines aggregate token counts
@@ -868,7 +890,8 @@ async def _run_one(payload: dict) -> None:
                 llm_router=llm_router,
                 tool_registry=registry,
                 system_prompt=_system_prompt,
-                model=loaded["model_cfg"].get("model", "claude-sonnet-4-5-20250929"),
+                model=payload.get("model_override")
+                or loaded["model_cfg"].get("model", "claude-sonnet-4-5-20250929"),
                 temperature=loaded["model_cfg"].get("temperature", 0.7),
                 max_iterations=loaded["model_cfg"].get("max_iterations", 10),
                 max_tokens=loaded["model_cfg"].get("max_tokens", 4096),
@@ -1076,7 +1099,7 @@ async def _run_one(payload: dict) -> None:
             elif _rt_error:
                 _final_status = "failed"
                 _final_error = str(_rt_error)[:2000]
-                _final_code = (
+                _final_code = _last_done.get("failure_code") or (
                     "SANDBOX_TIMEOUT" if "timed out" in str(_rt_error).lower() else None
                 )
             await _mark_done(
@@ -1095,6 +1118,8 @@ async def _run_one(payload: dict) -> None:
                 model_used=_last_done.get("effective_model") or _last_done.get("model"),
                 confidence_score=_last_done.get("confidence_score"),
                 trigger_id=trigger_id,
+                risk_tier=_last_done.get("risk_tier") or None,
+                risk_reasons=_last_done.get("risk_reasons") or None,
             )
             # Debit api_keys / users counters — the inline path does this
             # via app.core.usage.update_user_usage; queue-routed runs need

@@ -44,6 +44,8 @@ _RULES: list[tuple[str, str]] = [
         r"moderation\s*blocked|policy\s*triggered|content\s*violation",
         "MODERATION_BLOCKED",
     ),
+    (r"stopped by a kill switch", "KILL_SWITCH"),
+    (r"not on the allowed list for .* risk", "MODEL_NOT_ALLOWED"),
     # Tool layer
     (r"tool.*not.*found|unknown\s+tool", "TOOL_NOT_FOUND"),
     (r"toolerror|tool.*error|tool.*exception", "TOOL_ERROR"),

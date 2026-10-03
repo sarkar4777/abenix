@@ -68,6 +68,11 @@ jobs:
       # the image installs pyproject.toml, CI installs requirements.txt, keep them equal
       - run: python scripts/check-api-requirements.py
       - run: pytest tests/unit/ -v --tb=short
+      # Redis and LiveKit tests skip when the service is absent, the public API checks skip on this flag
+      - name: Agent runtime tests
+        run: python -m pytest -q apps/agent-runtime/tests
+        env:
+          SKIP_NETWORK_TESTS: "1"
       # Validates every agent seed, and checks that an agent declaring
       # knowledge_search has a collection granted somewhere. Nothing ran this
       # before, which is how twenty-three agents came to advertise a tool the

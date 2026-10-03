@@ -10,6 +10,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class DataMergerTool(BaseTool):
     name = "data_merger"
+    risk_tier = "low"
     description = (
         "Merge multiple data inputs into a single unified structure. Supports three "
         "strategies: 'flat' merges all inputs into one dictionary, 'nested' preserves "

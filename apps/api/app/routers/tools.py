@@ -112,6 +112,8 @@ _CATEGORY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("twilio", "zapier", "connector_", "browser_"), "integration"),
     (("plotly_", "mermaid_", "translation", "narrate"), "multimodal"),
     (("approval_gate", "sub_pipeline", "invoke_agent"), "pipeline"),
+    (("decision_",), "decisions"),
+    (("source_",), "sources"),
 )
 
 

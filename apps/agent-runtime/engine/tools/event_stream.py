@@ -11,6 +11,7 @@ class EventBufferTool(BaseTool):
     """Read buffered events from Redis — works with webhook triggers that accumulate events."""
 
     name = "event_buffer"
+    risk_tier = "low"
     description = "Read and consume buffered events from the platform event queue. Events arrive via webhook triggers and accumulate until consumed. Supports filtering by event type and time window."
     input_schema = {
         "type": "object",
@@ -92,6 +93,7 @@ class RedisStreamConsumerTool(BaseTool):
     """Read messages from a Redis Stream — real-time event processing."""
 
     name = "redis_stream_consumer"
+    risk_tier = "low"
     description = "Consume messages from a Redis Stream. Ideal for real-time event processing, IoT sensor data, and inter-agent communication. Supports consumer groups for load balancing."
     input_schema = {
         "type": "object",
@@ -185,6 +187,7 @@ class RedisStreamPublisherTool(BaseTool):
     """Publish messages to a Redis Stream — for inter-agent and event-driven communication."""
 
     name = "redis_stream_publisher"
+    risk_tier = "medium"
     description = "Publish messages to a Redis Stream. Use for inter-agent communication, event broadcasting, and IoT data ingestion pipelines."
     input_schema = {
         "type": "object",
@@ -228,6 +231,7 @@ class KafkaConsumerTool(BaseTool):
     """Consume messages from Apache Kafka topics."""
 
     name = "kafka_consumer"
+    risk_tier = "low"
     description = "Consume messages from Kafka topics. For high-throughput event streaming: IoT telemetry, financial transactions, log aggregation. Requires KAFKA_BOOTSTRAP_SERVERS env var."
     input_schema = {
         "type": "object",

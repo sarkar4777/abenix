@@ -10,6 +10,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class DatabaseWriterTool(BaseTool):
     name = "database_writer"
+    risk_tier = "high"
     description = (
         "Write data to PostgreSQL tables (INSERT or UPSERT). "
         "Tables must be prefixed with 'af_' for safety. Max 10,000 rows per call. "

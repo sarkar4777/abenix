@@ -342,6 +342,51 @@ scaling:
     enabled: false
   pools: []
 
+# Warm code runners. One Deployment per tenant and asset version, created on
+# the first call and called over NATS. Needs scaling.queueBackend: nats.
+# Each pool maps an asset image family to a runner image under `registry`.
+codeRunners:
+  enabled: false
+  # auto falls back to a one-off Job, warm returns errors, job is the old path
+  mode: auto
+  registry: ""
+  imageTag: latest
+  pullPolicy: IfNotPresent
+  pools:
+    - name: python-3.12
+      image: code-runner-python
+  concurrency: 4
+  maxReplicas: 5
+  idleSeconds: 900
+  drainSeconds: 120
+  graceSeconds: 930
+  minWarmByTier: "low=0,medium=0,high=1,critical=1"
+  hotCallsPerHour: 30
+  defaultTier: medium
+  fetchTokenTtl: 21600
+  apiUrl: ""
+  # gvisor, when the nodes have it
+  runtimeClassName: ""
+  workspaceSize: 2Gi
+  scratchSize: 1Gi
+  networkPolicy: true
+  resources:
+    exec:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: "2", memory: 2Gi }
+    gateway:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 500m, memory: 256Mi }
+  keda:
+    enabled: false
+    prometheusUrl: ""
+  nats:
+    user: coderun
+    # empty means generated on install and kept across upgrades
+    password: ""
+  reaper:
+    schedule: "*/2 * * * *"
+
 # Platform alert delivery. Prometheus rules fire into the chart's
 # Alertmanager, which posts to the API webhook. The API fans each alert
 # out to tenant admins (in-app + WS) and Slack (per-tenant webhook or
@@ -388,6 +433,10 @@ postProcessorModules: ""
 # comma-separated list of any in-cluster MCP services you want callable
 # (e.g. "uat-mcp.abenix.svc.cluster.local,other-mcp.tools.svc.cluster.local").
 mcpAllowedHosts: ""
+
+# Exact host names outbound webhooks may call even though they resolve to
+# private addresses, comma separated. Everything else private stays blocked.
+eventsAllowedInternalHosts: ""
 
 environment: production
 logLevel: info

@@ -1,0 +1,21 @@
+# Warm runner for node-20 code assets. Python only hosts the runner itself. Build context: apps/code-runner
+FROM node:20-slim
+
+RUN apt-get update \
+ && apt-get upgrade -y \
+ && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONUNBUFFERED=1 \
+    CODERUN_PATH=/tmp/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+COPY requirements.txt /opt/coderun/requirements.txt
+RUN python3 -m venv /opt/coderun/venv \
+ && /opt/coderun/venv/bin/pip install --no-cache-dir --upgrade pip \
+ && /opt/coderun/venv/bin/pip install --no-cache-dir -r /opt/coderun/requirements.txt \
+ && rm -rf /root/.cache
+COPY runner.py /opt/coderun/runner.py
+
+USER 10001
+ENTRYPOINT ["/opt/coderun/venv/bin/python", "/opt/coderun/runner.py"]
+CMD ["gateway"]

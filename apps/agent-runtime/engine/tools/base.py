@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from engine import credentials
+from engine import credentials, governance, risk
 from engine.credentials import ToolNeedsConfiguration
 
 __all__ = [
@@ -77,12 +77,83 @@ def needs_configuration_result(tool: Any, exc: ToolNeedsConfiguration) -> ToolRe
     )
 
 
+async def _govern(tool: Any, arguments: dict[str, Any]) -> ToolResult | None:
+    """Kill switches and tier escalation for one tool call. None means go ahead."""
+    run = governance.current()
+    tenant = (
+        run.tenant_id
+        if run
+        else credentials.current_tenant() or str(getattr(tool, "tenant_id", "") or "")
+    )
+    name = getattr(tool, "name", "")
+    try:
+        governance.check(tenant, "tool", name)
+        # a run already going stops at its next tool call, nested runs included
+        for ctx in run.chain() if run else ():
+            if ctx.subject_id:
+                governance.check(tenant, ctx.scope, ctx.subject_id)
+    except governance.Stopped as s:
+        return ToolResult(
+            content=s.message(),
+            is_error=True,
+            metadata={"stopped": {"scope": s.scope, "target": s.target}, "tool": name},
+        )
+    tier = risk.normalize(getattr(tool, "risk_tier", "low"))
+    if run is None or not risk.above(tier, run.tier):
+        return None
+    action = governance.policy(tenant, tier).get("tool_call_action", "allow")
+    if action == "block":
+        return ToolResult(
+            content=(
+                f"{name} is a {tier} risk tool and this run is {run.tier} risk. "
+                f"The tenant's {tier} tier policy blocks the call. Raise the agent's "
+                f"risk tier to {tier} if it should use this tool."
+            ),
+            is_error=True,
+            metadata={
+                "risk_blocked": {"tool_tier": tier, "run_tier": run.tier},
+                "tool": name,
+            },
+        )
+    if action == "approval":
+        from engine.tools.human_approval import HumanApprovalTool
+
+        import json as _json
+
+        gate = HumanApprovalTool(
+            execution_id=run.execution_id,
+            tenant_id=tenant,
+            agent_name=run.agent_name,
+        )
+        decision = await gate.execute(
+            {
+                "action": f"call {name} ({tier} risk)",
+                "details": _json.dumps(arguments or {}, default=str)[:4000],
+                "risk_level": tier,
+            }
+        )
+        if decision.is_error:
+            return ToolResult(
+                content=f"{name} needs approval at {tier} risk and did not get it. {decision.content}",
+                is_error=True,
+                metadata={"risk_approval": decision.metadata, "tool": name},
+            )
+        run.raise_to(
+            tier, f"tool:{name}", f"approved by {decision.metadata.get('reviewer', '')}"
+        )
+        return None
+    run.raise_to(tier, f"tool:{name}")
+    return None
+
+
 class BaseTool(ABC):
     name: str
     description: str
     input_schema: dict[str, Any]
     # What this tool needs to run. Empty for a tool that needs nothing.
     config_fields: tuple[ConfigField, ...] = ()
+    # low | medium | high | critical, see engine.risk.TIER_GUIDE
+    risk_tier: str = "low"
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -97,6 +168,14 @@ class BaseTool(ABC):
         @functools.wraps(original)
         async def execute(self: BaseTool, arguments: dict[str, Any]) -> ToolResult:
             await credentials.ensure_fresh()
+            # wrappers around a tool are checked once, at the outermost call
+            gtoken = None
+            if not governance.in_tool():
+                await governance.ensure_fresh()
+                refused = await _govern(self, arguments)
+                if refused is not None:
+                    return refused
+                gtoken = governance.enter_tool()
             # a tool built with its own tenant_id covers reads outside an executor run
             token = None
             own_tenant = str(getattr(self, "tenant_id", "") or "")
@@ -109,6 +188,8 @@ class BaseTool(ABC):
             finally:
                 if token is not None:
                     credentials.reset_tenant(token)
+                if gtoken is not None:
+                    governance.exit_tool(gtoken)
 
         execute._config_wrapped = True  # type: ignore[attr-defined]
         cls.execute = execute  # type: ignore[assignment]
@@ -160,6 +241,7 @@ class BaseTool(ABC):
             "description": self.description,
             "input_schema": self.input_schema,
             "config_fields": [f.to_dict() for f in self.config_fields],
+            "risk_tier": risk.normalize(getattr(self, "risk_tier", "low")),
         }
 
 
@@ -190,6 +272,7 @@ class _DefaultedTool(BaseTool):
         self._calls = 0
         self.name = inner.name
         self.config_fields = inner.config_fields
+        self.risk_tier = getattr(inner, "risk_tier", "low")
         # Build a filtered schema that removes pre-set keys.
         props = dict((inner.input_schema or {}).get("properties") or {})
         required = list((inner.input_schema or {}).get("required") or [])

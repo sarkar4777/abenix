@@ -36,6 +36,7 @@ async def _resolve_coords(location: str) -> tuple[float, float, str] | None:
 
 class WeatherTool(BaseTool):
     name = "weather"
+    risk_tier = "low"
     description = (
         "Current weather and forecast for any location worldwide. Free, no API key. "
         "Accepts city names ('Berlin'), 'City, Country' ('Tokyo, Japan'), or raw "

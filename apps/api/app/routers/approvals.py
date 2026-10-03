@@ -69,6 +69,7 @@ def _serialize(a: Approval) -> dict[str, Any]:
         "decided_at": a.decided_at.isoformat() if a.decided_at else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
         "gate_kind": a.gate_kind,
+        "policy": a.policy,
         "client_token": a.client_token,
     }
 
@@ -80,6 +81,8 @@ def _evaluate_status(a: Approval) -> ApprovalStatus:
     deny_count = sum(1 for s in signoffs if s.get("decision") == "deny")
     if deny_count > 0:
         return ApprovalStatus.denied
+    if any(s.get("decision") == "return" for s in signoffs):
+        return ApprovalStatus.returned
     if approve_count >= a.required_signoffs:
         return ApprovalStatus.approved
     if a.expires_at and a.expires_at < datetime.now(timezone.utc):
@@ -87,20 +90,133 @@ def _evaluate_status(a: Approval) -> ApprovalStatus:
     return ApprovalStatus.pending
 
 
+async def _tier_floor(
+    db: AsyncSession, user: User, body: Any
+) -> tuple[int, dict | None]:
+    """Sign-offs and signing rules for a new approval: what was asked, raised to the tier's policy."""
+    from engine import governance, risk
+
+    tier = body.risk_tier
+    if not tier and body.agent_execution_id:
+        from models.execution import Execution
+
+        tier = (
+            await db.execute(
+                select(Execution.risk_tier).where(
+                    Execution.id == body.agent_execution_id,
+                    Execution.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar()
+    if not tier or risk.normalize(tier) == "low":
+        return body.required_signoffs, None
+    await governance.ensure_fresh()
+    pol = (
+        governance.policy(str(user.tenant_id), risk.normalize(tier)).get(
+            "publish_approvals"
+        )
+        or {}
+    )
+    floor = int(pol.get("min_approvers") or 0)
+    policy = {
+        "exclude_requester": bool(pol.get("exclude_author")),
+        "capability": pol.get("capability") or "approvals.sign",
+        "risk_tier": risk.normalize(tier),
+        "escalate_after_hours": int(pol.get("escalate_after_hours") or 0),
+    }
+    return max(body.required_signoffs, floor), policy
+
+
+async def escalate_overdue(db: AsyncSession) -> int:
+    """Tell a tenant's admins once about each tiered approval nobody has acted on in time."""
+    now = datetime.now(timezone.utc)
+    rows = (
+        (
+            await db.execute(
+                select(Approval).where(
+                    Approval.status == ApprovalStatus.pending,
+                    Approval.escalated_at.is_(None),
+                    Approval.policy.isnot(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sent = 0
+    for a in rows:
+        hours = int((a.policy or {}).get("escalate_after_hours") or 0)
+        if hours <= 0 or a.created_at + timedelta(hours=hours) > now:
+            continue
+        admins = (
+            (
+                await db.execute(
+                    select(User.id).where(
+                        User.tenant_id == a.tenant_id,
+                        User.role == "admin",
+                        User.is_active.is_(True),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        got = len(a.signoffs or [])
+        for uid in admins:
+            await create_notification(
+                db,
+                tenant_id=a.tenant_id,
+                user_id=uid,
+                type="system_alert",
+                title=f"Approval waiting over {hours}h: {a.title or 'untitled'}",
+                message=f"{got} of {a.required_signoffs} sign-offs so far. It is {a.policy.get('risk_tier', 'tiered')} risk, so it needs someone to act.",
+                link="/approvals",
+                metadata={"approval_id": str(a.id)},
+            )
+        a.escalated_at = now
+        sent += 1
+    await db.commit()
+    return sent
+
+
 async def _expire_stale(db: AsyncSession, tenant_id: uuid.UUID) -> None:
     """Sweep pending rows past their deadline. Cheap inline call from list/get."""
+    from app.services.events import emit
+
     now = datetime.now(timezone.utc)
-    await db.execute(
-        update(Approval)
-        .where(
-            Approval.tenant_id == tenant_id,
-            Approval.status == ApprovalStatus.pending,
-            Approval.expires_at.isnot(None),
-            Approval.expires_at < now,
+    expired = (
+        await db.execute(
+            update(Approval)
+            .where(
+                Approval.tenant_id == tenant_id,
+                Approval.status == ApprovalStatus.pending,
+                Approval.expires_at.isnot(None),
+                Approval.expires_at < now,
+            )
+            .values(status=ApprovalStatus.expired, decided_at=now)
+            .returning(Approval.id, Approval.title, Approval.gate_kind)
         )
-        .values(status=ApprovalStatus.expired, decided_at=now)
-    )
+    ).all()
+    for aid, title, gate_kind in expired:
+        await emit(
+            db,
+            tenant_id,
+            "approval.resolved",
+            {
+                "approval_id": str(aid),
+                "status": ApprovalStatus.expired.value,
+                "gate_kind": gate_kind,
+                "title": title,
+            },
+        )
     await db.commit()
+    for aid, _, gate_kind in expired:
+        if gate_kind == "decision_publish":
+            from app.routers.decisions import on_approval_resolved
+
+            row = await db.get(Approval, aid)
+            if row is not None:
+                await on_approval_resolved(db, row)
 
 
 @router.post("")
@@ -125,21 +241,37 @@ async def create_approval(
         expires_at = datetime.now(timezone.utc) + timedelta(
             seconds=body.expires_seconds
         )
+    required, policy = await _tier_floor(db, user, body)
     a = Approval(
         tenant_id=user.tenant_id,
         agent_id=body.agent_id,
         agent_execution_id=body.agent_execution_id,
         title=body.title,
         payload=body.payload,
-        required_signoffs=body.required_signoffs,
+        required_signoffs=required,
         signoffs=[],
         status=ApprovalStatus.pending,
         requested_by=user.id,
         expires_at=expires_at,
         gate_kind=body.gate_kind,
         client_token=body.client_token,
+        policy=policy,
     )
     db.add(a)
+    await db.flush()
+    from app.services.events import emit
+
+    await emit(
+        db,
+        user.tenant_id,
+        "approval.requested",
+        {
+            "approval_id": str(a.id),
+            "title": a.title,
+            "gate_kind": a.gate_kind,
+            "required_signoffs": a.required_signoffs,
+        },
+    )
     await db.commit()
     await db.refresh(a)
     await _notify_pending(db, a, requester=user)
@@ -476,8 +608,10 @@ async def sign_off(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if body.decision not in ("approve", "deny"):
-        return error("decision must be 'approve' or 'deny'", 400)
+    if body.decision not in ("approve", "deny", "return"):
+        return error("decision must be approve, deny or return", 400)
+    if body.decision == "return" and not (body.reason or "").strip():
+        return error("Say what needs to change, so the requester can correct it.", 400)
     hitl = parse_hitl_id(approval_id)
     if hitl:
         return await _sign_off_hitl(db, user, hitl[0], hitl[1], body)
@@ -501,7 +635,7 @@ async def sign_off(
     if a.status != ApprovalStatus.pending:
         return error(f"Approval is already {a.status.value}", 409)
 
-    denial = await approver_denial(db, user, a.requested_by)
+    denial = await approver_denial(db, user, a.requested_by, a.policy)
     if denial:
         return error(denial, 403)
 
@@ -528,6 +662,24 @@ async def sign_off(
     await db.commit()
     await db.refresh(a)
     if prev_status == ApprovalStatus.pending and new_status != ApprovalStatus.pending:
+        from app.services.events import emit
+
+        await emit(
+            db,
+            a.tenant_id,
+            "approval.resolved",
+            {
+                "approval_id": str(a.id),
+                "status": new_status.value,
+                "gate_kind": a.gate_kind,
+                "title": a.title,
+            },
+        )
+        await db.commit()
+        if a.gate_kind == "decision_publish":
+            from app.routers.decisions import on_approval_resolved
+
+            await on_approval_resolved(db, a)
         await _notify_resolved(db, a, decider=user)
     return success(_serialize(a))
 

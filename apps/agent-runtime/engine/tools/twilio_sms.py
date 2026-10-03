@@ -13,6 +13,7 @@ _BASE = "https://api.twilio.com/2010-04-01"
 
 class TwilioSmsTool(BaseTool):
     name = "twilio_sms"
+    risk_tier = "high"
     config_fields = (
         ConfigField(
             "TWILIO_ACCOUNT_SID",

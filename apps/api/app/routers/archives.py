@@ -218,6 +218,7 @@ async def download_archive_file(
     run = await _own_run(db, run_id, user)
     if not run or not run.file_uri:
         return error("Archive not found", 404)
+    await db.close()
     key = getattr(run, "storage_key", None)
     if key:
         storage = get_archive_storage()

@@ -10,6 +10,7 @@ from engine.tools import _meeting_session as sessmod
 
 class MeetingLeaveTool(BaseTool):
     name = "meeting_leave"
+    risk_tier = "low"
     description = (
         "Leave the joined meeting. Optionally posts a short farewell to "
         "the meeting chat before disconnecting, and logs a final decision "

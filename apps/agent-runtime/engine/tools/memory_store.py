@@ -9,6 +9,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class MemoryStoreTool(BaseTool):
     name = "memory_store"
+    risk_tier = "low"
     description = (
         "Store a piece of information in persistent memory. Use this to remember "
         "facts, procedures, or past events across conversations. Memories are "
@@ -67,7 +68,7 @@ class MemoryStoreTool(BaseTool):
             import uuid as uuid_mod
 
             from sqlalchemy import select
-            from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+            from sqlalchemy.ext.asyncio import AsyncSession
 
             from engine.tools._db_url import resolve_async_db_url
 
@@ -90,7 +91,9 @@ class MemoryStoreTool(BaseTool):
                     ),
                     is_error=True,
                 )
-            engine = create_async_engine(db_url, echo=False)
+            from engine.db_pool import shared_engine
+
+            engine = shared_engine(db_url)
 
             import sys
             from pathlib import Path
@@ -150,7 +153,6 @@ class MemoryStoreTool(BaseTool):
 
                 await db.commit()
 
-            await engine.dispose()
             action = "Updated" if existing else "Stored"
             return ToolResult(
                 content=f"{action} memory '{key}' ({memory_type}, importance={importance})",

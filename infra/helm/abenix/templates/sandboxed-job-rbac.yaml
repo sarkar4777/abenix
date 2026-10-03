@@ -33,6 +33,19 @@ rules:
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+  {{- if (default dict .Values.codeRunners).enabled }}
+  # Warm code runners: the per-runner fetch-token Secret (write only, no read)
+  # and the scaler that sits beside each runner Deployment.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "patch", "delete"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["create", "get", "list", "patch", "delete"]
+  - apiGroups: ["keda.sh"]
+    resources: ["scaledobjects"]
+    verbs: ["create", "get", "list", "patch", "delete"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

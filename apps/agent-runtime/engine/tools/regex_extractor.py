@@ -31,6 +31,7 @@ PRESET_PATTERNS: dict[str, str] = {
 
 class RegexExtractorTool(BaseTool):
     name = "regex_extractor"
+    risk_tier = "low"
     description = (
         "Extract data from text using regular expressions. Supports custom regex "
         "patterns and preset patterns for common data types: email, url, phone, "

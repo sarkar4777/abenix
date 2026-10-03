@@ -74,6 +74,8 @@ async def load_schema_from_db(
 class SchemaPortfolioTool(BaseTool):
     """Schema-driven portfolio tool that adapts to any domain via a schema dict."""
 
+    risk_tier = "low"
+
     def __init__(
         self,
         schema: dict | None = None,

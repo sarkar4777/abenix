@@ -12,6 +12,9 @@ from engine.tools.base import BaseTool, ToolResult
 class PipelineAgentTool(BaseTool):
     """Wraps a saved pipeline agent so it can be invoked as a tool by LLM agents."""
 
+    # the pipeline it runs is governed at its own tier
+    risk_tier = "low"
+
     def __init__(
         self,
         agent_name: str,

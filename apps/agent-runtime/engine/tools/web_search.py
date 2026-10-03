@@ -7,6 +7,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class WebSearchTool(BaseTool):
     name = "web_search"
+    risk_tier = "low"
     description = (
         "Search the web for current information. Returns a list of results "
         "with titles, URLs, and snippets."

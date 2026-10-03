@@ -14,6 +14,7 @@ _UA = "Abenix/1.0 (geocoding tool)"
 
 class GeocodingTool(BaseTool):
     name = "geocoding"
+    risk_tier = "low"
     description = (
         "Convert addresses to coordinates (forward) or coordinates to "
         "addresses (reverse) using OpenStreetMap Nominatim. Free, no "

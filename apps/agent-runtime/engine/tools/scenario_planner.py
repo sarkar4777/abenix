@@ -12,6 +12,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class ScenarioPlannerTool(BaseTool):
     name = "scenario_planner"
+    risk_tier = "low"
     description = (
         "Run structured what-if scenario analysis with parameter sweeps. "
         "Define base values and variations for any set of numeric parameters, "

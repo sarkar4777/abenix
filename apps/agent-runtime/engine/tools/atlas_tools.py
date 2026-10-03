@@ -110,6 +110,7 @@ async def _resolve_graph_id(
 
 class AtlasQueryTool(BaseTool):
     name = "atlas_query"
+    risk_tier = "low"
     description = (
         "Search the Atlas ontology graph by node pattern. Each pattern is a "
         "{label_like, kind?} object. Returns matching nodes (and edges, if "
@@ -270,6 +271,7 @@ class AtlasQueryTool(BaseTool):
 
 class AtlasTraverseTool(BaseTool):
     name = "atlas_traverse"
+    risk_tier = "low"
     description = (
         "Return the 1-hop neighbourhood of a node (incoming + outgoing edges "
         "and the nodes on the other end). Pick the node by exact label match, "
@@ -412,6 +414,7 @@ class AtlasTraverseTool(BaseTool):
 
 class AtlasSearchGroundedTool(BaseTool):
     name = "atlas_search_grounded"
+    risk_tier = "low"
     description = (
         "Find KB documents that are linked (as document-kind nodes) to "
         "concepts near a target term in the ontology. Use this instead of "
@@ -557,6 +560,7 @@ class AtlasSearchGroundedTool(BaseTool):
 
 class AtlasDescribeTool(BaseTool):
     name = "atlas_describe"
+    risk_tier = "low"
     description = (
         "Summarise an atlas graph: total nodes/edges per kind, top edge labels, "
         "and the most-connected concepts. Use as the first step when the user "

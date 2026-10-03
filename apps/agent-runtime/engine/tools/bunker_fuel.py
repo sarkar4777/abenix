@@ -64,6 +64,7 @@ _VLGC_CARGO_MT = 44_000.0  # Typical 84,000 cbm VLGC carries ~44kT propane
 
 class BunkerFuelTool(BaseTool):
     name = "bunker_fuel"
+    risk_tier = "low"
     description = (
         "Free bunker-fuel price proxy + corridor freight-rate estimator. "
         "Returns current VLSFO bunker prices at the major ports (Houston, "

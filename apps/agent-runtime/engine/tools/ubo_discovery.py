@@ -266,6 +266,7 @@ def _compute_effective_pct(ownership_paths: list[list[dict[str, Any]]]) -> float
 
 class UBODiscoveryTool(BaseTool):
     name = "ubo_discovery"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "COMPANIES_HOUSE_API_KEY",

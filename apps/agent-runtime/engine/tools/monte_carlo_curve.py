@@ -38,6 +38,7 @@ def _derive_seed(arguments: dict[str, Any]) -> int:
 
 class MonteCarloCurveTool(BaseTool):
     name = "monte_carlo_curve"
+    risk_tier = "low"
     description = (
         "Simulate a forward curve via mean-reverting GBM with optional "
         "seasonal overlay. Returns the expected curve plus P10/P90 band "

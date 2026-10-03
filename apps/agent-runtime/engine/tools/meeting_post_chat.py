@@ -10,6 +10,7 @@ from engine.tools import _meeting_session as sessmod
 
 class MeetingPostChatTool(BaseTool):
     name = "meeting_post_chat"
+    risk_tier = "medium"
     description = (
         "Post a text message to the meeting chat without speaking out loud. "
         "Good for links, long-form answers, summaries, or when the user "

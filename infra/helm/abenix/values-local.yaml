@@ -367,7 +367,30 @@ nats:
     fileStorage:
       size: 1Gi
 
+# Warm code runners. Images come from build_images in deploy.sh, the tag is
+# set there. CPU HPA locally, KEDA on runner load is the AKS posture.
+codeRunners:
+  enabled: true
+  mode: auto
+  registry: localhost:5000/abenix
+  pullPolicy: Never
+  pools:
+    - name: python-3.12
+      image: code-runner-python
+  maxReplicas: 2
+  idleSeconds: 600
+  resources:
+    exec:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: "1", memory: 1Gi }
+    gateway:
+      requests: { cpu: 20m, memory: 48Mi }
+      limits: { cpu: 250m, memory: 128Mi }
+  keda:
+    enabled: false
+
 # MCP servers a local cluster may register. The chart default allows only the
 # UAT fixture, so any other in-cluster MCP service has to be named here or the
 # connect call answers 400.
 mcpAllowedHosts: "uat-mcp.abenix.svc.cluster.local,custom-mcp.abenix.svc.cluster.local"
+

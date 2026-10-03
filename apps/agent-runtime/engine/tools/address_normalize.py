@@ -189,6 +189,7 @@ def _normalize(raw: str) -> dict[str, Any]:
 
 class AddressNormalizeTool(BaseTool):
     name = "address_normalize"
+    risk_tier = "low"
     description = (
         "Parse a free-text address into structured fields (street, city, "
         "state, postal_code, country) and emit a canonical single-line "

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from typing import Any
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import async_session, get_current_user, get_db
 from app.core.notifications import _serialize_notification
 from app.core.responses import error, success
 from app.core.security import verify_token
@@ -179,6 +179,8 @@ async def stream_notifications(
     wanted: set[str] | None = (
         {t.strip() for t in types.split(",") if t.strip()} if types else None
     )
+    user_id = user.id
+    await db.close()
 
     async def _gen():
         last_seen = datetime.now(timezone.utc)
@@ -191,20 +193,22 @@ async def stream_notifications(
             stmt = (
                 select(Notification)
                 .where(
-                    Notification.user_id == user.id,
+                    Notification.user_id == user_id,
                     Notification.created_at > last_seen,
                 )
                 .order_by(Notification.created_at.asc())
                 .limit(50)
             )
-            result = await db.execute(stmt)
-            rows = result.scalars().all()
-            for n in rows:
-                if wanted and n.type not in wanted:
+            async with async_session() as s:
+                rows = (await s.execute(stmt)).scalars().all()
+                batch = [
+                    (n.type, _serialize_notification(n), n.created_at) for n in rows
+                ]
+            for n_type, payload, created_at in batch:
+                if wanted and n_type not in wanted:
                     continue
-                payload = _serialize_notification(n)
-                yield f"event: {n.type}\ndata: {json.dumps(payload)}\n\n"
-                last_seen = n.created_at or last_seen
+                yield f"event: {n_type}\ndata: {json.dumps(payload)}\n\n"
+                last_seen = created_at or last_seen
             now = monotonic()
             if now - keepalive_at > 25:
                 yield ": keep-alive\n\n"

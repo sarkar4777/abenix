@@ -64,10 +64,10 @@ def test_router_route_gemini_prefix():
     assert provider.__class__.__name__ == "GoogleProvider"
 
 
-def test_router_route_unknown_defaults_anthropic():
+def test_router_route_unknown_model_is_rejected():
     router = LLMRouter()
-    provider = router.route("random-model-name")
-    assert provider.__class__.__name__ == "AnthropicProvider"
+    with pytest.raises(ValueError, match="Unknown model 'random-model-name'"):
+        router.route("random-model-name")
 
 
 @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})

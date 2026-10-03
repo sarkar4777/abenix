@@ -14,6 +14,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class DocumentExtractorTool(BaseTool):
     name = "document_extractor"
+    risk_tier = "low"
     description = (
         "Extract structured data from documents. Parses tables into rows/columns, "
         "extracts key-value pairs (dates, amounts, percentages, names), identifies "

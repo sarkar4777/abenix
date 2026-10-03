@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from unittest.mock import AsyncMock
 
@@ -801,7 +802,12 @@ def test_cache_key_unicode_content():
 def test_cache_key_large_payload():
     large_msg = [{"role": "user", "content": "x" * 100_000}]
     key = _cache_key("model", large_msg, None, 0.3)
-    assert len(key) == len("abenix:exact:") + 64
+    prefix = "abenix:exact:notenant:"
+    assert key.startswith(prefix)
+    assert re.fullmatch(r"[0-9a-f]{64}", key[len(prefix) :])
+    scoped = _cache_key("model", large_msg, None, 0.3, tenant_id="t1")
+    assert scoped.startswith("abenix:exact:t1:")
+    assert scoped[-64:] != key[-64:]
 
 
 @requires_redis

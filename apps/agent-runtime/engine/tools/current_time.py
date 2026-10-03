@@ -22,6 +22,7 @@ COMMON_ZONES = {
 
 class CurrentTimeTool(BaseTool):
     name = "current_time"
+    risk_tier = "low"
     description = (
         "Get the current date and time in UTC or a specified timezone. "
         "Supports IANA timezone names (e.g. 'America/New_York') and common "

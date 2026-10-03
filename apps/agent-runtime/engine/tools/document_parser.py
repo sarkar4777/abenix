@@ -34,6 +34,7 @@ _ENCODING_CHAIN = ("utf-8", "latin-1", "cp1252")
 
 class DocumentParserTool(BaseTool):
     name = "document_parser"
+    risk_tier = "low"
     description = (
         "Extract plain text from documents (PDF, DOCX, TXT, CSV, HTML, Markdown). "
         "Returns the full text content ready for analysis. Use as the first step "

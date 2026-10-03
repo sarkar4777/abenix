@@ -10,6 +10,7 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 class ApiConnectorTool(BaseTool):
     name = "api_connector"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "SLACK_WEBHOOK_URL",

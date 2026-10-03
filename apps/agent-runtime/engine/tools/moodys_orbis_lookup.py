@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class MoodysOrbisLookupTool(BaseTool):
     name = "moodys_orbis_lookup"
+    risk_tier = "low"
     description = (
         "Look up a counterparty in Moody's Orbis (BvD). This environment is "
         "not provisioned for Orbis; the tool always returns "

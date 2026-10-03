@@ -83,6 +83,7 @@ def _validate_structure(extracted: Any, schema: dict[str, Any]) -> list[str]:
 
 class StructuredExtractorTool(BaseTool):
     name = "structured_extractor"
+    risk_tier = "low"
     description = (
         "Extract structured data from unstructured text using a provided JSON "
         "schema. The tool calls an LLM to analyze the text and produce output "

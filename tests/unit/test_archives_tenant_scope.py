@@ -48,6 +48,9 @@ class RecordingDB:
     async def refresh(self, obj):
         return None
 
+    async def close(self):
+        return None
+
 
 def _admin(tenant_id=None):
     return SimpleNamespace(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -749,6 +750,12 @@ class TestValidateToolAnnotations:
 
 
 class TestTokenEncryption:
+    @pytest.fixture(autouse=True)
+    def _kek(self, monkeypatch):
+        monkeypatch.setenv(
+            "ABENIX_DATA_KEY_KEK_BASE64", base64.b64encode(b"k" * 32).decode()
+        )
+
     def _get_encrypt_decrypt(self):
         from app.routers.mcp import _decrypt_token, _encrypt_token
 
@@ -778,13 +785,19 @@ class TestTokenEncryption:
         encrypted = encrypt("")
         assert decrypt(encrypted) == ""
 
-    def test_encrypted_is_base64(self):
+    def test_encrypted_is_versioned_aes_gcm_envelope(self):
         encrypt, _ = self._get_encrypt_decrypt()
-        import base64
-
         encrypted = encrypt("some-token")
-        # Should not raise
-        base64.b64decode(encrypted)
+        version, blob = encrypted.split(":", 1)
+        assert version == "v1"
+        # 12-byte nonce + 10-byte ciphertext + 16-byte GCM tag
+        assert len(base64.b64decode(blob, validate=True)) == 12 + 10 + 16
+
+    def test_tenants_cannot_read_each_others_tokens(self):
+        encrypt, decrypt = self._get_encrypt_decrypt()
+        encrypted = encrypt("tenant-a-secret", "tenant-a")
+        assert decrypt(encrypted, "tenant-a") == "tenant-a-secret"
+        assert decrypt(encrypted, "tenant-b") != "tenant-a-secret"
 
     def test_different_tokens_produce_different_ciphertexts(self):
         encrypt, _ = self._get_encrypt_decrypt()

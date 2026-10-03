@@ -11,6 +11,7 @@ from engine.tools import _meeting_session as sessmod
 
 class ScopeGateTool(BaseTool):
     name = "scope_gate"
+    risk_tier = "low"
     description = (
         "Check whether a meeting question is inside the user-declared "
         "topic allow-list. Returns {decision: 'answer'|'defer'|'decline', "

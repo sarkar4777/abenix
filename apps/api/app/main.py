@@ -42,6 +42,8 @@ from app.routers import (
     llm_models,
     admin_settings,
     admin_tool_config,
+    governance,
+    decisions,
     public_settings,
     agent_comments,
     agent_favorites,
@@ -162,8 +164,10 @@ app.add_middleware(
         "X-Request-ID",
         "X-API-Key",
         "X-CIQ-Key",
+        "If-Match",
+        "If-None-Match",
     ],
-    expose_headers=["Retry-After", "X-RateLimit-Remaining", "X-Request-ID"],
+    expose_headers=["Retry-After", "X-RateLimit-Remaining", "X-Request-ID", "ETag"],
     max_age=600,
 )
 
@@ -203,7 +207,27 @@ async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONR
     return JSONResponse(
         status_code=exc.status_code,
         content={"data": None, "error": payload},
-        headers=_cors_headers_for(request),
+        headers={**(exc.headers or {}), **_cors_headers_for(request)},
+    )
+
+
+from sqlalchemy.exc import TimeoutError as _PoolTimeout  # noqa: E402
+
+
+@app.exception_handler(_PoolTimeout)
+async def _pool_timeout_handler(request: Request, exc: _PoolTimeout) -> JSONResponse:
+    # every connection is in use, a retry soon will usually get one
+    return JSONResponse(
+        status_code=503,
+        content={
+            "data": None,
+            "error": {
+                "message": "The service is busy, retry shortly.",
+                "code": 503,
+                "error_code": "BUSY",
+            },
+        },
+        headers={"Retry-After": "2", **_cors_headers_for(request)},
     )
 
 
@@ -247,9 +271,15 @@ from app.routers import invocations as _invocations_mod, archives as _archives_m
 
 app.include_router(_invocations_mod.router)
 app.include_router(_archives_mod.router)
+from app.routers import evals as _evals_mod
+
+app.include_router(_evals_mod.router)
 app.include_router(admin_scaling.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_tool_config.router)
+app.include_router(governance.router)
+app.include_router(decisions.router)
+app.include_router(decisions.refs_router)
 app.include_router(public_settings.router)
 app.include_router(admin_pricing.router)
 app.include_router(admin_model_availability.router)
@@ -361,6 +391,10 @@ from app.routers import admin_alerts as admin_alerts_router
 app.include_router(search_router.router)
 app.include_router(admin_cluster_router.router)
 app.include_router(admin_alerts_router.router)
+
+from app.routers import sources as sources_router
+
+app.include_router(sources_router.router)
 
 # ContractIQ has been extracted to /contractiq/ as a standalone application.
 # It uses the Abenix SDK for AI features via the actAs delegation pattern.

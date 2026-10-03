@@ -27,6 +27,7 @@ PII_PATTERNS = {
 
 class PIIRedactorTool(BaseTool):
     name = "pii_redactor"
+    risk_tier = "low"
     description = "Detect and redact PII (SSN, credit cards, emails, phone numbers, IPs, dates of birth) from text. Supports mask, hash, and remove strategies."
     input_schema = {
         "type": "object",

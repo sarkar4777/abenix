@@ -195,7 +195,7 @@ check_prereqs() {
 _expand_only() {
   local token="$1"
   case "${token}" in
-    abenix)     echo "api web worker agent-runtime cognify-worker" ;;
+    abenix)     echo "api web worker agent-runtime cognify-worker code-runner-python code-runner-node" ;;
     contractiq)     echo "contractiq-api contractiq-web" ;;
     mideasttourism)   echo "mideasttourism-api mideasttourism-web" ;;
     industrial-iot) echo "industrial-iot-api industrial-iot-web" ;;
@@ -503,6 +503,8 @@ declare -A DOCKERFILES=(
   [web]="docker/Dockerfile.web"
   [worker]="docker/Dockerfile.worker"
   [agent-runtime]="docker/Dockerfile.agent-runtime"
+  [code-runner-python]="apps/code-runner/Dockerfile.python"
+  [code-runner-node]="apps/code-runner/Dockerfile.node"
   [contractiq-api]="contractiq/api/Dockerfile"
   [contractiq-web]="contractiq/web/Dockerfile"
   [mideasttourism-api]="mideasttourism/api/Dockerfile"
@@ -527,6 +529,8 @@ declare -A BUILD_CONTEXTS=(
   [web]="${ROOT_DIR}"
   [worker]="${ROOT_DIR}"
   [agent-runtime]="${ROOT_DIR}"
+  [code-runner-python]="${ROOT_DIR}/apps/code-runner"
+  [code-runner-node]="${ROOT_DIR}/apps/code-runner"
   [cognify-worker]="${ROOT_DIR}"
   [contractiq-api]="${ROOT_DIR}/contractiq/api"
   [contractiq-web]="${ROOT_DIR}/contractiq/web"
@@ -595,6 +599,7 @@ build_and_push() {
   # cognify-worker reuses the worker image — don't build it separately
   local all_svcs=(
     api web worker agent-runtime
+    code-runner-python code-runner-node
     contractiq-api contractiq-web
     mideasttourism-api mideasttourism-web
     industrial-iot-api industrial-iot-web
@@ -854,6 +859,8 @@ deploy_abenix_helm() {
     --set "agent-runtime.image.repository=${ACR_LOGIN_SERVER}/agent-runtime" \
     --set "agent-runtime.image.tag=${IMAGE_TAG}" \
     --set "agent-runtime.image.pullPolicy=Always" \
+    --set "codeRunners.registry=${ACR_LOGIN_SERVER}" \
+    --set "codeRunners.imageTag=${IMAGE_TAG}" \
     --set "cognifyWorker.image.repository=${ACR_LOGIN_SERVER}/worker" \
     --set "cognifyWorker.image.tag=${IMAGE_TAG}" \
     --set "cognifyWorker.image.pullPolicy=Always" \
@@ -927,6 +934,14 @@ run_migrations() {
     # so we keep the swallow and rely on the sentinel check instead.
     kubectl exec -n "${NAMESPACE}" "${api_pod}" -- bash -c \
       'cd /app/packages/db && python -m alembic upgrade heads' 2>&1 | tail -10 || true
+    # an upgrade that committed nothing exits 0, so check the database is at every head
+    local heads_out
+    if ! heads_out=$(kubectl exec -n "${NAMESPACE}" "${api_pod}" -- bash -c         'cd /app/packages/db && python -m bootstrap verify' 2>&1); then
+      echo "${heads_out}" | tail -3
+      err "Migrations did not reach every head, aborting before traffic moves"
+      exit 1
+    fi
+    echo "${heads_out}" | tail -1
 
     # Schema-drift sentinel: a small set of canonical columns that
     # MUST exist after alembic upgrade heads. The list lives in
@@ -1514,6 +1529,7 @@ deploy_pharmavigil() {
   kubectl -n "${NAMESPACE}" rollout restart deploy/pharmavigil-web 2>&1 | tail -1 || true
   ok "PharmaVigil deployed"
 }
+
 
 deploy_wingman() {
   if [ -n "${ONLY_CSV}" ] && ! _should_do "wingman-api" && ! _should_do "wingman-web"; then return 0; fi

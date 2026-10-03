@@ -98,6 +98,7 @@ Output as JSON object.""",
 
 class StructuredAnalyzerTool(BaseTool):
     name = "structured_analyzer"
+    risk_tier = "low"
     description = (
         "Extract structured data from ANY content using LLM analysis. "
         "Supports code (all languages), documents, and images. "

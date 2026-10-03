@@ -47,7 +47,7 @@ CREATE TABLE approvals (
   title TEXT NOT NULL,
   payload JSONB NOT NULL,
   required_signoffs INT NOT NULL DEFAULT 1,
-  status approval_status NOT NULL,      -- pending | approved | denied | expired
+  status approval_status NOT NULL,      -- pending | approved | denied | returned | expired
   requested_by UUID NOT NULL,           -- user_id
   expires_at TIMESTAMPTZ,
   decided_at TIMESTAMPTZ,
@@ -61,7 +61,7 @@ CREATE TABLE approval_signoffs (
   approval_id UUID NOT NULL REFERENCES approvals(id) ON DELETE CASCADE,
   user_id UUID NOT NULL,
   user_email TEXT NOT NULL,
-  decision approval_decision NOT NULL,  -- approve | deny
+  decision approval_decision NOT NULL,  -- approve | deny | return
   reason TEXT,
   decided_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -74,13 +74,17 @@ stateDiagram-v2
   [*] --> pending: create
   pending --> approved: signoffs >= required
   pending --> denied: any deny
+  pending --> returned: any return
   pending --> expired: now() > expires_at
   approved --> [*]
   denied --> [*]
+  returned --> [*]
   expired --> [*]
 ```
 
 Once terminal, an approval cannot be re-opened. A new approval row is needed.
+
+A deny wins over everything else. A return wins over approvals already given.
 
 ---
 
@@ -133,6 +137,46 @@ pipeline_config:
 ```
 
 If `review` is denied or expires, `send` never fires.
+
+---
+
+## Return for changes
+
+A signer can send an approval back instead of denying it. `POST /api/approvals/{id}/signoff` takes `decision: "return"` alongside `approve` and `deny`. A return needs a `reason`, otherwise the call fails with 400 and "Say what needs to change, so the requester can correct it."
+
+- The approval moves to `returned` and `approval.resolved` is emitted with that status.
+- For a decision version (`gate_kind: decision_publish`) the version goes back to `draft`. The reviewer's note is kept on the version under `validation.returned` as `{note, at}`, so the author sees what to fix, and its lock version is bumped.
+- On `/approvals` the button is **Return for changes**. It is not offered on `human_approval` gates. A return sent to one through the API ends the gate as rejected.
+
+## Tier floor
+
+An approval raised for tiered work picks up the tenant's tier policy. The tier comes from `risk_tier` on the create request, or from the execution named in `agent_execution_id`. Low tier, or no tier, keeps the plain rules above.
+
+For medium and above the `publish_approvals` block of the tier policy sets a floor:
+
+| Policy field | Effect on the approval |
+|---|---|
+| `min_approvers` | `required_signoffs` is raised to at least this. A request can ask for more, never fewer |
+| `exclude_author` | The requester cannot sign. They get 403 "You requested this change, so someone else has to approve it." |
+| `capability` | Signers need it, for example `approvals.sign:legal`. Default `approvals.sign` |
+| `escalate_after_hours` | When to tell admins nobody has acted. See below |
+
+These are copied onto the approval's `policy` column when it is created, so a later policy change does not move the goalposts on approvals already waiting. With a policy in place the capability check replaces the admin-or-creator rule.
+
+## Escalation
+
+Each tier policy has `escalate_after_hours`. Defaults:
+
+| Tier | `escalate_after_hours` |
+|---|---|
+| Low | 0 |
+| Medium | 0 |
+| High | 24 |
+| Critical | 4 |
+
+0 means never. Values from 0 to 720 are accepted.
+
+A scheduler job, `escalate_approvals`, runs every 15 minutes on one replica at a time (Postgres advisory lock). It picks pending approvals that carry a policy and have not been escalated, and for each one older than its `escalate_after_hours` sends every active admin in the tenant a notification: "Approval waiting over Nh", with how many sign-offs it has so far and a link to `/approvals`. It then sets `escalated_at`, so each approval escalates once.
 
 ---
 
@@ -209,6 +253,10 @@ These are immutable and tenant-scoped. Compliance can export them via `GET /api/
 | What | Where |
 |---|---|
 | **Approvals REST router** | [`apps/api/app/routers/approvals.py`](../../apps/api/app/routers/approvals.py) — create, list, signoff, wait, webhook config |
+| **Tier floor + escalation** | same router, `_tier_floor` and `escalate_overdue` |
+| **Tier policy defaults** | [`apps/agent-runtime/engine/risk.py`](../../apps/agent-runtime/engine/risk.py) — `DEFAULT_POLICIES` |
+| **Who may sign** | [`apps/api/app/core/hitl.py`](../../apps/api/app/core/hitl.py) — `approver_denial` |
+| **Escalation job** | [`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py) — `_escalate_approvals` |
 | **Approval model** | [`packages/db/models/approval.py`](../../packages/db/models/approval.py) — `Approval`, `ApprovalStatus`, signoffs JSONB |
 | **Pause / resume mechanics** | [`apps/agent-runtime/engine/agent_executor.py`](../../apps/agent-runtime/engine/agent_executor.py) — search for `pause_state` |
 | **Approval webhooks (outbound)** | same router, `PUT /webhooks` — uses `tenant.settings.approval_webhook_url` |

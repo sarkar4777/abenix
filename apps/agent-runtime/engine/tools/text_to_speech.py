@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 class TextToSpeechTool(BaseTool):
     name = "text_to_speech"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "OPENAI_API_KEY",

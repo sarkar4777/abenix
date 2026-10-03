@@ -176,6 +176,7 @@ _SHORTCUTS: dict[str, dict[str, Any]] = {
 
 class EiaOpenDataTool(BaseTool):
     name = "eia_open_data"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "EIA_API_KEY",

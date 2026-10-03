@@ -17,16 +17,26 @@ _MAX_TEXT_CHARS = 16000
 _PUBSUB_CHANNEL_PREFIX = "invocations:"
 
 
+_REDIS: dict[int, Any] = {}
+
+
+def _redis() -> Any:
+    key = id(asyncio.get_running_loop())
+    client = _REDIS.get(key)
+    if client is None:
+        import redis.asyncio as redis_async  # type: ignore
+
+        client = redis_async.from_url(_REDIS_URL, decode_responses=True)
+        _REDIS[key] = client
+    return client
+
+
 async def _publish_event(kind: str, resource_id: str, event: dict) -> None:
     if not _REDIS_URL or not resource_id:
         return
     try:
-        import redis.asyncio as redis_async  # type: ignore
-
-        client = redis_async.from_url(_REDIS_URL, decode_responses=True)
         channel = f"{_PUBSUB_CHANNEL_PREFIX}{kind}:{resource_id}"
-        await client.publish(channel, json.dumps(event, default=str))
-        await client.aclose()
+        await _redis().publish(channel, json.dumps(event, default=str))
     except Exception as e:
         logger.debug("invocation_log.publish %s/%s failed: %s", kind, resource_id, e)
 
@@ -52,16 +62,33 @@ def _truncate_text(value: Any) -> str | None:
     return s
 
 
+_ENGINES: dict[int, Any] = {}
+
+
 async def _engine():
+    # one pool per event loop, a new engine per call meant a new login per call
     if not _DB_URL:
         return None
+    key = id(asyncio.get_running_loop())
+    eng = _ENGINES.get(key)
+    if eng is not None:
+        return eng
     try:
         from sqlalchemy.ext.asyncio import create_async_engine
 
-        return create_async_engine(_DB_URL, pool_pre_ping=True, pool_size=1)
+        eng = create_async_engine(
+            _DB_URL,
+            pool_size=2,
+            max_overflow=3,
+            pool_timeout=60,
+            pool_recycle=300,
+            pool_pre_ping=True,
+        )
     except Exception as e:
         logger.debug("invocation_log: engine init failed: %s", e)
         return None
+    _ENGINES[key] = eng
+    return eng
 
 
 async def record_code_asset(
@@ -148,11 +175,6 @@ async def record_code_asset(
             )
     except Exception as e:
         logger.debug("invocation_log.code_asset insert failed: %s", e)
-    finally:
-        try:
-            await eng.dispose()
-        except Exception:
-            pass
 
     try:
         await _publish_event(
@@ -264,11 +286,6 @@ async def record_ml_model(
             )
     except Exception as e:
         logger.debug("invocation_log.ml_model insert failed: %s", e)
-    finally:
-        try:
-            await eng.dispose()
-        except Exception:
-            pass
 
     try:
         await _publish_event(
@@ -367,11 +384,6 @@ async def record_kb_query(
             )
     except Exception as e:
         logger.debug("invocation_log.kb_query insert failed: %s", e)
-    finally:
-        try:
-            await eng.dispose()
-        except Exception:
-            pass
 
     try:
         await _publish_event(

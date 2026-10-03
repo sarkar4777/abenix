@@ -24,6 +24,7 @@ FORBIDDEN_KEYWORDS = (
 
 class DatabaseQueryTool(BaseTool):
     name = "database_query"
+    risk_tier = "low"
     description = (
         "Execute read-only SQL queries against PostgreSQL databases. "
         "Read-only (SELECT only), parameterized, 30s timeout. Returns up to 10,000 rows."

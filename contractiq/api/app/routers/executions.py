@@ -209,9 +209,12 @@ async def _authorize_execution(execution_id: str, user: ContractIQUser) -> None:
 async def watch_execution(
     execution_id: str,
     user: ContractIQUser = Depends(get_contractiq_user),
+    db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """SSE pass-through for a single execution's live event stream."""
     await _authorize_execution(execution_id, user)
+    # the auth lookup's session, release it before streaming
+    await db.close()
 
     async def gen() -> AsyncIterator[bytes]:
         try:
@@ -241,9 +244,11 @@ async def watch_execution(
 async def narration_passthrough(
     execution_id: str,
     user: ContractIQUser = Depends(get_contractiq_user),
+    db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """SSE pass-through for execution narration (LLM commentary stream)."""
     await _authorize_execution(execution_id, user)
+    await db.close()
 
     async def gen() -> AsyncIterator[bytes]:
         try:

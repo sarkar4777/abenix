@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine import credentials
+from engine import credentials, governance, risk
 from engine.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -181,6 +181,9 @@ class PipelineResult:
     final_output: Any = None
     node_errors: dict[str, str] = field(default_factory=dict)  # {node_id: error_msg}
     labels: dict[str, str] = field(default_factory=dict)  # {node_id: label}
+    risk_tier: str = ""
+    risk_reasons: list[dict[str, Any]] = field(default_factory=list)
+    failure_code: str = ""
 
 
 _MD_JSON_FENCE = __import__("re").compile(
@@ -518,15 +521,69 @@ class PipelineExecutor:
         """Safely invoke a callback, awaiting it if it is a coroutine function."""
         if callback is None:
             return
+        # Callbacks written before error_message/error_type existed take fewer args
+        try:
+            kinds = [p.kind for p in inspect.signature(callback).parameters.values()]
+        except (TypeError, ValueError):
+            kinds = None
+        if kinds is not None and inspect.Parameter.VAR_POSITIONAL not in kinds:
+            positional = (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+            args = args[: sum(1 for k in kinds if k in positional)]
         try:
             if inspect.iscoroutinefunction(callback):
                 await callback(*args)
             else:
                 callback(*args)
         except Exception:
-            logger.debug("Streaming callback raised an exception", exc_info=True)
+            logger.warning("Streaming callback raised an exception", exc_info=True)
 
     async def execute(
+        self,
+        nodes: list[PipelineNode],
+        context: dict[str, Any] | None = None,
+    ) -> PipelineResult:
+        await governance.ensure_fresh()
+        parent = governance.current()
+        base = risk.highest(
+            [governance.agent_tier(self._agent_id), parent.tier if parent else "low"]
+        )
+        ctx = governance.RunContext(
+            tenant_id=str(self._tenant_id or ""),
+            execution_id=str((context or {}).get("__execution_id") or ""),
+            agent_name=f"pipeline {self._agent_id}",
+            base_tier=base,
+            tier=base,
+            scope="pipeline",
+            subject_id=str(self._agent_id or ""),
+            parent=parent,
+        )
+        if base != "low":
+            ctx.reasons.append({"tier": base, "source": "pipeline", "detail": ""})
+        token = governance.begin_run(ctx)
+        try:
+            try:
+                governance.check(self._tenant_id, "pipeline", self._agent_id or "*")
+            except governance.Stopped as s:
+                result = PipelineResult(
+                    status="failed",
+                    node_errors={"pipeline": s.message()},
+                    final_output={"error": s.message()},
+                    failure_code="KILL_SWITCH",
+                )
+            else:
+                result = await self._execute_governed(nodes, context)
+        finally:
+            governance.end_run(token)
+            if parent is not None:
+                parent.raise_to(ctx.tier, f"pipeline:{self._agent_id}")
+        result.risk_tier = ctx.tier
+        result.risk_reasons = list(ctx.reasons)
+        return result
+
+    async def _execute_governed(
         self,
         nodes: list[PipelineNode],
         context: dict[str, Any] | None = None,
@@ -1930,4 +1987,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, Any]:
         "failed_nodes": result.failed_nodes,
         "total_duration_ms": result.total_duration_ms,
         "final_output": result.final_output,
+        "risk_tier": result.risk_tier,
+        "risk_reasons": result.risk_reasons,
+        "failure_code": result.failure_code,
     }

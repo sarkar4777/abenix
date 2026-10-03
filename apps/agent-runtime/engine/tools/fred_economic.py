@@ -33,6 +33,7 @@ _SERIES_ALIASES = {
 
 class FredEconomicTool(BaseTool):
     name = "fred_economic"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "FRED_API_KEY",

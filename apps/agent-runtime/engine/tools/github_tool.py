@@ -15,6 +15,7 @@ MAX_CONTENT_LENGTH = 100_000
 
 class GitHubTool(BaseTool):
     name = "github_tool"
+    risk_tier = "high"
     config_fields = (
         ConfigField(
             "GITHUB_TOKEN",

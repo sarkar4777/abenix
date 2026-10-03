@@ -14,6 +14,7 @@ def _slug(s: str) -> str:
 
 class MermaidDiagramTool(BaseTool):
     name = "mermaid_diagram"
+    risk_tier = "low"
     description = (
         "Produce a Mermaid diagram source block from structured input. "
         "Supports: flowchart (nodes + edges), sequence (actor messages), "

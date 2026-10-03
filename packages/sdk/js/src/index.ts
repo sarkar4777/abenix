@@ -110,7 +110,7 @@ export interface Approval {
   payload: Record<string, unknown>;
   requiredSignoffs: number;
   signoffs: Array<Record<string, unknown>>;
-  status: 'pending' | 'approved' | 'denied' | 'expired';
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'returned';
   requestedBy: string | null;
   expiresAt: string | null;
   decidedAt: string | null;
@@ -190,6 +190,9 @@ export class Abenix {
   public agents: AgentsClient;
   public knowledge: KnowledgeClient;
   public approvals: ApprovalsClient;
+  public decisions: DecisionsClient;
+  public sources: SourcesClient;
+  public events: EventsClient;
 
   constructor(config: AbenixConfig) {
     this.apiKey = config.apiKey;
@@ -200,6 +203,14 @@ export class Abenix {
     this.agents = new AgentsClient(this);
     this.knowledge = new KnowledgeClient(this);
     this.approvals = new ApprovalsClient(this);
+    this.decisions = new DecisionsClient(this);
+    this.sources = new SourcesClient(this);
+    this.events = new EventsClient(this);
+  }
+
+  /** The key's user, role and capabilities. */
+  permissions(): Promise<{ user_id: string; email: string; role: string; capabilities: string[] }> {
+    return platformCall(this, 'GET', '/api/me/permissions');
   }
 
   private _subjectHeader(actAs?: ActingSubject): Record<string, string> {
@@ -542,6 +553,264 @@ class KnowledgeClient {
   }
 }
 
+export class AbenixDecisionError extends Error {
+  constructor(public status: number, message: string, public code?: string, public details?: unknown) {
+    super(message);
+    this.name = 'AbenixDecisionError';
+  }
+}
+
+export type DecisionOutcome = 'decided' | 'no_match' | 'missing_facts' | 'invalid_facts';
+
+export interface DecisionResult {
+  decision: { key: string; name: string; risk_tier: string };
+  version: { id: string; version: number; content_hash: string; valid_from: string | null; valid_to: string | null };
+  as_of: string;
+  outcome: DecisionOutcome;
+  result: unknown;
+  applied_rules: string[];
+  missing_facts: string[];
+  invalid_facts: { fact: string; expected: string; got: string; value: string }[];
+  trace: { rule_id: string; description: string; values_seen: Record<string, unknown> }[];
+  trace_hash: string;
+  evaluation_id?: string;
+}
+
+export class DecisionsClient {
+  constructor(private client: Abenix) {}
+
+  private async call<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    const res = await this.client._fetch(path, { method, body: body === undefined ? undefined : JSON.stringify(body), headers });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = typeof json?.error === 'object' && json.error ? json.error : { message: String(json?.error ?? `HTTP ${res.status}`) };
+      throw new AbenixDecisionError(res.status, err.message, err.error_code, err.details);
+    }
+    return json?.data as T;
+  }
+
+  list(q = ''): Promise<any[]> {
+    return this.call('GET', `/api/decisions${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  }
+
+  get(key: string): Promise<any> {
+    return this.call('GET', `/api/decisions/${encodeURIComponent(key)}`);
+  }
+
+  /** Missing facts are reported, never guessed. */
+  evaluate(key: string, facts: Record<string, unknown>, opts: { asOf?: string; knownAt?: string; version?: number; trace?: boolean; persist?: boolean; idempotencyKey?: string } = {}): Promise<DecisionResult> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/evaluate`, {
+      facts, as_of: opts.asOf, known_at: opts.knownAt, version: opts.version, trace: opts.trace ?? true,
+      persist: opts.persist ?? false, idempotency_key: opts.idempotencyKey,
+    });
+  }
+
+  evaluateBatch(key: string, items: { facts: Record<string, unknown>; as_of?: string }[], opts: { asOf?: string; version?: number } = {}): Promise<{ results: DecisionResult[]; counts: Record<string, number> }> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/evaluate-batch`, { items, as_of: opts.asOf, version: opts.version });
+  }
+
+  compare(key: string, facts: Record<string, unknown>, targets: { label?: string; version?: number; as_of?: string; known_at?: string }[]): Promise<{ results: any[]; any_difference: boolean }> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/compare`, { facts, targets });
+  }
+
+  async proposeRules(key: string, rules: unknown, note: string, mode: 'merge' | 'replace' = 'merge'): Promise<any> {
+    const k = encodeURIComponent(key);
+    const draft: any = await this.call('POST', `/api/decisions/${k}/versions`, { note });
+    await this.call('POST', `/api/decisions/${k}/import`, { payload: rules, mode, version: draft.version }, { 'If-Match': draft.etag });
+    return this.call('POST', `/api/decisions/${k}/versions/${draft.version}/propose`, { note });
+  }
+
+  export(key: string, version?: number): Promise<any> {
+    return this.call('GET', `/api/decisions/${encodeURIComponent(key)}/export${version ? `?version=${version}` : ''}`);
+  }
+
+  referenceSets(): Promise<any[]> {
+    return this.call('GET', '/api/decision-reference-sets');
+  }
+
+  update(key: string, fields: { name?: string; description?: string; riskTier?: string; tags?: string[]; logMode?: string }): Promise<any> {
+    const body: Record<string, unknown> = {};
+    if (fields.name !== undefined) body.name = fields.name;
+    if (fields.description !== undefined) body.description = fields.description;
+    if (fields.riskTier !== undefined) body.risk_tier = fields.riskTier;
+    if (fields.tags !== undefined) body.tags = fields.tags;
+    if (fields.logMode !== undefined) body.log_mode = fields.logMode;
+    return this.call('PATCH', `/api/decisions/${encodeURIComponent(key)}`, body);
+  }
+
+  /** A draft copied from fromVersion, or from the version in force. Carries an etag for saves. */
+  newDraft(key: string, opts: { note?: string; fromVersion?: number } = {}): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/versions`, { note: opts.note ?? '', from_version: opts.fromVersion });
+  }
+
+  /** With an etag a stale save is refused with STALE_DRAFT. */
+  saveDraft(key: string, version: number, fields: {
+    etag?: string; authoring?: unknown; content?: unknown; validFrom?: string; validTo?: string;
+    clearValidFrom?: boolean; clearValidTo?: boolean; changeNote?: string; provenance?: unknown;
+  }): Promise<any> {
+    const body: Record<string, unknown> = { clear_valid_from: !!fields.clearValidFrom, clear_valid_to: !!fields.clearValidTo };
+    if (fields.authoring !== undefined) body.authoring = fields.authoring;
+    if (fields.content !== undefined) body.content = fields.content;
+    if (fields.validFrom !== undefined) body.valid_from = fields.validFrom;
+    if (fields.validTo !== undefined) body.valid_to = fields.validTo;
+    if (fields.changeNote !== undefined) body.change_note = fields.changeNote;
+    if (fields.provenance !== undefined) body.provenance = fields.provenance;
+    return this.call('PUT', `/api/decisions/${encodeURIComponent(key)}/versions/${version}`, body, fields.etag ? { 'If-Match': fields.etag } : undefined);
+  }
+
+  importRules(key: string, version: number, rules: unknown, opts: { mode?: 'merge' | 'replace'; etag?: string } = {}): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/import`, { payload: rules, mode: opts.mode ?? 'merge', version },
+      opts.etag ? { 'If-Match': opts.etag } : undefined);
+  }
+
+  /** Validates and sends a draft for sign-off under the decision's risk tier. */
+  propose(key: string, version: number, note = ''): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/versions/${version}/propose`, { note });
+  }
+
+  withdraw(key: string, version: number): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/versions/${version}/withdraw`);
+  }
+
+  validate(key: string, version: number): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/versions/${version}/validate`);
+  }
+
+  publish(key: string, version: number, opts: { expectedCurrent?: number } = {}): Promise<any> {
+    return this.call('POST', `/api/decisions/${encodeURIComponent(key)}/versions/${version}/publish`, { expected_current: opts.expectedCurrent });
+  }
+
+  publishPlan(key: string, version: number): Promise<any> {
+    return this.call('GET', `/api/decisions/${encodeURIComponent(key)}/versions/${version}/publish-plan`);
+  }
+
+  diff(key: string, a: number, b: number): Promise<any> {
+    return this.call('GET', `/api/decisions/${encodeURIComponent(key)}/diff?a=${a}&b=${b}`);
+  }
+}
+
+export class AbenixError extends Error {
+  constructor(public status: number, message: string, public code?: string, public details?: unknown) {
+    super(message);
+    this.name = 'AbenixError';
+  }
+}
+
+async function platformCall<T>(client: Abenix, method: string, path: string, body?: unknown): Promise<T> {
+  const res = await client._fetch(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const raw = json?.error ?? json?.detail;
+    const err = typeof raw === 'object' && raw && !Array.isArray(raw) ? raw : { message: Array.isArray(raw) ? raw.map((x: any) => x?.msg ?? String(x)).join('; ') : String(raw ?? `HTTP ${res.status}`) };
+    throw new AbenixError(res.status, err.message, err.error_code, err.details);
+  }
+  return json?.data as T;
+}
+
+/** Source Watch: watched pages and feeds, their snapshots and the changes found between them. */
+export class SourcesClient {
+  constructor(private client: Abenix) {}
+
+  list(q = ''): Promise<any[]> {
+    return platformCall(this.client, 'GET', `/api/sources${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  }
+
+  get(sourceId: string): Promise<any> {
+    return platformCall(this.client, 'GET', `/api/sources/${sourceId}`);
+  }
+
+  create(body: { name: string; url: string; kind?: string; description?: string; cadence_minutes?: number; selector?: string; jurisdiction?: string; tags?: string[]; risk_tier?: string; active?: boolean }): Promise<any> {
+    return platformCall(this.client, 'POST', '/api/sources', { kind: 'html', ...body });
+  }
+
+  update(sourceId: string, fields: Record<string, unknown>): Promise<any> {
+    return platformCall(this.client, 'PATCH', `/api/sources/${sourceId}`, fields);
+  }
+
+  delete(sourceId: string): Promise<any> {
+    return platformCall(this.client, 'DELETE', `/api/sources/${sourceId}`);
+  }
+
+  pause(sourceId: string, reason = ''): Promise<any> {
+    return platformCall(this.client, 'POST', `/api/sources/${sourceId}/pause`, { reason });
+  }
+
+  resume(sourceId: string): Promise<any> {
+    return platformCall(this.client, 'POST', `/api/sources/${sourceId}/resume`);
+  }
+
+  checkNow(sourceId: string): Promise<any> {
+    return platformCall(this.client, 'POST', `/api/sources/${sourceId}/check-now`);
+  }
+
+  changes(limit = 50): Promise<any[]> {
+    return platformCall(this.client, 'GET', `/api/sources/changes?limit=${limit}`);
+  }
+
+  change(changeId: string): Promise<any> {
+    return platformCall(this.client, 'GET', `/api/sources/changes/${changeId}`);
+  }
+
+  sourceChanges(sourceId: string, limit = 100): Promise<any[]> {
+    return platformCall(this.client, 'GET', `/api/sources/${sourceId}/changes?limit=${limit}`);
+  }
+
+  snapshot(snapshotId: string, opts: { full?: boolean } = {}): Promise<any> {
+    return platformCall(this.client, 'GET', `/api/sources/snapshots/${snapshotId}${opts.full ? '?full=true' : ''}`);
+  }
+}
+
+/** Platform events delivered to a webhook, or used to start an agent or pipeline. */
+export class EventsClient {
+  constructor(private client: Abenix) {}
+
+  catalog(): Promise<any[]> {
+    return platformCall(this.client, 'GET', '/api/webhooks/catalog');
+  }
+
+  list(): Promise<any[]> {
+    return platformCall(this.client, 'GET', '/api/webhooks');
+  }
+
+  /** A webhook subscription returns its signing_secret once. */
+  subscribe(events: string[], opts: { url?: string; name?: string; filter?: Record<string, unknown>; targetType?: 'webhook' | 'agent' | 'pipeline'; target?: Record<string, unknown> } = {}): Promise<any> {
+    if (!events.length) return Promise.reject(new Error('Pick at least one event'));
+    const body: Record<string, unknown> = { events, name: opts.name ?? '', target_type: opts.targetType ?? 'webhook' };
+    if (opts.url) body.url = opts.url;
+    if (opts.filter) body.filter = opts.filter;
+    if (opts.target) body.target = opts.target;
+    return platformCall(this.client, 'POST', '/api/webhooks', body);
+  }
+
+  update(subscriptionId: string, fields: Record<string, unknown>): Promise<any> {
+    return platformCall(this.client, 'PUT', `/api/webhooks/${subscriptionId}`, fields);
+  }
+
+  delete(subscriptionId: string): Promise<any> {
+    return platformCall(this.client, 'DELETE', `/api/webhooks/${subscriptionId}`);
+  }
+
+  deliveries(subscriptionId: string, opts: { limit?: number; status?: string } = {}): Promise<any[]> {
+    const q = new URLSearchParams({ limit: String(opts.limit ?? 20) });
+    if (opts.status) q.set('status', opts.status);
+    return platformCall(this.client, 'GET', `/api/webhooks/${subscriptionId}/deliveries?${q.toString()}`);
+  }
+
+  /** True when the X-Abenix-Signature header matches the raw request body. */
+  static async verifySignature(secret: string, body: string, signature: string | null | undefined): Promise<boolean> {
+    if (!secret || !signature) return false;
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(body)));
+    const want = 'sha256=' + Array.from(mac, (b) => b.toString(16).padStart(2, '0')).join('');
+    const got = signature.trim();
+    if (want.length !== got.length) return false;
+    let diff = 0;
+    for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ got.charCodeAt(i);
+    return diff === 0;
+  }
+}
+
 export class ApprovalsClient {
   constructor(private client: Abenix) {}
 
@@ -624,9 +893,15 @@ export class ApprovalsClient {
     return this._normalize(data.data || {});
   }
 
+  /** Send it back to the requester with what needs to change. A decision version returns to draft. */
+  returnForChanges(approvalId: string, reason: string, options?: { clientToken?: string }): Promise<Approval> {
+    if (!reason.trim()) return Promise.reject(new Error('Say what needs to change, so the requester can correct it.'));
+    return this.signoff(approvalId, 'return', { reason, clientToken: options?.clientToken });
+  }
+
   async signoff(
     approvalId: string,
-    decision: 'approve' | 'deny',
+    decision: 'approve' | 'deny' | 'return',
     options?: { reason?: string; clientToken?: string },
   ): Promise<Approval> {
     const body: Record<string, unknown> = {

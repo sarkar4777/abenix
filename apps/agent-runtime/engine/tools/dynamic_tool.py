@@ -368,6 +368,9 @@ def _run_in_daemon_thread(fn: Any) -> asyncio.Future:
 class DynamicTool(BaseTool):
     """A tool generated at runtime from Python code."""
 
+    # reaches systems or runs code the platform did not write
+    risk_tier = "medium"
+
     def __init__(
         self,
         tool_name: str,

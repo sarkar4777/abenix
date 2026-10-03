@@ -28,11 +28,11 @@ def _sample_value(metric_name: str, labels: dict[str, str] | None = None) -> flo
 
 def test_llm_tokens_counter_increments():
     before = _sample_value(
-        "abenix_llm_tokens", {"model": "test-model", "direction": "input"}
+        "abenix_runtime_llm_tokens", {"model": "test-model", "direction": "input"}
     )
     llm_tokens_total.labels(model="test-model", direction="input").inc(100)
     after = _sample_value(
-        "abenix_llm_tokens", {"model": "test-model", "direction": "input"}
+        "abenix_runtime_llm_tokens", {"model": "test-model", "direction": "input"}
     )
     assert after - before == 100
 

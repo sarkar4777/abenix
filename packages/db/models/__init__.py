@@ -100,6 +100,24 @@ from models.cognify_config import CognifyConfig, CognifyConflict
 from models.gdpr_purge_log import GDPRPurgeLog
 from models.llm_pricing import LLMModelPricing, ModelAvailability
 from models.tenant_tool_credential import TenantToolCredential
+from models.decision import (
+    DecisionEvaluation,
+    DecisionModel,
+    DecisionTest,
+    DecisionVersion,
+    ReferenceSet,
+    ReferenceSetVersion,
+)
+from models.evals import EvalCase, EvalResult, EvalRun, EvalSuite
+from models.governance import (
+    EventOutbox,
+    ExecutionConfigSnapshot,
+    KillSwitch,
+    PermissionAssignment,
+    PermissionSet,
+    RiskPolicy,
+)
+from models.source_watch import SourceChange, SourceSnapshot, WatchSource
 
 __all__ = [
     "Base",
@@ -218,4 +236,23 @@ __all__ = [
     "LLMModelPricing",
     "ModelAvailability",
     "TenantToolCredential",
+    "PermissionSet",
+    "PermissionAssignment",
+    "RiskPolicy",
+    "EventOutbox",
+    "ExecutionConfigSnapshot",
+    "DecisionEvaluation",
+    "DecisionModel",
+    "DecisionTest",
+    "DecisionVersion",
+    "ReferenceSet",
+    "ReferenceSetVersion",
+    "KillSwitch",
+    "WatchSource",
+    "SourceSnapshot",
+    "SourceChange",
+    "EvalSuite",
+    "EvalCase",
+    "EvalRun",
+    "EvalResult",
 ]

@@ -225,6 +225,7 @@ def _check_age_red_flag(incorp_date: str | None) -> list[str]:
 
 class LegalExistenceVerifierTool(BaseTool):
     name = "legal_existence_verifier"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "COMPANIES_HOUSE_API_KEY",

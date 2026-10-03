@@ -10,6 +10,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class TimeSeriesAnalyzerTool(BaseTool):
     name = "time_series_analyzer"
+    risk_tier = "low"
     description = "Analyze time-series data: moving averages, anomaly detection (z-score), linear forecasting, trend decomposition, and correlation analysis."
     input_schema: dict[str, Any] = {
         "type": "object",

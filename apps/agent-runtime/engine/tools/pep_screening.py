@@ -326,6 +326,7 @@ async def _query_gov_roster(
 
 class PEPScreeningTool(BaseTool):
     name = "pep_screening"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "OPENSANCTIONS_API_KEY",

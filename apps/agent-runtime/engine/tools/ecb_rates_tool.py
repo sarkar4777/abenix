@@ -38,6 +38,7 @@ _CURRENCY_MAP: dict[str, str] = {
 
 class ECBRatesTool(BaseTool):
     name = "ecb_rates"
+    risk_tier = "low"
     description = (
         "Fetch foreign exchange rates, inflation data, and interest rates "
         "from the European Central Bank Statistical Data Warehouse."

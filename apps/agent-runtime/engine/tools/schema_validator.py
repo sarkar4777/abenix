@@ -13,6 +13,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class SchemaValidatorTool(BaseTool):
     name = "schema_validator"
+    risk_tier = "low"
     description = (
         "Validate JSON data against a schema, generate schema from sample data, "
         "or coerce data to match a schema. Ensures pipeline outputs are well-formed."

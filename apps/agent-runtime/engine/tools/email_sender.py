@@ -18,6 +18,7 @@ EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
 
 class EmailSenderTool(BaseTool):
     name = "email_sender"
+    risk_tier = "high"
     config_fields = (
         ConfigField(
             "SMTP_HOST",

@@ -44,6 +44,7 @@ def _get_tts_openai_client() -> Any:
 
 class MeetingSpeakTool(BaseTool):
     name = "meeting_speak"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "ELEVENLABS_API_KEY",
@@ -212,12 +213,13 @@ async def _consent_ok(voice_id: str, user_id: str) -> bool:
     if not db_url:
         return False
     try:
-        from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text as sql_text
     except ImportError:
         return False
     try:
-        engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=1)
+        from engine.db_pool import shared_engine
+
+        engine = shared_engine(db_url)
         async with engine.begin() as conn:
             r = await conn.execute(
                 sql_text(
@@ -227,7 +229,6 @@ async def _consent_ok(voice_id: str, user_id: str) -> bool:
                 {"uid": user_id},
             )
             row = r.first()
-        await engine.dispose()
     except Exception:
         return False
     if not row:

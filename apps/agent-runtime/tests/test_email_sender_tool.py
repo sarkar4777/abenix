@@ -23,11 +23,13 @@ class TestEmailSenderTool:
         self, tool: EmailSenderTool, tmp_path: pytest.TempPathFactory
     ) -> None:
         """In dev mode (no SMTP_HOST), the tool logs the email to a JSON file."""
-        with patch.dict(
-            os.environ,
-            {"SMTP_HOST": "", "EXPORT_DIR": str(tmp_path)},
-        ), credentials.override({"SMTP_HOST": ""}), patch(
-            "engine.tools.email_sender.EXPORT_DIR", str(tmp_path)
+        with (
+            patch.dict(
+                os.environ,
+                {"SMTP_HOST": "", "EXPORT_DIR": str(tmp_path)},
+            ),
+            credentials.override({"SMTP_HOST": ""}),
+            patch("engine.tools.email_sender.EXPORT_DIR", str(tmp_path)),
         ):
             result = await tool.execute(
                 {
@@ -71,8 +73,9 @@ class TestEmailSenderTool:
         self, tool: EmailSenderTool, tmp_path: pytest.TempPathFactory
     ) -> None:
         """Sending with format='html' succeeds and records the format."""
-        with credentials.override({"SMTP_HOST": ""}), patch(
-            "engine.tools.email_sender.EXPORT_DIR", str(tmp_path)
+        with (
+            credentials.override({"SMTP_HOST": ""}),
+            patch("engine.tools.email_sender.EXPORT_DIR", str(tmp_path)),
         ):
             result = await tool.execute(
                 {
@@ -97,8 +100,9 @@ class TestEmailSenderTool:
         self, tool: EmailSenderTool, tmp_path: pytest.TempPathFactory
     ) -> None:
         """Comma-separated recipients are split into a list."""
-        with credentials.override({"SMTP_HOST": ""}), patch(
-            "engine.tools.email_sender.EXPORT_DIR", str(tmp_path)
+        with (
+            credentials.override({"SMTP_HOST": ""}),
+            patch("engine.tools.email_sender.EXPORT_DIR", str(tmp_path)),
         ):
             result = await tool.execute(
                 {
@@ -119,8 +123,9 @@ class TestEmailSenderTool:
         self, tool: EmailSenderTool, tmp_path: pytest.TempPathFactory
     ) -> None:
         """The JSON output contains the required keys: status, recipients, subject, mode."""
-        with credentials.override({"SMTP_HOST": ""}), patch(
-            "engine.tools.email_sender.EXPORT_DIR", str(tmp_path)
+        with (
+            credentials.override({"SMTP_HOST": ""}),
+            patch("engine.tools.email_sender.EXPORT_DIR", str(tmp_path)),
         ):
             result = await tool.execute(
                 {
@@ -148,16 +153,18 @@ class TestEmailSenderSmtp:
     @pytest.mark.asyncio
     async def test_smtp_send_success(self, tool: EmailSenderTool) -> None:
         """SMTP send succeeds with mocked aiosmtplib."""
-        with patch.dict(
-            os.environ,
-            {
-                "SMTP_HOST": "smtp.test.com",
-                "SMTP_PORT": "587",
-                "SMTP_USER": "user@test.com",
-                "SMTP_PASS": "password123",
-                "SMTP_FROM": "noreply@test.com",
-            },
-        ), patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        with (
+            credentials.override(
+                {
+                    "SMTP_HOST": "smtp.test.com",
+                    "SMTP_PORT": "587",
+                    "SMTP_USER": "user@test.com",
+                    "SMTP_PASS": "password123",
+                    "SMTP_FROM": "noreply@test.com",
+                },
+            ),
+            patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send,
+        ):
             mock_send.return_value = ({}, "OK")
             result = await tool.execute(
                 {
@@ -169,6 +176,11 @@ class TestEmailSenderSmtp:
 
         assert not result.is_error
         mock_send.assert_called_once()
+        kwargs = mock_send.call_args.kwargs
+        assert kwargs["hostname"] == "smtp.test.com"
+        assert kwargs["port"] == 587
+        assert kwargs["username"] == "user@test.com"
+        assert kwargs["password"] == "password123"
         parsed = json.loads(result.content)
         assert parsed["mode"] == "smtp"
         assert parsed["status"] == "sent"
@@ -177,16 +189,18 @@ class TestEmailSenderSmtp:
     @pytest.mark.asyncio
     async def test_smtp_auth_failure(self, tool: EmailSenderTool) -> None:
         """SMTP authentication failure returns an error."""
-        with patch.dict(
-            os.environ,
-            {
-                "SMTP_HOST": "smtp.test.com",
-                "SMTP_PORT": "587",
-                "SMTP_USER": "bad_user",
-                "SMTP_PASS": "bad_pass",
-                "SMTP_FROM": "noreply@test.com",
-            },
-        ), patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        with (
+            credentials.override(
+                {
+                    "SMTP_HOST": "smtp.test.com",
+                    "SMTP_PORT": "587",
+                    "SMTP_USER": "bad_user",
+                    "SMTP_PASS": "bad_pass",
+                    "SMTP_FROM": "noreply@test.com",
+                },
+            ),
+            patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send,
+        ):
             mock_send.side_effect = Exception(
                 "SMTP Authentication failed: (535, 'Authentication credentials invalid')"
             )
@@ -207,13 +221,15 @@ class TestEmailSenderSmtp:
     @pytest.mark.asyncio
     async def test_smtp_connection_failure(self, tool: EmailSenderTool) -> None:
         """SMTP connection refused returns an error."""
-        with patch.dict(
-            os.environ,
-            {
-                "SMTP_HOST": "smtp.unreachable.com",
-                "SMTP_PORT": "587",
-            },
-        ), patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        with (
+            credentials.override(
+                {
+                    "SMTP_HOST": "smtp.unreachable.com",
+                    "SMTP_PORT": "587",
+                },
+            ),
+            patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send,
+        ):
             mock_send.side_effect = ConnectionRefusedError(
                 "Connection refused by smtp.unreachable.com:587"
             )
@@ -233,16 +249,18 @@ class TestEmailSenderSmtp:
     @pytest.mark.asyncio
     async def test_smtp_html_email(self, tool: EmailSenderTool) -> None:
         """HTML email is sent with correct content type via SMTP."""
-        with patch.dict(
-            os.environ,
-            {
-                "SMTP_HOST": "smtp.test.com",
-                "SMTP_PORT": "587",
-                "SMTP_USER": "user@test.com",
-                "SMTP_PASS": "password123",
-                "SMTP_FROM": "noreply@test.com",
-            },
-        ), patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        with (
+            credentials.override(
+                {
+                    "SMTP_HOST": "smtp.test.com",
+                    "SMTP_PORT": "587",
+                    "SMTP_USER": "user@test.com",
+                    "SMTP_PASS": "password123",
+                    "SMTP_FROM": "noreply@test.com",
+                },
+            ),
+            patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send,
+        ):
             mock_send.return_value = ({}, "OK")
             result = await tool.execute(
                 {

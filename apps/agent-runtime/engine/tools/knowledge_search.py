@@ -37,6 +37,7 @@ def _citation_fields(meta: dict[str, Any] | None) -> list[str]:
 
 class KnowledgeSearchTool(BaseTool):
     name = "knowledge_search"
+    risk_tier = "low"
     description = (
         "Search the agent's knowledge base using hybrid retrieval that combines "
         "vector similarity with knowledge graph traversal. Returns results with "
@@ -86,7 +87,7 @@ class KnowledgeSearchTool(BaseTool):
         try:
             import os
             import uuid as _uuid
-            from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+            from sqlalchemy.ext.asyncio import AsyncSession
             from sqlalchemy import text
 
             db_url = (
@@ -121,35 +122,34 @@ class KnowledgeSearchTool(BaseTool):
                 except (ValueError, AttributeError):
                     agent_uuid = None
 
-            engine = create_async_engine(db_url, pool_pre_ping=True)
-            try:
-                async with AsyncSession(engine) as session:
-                    # Gate 1: tenant match.
-                    rows = (
+            from engine.db_pool import shared_engine
+
+            engine = shared_engine(db_url)
+            async with AsyncSession(engine) as session:
+                # Gate 1: tenant match.
+                rows = (
+                    await session.execute(
+                        text(
+                            "SELECT id FROM knowledge_collections "
+                            "WHERE id = ANY(:ids) AND tenant_id = :tid"
+                        ).bindparams(ids=uuid_inputs, tid=tenant_uuid)
+                    )
+                ).all()
+                tenant_ok = {str(r[0]) for r in rows}
+
+                # Gate 2: agent grants (only when agent has ANY grants).
+                grant_ok: set[str] | None = None
+                if agent_uuid is not None:
+                    g_rows = (
                         await session.execute(
                             text(
-                                "SELECT id FROM knowledge_collections "
-                                "WHERE id = ANY(:ids) AND tenant_id = :tid"
-                            ).bindparams(ids=uuid_inputs, tid=tenant_uuid)
+                                "SELECT collection_id FROM agent_collection_grants "
+                                "WHERE agent_id = :aid"
+                            ).bindparams(aid=agent_uuid)
                         )
                     ).all()
-                    tenant_ok = {str(r[0]) for r in rows}
-
-                    # Gate 2: agent grants (only when agent has ANY grants).
-                    grant_ok: set[str] | None = None
-                    if agent_uuid is not None:
-                        g_rows = (
-                            await session.execute(
-                                text(
-                                    "SELECT collection_id FROM agent_collection_grants "
-                                    "WHERE agent_id = :aid"
-                                ).bindparams(aid=agent_uuid)
-                            )
-                        ).all()
-                        if g_rows:
-                            grant_ok = {str(r[0]) for r in g_rows}
-            finally:
-                await engine.dispose()
+                    if g_rows:
+                        grant_ok = {str(r[0]) for r in g_rows}
 
             allowed = tenant_ok if grant_ok is None else (tenant_ok & grant_ok)
             return [s for s in ids if s in allowed] + passthrough

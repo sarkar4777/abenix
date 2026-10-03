@@ -41,6 +41,10 @@
         {
           "slug": "01-architecture/06-atlas-knowledge-engine",
           "title": "Atlas + Knowledge Engine"
+        },
+        {
+          "slug": "01-architecture/07-governance",
+          "title": "Governance: risk tiers, kill switches, capabilities, audit"
         }
       ]
     },
@@ -111,6 +115,22 @@
         {
           "slug": "02-runtime/15-v2-knowledge-enterprise",
           "title": "v2.0 enterprise knowledge stack (ACL / OCR / temporal graph / GDPR)"
+        },
+        {
+          "slug": "02-runtime/16-warm-code-runners",
+          "title": "Warm code runners"
+        },
+        {
+          "slug": "02-runtime/17-source-watch",
+          "title": "Source Watch"
+        },
+        {
+          "slug": "02-runtime/18-evaluation-suites",
+          "title": "Evaluation suites"
+        },
+        {
+          "slug": "02-runtime/19-outbound-events",
+          "title": "Outbound events + webhooks"
         }
       ]
     },
@@ -299,6 +319,10 @@
         {
           "slug": "08-howto/08-tool-configuration",
           "title": "Tool configuration"
+        },
+        {
+          "slug": "08-howto/09-decisions",
+          "title": "Decisions: business rules without code"
         }
       ]
     },

@@ -34,6 +34,10 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection):
+    # a blocked upgrade fails and the init container retries, instead of hanging the rollout
+    connection.exec_driver_sql("SET lock_timeout = '60s'")
+    # the SET autobegins a transaction, alembic would treat it as external and never commit
+    connection.commit()
     context.configure(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():

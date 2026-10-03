@@ -1,14 +1,19 @@
 import hashlib
+import time
 import uuid
 
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.security import verify_token
 
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_UPLOAD_BODY_BYTES = 50 * 1024 * 1024  # 50 MB
+
+API_KEY_CACHE_TTL_SECONDS = 30.0
+API_KEY_CACHE_MAX_ENTRIES = 4096
 
 AUTH_PATHS = frozenset(
     {
@@ -31,40 +36,83 @@ RATE_LIMIT_SKIP = frozenset(
     }
 )
 
+_SECURITY_HEADERS = (
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "strict-origin-when-cross-origin"),
+    ("X-Frame-Options", "DENY"),
+    ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
+)
 
-class TenantMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        request.state.tenant_id = None
+_CSP = (
+    "default-src 'self'; frame-ancestors 'none'; "
+    "img-src 'self' data: blob: https:; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self' https: wss:"
+)
 
-        # Try API key first
-        api_key = request.headers.get("x-api-key", "")
+
+class TenantMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self._cache: dict[str, tuple[float, uuid.UUID]] = {}
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        state = scope.setdefault("state", {})
+        state["tenant_id"] = None
+        headers = Headers(scope=scope)
+
+        api_key = headers.get("x-api-key", "")
         if api_key.startswith("af_"):
-            tenant_id = await self._resolve_tenant_from_api_key(api_key)
+            tenant_id = await self._tenant_for_api_key(api_key)
             if tenant_id:
-                request.state.tenant_id = tenant_id
-            return await call_next(request)
+                state["tenant_id"] = tenant_id
+            await self.app(scope, receive, send)
+            return
 
-        # Fall back to JWT Bearer token
-        auth = request.headers.get("authorization", "")
+        auth = headers.get("authorization", "")
         if auth.startswith("Bearer "):
-            token = auth.removeprefix("Bearer ")
-            payload = verify_token(token)
+            payload = verify_token(auth.removeprefix("Bearer "))
             tid = payload.get("tenant_id")
             if tid:
                 try:
-                    request.state.tenant_id = uuid.UUID(tid)
+                    state["tenant_id"] = uuid.UUID(tid)
                 except ValueError:
                     pass
-        return await call_next(request)
+        await self.app(scope, receive, send)
+
+    async def _tenant_for_api_key(self, raw_key: str) -> uuid.UUID | None:
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        now = time.monotonic()
+        hit = self._cache.get(key_hash)
+        if hit is not None:
+            if hit[0] > now:
+                return hit[1]
+            self._cache.pop(key_hash, None)
+
+        tenant_id = await self._resolve_tenant_from_api_key(key_hash)
+        # Misses are not cached so a freshly created key works at once.
+        if tenant_id is not None:
+            if len(self._cache) >= API_KEY_CACHE_MAX_ENTRIES:
+                self._evict(now)
+            self._cache[key_hash] = (now + API_KEY_CACHE_TTL_SECONDS, tenant_id)
+        return tenant_id
+
+    def _evict(self, now: float) -> None:
+        for k in [k for k, (exp, _) in self._cache.items() if exp <= now]:
+            del self._cache[k]
+        while len(self._cache) >= API_KEY_CACHE_MAX_ENTRIES:
+            del self._cache[next(iter(self._cache))]
 
     @staticmethod
-    async def _resolve_tenant_from_api_key(raw_key: str) -> uuid.UUID | None:
+    async def _resolve_tenant_from_api_key(key_hash: str) -> uuid.UUID | None:
         """Look up tenant_id from an API key without importing deps (avoids circular imports)."""
         from app.core.deps import async_session
 
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
         async with async_session() as db:
             from sqlalchemy import select
 
@@ -79,74 +127,81 @@ class TenantMiddleware(BaseHTTPMiddleware):
             return row[0] if row else None
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        path = request.url.path
+class RateLimitMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-        if path in RATE_LIMIT_SKIP:
-            return await call_next(request)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] in RATE_LIMIT_SKIP:
+            await self.app(scope, receive, send)
+            return
 
         from app.core.rate_limit import rate_limit_auth, rate_limit_user
+
+        path = scope["path"]
+        request = Request(scope)
 
         if path in AUTH_PATHS or path.startswith("/api/auth/invite/"):
             blocked = await rate_limit_auth(request)
             if blocked:
-                return blocked
+                await blocked(scope, receive, send)
+                return
 
         blocked = await rate_limit_user(request)
         if blocked:
-            return blocked
+            await blocked(scope, receive, send)
+            return
 
-        return await call_next(request)
+        await self.app(scope, receive, send)
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        response = await call_next(request)
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault(
-            "Referrer-Policy", "strict-origin-when-cross-origin"
-        )
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault(
-            "Strict-Transport-Security",
-            "max-age=31536000; includeSubDomains",
-        )
-        path = request.url.path
-        if not (
+class SecurityHeadersMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope["path"]
+        add_csp = not (
             path.startswith("/docs")
             or path.startswith("/redoc")
             or path == "/openapi.json"
-        ):
-            response.headers.setdefault(
-                "Content-Security-Policy",
-                "default-src 'self'; frame-ancestors 'none'; "
-                "img-src 'self' data: blob: https:; "
-                "script-src 'self' 'unsafe-inline'; "
-                "style-src 'self' 'unsafe-inline'; "
-                "connect-src 'self' https: wss:",
-            )
-        return response
+        )
+
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                for name, value in _SECURITY_HEADERS:
+                    headers.setdefault(name, value)
+                if add_csp:
+                    headers.setdefault("Content-Security-Policy", _CSP)
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 
-class BodySizeLimitMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        content_length = request.headers.get("content-length")
+class BodySizeLimitMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        content_length = headers.get("content-length")
         if content_length:
             length = int(content_length)
-            is_upload = (
-                "upload" in request.url.path
-                or "multipart" in request.headers.get("content-type", "")
+            is_upload = "upload" in scope["path"] or "multipart" in headers.get(
+                "content-type", ""
             )
             limit = MAX_UPLOAD_BODY_BYTES if is_upload else MAX_REQUEST_BODY_BYTES
             if length > limit:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=413,
                     content={
                         "data": None,
@@ -158,4 +213,6 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
                         },
                     },
                 )
-        return await call_next(request)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)

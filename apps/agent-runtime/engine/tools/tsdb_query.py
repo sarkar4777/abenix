@@ -46,6 +46,7 @@ def _parse_ts(value: str) -> datetime | None:
 
 class TsdbQueryTool(BaseTool):
     name = "tsdb_query"
+    risk_tier = "low"
     description = (
         "Query the platform time-series store (TimescaleDB) for a metric over "
         "a time window. Supports raw rows or 5-min/1-hour aggregations. "

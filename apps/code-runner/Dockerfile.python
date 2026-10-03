@@ -1,0 +1,17 @@
+# Warm runner for python-3.12 code assets. Build context: apps/code-runner
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    CODERUN_PATH=/tmp/.pyuser/bin:/tmp/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /opt/coderun/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip  && pip install --no-cache-dir -r /opt/coderun/requirements.txt \
+ && rm -rf /root/.cache
+COPY runner.py /opt/coderun/runner.py
+
+USER 10001
+ENTRYPOINT ["python", "/opt/coderun/runner.py"]
+CMD ["gateway"]

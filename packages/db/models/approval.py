@@ -18,6 +18,7 @@ class ApprovalStatus(str, enum.Enum):
     approved = "approved"
     denied = "denied"
     expired = "expired"
+    returned = "returned"
 
 
 class Approval(UUIDMixin, TenantMixin, TimestampMixin, Base):
@@ -47,7 +48,12 @@ class Approval(UUIDMixin, TenantMixin, TimestampMixin, Base):
     decided_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    escalated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     client_token: Mapped[str | None] = mapped_column(String(120), nullable=True)
     gate_kind: Mapped[str | None] = mapped_column(
         String(120), nullable=True, index=True
     )
+    # separation of duties: {"exclude_requester": bool, "capability": "approvals.sign:legal"}
+    policy: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

@@ -47,6 +47,7 @@ def _to_epoch(value: Any) -> float | None:
 
 class WindowedStateTool(BaseTool):
     name = "windowed_state"
+    risk_tier = "low"
     description = (
         "Per-asset sliding-window state primitive. Operations: append, query, "
         "count, pattern_match. Backed by Redis sorted-sets keyed by tenant + "
