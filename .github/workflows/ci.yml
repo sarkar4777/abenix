@@ -67,6 +67,11 @@ jobs:
                       -r apps/worker/requirements.txt
       # the image installs pyproject.toml, CI installs requirements.txt, keep them equal
       - run: python scripts/check-api-requirements.py
+      # the chart tests render with helm, which needs the subcharts the repo does not ship
+      - uses: azure/setup-helm@v4
+      - run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm dependency build infra/helm/abenix
       - run: pytest tests/unit/ -v --tb=short
       # Redis and LiveKit tests skip when the service is absent, the public API checks skip on this flag
       - name: Agent runtime tests
