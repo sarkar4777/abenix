@@ -194,12 +194,12 @@ export default function RuleBuilder({
           <div className="flex flex-wrap items-start gap-3">
             <div className="flex-1 min-w-[220px]">
               <label className="block text-xs text-slate-400 mb-1" htmlFor="rule-key">Rule key</label>
-              <input id="rule-key" value={rule.key || ''} onChange={(e) => setRule({ key: e.target.value })} placeholder="eu.cbam.import.applicability" className={`w-full bg-slate-950 border rounded-md px-2 py-1.5 text-sm text-white font-mono ${keyProblem ? 'border-rose-500/60' : 'border-slate-700'}`} data-testid="rule-key" />
+              <input id="rule-key" value={rule.key || ''} onChange={(e) => setRule({ key: e.target.value })} placeholder="freight.remote.surcharge" className={`w-full bg-slate-950 border rounded-md px-2 py-1.5 text-sm text-white font-mono ${keyProblem ? 'border-rose-500/60' : 'border-slate-700'}`} data-testid="rule-key" />
               {keyProblem ? <p className="mt-0.5 text-xs text-rose-300">{keyProblem.message}</p> : rule.key && !KEY_RE.test(rule.key) ? null : <p className="mt-0.5 text-[11px] text-slate-500">Shown in results as the rule that applied.</p>}
             </div>
             <div className="flex-[2] min-w-[260px]">
               <label className="block text-xs text-slate-400 mb-1" htmlFor="rule-desc">What it means</label>
-              <input id="rule-desc" value={rule.description || ''} onChange={(e) => setRule({ description: e.target.value })} placeholder="Imports of covered goods by importers above 50 t a year need a CBAM declaration" className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white" data-testid="rule-description" />
+              <input id="rule-desc" value={rule.description || ''} onChange={(e) => setRule({ description: e.target.value })} placeholder="Shipments to remote postcodes above 50 kg carry a remote area surcharge" className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white" data-testid="rule-description" />
             </div>
             {!readOnly && (
               <div className="flex items-center gap-1 pt-5">
@@ -273,7 +273,7 @@ export default function RuleBuilder({
                 </span>
               ))}
               <input
-                placeholder={citations.length ? 'Add another…' : 'Regulation (EU) 2023/956, Art. 2(1)'}
+                placeholder={citations.length ? 'Add another…' : 'Carrier tariff 2026, section 4.2'}
                 onKeyDown={(e) => {
                   const v = (e.target as HTMLInputElement).value.trim();
                   if (e.key === 'Enter' && v) { setRule({ provenance: { ...(rule.provenance || {}), citations: [...citations, v] } }); (e.target as HTMLInputElement).value = ''; }

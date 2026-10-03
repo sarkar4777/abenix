@@ -44,7 +44,7 @@ CATALOG: dict[str, dict[str, Any]] = {
         "description": "Something is waiting for sign-off",
         "sample": {
             "approval_id": "…",
-            "title": "Publish CBAM version 4",
+            "title": "Publish remote surcharge version 4",
             "gate_kind": "decision_publish",
             "required_signoffs": 1,
         },
@@ -60,7 +60,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     "decision.proposed": {
         "description": "A new decision version was proposed",
         "sample": {
-            "decision_key": "eu.cbam.import.applicability",
+            "decision_key": "freight.remote.surcharge",
             "version": 4,
             "approvals_needed": 1,
         },
@@ -68,7 +68,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     "decision.published": {
         "description": "A decision version came into force",
         "sample": {
-            "decision_key": "eu.cbam.import.applicability",
+            "decision_key": "freight.remote.surcharge",
             "version": 4,
             "valid_from": "2026-01-01",
             "superseded": [3],
@@ -77,7 +77,7 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
     "decision.retired": {
         "description": "A decision version stopped applying",
-        "sample": {"decision_key": "eu.cbam.import.applicability", "version": 3},
+        "sample": {"decision_key": "freight.remote.surcharge", "version": 3},
     },
     "kill_switch.set": {
         "description": "Something was stopped by a kill switch",
@@ -91,7 +91,7 @@ CATALOG: dict[str, dict[str, Any]] = {
         "description": "A watched source changed",
         "sample": {
             "source_id": "…",
-            "name": "EU CBAM guidance",
+            "name": "Carrier tariff page",
             "snapshot_id": "…",
             "change_summary": "…",
         },

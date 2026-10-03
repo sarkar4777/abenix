@@ -3,6 +3,7 @@
 ## v2.5.2 — 2026-10-03
 
 ### Added
+
 - Warm code runners. Each tenant and code asset version gets its own runner Deployment, built once and called over NATS (`code.<tenant>.<asset>.<version>`). A warm call adds about 2 ms over the code's run time in process mode and under 1 ms in handler mode, against about 4.6 s for a one-off Job. The first call after scale to zero runs as a Job while the runner warms. Idle runners scale to zero, old versions drain and are removed by a reaper CronJob. Runners run non-root on a read-only root with no capabilities, the NATS login and the user code sit in separate containers and uids, and closed runners only reach DNS, the API and NATS. Off by default in the chart, on in values-local and values-azure (`codeRunners`). See apps/code-runner/README.md.
 - Approvals can be returned for changes. The reviewer has to say what to fix, and a returned decision version goes back to draft with the note on it.
 - Approvals escalate. Each risk tier sets how long an approval may wait before admins are notified (off for low and medium, 24 hours for high, 4 for critical by default). Editable on the risk tier policies page.
@@ -14,9 +15,8 @@
 - Python and TypeScript SDKs: the decision lifecycle (new draft, save, import rules, propose, withdraw, publish plan, diff, update), a Source Watch client, an events client for webhook and run subscriptions with signature checks, return for changes on approvals, agent create, update and exact slug lookup, and the caller's permissions. Refused calls raise `AbenixError` with the platform's message and code.
 - `scripts/lint-agent-seeds.py` also validates agent seeds of standalone apps that opt in with `<app>/seeds/manifest.yaml`
 
-### Changed
-
 ### Fixed
+
 - The code runner reaper crashed when LOG_LEVEL was lower case.
 - deploy.sh reported the Grafana port as taken by an unknown process when it was its own forward.
 - Decision drafts could not be saved from the browser. The CORS preflight rejected If-Match.

@@ -6,16 +6,16 @@
 
 ## What a decision is
 
-A decision takes facts, such as an import date, a product code and a tonnage, and returns outcomes, such as an obligation, using rules people can read. It runs on the ZEN engine (GoRules, MIT), so the same facts and the same version always give the same result, with a trace of which rules applied and what values they saw.
+A decision takes facts, such as a shipment date, a postcode and a weight, and returns outcomes, such as a surcharge, using rules people can read. It runs on the ZEN engine (GoRules, MIT), so the same facts and the same version always give the same result, with a trace of which rules applied and what values they saw.
 
 Each version applies over a period of time. A question can be asked as of any date, and also as the rules were known on any date, so an answer given last year can be repeated exactly.
 
 ## Writing rules
 
-Open **Build -> Decisions** and start blank, from typed JSON rules, or from the CBAM example. The workspace has three views of the same rules:
+Open **Build -> Decisions** and start blank, from typed JSON rules, or from the surcharge example. The workspace has three views of the same rules:
 
 - **Rules.** The default. One rule at a time: conditions grouped as all, any or none of, dragged to reorder or into groups, then outcomes as fixed values or calculations. Facts are picked from a list, or typed as a new path and added on the spot. Comparisons match the fact's type, so dates get before and after, numbers get more than and between, codes get one of and reference sets.
-- **Table.** One row per rule and one column per fact. Type `> 50`, `>= 2026-01-01`, `a, b, c`, `in EU_CBAM_CN_CODES` or `between 1 and 5`. Paste rows from Excel, with or without a header row. Export to CSV.
+- **Table.** One row per rule and one column per fact. Type `> 50`, `>= 2026-01-01`, `a, b, c`, `in REMOTE_POSTCODES` or `between 1 and 5`. Paste rows from Excel, with or without a header row. Export to CSV.
 - **Flow.** The ZEN visual editor, for multi-step decisions with switches, expressions and chained tables. Editing a draft as a flow keeps that draft as a flow.
 
 Problems show at the field as you type: unknown fact, wrong value type, a range the wrong way round, a formula that does not parse, rules hidden by a rule above them or giving conflicting outcomes.
@@ -33,7 +33,7 @@ Drafts save themselves. Two people can edit the same draft. Each sees the other 
 | missing_facts | A required fact is absent. `missing_facts` lists them. Nothing is guessed |
 | invalid_facts | A fact has the wrong type, for example text where a number belongs |
 
-Facts are normalised before the rules run. A product code sent as a number is read as text, and the response says so. The trace hash covers the facts, the version and the result, so two evaluations can be compared without storing either.
+Facts are normalised before the rules run. A code sent as a number is read as text, a weight sent as `"120"` is read as 120, and the response says so. The trace hash covers the facts, the version and the result, so two evaluations can be compared without storing either.
 
 ## From draft to published
 
@@ -61,14 +61,14 @@ From an app, use the SDK:
 
 ```python
 result = await forge.decisions.evaluate(
-    "eu.cbam.import.applicability",
-    {"import": {"date": "2026-03-01", "cnCode": "72011000"}, "importer": {"annualCbamMassTonnes": 120}},
+    "freight.remote.surcharge",
+    {"shipment": {"date": "2026-03-01", "postcode": "IV27", "weightKg": 120}},
     as_of="2026-03-01",
 )
 ```
 
 ```ts
-const r = await abenix.decisions.evaluate('eu.cbam.import.applicability', facts, { asOf: '2026-03-01' });
+const r = await abenix.decisions.evaluate('freight.remote.surcharge', facts, { asOf: '2026-03-01' });
 ```
 
 Errors raise `AbenixDecisionError` with the platform's message and code. A mistyped key comes back with the closest matches.
@@ -81,16 +81,16 @@ Rules import and export in this shape, losslessly:
 
 ```json
 {
-  "ruleKey": "eu.cbam.import.applicability",
+  "ruleKey": "freight.remote.surcharge",
   "validFrom": "2026-01-01",
-  "requiresFacts": ["import.date", "import.cnCode", "importer.annualCbamMassTonnes"],
+  "requiresFacts": ["shipment.date", "shipment.postcode", "shipment.weightKg"],
   "when": {"all": [
-    {"gte": [{"fact": "import.date"}, "2026-01-01"]},
-    {"inReferenceSet": [{"fact": "import.cnCode"}, "EU_CBAM_CN_CODES"]},
-    {"gt": [{"fact": "importer.annualCbamMassTonnes"}, 50]}
+    {"gte": [{"fact": "shipment.date"}, "2026-01-01"]},
+    {"inReferenceSet": [{"fact": "shipment.postcode"}, "REMOTE_POSTCODES"]},
+    {"gt": [{"fact": "shipment.weightKg"}, 50]}
   ]},
-  "then": {"obligation": "CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER"},
-  "provenance": {"citations": ["Regulation (EU) 2023/956, Art. 2"]}
+  "then": {"surcharge": "REMOTE_AREA_SURCHARGE"},
+  "provenance": {"citations": ["Carrier tariff 2026, section 4.2"]}
 }
 ```
 
@@ -98,7 +98,7 @@ Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `between`, `in`, `notIn`, `inR
 
 ## Reference sets
 
-**Decisions -> Reference sets** holds named lists such as covered product codes. Paste one value per line. Each change is a new version. A published decision keeps the values it was compiled with. A new draft picks up the latest.
+**Decisions -> Reference sets** holds named lists such as remote postcode areas. Paste one value per line. Each change is a new version. A published decision keeps the values it was compiled with. A new draft picks up the latest.
 
 ## Scale
 

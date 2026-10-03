@@ -157,7 +157,7 @@ export default function SourceForm({
             </div>
             <div>
               <label htmlFor="sf-name" className="block text-sm font-medium text-slate-200 mb-1.5">Name</label>
-              <input id="sf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="EU CBAM implementing regulation" className={INPUT} data-testid="source-name" />
+              <input id="sf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Carrier tariff page" className={INPUT} data-testid="source-name" />
             </div>
             <div>
               <div className="text-sm font-medium text-slate-200 mb-1.5">What it is</div>
@@ -205,7 +205,7 @@ export default function SourceForm({
               </div>
               <div>
                 <label htmlFor="sf-tags" className="block text-sm font-medium text-slate-200 mb-1.5">Tags <span className="text-slate-500 font-normal">(comma separated)</span></label>
-                <input id="sf-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="cbam, carbon" className={INPUT} />
+                <input id="sf-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="tariff, freight" className={INPUT} />
               </div>
             </div>
             <div>

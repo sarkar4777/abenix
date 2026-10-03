@@ -1,5 +1,5 @@
 /**
- * Decisions, through the screens only: build the CBAM rule in the builder, test it, keep a golden case,
+ * Decisions, through the screens only: build the remote surcharge rule in the builder, test it, keep a golden case,
  * propose and publish, import typed JSON, edit as a table, two authors at once, and sign-off by a second person.
  *
  *   BASE=http://localhost:3100 API=http://localhost:8000 npx playwright test e2e/uat_decisions.spec.ts --workers=1
@@ -57,14 +57,14 @@ async function addFactCondition(page: Page, prefix: string, idx: string, path: s
 test.describe.configure({ mode: 'serial' });
 
 let tok = '';
-const KEY = `uat.cbam.${RUN}`;
+const KEY = `uat.freight.${RUN}`;
 
 test.beforeAll(async ({ browser }) => {
   const p = await browser.newPage();
   tok = await tokenFor(p);
-  const have = await api(p, tok, 'GET', '/api/decision-reference-sets/EU_CBAM_CN_CODES');
+  const have = await api(p, tok, 'GET', '/api/decision-reference-sets/REMOTE_POSTCODES');
   if (have.status === 404) {
-    await api(p, tok, 'POST', '/api/decision-reference-sets', { key: 'EU_CBAM_CN_CODES', name: 'EU CBAM CN codes', values: ['31021000', '72011000', '76011000'] });
+    await api(p, tok, 'POST', '/api/decision-reference-sets', { key: 'REMOTE_POSTCODES', name: 'Remote postcodes', values: ['HS2', 'IV27', 'ZE2'] });
   }
   await p.close();
 });
@@ -76,7 +76,7 @@ test('the Decisions page explains itself and starts a blank decision', async ({ 
   await expect(page.locator('header').first()).toContainText('Decisions');
   const start = page.getByTestId('decision-new').or(page.getByTestId('decision-start-blank'));
   await start.first().click();
-  await page.getByTestId('decision-name').fill(`UAT CBAM ${RUN}`);
+  await page.getByTestId('decision-name').fill(`UAT surcharge ${RUN}`);
   await page.getByTestId('decision-key').fill('Bad Key');
   await expect(page.getByText('Use lowercase letters, digits, dots, dashes or underscores.')).toBeVisible();
   await expect(page.getByTestId('decision-create')).toBeDisabled();
@@ -86,36 +86,36 @@ test('the Decisions page explains itself and starts a blank decision', async ({ 
   await expect(page.getByTestId('lifecycle-bar')).toContainText('Propose');
 });
 
-test('the CBAM rule is built in the builder with no code', async ({ page }) => {
+test('the remote surcharge rule is built in the builder with no code', async ({ page }) => {
   await login(page);
   await visit(page, `/decisions/${KEY}`);
   await page.getByTestId('rule-add-first').click();
-  await page.getByTestId('rule-key').fill('eu.cbam.import.applicability');
-  await page.getByTestId('rule-description').fill('Covered imports by importers above 50 t a year need a CBAM declaration');
+  await page.getByTestId('rule-key').fill('freight.remote.surcharge');
+  await page.getByTestId('rule-description').fill('Shipments to remote postcodes above 50 kg carry a remote area surcharge');
 
-  await addFactCondition(page, 'rule0', '0', 'import.date', 'date');
+  await addFactCondition(page, 'rule0', '0', 'shipment.date', 'date');
   await page.getByTestId('rule0-c0-op').selectOption('on_or_after');
   await page.getByTestId('rule0-c0-value').fill('2026-01-01');
 
-  await addFactCondition(page, 'rule0', '1', 'import.cnCode', 'string');
+  await addFactCondition(page, 'rule0', '1', 'shipment.postcode', 'string');
   await page.getByTestId('rule0-c1-op').selectOption('in_reference_set');
-  await page.getByTestId('rule0-c1-value').selectOption('EU_CBAM_CN_CODES');
+  await page.getByTestId('rule0-c1-value').selectOption('REMOTE_POSTCODES');
 
-  await addFactCondition(page, 'rule0', '2', 'importer.annualCbamMassTonnes', 'number');
+  await addFactCondition(page, 'rule0', '2', 'shipment.weightKg', 'number');
   await page.getByTestId('rule0-c2-op').selectOption('gt');
   await page.getByTestId('rule0-c2-value').fill('fifty');
   await expect(page.getByText(/must be a number/)).toBeVisible();
   await page.getByTestId('rule0-c2-value').fill('50');
   await expect(page.getByText(/must be a number/)).toHaveCount(0);
 
-  await page.getByTestId('rule0-new-outcome').fill('obligation');
+  await page.getByTestId('rule0-new-outcome').fill('surcharge');
   await page.getByTestId('rule0-add-outcome').click();
-  await page.getByTestId('rule0-then-obligation-value').fill('CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER');
-  await page.getByTestId('rule-citation').fill('Regulation (EU) 2023/956, Art. 2');
+  await page.getByTestId('rule0-then-surcharge-value').fill('REMOTE_AREA_SURCHARGE');
+  await page.getByTestId('rule-citation').fill('Carrier tariff 2026, section 4.2');
   await page.getByTestId('rule-citation').press('Enter');
 
-  await expect(page.getByTestId('rule-sentence')).toContainText('importer.annualCbamMassTonnes is more than 50');
-  await expect(page.getByTestId('rule-sentence')).toContainText('CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER');
+  await expect(page.getByTestId('rule-sentence')).toContainText('shipment.weightKg is more than 50');
+  await expect(page.getByTestId('rule-sentence')).toContainText('REMOTE_AREA_SURCHARGE');
   await saved(page);
 });
 
@@ -126,12 +126,12 @@ test('Try it decides live, explains missing facts, and keeps a golden test', asy
   await expect(panel.getByTestId('try-result')).toContainText(/Missing facts/, { timeout: 15_000 });
   await page.getByTestId('try-json').waitFor({ state: 'detached' }).catch(() => {});
   await panel.getByRole('button', { name: /JSON/ }).click();
-  await page.getByTestId('try-json').fill(JSON.stringify({ import: { date: '2026-03-01', cnCode: 72011000 }, importer: { annualCbamMassTonnes: 120 } }));
+  await page.getByTestId('try-json').fill(JSON.stringify({ shipment: { date: '2026-03-01', postcode: 'IV27', weightKg: '120' } }));
   await page.getByTestId('try-as-of').fill('2026-03-01');
   await expect(panel.getByTestId('try-result')).toContainText('Decided', { timeout: 15_000 });
-  await expect(panel.getByTestId('try-result-value')).toContainText('CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER');
-  await expect(panel).toContainText('import.cnCode was read as "72011000"');
-  await page.getByTestId('try-test-name').fill('Large steel importer');
+  await expect(panel.getByTestId('try-result-value')).toContainText('REMOTE_AREA_SURCHARGE');
+  await expect(panel).toContainText('shipment.weightKg was read as 120');
+  await page.getByTestId('try-test-name').fill('Heavy parcel to IV27');
   await page.getByTestId('try-save-test').click();
   await expect(panel).toContainText('Saved as a golden test');
 });
@@ -150,7 +150,7 @@ test('Check, propose and publish from the lifecycle bar', async ({ page }) => {
   await page.getByRole('button', { name: 'Publish' }).last().click();
   await expect(page.getByTestId('workspace-notice')).toContainText('is now in force');
   await expect(page.getByTestId('version-picker')).toContainText('In force');
-  const ev = await api(page, tok, 'POST', `/api/decisions/${KEY}/evaluate`, { facts: { import: { date: '2026-04-01', cnCode: '31021000' }, importer: { annualCbamMassTonnes: 75 } }, as_of: '2026-04-01' });
+  const ev = await api(page, tok, 'POST', `/api/decisions/${KEY}/evaluate`, { facts: { shipment: { date: '2026-04-01', postcode: 'ZE2', weightKg: 75 } }, as_of: '2026-04-01' });
   expect(ev.json.data.outcome).toBe('decided');
 });
 
@@ -161,16 +161,16 @@ test('a new draft takes typed JSON and a table edit changes the threshold', asyn
   await expect(page.getByTestId('version-picker')).toContainText('Version 2');
   await page.getByTestId('import-open').click();
   await page.getByTestId('import-json').fill(JSON.stringify({
-    ruleKey: 'eu.cbam.small.importer',
-    requiresFacts: ['importer.annualCbamMassTonnes'],
-    when: { all: [{ lte: [{ fact: 'importer.annualCbamMassTonnes' }, 50] }] },
-    then: { obligation: 'NONE_DE_MINIMIS' },
-    provenance: { citations: ['Regulation (EU) 2023/956, Art. 2(3)'] },
+    ruleKey: 'freight.light.parcel',
+    requiresFacts: ['shipment.weightKg'],
+    when: { all: [{ lte: [{ fact: 'shipment.weightKg' }, 50] }] },
+    then: { surcharge: 'NONE_LIGHT_PARCEL' },
+    provenance: { citations: ['Carrier tariff 2026, section 4.3'] },
   }));
   await page.getByTestId('import-go').click();
-  await expect(page.getByTestId('rule-card-1')).toContainText('eu.cbam.small.importer');
+  await expect(page.getByTestId('rule-card-1')).toContainText('freight.light.parcel');
   await page.getByTestId('tab-table').click();
-  const cell = page.getByTestId('table-0-importer.annualCbamMassTonnes');
+  const cell = page.getByTestId('table-0-shipment.weightKg');
   await cell.fill('> 100');
   await cell.press('Enter');
   await saved(page);

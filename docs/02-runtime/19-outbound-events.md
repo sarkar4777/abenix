@@ -64,7 +64,7 @@ Every delivery wraps the payload the same way.
   "type": "decision.published",
   "tenant_id": "3f0c…",
   "occurred_at": "2026-10-03T09:14:02.118+00:00",
-  "data": { "decision_key": "eu.cbam.import.applicability", "version": 4 }
+  "data": { "decision_key": "freight.remote.surcharge", "version": 4 }
 }
 ```
 
@@ -113,7 +113,7 @@ A subscription is a row in `webhooks`.
 ### Matching events
 
 - `events` entries are exact types, `*` for everything, or shell-style patterns matched case-sensitively, such as `decision.*`. A pattern that matches no catalogue type is refused with 400.
-- `filter` maps a dotted path into `data` to a value, or to a list of allowed values. `{"decision_key": "eu.cbam.import.applicability"}` or `{"status": ["failed"]}`. Nested objects as values are refused.
+- `filter` maps a dotted path into `data` to a value, or to a list of allowed values. `{"decision_key": "freight.remote.surcharge"}` or `{"status": ["failed"]}`. Nested objects as values are refused.
 
 ### Webhook targets
 
@@ -259,7 +259,7 @@ Create example:
   "target_type": "webhook",
   "url": "https://hooks.example.com/abenix",
   "events": ["decision.published", "decision.retired"],
-  "filter": {"decision_key": ["eu.cbam.import.applicability"]}
+  "filter": {"decision_key": ["freight.remote.surcharge"]}
 }
 ```
 

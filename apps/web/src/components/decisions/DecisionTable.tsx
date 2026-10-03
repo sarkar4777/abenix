@@ -198,7 +198,7 @@ export default function DecisionTable({ doc, onChange, problems, readOnly, onOpe
     <div onPaste={onPaste} data-testid="decision-table">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <p className="text-xs text-slate-400 max-w-3xl">
-          One row per rule. Type in a cell: <code className="text-cyan-300">&gt; 50</code>, <code className="text-cyan-300">&gt;= 2026-01-01</code>, <code className="text-cyan-300">a, b, c</code>, <code className="text-cyan-300">in EU_CBAM_CN_CODES</code>, <code className="text-cyan-300">between 1 and 5</code>. Empty means any. Outcomes starting with <code className="text-cyan-300">=</code> are calculated.
+          One row per rule. Type in a cell: <code className="text-cyan-300">&gt; 50</code>, <code className="text-cyan-300">&gt;= 2026-01-01</code>, <code className="text-cyan-300">a, b, c</code>, <code className="text-cyan-300">in REMOTE_POSTCODES</code>, <code className="text-cyan-300">between 1 and 5</code>. Empty means any. Outcomes starting with <code className="text-cyan-300">=</code> are calculated.
         </p>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-500"><ClipboardPaste className="w-3.5 h-3.5" /> Paste rows from Excel</span>

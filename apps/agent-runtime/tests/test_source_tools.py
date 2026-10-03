@@ -26,8 +26,8 @@ def _src(**kw):
     base = dict(
         id=uuid.uuid4(),
         tenant_id=uuid.UUID(TENANT),
-        name="CBAM guidance",
-        url="https://example.test/cbam",
+        name="Carrier tariff page",
+        url="https://example.test/tariff",
         active=True,
         paused_reason=None,
         current_snapshot_id=uuid.uuid4(),
@@ -41,8 +41,8 @@ def _src(**kw):
 def _snap(text="", **kw):
     base = dict(
         id=uuid.uuid4(),
-        url="https://example.test/cbam",
-        title="CBAM",
+        url="https://example.test/tariff",
+        title="Tariff",
         fetched_at=datetime(2026, 10, 1, 9, 30, tzinfo=timezone.utc),
         content_sha256="f" * 64,
         normalized_text=text,
@@ -121,7 +121,7 @@ def test_snapshot_get_pages_and_cites(monkeypatch):
     assert not r.is_error
     assert out["citation"]["sha256"] == snap.content_sha256
     assert out["citation"]["cite_as"].startswith(
-        "CBAM guidance, https://example.test/cbam, retrieved 2026-10-01"
+        "Carrier tariff page, https://example.test/tariff, retrieved 2026-10-01"
     )
     assert len(out["text"]) == 600 and out["next_offset"] == 600
 
@@ -138,7 +138,9 @@ def test_snapshot_get_pages_and_cites(monkeypatch):
 def test_snapshot_get_without_a_snapshot_explains(monkeypatch):
     src = _src(current_snapshot_id=None, last_error="The site answered HTTP 503.")
     _patch_session(monkeypatch, FakeSession(results=[src]))
-    r = _run(T.SourceSnapshotGetTool(tenant_id=TENANT), {"source": "CBAM guidance"})
+    r = _run(
+        T.SourceSnapshotGetTool(tenant_id=TENANT), {"source": "Carrier tariff page"}
+    )
     assert r.is_error and "503" in r.content
 
 

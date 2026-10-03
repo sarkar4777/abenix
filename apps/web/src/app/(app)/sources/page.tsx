@@ -104,7 +104,7 @@ export default function SourcesPage() {
             <h1 className="text-3xl font-semibold text-white">Source Watch</h1>
           </div>
           <p className="text-slate-400 max-w-3xl">
-            Regulator pages, guidance PDFs, data files and feeds checked on a schedule. Every version is kept as an
+            Policy and tariff pages, guidance PDFs, data files and feeds checked on a schedule. Every version is kept as an
             immutable snapshot, every change is diffed and announced as a source.changed event, and agents read and
             cite the snapshots.
           </p>
@@ -312,7 +312,7 @@ export default function SourcesPage() {
 
 function EmptyState({ canManage, onAdd }: { canManage: boolean; onAdd: () => void }) {
   const examples = [
-    { title: 'A regulator page', text: 'Guidance or a notice page. Narrow it to the main content so menus and dates do not count as changes.' },
+    { title: 'A policy or tariff page', text: 'Guidance or a notice page. Narrow it to the main content so menus and dates do not count as changes.' },
     { title: 'A PDF or spreadsheet', text: 'Default values, tariff tables or published lists. Tables are compared row by row.' },
     { title: 'A feed or JSON API', text: 'An RSS or Atom feed, or a JSON document, compared item by item or field by field.' },
   ];
