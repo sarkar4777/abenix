@@ -59,6 +59,7 @@
 - Pipeline agent steps honour the agent's own limits and the runtime reads the admin timeouts. The live DAG follows queued pipelines.
 - Decisions with an archived key can be restored instead of failing with 500, and permission-set signers can approve agent gates.
 - Chat renders markdown tables, headings and lists.
+- The pipeline builder understands agent steps written as type: agent, so they no longer show as unknown with false errors and survive a save.
 
 ## v2.5.1 — 2026-10-02
 
