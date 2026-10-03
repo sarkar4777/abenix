@@ -47,6 +47,7 @@ def _to_iso(d: str) -> str | None:
 
 class BundesanzeigerTool(BaseTool):
     name = "bundesanzeiger_filings"
+    risk_tier = "low"
     description = (
         "Search Bundesanzeiger for filings linked to a DE-incorporated "
         "counterparty. Returns the result-list of annual accounts and "

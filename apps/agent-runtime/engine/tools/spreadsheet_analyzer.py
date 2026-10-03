@@ -17,6 +17,7 @@ ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".tsv"}
 
 class SpreadsheetAnalyzerTool(BaseTool):
     name = "spreadsheet_analyzer"
+    risk_tier = "low"
     description = (
         "Analyze Excel workbooks and spreadsheets with advanced operations: read "
         "multiple sheets, extract cell ranges, analyze formulas, compute cross-sheet "

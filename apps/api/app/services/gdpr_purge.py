@@ -91,12 +91,16 @@ async def _purge_postgres(
     )
     affected += r.rowcount or 0
 
+    from app.services.audit_chain import NIL_ACTOR, maintenance
+
+    # the chain keeps its salted digest, dropping the salt unlinks the person
+    await maintenance(db)
     r = await db.execute(
         text(
-            "UPDATE activity_logs SET user_id=NULL, ip_address=NULL, "
-            "user_agent=NULL WHERE user_id=:uid"
+            "UPDATE activity_logs SET user_id=:nil, ip_address=NULL, "
+            "user_agent=NULL, pii_salt=NULL WHERE user_id=:uid"
         ),
-        {"uid": sid},
+        {"uid": sid, "nil": NIL_ACTOR},
     )
     affected += r.rowcount or 0
 

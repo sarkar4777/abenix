@@ -424,6 +424,7 @@ def _match_against_list(
 
 class SanctionsScreeningTool(BaseTool):
     name = "sanctions_screening"
+    risk_tier = "medium"
     description = (
         "Screen a person or company name against the world's major sanctions "
         "lists — OFAC SDN, OFAC Consolidated (non-SDN), EU Consolidated, "

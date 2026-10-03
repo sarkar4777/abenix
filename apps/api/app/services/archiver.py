@@ -223,6 +223,10 @@ async def _delete_batch(
         await db.execute(
             sql_text(stmt).bindparams(bindparam("ids", expanding=True)), params
         )
+    if table == "activity_logs":
+        from app.services.audit_chain import maintenance
+
+        await maintenance(db)
     res = await db.execute(
         sql_text(f"DELETE FROM {table} WHERE id IN :ids").bindparams(
             bindparam("ids", expanding=True)
@@ -271,15 +275,35 @@ async def run_archive(
         await db.commit()
 
         scope = _TENANT_PREDICATE[table]
-        first_q = sql_text(
-            f"SELECT * FROM {table} WHERE {scope} AND created_at < :cutoff "
-            "ORDER BY created_at ASC, id ASC LIMIT :batch"
-        )
-        next_q = sql_text(
-            f"SELECT * FROM {table} WHERE {scope} AND created_at < :cutoff "
-            "AND (created_at, id) > (:last_created, :last_id) "
-            "ORDER BY created_at ASC, id ASC LIMIT :batch"
-        )
+        # the audit chain only loses a contiguous chained prefix
+        audit = table == "activity_logs"
+        prefix_end = 0
+        if audit:
+            from app.services.audit_chain import chained_prefix_end
+
+            prefix_end = await chained_prefix_end(db, tenant_id, cutoff)
+            first_q = sql_text(
+                "SELECT * FROM activity_logs WHERE tenant_id = :tenant_id "
+                "AND chain_pos IS NOT NULL AND chain_pos <= :prefix_end "
+                "ORDER BY chain_pos LIMIT :batch"
+            )
+            next_q = sql_text(
+                "SELECT * FROM activity_logs WHERE tenant_id = :tenant_id "
+                "AND chain_pos > :last_pos AND chain_pos <= :prefix_end "
+                "ORDER BY chain_pos LIMIT :batch"
+            )
+        else:
+            first_q = sql_text(
+                f"SELECT * FROM {table} WHERE {scope} AND created_at < :cutoff "
+                "ORDER BY created_at ASC, id ASC LIMIT :batch"
+            )
+            next_q = sql_text(
+                f"SELECT * FROM {table} WHERE {scope} AND created_at < :cutoff "
+                "AND (created_at, id) > (:last_created, :last_id) "
+                "ORDER BY created_at ASC, id ASC LIMIT :batch"
+            )
+        last_pos = 0
+        last_hash: str | None = None
 
         storage = storage or get_archive_storage()
         key = archive_key(tenant_id, run.id)
@@ -303,8 +327,14 @@ async def run_archive(
                     "cutoff": cutoff,
                     "batch": min(BATCH_SIZE, MAX_ROWS_PER_RUN - len(archived_ids)),
                 }
+                if audit:
+                    params.pop("cutoff")
+                    params["prefix_end"] = prefix_end
                 if last_id is None:
                     rows = (await db.execute(first_q, params)).all()
+                elif audit:
+                    params["last_pos"] = last_pos
+                    rows = (await db.execute(next_q, params)).all()
                 else:
                     params.update({"last_created": last_created, "last_id": last_id})
                     rows = (await db.execute(next_q, params)).all()
@@ -323,6 +353,9 @@ async def run_archive(
                         newest = ca if newest is None or ca > newest else newest
                 last_created = rows[-1]._mapping["created_at"]
                 last_id = rows[-1]._mapping["id"]
+                if audit:
+                    last_pos = int(rows[-1]._mapping["chain_pos"])
+                    last_hash = rows[-1]._mapping["row_hash"]
                 if len(rows) < params["batch"]:
                     break
 
@@ -348,6 +381,22 @@ async def run_archive(
         run.oldest_row_at = oldest
         run.newest_row_at = newest
         await db.commit()
+
+        if audit and last_hash:
+            from app.services.audit_chain import write_prune_anchor
+
+            # anchor first, so a delete that stops half way still verifies after a rerun
+            await write_prune_anchor(
+                db,
+                tenant_id,
+                last_row_hash=last_hash,
+                last_chain_pos=last_pos,
+                rows=len(archived_ids),
+                reason="archived",
+                actor=triggered_by,
+                extra={"archive_run_id": str(run.id), "storage_key": key},
+            )
+            await db.commit()
 
         child_tables = {t for t, _ in _CHILD_DELETES.get(table, [])}
         present = await _existing_tables(db, child_tables)

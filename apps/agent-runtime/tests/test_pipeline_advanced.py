@@ -620,3 +620,33 @@ class TestStreamingCallbacks:
         assert "n2" in result.execution_path
         assert result.node_results["n1"].output == {"ok": True}
         assert result.node_results["n2"].output == {"still": "running"}
+
+    @pytest.mark.asyncio
+    async def test_on_node_complete_receives_error_fields(
+        self, registry: ToolRegistry
+    ) -> None:
+        complete_calls: list[tuple[Any, ...]] = []
+
+        async def on_complete(
+            node_id: str,
+            status: str,
+            duration_ms: int,
+            output: Any,
+            error_message: str | None = None,
+            error_type: str | None = None,
+        ) -> None:
+            complete_calls.append(
+                (node_id, status, duration_ms, output, error_message, error_type)
+            )
+
+        nodes = [PipelineNode(id="bad", tool_name="always_fail", arguments={})]
+        result = await PipelineExecutor(registry, on_node_complete=on_complete).execute(
+            nodes
+        )
+
+        actual = result.node_results["bad"]
+        assert len(complete_calls) == 1
+        assert complete_calls[0][:2] == ("bad", "failed")
+        assert complete_calls[0][4] == actual.error_message
+        assert complete_calls[0][5] == actual.error_type
+        assert actual.error_message

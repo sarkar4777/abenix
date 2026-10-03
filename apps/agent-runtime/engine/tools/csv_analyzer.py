@@ -16,6 +16,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class CsvAnalyzerTool(BaseTool):
     name = "csv_analyzer"
+    risk_tier = "low"
     description = (
         "Analyze CSV and tabular data with advanced operations: descriptive statistics, "
         "filtering, sorting, grouping/aggregation, pivot tables, correlation analysis, "

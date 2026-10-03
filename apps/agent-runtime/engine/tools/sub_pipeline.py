@@ -10,6 +10,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class SubPipelineTool(BaseTool):
     name = "sub_pipeline"
+    risk_tier = "low"
     description = (
         "Execute a nested pipeline as a single step within a parent pipeline. "
         "Define a set of pipeline nodes with dependencies, conditions, and data "

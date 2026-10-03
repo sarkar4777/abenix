@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 class TranslationTool(BaseTool):
     name = "translation"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "DEEPL_API_KEY",

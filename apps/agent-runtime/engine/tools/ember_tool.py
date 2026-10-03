@@ -42,6 +42,7 @@ async def _get(path: str, params: dict[str, Any], api_key: str) -> dict[str, Any
 
 class EmberClimateTool(BaseTool):
     name = "ember_climate"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "EMBER_API_KEY",

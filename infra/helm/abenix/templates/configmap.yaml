@@ -35,7 +35,6 @@ data:
   {{- if eq (default "celery" .Values.scaling.queueBackend) "nats" }}
   NATS_URL: "nats://{{ .Release.Name }}-nats:4222"
   NATS_USER: "abenix"
-  NATS_PASSWORD: "abenix-dev"
   {{- end }}
   NEO4J_URI: "bolt://{{ .Release.Name }}-neo4j:7687"
   NEO4J_DATABASE: {{ .Values.neo4j.database | default "neo4j" | quote }}
@@ -126,3 +125,39 @@ data:
   # validator's cluster-internal DNS block rejects every register call
   # with "server_url rejected: cluster-internal DNS blocked".
   MCP_ALLOWED_HOSTS: {{ .Values.mcpAllowedHosts | default (printf "uat-mcp.%s.svc.cluster.local" .Release.Namespace) | quote }}
+  # in-cluster webhook receivers that may resolve to private addresses, exact names
+  EVENTS_ALLOWED_INTERNAL_HOSTS: {{ .Values.eventsAllowedInternalHosts | default "" | quote }}
+  # Warm code runners, see templates/code-runners.yaml
+  {{- $cr := default dict .Values.codeRunners }}
+  {{- if $cr.enabled }}
+  {{- $reg := default "localhost:5000/abenix" $cr.registry }}
+  {{- $images := dict }}
+  {{- range $cr.pools }}
+  {{- $_ := set $images .name (printf "%s/%s:%s" $reg .image (toString (default "latest" $cr.imageTag))) }}
+  {{- end }}
+  CODE_RUNNER_MODE: {{ default "auto" $cr.mode | quote }}
+  CODE_RUNNER_IMAGES: {{ toJson $images | quote }}
+  CODE_RUNNER_PULL_POLICY: {{ default "IfNotPresent" $cr.pullPolicy | quote }}
+  CODE_RUNNER_CONCURRENCY: {{ default 4 $cr.concurrency | quote }}
+  CODE_RUNNER_MAX_REPLICAS: {{ default 5 $cr.maxReplicas | quote }}
+  CODE_RUNNER_IDLE_SECONDS: {{ default 900 $cr.idleSeconds | quote }}
+  CODE_RUNNER_DRAIN_SECONDS: {{ default 120 $cr.drainSeconds | quote }}
+  CODE_RUNNER_GRACE_SECONDS: {{ default 930 $cr.graceSeconds | quote }}
+  CODE_RUNNER_MIN_WARM: {{ default "low=0,medium=0,high=1,critical=1" $cr.minWarmByTier | quote }}
+  CODE_RUNNER_HOT_CALLS_PER_HOUR: {{ default 30 $cr.hotCallsPerHour | quote }}
+  CODE_RUNNER_DEFAULT_TIER: {{ default "medium" $cr.defaultTier | quote }}
+  CODE_RUNNER_FETCH_TTL: {{ default 21600 $cr.fetchTokenTtl | quote }}
+  CODE_RUNNER_API_URL: {{ default (printf "http://%s-api.%s.svc.cluster.local:8000" .Release.Name .Release.Namespace) $cr.apiUrl | quote }}
+  CODE_RUNNER_NATS_URL: "nats://{{ .Release.Name }}-nats.{{ .Release.Namespace }}.svc.cluster.local:4222"
+  CODE_RUNNER_NATS_SECRET: "{{ .Release.Name }}-code-runner-nats"
+  CODE_RUNNER_RUNTIME_CLASS: {{ default "" $cr.runtimeClassName | quote }}
+  CODE_RUNNER_EXEC_RESOURCES: {{ toJson (default dict (default dict $cr.resources).exec) | quote }}
+  CODE_RUNNER_GATEWAY_RESOURCES: {{ toJson (default dict (default dict $cr.resources).gateway) | quote }}
+  CODE_RUNNER_WS_SIZE: {{ default "2Gi" $cr.workspaceSize | quote }}
+  CODE_RUNNER_SCRATCH_SIZE: {{ default "1Gi" $cr.scratchSize | quote }}
+  {{- $keda := default dict $cr.keda }}
+  CODE_RUNNER_KEDA: {{ default false $keda.enabled | quote }}
+  CODE_RUNNER_PROMETHEUS_URL: {{ default "" $keda.prometheusUrl | quote }}
+  {{- else }}
+  CODE_RUNNER_MODE: "job"
+  {{- end }}

@@ -46,6 +46,7 @@ _IV_NERVOUS = 0.35  # absolute IV above this counts as "nervous"
 
 class OptionsDataTool(BaseTool):
     name = "options_data"
+    risk_tier = "low"
     description = (
         "Listed options-market data: at-the-money implied volatility, "
         "25-delta risk reversal (call IV minus put IV), put/call open-"

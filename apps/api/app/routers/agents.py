@@ -114,6 +114,58 @@ def _finalize_execution_timing(execution: Execution) -> None:
         execution.duration_ms = int(delta.total_seconds() * 1000)
 
 
+async def _risk_activation_problem(agent: Agent) -> str | None:
+    """What the tenant's tier policy still needs before this agent can go live."""
+    from engine import governance, risk as _risk
+
+    mc = agent.model_config_ or {}
+    tier = _risk.normalize(mc.get("risk_tier"))
+    await governance.ensure_fresh()
+    pol = governance.policy(str(agent.tenant_id), tier)
+    has_schema = bool(
+        mc.get("output_schema")
+        or (mc.get("pipeline_config") or {}).get("output_schema")
+    )
+    if pol.get("require_output_schema") and not has_schema:
+        return (
+            f"This is {tier} risk work and the tenant's {tier} policy needs an output "
+            "schema before it goes live. Add one on the Output tab, or lower the tier."
+        )
+    if mc.get("mode") != "pipeline" and not _risk.model_allowed(
+        pol, mc.get("model") or ""
+    ):
+        return (
+            f"{mc.get('model')} is not on the allowed model list for {tier} risk work. "
+            "Pick an allowed model, or ask an admin to change the tier policy."
+        )
+    return None
+
+
+async def _eval_gate_problem(db: AsyncSession, agent: Agent) -> JSONResponse | None:
+    """Refuses publishing when the tier policy needs this exact config to pass its gating suites."""
+    from app.services.eval_runner import gate_for_agent
+
+    await db.flush()
+    gate = await gate_for_agent(db, agent)
+    if gate.allowed:
+        return None
+    return error(
+        gate.message,
+        409,
+        error_code="EVAL_GATE",
+        details={"agent_id": str(agent.id), "suites": gate.suites},
+    )
+
+
+def _record_risk(execution: Execution, data: Any) -> None:
+    """Where the run's risk tier ended up, from a done payload or an ExecutionResult."""
+    get = data.get if isinstance(data, dict) else (lambda k: getattr(data, k, None))
+    if get("risk_tier"):
+        execution.risk_tier = get("risk_tier")
+    if get("risk_reasons"):
+        execution.risk_reasons = get("risk_reasons")
+
+
 def _get_cache_orchestrator() -> Any:
     """Lazily initialize the cache orchestrator. Returns None on failure."""
     global _cache_orchestrator
@@ -1149,6 +1201,18 @@ async def update_agent(
             agent.status = AgentStatus(body.status)
         except ValueError:
             return error(f"Invalid status: {body.status}", 400)
+    if agent.status == AgentStatus.ACTIVE and (
+        body.status is not None or body.agent_model_config is not None
+    ):
+        problem = await _risk_activation_problem(agent)
+        if problem:
+            await db.rollback()
+            return error(problem, 400)
+    if agent.status == AgentStatus.ACTIVE and prev_state.get("status") != "active":
+        blocked = await _eval_gate_problem(db, agent)
+        if blocked:
+            await db.rollback()
+            return blocked
     if body.agent_type is not None:
         try:
             wanted_type = AgentType(body.agent_type.lower())
@@ -1530,6 +1594,13 @@ async def publish_agent(
             agent.marketplace_price = body.marketplace_price
         if body.category is not None:
             agent.category = sanitize_input(body.category)
+
+    problem = await _risk_activation_problem(agent)
+    if problem:
+        return error(problem, 400)
+    blocked = await _eval_gate_problem(db, agent)
+    if blocked:
+        return blocked
 
     if visibility == "public":
         # Marketplace publish — requires admin review
@@ -2081,6 +2152,9 @@ async def execute_agent(
     model_cfg = agent.model_config_ or {}
     is_pipeline = model_cfg.get("mode") == "pipeline"
     model = model_cfg.get("model", "claude-sonnet-4-5-20250929")
+    # evaluation runs compare models without editing the agent, only set in-process
+    _model_override = getattr(getattr(request, "state", None), "eval_model", None)
+    model = _model_override or model
     temperature = model_cfg.get("temperature", 0.7)
     tool_names = model_cfg.get("tools", [])
     # An agent yaml can override the cap, otherwise take the platform setting.
@@ -2189,6 +2263,7 @@ async def execute_agent(
                     str(parent_execution_id) if parent_execution_id else None
                 ),
                 "delegation_depth": delegation_depth,
+                "model_override": _model_override,
             }
             task_id = await backend.submit(agent_pool, payload)
 
@@ -2233,6 +2308,8 @@ async def execute_agent(
                         data = json.dumps(payload, default=str)
                         yield f"event: {ev_name}\ndata: {data}\n\n".encode()
 
+                # the stream waits on the queue, it must not hold a pooled connection
+                await db.close()
                 return StreamingResponse(
                     _remote_stream(),
                     media_type="text/event-stream",
@@ -2465,6 +2542,8 @@ async def execute_agent(
             )
 
         if body.stream:
+            # the final write reopens the session briefly, nothing is held while it runs
+            await db.close()
             return StreamingResponse(
                 _stream_pipeline_execution(
                     execution_id=execution.id,
@@ -2554,6 +2633,7 @@ async def execute_agent(
     kb_ids = [str(cid) for cid in _collection_ids]
 
     if body.stream:
+        await db.close()
         return StreamingResponse(
             _stream_execution(
                 execution_id=execution.id,
@@ -2861,6 +2941,9 @@ async def _stream_pipeline_execution(
                 else ExecutionStatus.FAILED
             )
             execution.duration_ms = pr.total_duration_ms
+            _record_risk(execution, pr)
+            if pr.failure_code:
+                execution.failure_code = pr.failure_code
             _finalize_execution_timing(execution)
             try:
                 from app.core.failure_codes import emit_outcome_metric
@@ -3123,8 +3206,9 @@ async def _non_stream_pipeline_execution(
         if result.status == "completed"
         else ExecutionStatus.FAILED
     )
+    _record_risk(execution, result)
     if result.status != "completed" and not execution.failure_code:
-        execution.failure_code = "PIPELINE_NODE_FAILED"
+        execution.failure_code = result.failure_code or "PIPELINE_NODE_FAILED"
     execution.duration_ms = result.total_duration_ms
     _finalize_execution_timing(execution)
     try:
@@ -3339,6 +3423,8 @@ async def _stream_execution(
                 "moderation gate build failed: %s", _mod_exc
             )
             _mod_ctx = None
+        # close, not rollback, so the loaded policy stays readable for the LLM loop
+        await db.close()
 
         # Resolve asset input_schemas async, BEFORE constructing the
         # executor — the agent_runtime image doesn't ship psycopg2 so
@@ -3519,6 +3605,7 @@ async def _stream_execution(
                     _stream_error if not final_data else None
                 )
             _persisted = True
+            _record_risk(execution, final_data)
             if _mod_blocked:
                 from app.core.failure_codes import emit_outcome_metric
 
@@ -3550,7 +3637,7 @@ async def _stream_execution(
                 )
 
                 execution.status = ExecutionStatus.FAILED
-                execution.failure_code = (
+                execution.failure_code = final_data.get("failure_code") or (
                     "SANDBOX_TIMEOUT"
                     if "timed out" in str(_runtime_error).lower()
                     else classify_exception(Exception(str(_runtime_error)))
@@ -3941,7 +4028,24 @@ async def _non_stream_execution(
 
         # Moderation block becomes a FAILED execution with a distinct
         # failure_code so dashboards + alerts can group it cleanly.
-        if getattr(result, "moderation_blocked", False):
+        _record_risk(execution, result)
+        _refusal = getattr(result, "governance_refusal", None)
+        if _refusal:
+            from app.core.failure_codes import emit_outcome_metric
+
+            execution.status = ExecutionStatus.FAILED
+            execution.failure_code = _refusal.get("code") or "KILL_SWITCH"
+            execution.error_message = _refusal.get("message") or result.output
+            execution.output_message = result.output
+            execution.duration_ms = result.duration_ms
+            _finalize_execution_timing(execution)
+            emit_outcome_metric(
+                outcome="FAILED",
+                failure_code=execution.failure_code,
+                agent_type="agent",
+                tenant_id=str(tenant_id) if tenant_id else "",
+            )
+        elif getattr(result, "moderation_blocked", False):
             from app.core.failure_codes import emit_outcome_metric
 
             execution.status = ExecutionStatus.FAILED
@@ -4180,20 +4284,4 @@ async def _emit_execution_event(
     except Exception:
         pass
 
-    # Deliver webhooks for execution events
-    try:
-        from app.core.webhooks import deliver_execution_webhook
-
-        webhook_event = (
-            "execution.completed"
-            if event_type == "execution_complete"
-            else "execution.failed"
-        )
-        await deliver_execution_webhook(
-            db,
-            str(execution.tenant_id),
-            webhook_event,
-            event_data,
-        )
-    except Exception:
-        pass
+    # execution events reach webhooks through the outbox, written by a database trigger

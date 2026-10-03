@@ -426,6 +426,7 @@ def _classify(value: float, limit: float, slack_pct: float = 0.05) -> str:
 
 class PortConstraintsTool(BaseTool):
     name = "port_constraints"
+    risk_tier = "low"
     description = (
         "UN/LOCODE port database with vessel-level berth compatibility "
         "checks. Knows ~25 liquid-bulk ports (US Gulf, USAC, NW Europe, "

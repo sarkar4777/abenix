@@ -13,6 +13,7 @@ _BASE = "https://search.patentsview.org/api/v1/patent"
 
 class PatentsTrademarksTool(BaseTool):
     name = "patents_trademarks"
+    risk_tier = "low"
     description = (
         "Search granted US patents via USPTO PatentsView. Free, no API key. "
         "Filter by query text, assignee, inventor, date range. Returns "

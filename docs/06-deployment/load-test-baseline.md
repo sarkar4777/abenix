@@ -36,6 +36,43 @@ k6 prints `iteration_duration` percentiles and `http_req_duration` percentiles. 
 
 These are baseline numbers, not SLAs. They exist so the next person who runs the test can spot "x feature got 3x slower" without having to know the absolute target.
 
+## 2.5.2: decision evaluation
+
+`POST /api/decisions/{key}/evaluate` under sustained concurrency, with a new version published partway through the run.
+
+Setup: minikube, one API pod with 2 CPU and 2 uvicorn workers (`API_WORKERS=2`). Load generated from a pod inside the cluster.
+
+| Concurrent users | Requests/s | p50 | p95 | Errors |
+|---|---|---|---|---|
+| 200 | 1,467 | 112 ms | 279 ms | 0 |
+| 500 | 1,306 | 298 ms | 525 ms | 0 |
+| 2,000 | 1,096 | 613 ms | 8.6 s | 41 transport errors (0.07%), no 401 or 500 |
+
+A publish mid-run switched versions with zero nondeterministic cases. Every set of facts gave one trace hash per version.
+
+Latency at high concurrency is requests queueing on a single pod, not slow evaluation. Throughput peaked at 200 users and held near it as users grew. For more users, scale API replicas.
+
+### How to run it
+
+Run both scripts from a pod inside the cluster. Going through a port-forward measures the forward.
+
+```bash
+# creates a decision with v1 in force and v2 approved, prints {"key": ..., "token": ...}
+BASE=http://abenix-api:8000 AF_EMAIL=admin@abenix.dev AF_PASSWORD=...   python scripts/load/decision_load_setup.py
+
+python scripts/load/decision_load.py --base http://abenix-api:8000   --token <token> --key <key>   --concurrency 500 --seconds 60 --publish-at 20 --publish-version 2
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--concurrency` | `500` | Open connections, one worker each |
+| `--seconds` | `60` | Run length |
+| `--publish-at` | `0` | Seconds in to publish. 0 means no publish |
+| `--publish-version` | `0` | Version to publish |
+| `--procs` | `0` | Worker processes. 0 means one per 32 connections |
+
+The load is spread over processes because one httpx client degrades past a few dozen connections and the client becomes the bottleneck. The script prints one JSON line with `rps`, `p50_ms`, `p95_ms`, `p99_ms`, `errors` by status or exception, `versions_seen` and `nondeterministic_cases`. Anything above 0 in the last one is a bug.
+
 ## What this test does NOT cover
 
 - Long-running pipelines (the `long-running` pool serves those, and they're slow by design — measuring their p95 over short windows is misleading).

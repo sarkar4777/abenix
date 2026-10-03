@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class NarrateTool(BaseTool):
     name = "narrate"
+    risk_tier = "low"
     description = (
         "Emit a single short progress line so the trader watching the live "
         "Desk Copilot canvas can see what you are doing right now. Use this at "

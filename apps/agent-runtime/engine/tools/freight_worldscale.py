@@ -103,6 +103,7 @@ _WS_FLAT_RATE_USD_MT: dict[str, dict[str, Any]] = {
 
 class FreightWorldscaleTool(BaseTool):
     name = "freight_worldscale"
+    risk_tier = "low"
     description = (
         "Worldscale freight calculator for clean-products (CPP) tankers. "
         "Computes voyage freight in $/MT using the industry-standard "

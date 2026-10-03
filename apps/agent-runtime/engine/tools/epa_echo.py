@@ -29,6 +29,7 @@ REQUEST_TIMEOUT = 30.0
 
 class EpaEchoTool(BaseTool):
     name = "epa_echo"
+    risk_tier = "low"
     description = (
         "Look up a counterparty in EPA ECHO. Returns matching facilities "
         "with Title V air, NPDES water, and RCRA hazardous-waste permits, "

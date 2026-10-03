@@ -1,5 +1,7 @@
 'use client';
 
+import ProvenancePanel from '@/components/governance/ProvenancePanel';
+import SaveAsEvalCase from '@/components/evals/SaveAsEvalCase';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -579,6 +581,7 @@ export default function ExecutionDetailPage() {
         >
           <RotateCcw className="w-3.5 h-3.5" /> Re-run
         </Link>
+        <SaveAsEvalCase executionId={executionId} agentId={execution.agent_id} agentName={(execution as any).agent_name} />
         {execution.confidence_score != null && (
           <ConfidenceRing score={execution.confidence_score} />
         )}
@@ -624,6 +627,7 @@ export default function ExecutionDetailPage() {
           {execution.error_message}
         </div>
       )}
+      <ProvenancePanel executionId={executionId} isPipeline={!!(execution as any).node_results && Object.keys((execution as any).node_results || {}).length > 0} />
       {trace?.warnings && trace.warnings.length > 0 && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200 space-y-1" data-testid="execution-warnings">
           {trace.warnings.map((w) => <p key={w}>{w}</p>)}

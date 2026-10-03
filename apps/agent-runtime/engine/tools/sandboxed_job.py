@@ -87,6 +87,7 @@ def _valid_env_name(k: str) -> bool:
 
 class SandboxedJobTool(BaseTool):
     name = "sandboxed_job"
+    risk_tier = "medium"
     description = (
         "Run a one-shot command in an isolated container. Auto-selects "
         "Kubernetes Jobs when running inside a cluster, or local Docker "

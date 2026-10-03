@@ -22,6 +22,7 @@ import {
   UserCheck,
   Users,
   Wrench,
+  Scale,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { CredentialBadge, type ToolConfigInfo } from '@/components/CredentialBadge';
@@ -290,6 +291,7 @@ function _iconFor(id: string, category?: string): LucideIcon {
   if (id.includes('time') || id.includes('date') || id === 'current_time') return Clock;
   if (id === 'calculator' || id.includes('financial') || id.includes('risk')) return Calculator;
   if (id === 'web_search' || id === 'http_client' || id.includes('storage') || id.includes('database') || id === 'ais_stream') return Globe;
+  if (id.startsWith('decision_')) return Scale;
   if (id.includes('approval') || id.includes('moderation')) return Shield;
   if (id.includes('audio') || id.includes('speech') || id.includes('voice')) return Mic;
   if (id.includes('document') || id.includes('file') || id.includes('csv') || id.includes('analyzer')) return FileText;
@@ -418,6 +420,8 @@ export default function ToolPalette({ selectedTools, onToggleTool }: ToolPalette
     ml: 'ML Models',
     knowledge: 'Knowledge Graph',
     privacy: 'Privacy & Safety',
+    decisions: 'Decisions & Rules',
+    sources: 'Sources & Watch',
   };
 
   // Group tools by category

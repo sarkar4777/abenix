@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import async_session, get_current_user, get_db
 
 
 def _anthropic_client(api_key: str | None = None, sync: bool = False):
@@ -309,6 +309,9 @@ async def execute_load_script(
 ) -> StreamingResponse:
     """Run a generated Python load-test script with an ephemeral 1-hour API key.
     Streams stdout line-by-line over SSE so the user sees live progress."""
+    tenant_id = user.tenant_id
+    user_id = user.id
+    await db.close()
 
     async def stream():
         # Mint an ephemeral API key
@@ -318,16 +321,17 @@ async def execute_load_script(
             raw_key = f"af_load_{secrets.token_urlsafe(24)}"
             key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
             key = ApiKey(
-                tenant_id=user.tenant_id,
-                user_id=user.id,
+                tenant_id=tenant_id,
+                user_id=user_id,
                 name="Load Playground (ephemeral)",
                 key_hash=key_hash,
                 key_prefix=raw_key[:11] + "****",
                 scopes={"playground": True, "load_test": True},
                 expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
             )
-            db.add(key)
-            await db.commit()
+            async with async_session() as s:
+                s.add(key)
+                await s.commit()
             key_id = key.id
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'message': f'Failed to mint API key: {e}'})}\n\n"

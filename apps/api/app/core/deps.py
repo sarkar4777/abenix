@@ -38,19 +38,30 @@ elif "+asyncpg" in _db_url:
         _connect_args = {}
 else:
     _connect_args = {}
+if "+asyncpg" in _db_url:
+    # a transaction left idle by a leak is ended by the server instead of pinning locks
+    _connect_args["server_settings"] = {
+        "idle_in_transaction_session_timeout": _os.environ.get(
+            "DB_IDLE_TXN_TIMEOUT_MS", "300000"
+        )
+    }
 
 import os as _os
 
-_pool_size = int(_os.environ.get("DB_POOL_SIZE", "30"))
-_max_overflow = int(_os.environ.get("DB_MAX_OVERFLOW", "20"))
+# per uvicorn worker, so a pod holds up to workers x (size + overflow); requests queue on the pool, not on Postgres
+_pool_size = int(_os.environ.get("DB_POOL_SIZE", "10"))
+_max_overflow = int(_os.environ.get("DB_MAX_OVERFLOW", "5"))
+_pool_timeout = int(_os.environ.get("DB_POOL_TIMEOUT", "20"))
 engine = create_async_engine(
     _db_url,
-    echo=settings.debug,
+    # every statement in the log costs real throughput, so it is opt-in
+    echo=_os.environ.get("SQL_ECHO", "").lower() in ("1", "true", "yes"),
     connect_args=_connect_args,
     pool_size=_pool_size,
     max_overflow=_max_overflow,
     pool_pre_ping=True,
     pool_recycle=3600,
+    pool_timeout=_pool_timeout,
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

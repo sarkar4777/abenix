@@ -119,6 +119,7 @@ CONVERSIONS: dict[str, dict[str, float]] = {
 
 class UnitConverterTool(BaseTool):
     name = "unit_converter"
+    risk_tier = "low"
     description = (
         "Convert between units across multiple categories: energy (kWh, MWh, GWh, BTU, "
         "toe, boe), power (W, kW, MW, GW, hp), length, area (ha, acre), volume (L, bbl, "

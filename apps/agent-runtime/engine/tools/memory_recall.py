@@ -9,6 +9,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class MemoryRecallTool(BaseTool):
     name = "memory_recall"
+    risk_tier = "low"
     description = (
         "Retrieve stored memories. Search by key, type, or get all memories "
         "sorted by importance. Use this at the start of conversations to "
@@ -81,9 +82,11 @@ class MemoryRecallTool(BaseTool):
         try:
             import uuid as uuid_mod
 
-            from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+            from sqlalchemy.ext.asyncio import AsyncSession
 
-            palace_engine = create_async_engine(db_url, echo=False)
+            from engine.db_pool import shared_engine
+
+            palace_engine = shared_engine(db_url)
             async with AsyncSession(palace_engine, expire_on_commit=False) as palace_db:
                 from engine.memory.palace import MemoryPalace
 
@@ -111,10 +114,8 @@ class MemoryRecallTool(BaseTool):
                             f"[{m.get('hall_type', 'factual')}] {m['key']} (importance={m['importance']}): {m['content']}"
                         )
                     await palace_db.commit()
-                    await palace_engine.dispose()
                     return ToolResult(content="\n".join(lines))
                 await palace_db.commit()
-            await palace_engine.dispose()
         except Exception:
             pass  # Fall back to basic recall
 
@@ -122,9 +123,11 @@ class MemoryRecallTool(BaseTool):
             import uuid as uuid_mod
 
             from sqlalchemy import select, or_
-            from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+            from sqlalchemy.ext.asyncio import AsyncSession
 
-            engine = create_async_engine(db_url, echo=False)
+            from engine.db_pool import shared_engine
+
+            engine = shared_engine(db_url)
 
             import sys
             from pathlib import Path
@@ -167,8 +170,6 @@ class MemoryRecallTool(BaseTool):
                 for mem in memories:
                     mem.access_count = (mem.access_count or 0) + 1
                 await db.commit()
-
-            await engine.dispose()
 
             if not memories:
                 return ToolResult(content="No memories found.")

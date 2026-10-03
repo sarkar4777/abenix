@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class ModerationVetTool(BaseTool):
     name = "moderation_vet"
+    risk_tier = "low"
     description = (
         "Screen text content for policy violations (hate, harassment, violence, "
         "sexual, self-harm, illicit). Returns {outcome, action, triggered_categories, "

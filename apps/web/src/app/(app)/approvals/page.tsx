@@ -23,16 +23,18 @@ interface ApprovalRow {
   payload: Record<string, unknown>;
   required_signoffs: number;
   signoffs: SignoffEntry[];
-  status: 'pending' | 'approved' | 'denied' | 'expired';
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'returned';
   requested_by: string | null;
   expires_at: string | null;
   decided_at: string | null;
   created_at: string | null;
   gate_kind?: string | null;
+  policy?: { exclude_requester?: boolean; capability?: string } | null;
 }
 
 const GATE_KIND_LABEL: Record<string, string> = {
   human_approval: 'agent gate',
+  decision_publish: 'rule change',
 };
 
 const STATUS_BADGE: Record<string, string> = {
@@ -40,6 +42,7 @@ const STATUS_BADGE: Record<string, string> = {
   approved: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
   denied: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
   expired: 'bg-slate-500/15 text-slate-400 border-slate-500/40',
+  returned: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
 };
 
 function PayloadView({ payload }: { payload: unknown }) {
@@ -158,9 +161,20 @@ function useLiveClock(intervalMs = 1000): number {
   return now;
 }
 
-function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id: string, decision: 'approve' | 'deny', reason?: string) => void; busy: boolean }) {
+function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id: string, decision: 'approve' | 'deny' | 'return', reason?: string) => Promise<string | null>; busy: boolean }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
+  const [decideErr, setDecideErr] = useState<string | null>(null);
+  async function decide(d: 'approve' | 'deny' | 'return') {
+    setDecideErr(null);
+    if (d === 'return' && !reason.trim()) {
+      setOpen(true);
+      setDecideErr('Say what needs to change in the reason box, then press Return again.');
+      return;
+    }
+    const e = await onDecide(row.id, d, reason);
+    if (e) setDecideErr(e);
+  }
   const isPending = row.status === 'pending';
   const approveCount = row.signoffs.filter(s => s.decision === 'approve').length;
   const now = useLiveClock(isPending && row.expires_at ? 1000 : 60_000);
@@ -197,25 +211,49 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
               <span className="font-mono text-slate-600">exec {row.agent_execution_id.slice(0, 8)}</span>
             )}
           </div>
+          {row.gate_kind === 'decision_publish' && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]" data-testid="approval-decision">
+              {typeof row.payload?.link === 'string' && (
+                <a href={row.payload.link as string} className="text-cyan-300 hover:underline">Review the rules and what changes</a>
+              )}
+              {typeof row.payload?.summary === 'string' && <span className="text-slate-400">{row.payload.summary as string}</span>}
+              {row.policy && (
+                <span className="text-slate-500">
+                  Needs {row.policy.capability || 'approvals.sign'}{row.policy.exclude_requester ? ', and not the person who proposed it' : ''}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         {isPending && (
           <div className="flex flex-col sm:flex-row gap-2 shrink-0 w-full sm:w-auto">
             <button
               disabled={busy}
-              onClick={() => onDecide(row.id, 'approve', reason)}
+              onClick={() => decide('approve')}
               className="px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-medium hover:bg-emerald-500/25 disabled:opacity-50 flex items-center gap-1.5 justify-center"
             >
               <CheckCircle2 className="w-3.5 h-3.5" /> Approve
             </button>
             <button
               disabled={busy}
-              onClick={() => onDecide(row.id, 'deny', reason)}
+              onClick={() => decide('deny')}
               className="px-3 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-medium hover:bg-rose-500/25 disabled:opacity-50 flex items-center gap-1.5 justify-center"
             >
               <XCircle className="w-3.5 h-3.5" /> Deny
             </button>
+            {!row.id.startsWith('hitl:') && (
+              <button
+                disabled={busy}
+                onClick={() => decide('return')}
+                className="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-300 text-xs font-medium hover:bg-amber-500/20 disabled:opacity-50 flex items-center gap-1.5 justify-center"
+                data-testid="approval-return"
+              >
+                Return for changes
+              </button>
+            )}
           </div>
         )}
+        {decideErr && <p className="basis-full text-xs text-rose-300" role="alert" data-testid="approval-error">{decideErr}</p>}
       </div>
       <button
         onClick={() => setOpen(o => !o)}
@@ -252,11 +290,11 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
           )}
           {isPending && (
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-slate-500">Optional reason</label>
+              <label className="text-[10px] uppercase tracking-wider text-slate-500">Reason (needed to return it)</label>
               <input
                 value={reason}
                 onChange={e => setReason(e.target.value)}
-                placeholder="Why are you approving or denying?"
+                placeholder="Why are you approving, denying or returning it?"
                 className="mt-1 w-full px-2 py-1.5 text-[11px] bg-slate-900/60 border border-slate-700 rounded-md text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500/50"
               />
             </div>
@@ -294,15 +332,17 @@ export default function ApprovalsPage() {
     return () => clearInterval(id);
   }, [load]);
 
-  const handleDecide = async (id: string, decision: 'approve' | 'deny', reason?: string) => {
+  const handleDecide = async (id: string, decision: 'approve' | 'deny' | 'return', reason?: string): Promise<string | null> => {
     setBusyId(id);
     // ids are opaque strings, agent gates look like hitl:{execution}:{gate}
-    await apiFetch(`/api/approvals/${encodeURIComponent(id)}/signoff`, {
+    const r = await apiFetch(`/api/approvals/${encodeURIComponent(id)}/signoff`, {
       method: 'POST',
       body: JSON.stringify({ decision, reason }),
+      throwOnError: false,
     });
     setBusyId(null);
     await load();
+    return r.error;
   };
 
   return (

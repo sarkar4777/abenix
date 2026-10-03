@@ -239,7 +239,7 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
     try:
         import os
         import uuid as _uuid
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+        from sqlalchemy.ext.asyncio import AsyncSession
         from sqlalchemy import text as _t
 
         db_url = (
@@ -261,7 +261,9 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
         result: dict[str, str] = {p: "pinecone" for p in passthrough}
         if not uuid_inputs:
             return result
-        engine = create_async_engine(db_url, pool_pre_ping=True)
+        from engine.db_pool import shared_engine
+
+        engine = shared_engine(db_url)
         async with AsyncSession(engine) as session:
             rows = (
                 await session.execute(
@@ -271,7 +273,6 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
                     ).bindparams(ids=uuid_inputs)
                 )
             ).all()
-        await engine.dispose()
         for r in rows:
             result[r[0]] = r[1] or "pinecone"
         return result
@@ -289,7 +290,7 @@ async def _vector_search_pgvector(
         import os
         import httpx
         import openai
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+        from sqlalchemy.ext.asyncio import AsyncSession
         from sqlalchemy import text as _t
 
         try:
@@ -321,7 +322,9 @@ async def _vector_search_pgvector(
         if not id_params:
             return []
 
-        engine = create_async_engine(db_url, pool_pre_ping=True)
+        from engine.db_pool import shared_engine
+
+        engine = shared_engine(db_url)
         results: list[SearchResult] = []
         async with AsyncSession(engine) as session:
             rows = (
@@ -339,7 +342,6 @@ async def _vector_search_pgvector(
                     ).bindparams(emb=emb_str, ids=id_params, k=top_k)
                 )
             ).all()
-        await engine.dispose()
         for r in rows:
             meta = r[5] or {}
             if not isinstance(meta, dict):

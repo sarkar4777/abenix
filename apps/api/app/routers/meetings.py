@@ -543,6 +543,7 @@ async def stream_meeting(
     m = await _load(meeting_id, user, db)
     if not m:
         raise HTTPException(status_code=404, detail="not found")
+    await db.close()
     return StreamingResponse(
         _sse_events(meeting_id),
         media_type="text/event-stream",

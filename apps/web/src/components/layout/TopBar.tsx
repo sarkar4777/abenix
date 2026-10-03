@@ -1,5 +1,6 @@
 'use client';
 
+import { NAV_ROUTE_LABELS } from '@/components/layout/Sidebar';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -55,6 +56,18 @@ const ROUTE_LABELS: Record<string, string> = {
   '/team': 'Team',
   '/creator': 'Creator Hub',
 };
+
+// exact match, then the longest known prefix, then the last path segment made readable
+function labelForPath(pathname: string): string {
+  const known: Record<string, string> = { ...NAV_ROUTE_LABELS, ...ROUTE_LABELS };
+  if (known[pathname]) return known[pathname];
+  const prefix = Object.keys(known)
+    .filter((r) => r !== '/' && pathname.startsWith(`${r}/`))
+    .sort((a, b) => b.length - a.length)[0];
+  if (prefix) return known[prefix];
+  const seg = pathname.split('/').filter(Boolean).pop() || 'dashboard';
+  return seg.replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+}
 
 const NOTIFICATION_ICONS: Record<string, typeof Bell> = {
   execution_complete: CheckCircle2,
@@ -317,7 +330,7 @@ export default function TopBar() {
     }
   };
 
-  const pageLabel = ROUTE_LABELS[pathname] || 'Dashboard';
+  const pageLabel = labelForPath(pathname);
 
   return (
     <header className="h-14 bg-[#111827]/80 backdrop-blur-xl border-b border-slate-800/50 flex items-center justify-between px-3 md:px-6 shrink-0 relative z-50">

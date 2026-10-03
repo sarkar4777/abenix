@@ -243,6 +243,7 @@ def _build_statements(
 
 class EdgarFilingsTool(BaseTool):
     name = "edgar_filings"
+    risk_tier = "low"
     description = (
         "Fetch the last 5 fiscal years of GAAP/IFRS-mapped financial statements "
         "for a US-listed issuer from SEC EDGAR XBRL company-facts API. Input: "

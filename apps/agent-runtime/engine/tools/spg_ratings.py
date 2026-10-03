@@ -26,6 +26,7 @@ USER_AGENT = "AgentForge issuer-rating-refresh contact@agentforge.local"
 
 class SPGRatingsTool(BaseTool):
     name = "spg_ratings_api"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "SPG_RATINGS_API_KEY",

@@ -16,6 +16,7 @@ EXPORT_DIR = os.environ.get("EXPORT_DIR", "/tmp/abenix_exports")
 
 class DataExporterTool(BaseTool):
     name = "data_exporter"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "SMTP_HOST",

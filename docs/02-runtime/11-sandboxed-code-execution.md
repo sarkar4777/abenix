@@ -132,3 +132,4 @@ A walkthrough for Crystal landed in commit `bcb8076` (deleted later because nobo
 
 - [`02-runtime/02-tools.md`](02-tools.md) — how a `code_asset` node fits the tool framework
 - [`/settings/sandbox`](../05-ui/03-page-catalogue.md) — the admin UI for the sandbox allow-list
+- [`02-runtime/16-warm-code-runners.md`](16-warm-code-runners.md) — warm per-tenant runners that answer calls over NATS instead of starting a Job each time

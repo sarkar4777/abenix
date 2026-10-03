@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class RealizedVolCalcTool(BaseTool):
     name = "realized_vol_calc"
+    risk_tier = "low"
     description = (
         "Compute realized volatility (annualized), 4-week momentum and a "
         "naive drift estimate from a price history array. Inputs are daily "

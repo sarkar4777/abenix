@@ -122,6 +122,7 @@ def mint_fetch_token(
 
 class InvokeAgentTool(BaseTool):
     name = "invoke_agent"
+    risk_tier = "low"
     description = (
         "Invoke a registered platform agent by slug. The platform enqueues the "
         "sub-execution, runs it on the appropriate runtime pool, and this tool "

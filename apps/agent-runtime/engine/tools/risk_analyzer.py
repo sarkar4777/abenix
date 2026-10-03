@@ -12,6 +12,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class RiskAnalyzerTool(BaseTool):
     name = "risk_analyzer"
+    risk_tier = "low"
     description = (
         "Perform quantitative risk analysis including Monte Carlo simulation, "
         "sensitivity analysis (tornado diagrams), scenario modeling (best/base/worst), "

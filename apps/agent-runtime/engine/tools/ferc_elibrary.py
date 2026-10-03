@@ -66,6 +66,7 @@ def _normalise_iso(s: str) -> str | None:
 
 class FercElibraryTool(BaseTool):
     name = "ferc_elibrary"
+    risk_tier = "low"
     description = (
         "Search FERC eLibrary for filings linked to a counterparty name. "
         "Returns matching dockets (ER, EL, QF, ES, PR types) with filing "

@@ -75,6 +75,7 @@ def _format_template(template: Any, params: dict[str, Any]) -> Any:
 
 class ConnectorCallTool(BaseTool):
     name = "connector_call"
+    risk_tier = "medium"
     description = (
         "Execute an operation against one of the tenant's configured "
         "connectors (CMMS, HRIS, telematics, weather, cost data). The "
@@ -121,7 +122,6 @@ class ConnectorCallTool(BaseTool):
             from sqlalchemy.ext.asyncio import (
                 AsyncSession,
                 async_sessionmaker,
-                create_async_engine,
             )
 
             from models.api_key import ApiKey  # type: ignore
@@ -135,50 +135,47 @@ class ConnectorCallTool(BaseTool):
                 content="DATABASE_URL not configured for runtime", is_error=True
             )
 
-        engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=1)
+        from engine.db_pool import shared_engine
+
+        engine = shared_engine(db_url)
         Session = async_sessionmaker(
             engine, class_=AsyncSession, expire_on_commit=False
         )
-        try:
-            async with Session() as session:
-                cr = await session.execute(
-                    select(Connector).where(Connector.id == connector_id)
-                )
-                c = cr.scalar_one_or_none()
-                if not c:
-                    return ToolResult(content="Connector not found", is_error=True)
+        async with Session() as session:
+            cr = await session.execute(
+                select(Connector).where(Connector.id == connector_id)
+            )
+            c = cr.scalar_one_or_none()
+            if not c:
+                return ToolResult(content="Connector not found", is_error=True)
 
-                preset_key = c.preset_key
-                preset = get_preset(preset_key) if preset_key else None
-                if not preset:
-                    return ToolResult(
-                        content=f"No preset registered for key={preset_key}",
-                        is_error=True,
-                    )
-                op = (preset.get("operations") or {}).get(operation)
-                if not op:
-                    return ToolResult(
-                        content=f"Operation '{operation}' not in preset '{preset_key}'",
-                        is_error=True,
-                    )
-
-                secret_value: str | None = None
-                if c.secret_ref:
-                    sr = await session.execute(
-                        select(ApiKey).where(ApiKey.id == c.secret_ref)
-                    )
-                    sk = sr.scalar_one_or_none()
-                    if sk:
-                        secret_value = sk.key_prefix
-                config = c.config or {}
-                base_url = c.base_url
-                auth_type = (
-                    c.auth_type.value
-                    if hasattr(c.auth_type, "value")
-                    else str(c.auth_type)
+            preset_key = c.preset_key
+            preset = get_preset(preset_key) if preset_key else None
+            if not preset:
+                return ToolResult(
+                    content=f"No preset registered for key={preset_key}",
+                    is_error=True,
                 )
-        finally:
-            await engine.dispose()
+            op = (preset.get("operations") or {}).get(operation)
+            if not op:
+                return ToolResult(
+                    content=f"Operation '{operation}' not in preset '{preset_key}'",
+                    is_error=True,
+                )
+
+            secret_value: str | None = None
+            if c.secret_ref:
+                sr = await session.execute(
+                    select(ApiKey).where(ApiKey.id == c.secret_ref)
+                )
+                sk = sr.scalar_one_or_none()
+                if sk:
+                    secret_value = sk.key_prefix
+            config = c.config or {}
+            base_url = c.base_url
+            auth_type = (
+                c.auth_type.value if hasattr(c.auth_type, "value") else str(c.auth_type)
+            )
 
         method = (op.get("method") or "GET").upper()
         path_template = op.get("path") or ""

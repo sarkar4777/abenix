@@ -286,6 +286,20 @@ DEACTIVATION_REASONS = {
 }
 
 
+async def trigger_stopped(trigger: AgentTrigger) -> str | None:
+    """The kill switch message when this trigger, or the agent it runs, is stopped."""
+    from engine import governance
+
+    await governance.ensure_fresh()
+    try:
+        governance.check(trigger.tenant_id, "trigger", str(trigger.id))
+        governance.check(trigger.tenant_id, "agent", str(trigger.agent_id))
+        governance.check(trigger.tenant_id, "pipeline", str(trigger.agent_id))
+    except governance.Stopped as s:
+        return s.message()
+    return None
+
+
 async def check_trigger_eligibility(
     db: AsyncSession,
     trigger: AgentTrigger,
@@ -580,6 +594,10 @@ async def receive_webhook(
     trigger = result.scalar_one_or_none()
     if not trigger:
         return error("Invalid or inactive webhook token", 404)
+    stopped = await trigger_stopped(trigger)
+    if stopped:
+        # 423 tells the sender to retry later, the trigger itself is untouched
+        return error(stopped, 423)
 
     # Parse incoming payload
     try:
@@ -785,6 +803,9 @@ async def run_trigger_now(
         return error(
             "Only the trigger owner, the agent owner or an admin can run it", 403
         )
+    stopped = await trigger_stopped(trigger)
+    if stopped:
+        return error(stopped, 423)
 
     agent = (
         await db.execute(select(Agent).where(Agent.id == trigger.agent_id))

@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class HttpClientTool(BaseTool):
     name = "http_client"
+    risk_tier = "medium"
     description = (
         "Make HTTP requests to external APIs and web services. Supports GET, POST, "
         "PUT, DELETE methods with custom headers and JSON payloads. Useful for "

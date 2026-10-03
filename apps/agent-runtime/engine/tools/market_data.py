@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 class MarketDataTool(BaseTool):
     name = "market_data"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "ALPHA_VANTAGE_API_KEY",

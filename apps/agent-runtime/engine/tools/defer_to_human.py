@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class DeferToHumanTool(BaseTool):
     name = "defer_to_human"
+    risk_tier = "low"
     description = (
         "Route a question back to the human the agent is representing. "
         "Call this whenever: (a) the question is outside the meeting's "

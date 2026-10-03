@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import async_session, get_current_user, get_db
 from app.core.responses import error, success
 
 
@@ -926,6 +926,9 @@ async def execute_code(
 
     JavaScript execution is not yet supported — copy the code and run it locally.
     """
+    tenant_id = user.tenant_id
+    user_id = user.id
+    await db.close()
 
     async def stream_execution():
         if body.language != "python":
@@ -944,16 +947,17 @@ async def execute_code(
             raw_key = f"af_pg_{secrets.token_urlsafe(24)}"
             key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
             key = ApiKey(
-                tenant_id=user.tenant_id,
-                user_id=user.id,
+                tenant_id=tenant_id,
+                user_id=user_id,
                 name="SDK Playground (ephemeral)",
                 key_hash=key_hash,
                 key_prefix=raw_key[:11] + "****",
                 scopes={"playground": True},
                 expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
             )
-            db.add(key)
-            await db.commit()
+            async with async_session() as s:
+                s.add(key)
+                await s.commit()
             key_id = key.id
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'message': f'Failed to mint key: {e}'})}\n\n"

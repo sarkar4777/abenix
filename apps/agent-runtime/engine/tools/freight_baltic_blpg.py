@@ -94,6 +94,7 @@ def _load_curated() -> dict[str, dict[str, Any]]:
 
 class FreightBalticBlpgTool(BaseTool):
     name = "freight_baltic_blpg"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "BALTIC_API_KEY",

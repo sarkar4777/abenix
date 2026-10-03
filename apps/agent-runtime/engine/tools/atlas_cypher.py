@@ -56,6 +56,7 @@ def _is_read_only(query: str) -> tuple[bool, str | None]:
 
 class AtlasCypherTool(BaseTool):
     name = "atlas_cypher"
+    risk_tier = "low"
     description = (
         "Run a read-only Cypher query against the Atlas knowledge graph. "
         "CREATE / MERGE / DELETE / SET / REMOVE / CALL apoc / LOAD CSV are "
@@ -149,6 +150,7 @@ class AtlasCypherTool(BaseTool):
 
 class AtlasAsOfTool(BaseTool):
     name = "atlas_as_of"
+    risk_tier = "low"
     description = (
         "Query the Atlas graph as it existed at a specific timestamp. "
         "Uses bi-temporal edge metadata (valid_from / valid_to). Returns "

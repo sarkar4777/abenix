@@ -86,7 +86,7 @@ class NATSBackend(QueueBackend):
                 return
             url = os.environ.get("NATS_URL", "nats://abenix-nats:4222")
             user = os.environ.get("NATS_USER", "abenix")
-            password = os.environ.get("NATS_PASSWORD", "abenix-dev")
+            password = os.environ.get("NATS_PASSWORD") or None
             self._nc = await self._nats.connect(url, user=user, password=password)
             self._js = self._nc.jetstream()
             # Ensure our stream exists. Idempotent.

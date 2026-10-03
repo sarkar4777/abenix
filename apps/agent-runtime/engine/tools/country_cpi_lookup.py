@@ -555,6 +555,7 @@ def _resolve_country(s: str) -> tuple[str, str, str]:
 
 class CountryCpiLookupTool(BaseTool):
     name = "country_cpi_lookup"
+    risk_tier = "low"
     description = (
         "Pull the Transparency International Corruption Perceptions Index "
         "(CPI) rank and score for any country. Accepts ISO-2, ISO-3, or a "

@@ -11,6 +11,7 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 
 class VectorSearchTool(BaseTool):
     name = "vector_search"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "PINECONE_API_KEY",

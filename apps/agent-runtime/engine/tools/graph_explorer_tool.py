@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 class GraphExplorerTool(BaseTool):
     name = "graph_explorer"
+    risk_tier = "low"
     description = (
         "Explore a knowledge graph (Neo4j) to find entities and relationships "
         "extracted from your documents via Cognify. Domain-agnostic. "

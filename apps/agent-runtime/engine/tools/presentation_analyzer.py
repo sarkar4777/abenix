@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class PresentationAnalyzerTool(BaseTool):
     name = "presentation_analyzer"
+    risk_tier = "low"
     description = (
         "Analyze PowerPoint presentations (.pptx): extract slide content, speaker notes, "
         "images, tables, charts, slide layouts, and master slides. Provides structured "

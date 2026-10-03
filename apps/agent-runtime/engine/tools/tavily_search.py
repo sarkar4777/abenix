@@ -19,6 +19,7 @@ _PROVIDERS = [
 
 class TavilySearchTool(BaseTool):
     name = "tavily_search"
+    risk_tier = "low"
     # One field per provider in _PROVIDERS. Any one of them unlocks the tool,
     # and with none set it falls back to DuckDuckGo and says so.
     config_fields = tuple(

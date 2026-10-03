@@ -36,6 +36,7 @@ _HUBS: dict[str, tuple[float, float, str]] = {
 
 class OpenMeteoTool(BaseTool):
     name = "open_meteo"
+    risk_tier = "low"
     description = (
         "Fetch free weather and marine forecasts from Open-Meteo. Use one of "
         "the shortcut location ids (USGC_HOUSTON, USGC_MONT_BELVIEU, "

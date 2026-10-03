@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import BigInteger, DateTime, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,3 +21,12 @@ class ActivityLog(UUIDMixin, TenantMixin, Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # global order, then linked per tenant by the audit chainer
+    audit_seq: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("nextval('activity_logs_audit_seq')")
+    )
+    prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    row_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chain_pos: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    pii_salt: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    pii_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)

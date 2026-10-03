@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class MeetingJoinTool(BaseTool):
     name = "meeting_join"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "LIVEKIT_API_KEY",

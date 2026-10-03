@@ -80,6 +80,7 @@ def _diff_json(a: Any, b: Any, path: str = "") -> list[dict[str, Any]]:
 
 class SemanticDiffTool(BaseTool):
     name = "semantic_diff"
+    risk_tier = "low"
     description = (
         "Diff two strings or two JSON objects, producing structured "
         "add/remove/change records. Text mode also returns a unified "

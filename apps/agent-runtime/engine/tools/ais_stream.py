@@ -33,6 +33,7 @@ _WS_URL = "wss://stream.aisstream.io/v0/stream"
 
 class AisStreamTool(BaseTool):
     name = "ais_stream"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "AISSTREAM_API_KEY",

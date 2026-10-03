@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import async_session, get_current_user, get_db
 from app.core.responses import error, success
 from app.core.config import settings
 from app.core.platform_settings import get_setting as _get_setting
@@ -1235,6 +1235,8 @@ async def _generate_config_core(
         db, str(user.tenant_id)
     )
     code_assets_context = await _get_code_assets_context(db, str(user.tenant_id))
+    # end the read transaction before the LLM call
+    await db.close()
     pipeline_examples_context = await _get_pipeline_examples_context()
     sandbox_policy_context = await _get_sandbox_policy_context(str(user.tenant_id))
 
@@ -1376,7 +1378,8 @@ async def build_iterative(
         )
 
     async def generator_fn(desc: str, mode: str, repair: str) -> dict[str, Any]:
-        return await _generate_config_core(desc, mode, repair, llm, db, user)
+        async with async_session() as s:
+            return await _generate_config_core(desc, mode, repair, llm, s, user)
 
     async def validator_fn(config: dict[str, Any]) -> dict[str, Any]:
         return await _validate_config_core(config)
@@ -1465,6 +1468,7 @@ async def build_iterative(
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
+    await db.close()
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",

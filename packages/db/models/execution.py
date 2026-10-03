@@ -96,6 +96,12 @@ class Execution(UUIDMixin, TenantMixin, Base):
         UUID(as_uuid=True), ForeignKey("executions.id"), nullable=True
     )
     retry_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # governance and provenance, what tier the run reached and exactly what ran
+    risk_tier: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    risk_reasons: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    agent_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provenance: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     agent: Mapped["Agent"] = relationship(back_populates="executions")
     user: Mapped["User"] = relationship(back_populates="executions")

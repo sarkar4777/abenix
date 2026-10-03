@@ -61,6 +61,7 @@ def _get_overrides() -> dict[str, dict[str, float]]:
 
 class SentimentAnalyzerTool(BaseTool):
     name = "sentiment_analyzer"
+    risk_tier = "low"
     description = (
         "Analyze market sentiment from text, news, or structured data. Produces "
         "sentiment scores, trend direction, volatility indicators, and confidence "

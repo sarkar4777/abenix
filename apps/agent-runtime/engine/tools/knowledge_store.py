@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 class KnowledgeStoreTool(BaseTool):
     name = "knowledge_store"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "OPENAI_API_KEY",

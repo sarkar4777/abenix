@@ -29,12 +29,28 @@ data:
       max_file_store: 5GB
     }
     accounts: {
-      SYS: { users: [ { user: "sys", password: "sys" } ] }
+      SYS: { users: [ { user: "sys", password: $NATS_SYS_PASSWORD } ] }
       # JetStream must be explicitly enabled per account, otherwise
       # pull-subscribe returns "JetStream not enabled for account".
       A: {
         jetstream: enabled
-        users: [ { user: "abenix", password: "abenix-dev" } ]
+        users: [
+          { user: "abenix", password: $NATS_PASSWORD }
+          {{- $cr := default dict .Values.codeRunners }}
+          {{- if $cr.enabled }}
+          {{- $crn := default dict $cr.nats }}
+          # code runners may only take code.> requests and answer them
+          {
+            user: {{ default "coderun" $crn.user | quote }}
+            password: $CODERUN_NATS_PASSWORD
+            permissions: {
+              publish: { allow: ["_INBOX.>"] }
+              subscribe: { allow: ["code.>"] }
+              allow_responses: true
+            }
+          }
+          {{- end }}
+        ]
       }
     }
     system_account: SYS
@@ -76,6 +92,10 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: nats
+      annotations:
+        # restarts NATS when the code runner login is added or changed
+        {{- $crr := default dict .Values.codeRunners }}
+        abenix.io/users: {{ printf "%v/%v" $crr.enabled (toJson (default dict $crr.nats)) | sha256sum | trunc 12 | quote }}
     spec:
       containers:
         - name: nats
@@ -84,6 +104,16 @@ spec:
           # already sets store_dir. Having both trips the v2.10 config
           # validator ("Duplicate 'store_dir' configuration").
           args: ["-c", "/etc/nats/nats.conf", "-js"]
+          # nats.conf reads the passwords from these, so none sit in the ConfigMap
+          env:
+            - name: NATS_PASSWORD
+              valueFrom: { secretKeyRef: { name: abenix-secrets, key: NATS_PASSWORD } }
+            - name: NATS_SYS_PASSWORD
+              valueFrom: { secretKeyRef: { name: abenix-secrets, key: NATS_SYS_PASSWORD } }
+            {{- if (default dict .Values.codeRunners).enabled }}
+            - name: CODERUN_NATS_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Release.Name }}-code-runner-nats, key: password } }
+            {{- end }}
           ports:
             - { name: client, containerPort: 4222 }
             - { name: monitor, containerPort: 8222 }

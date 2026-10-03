@@ -87,6 +87,7 @@ async def _ensure_local(model_id: str, file_uri: str, tenant_id: str) -> str:
 
 class MLModelTool(BaseTool):
     name = "ml_model"
+    risk_tier = "low"
     description = (
         "Run inference on registered ML models (sklearn, PyTorch, ONNX, XGBoost). "
         "Operations: 'list_models' (catalog), 'predict' (single inference), "

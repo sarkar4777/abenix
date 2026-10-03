@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-from engine import credentials
+from engine import credentials, governance, risk
 from engine.llm_router import LLMResponse, LLMRouter
 from engine.metrics import (
     agent_active_streams,
@@ -293,6 +293,11 @@ class ExecutionResult:
     # cannot be certified as grounded.
     grounding_violation: bool = False
     grounding_block_source: str = ""  # no_knowledge_search_invocation
+    # tier the run ended at and what raised it, see engine.governance
+    risk_tier: str = ""
+    risk_reasons: list[dict[str, Any]] = field(default_factory=list)
+    # set when a kill switch or tier policy refused the run before it started
+    governance_refusal: dict[str, Any] | None = None
 
     def get_trace_summary(self) -> list[dict[str, Any]]:
         return [t.to_dict() for t in self.node_traces]
@@ -318,8 +323,13 @@ class AgentExecutor:
         tenant_id: str = "",
         require_knowledge_search: bool = False,
         require_tools: list[str] | None = None,
+        risk_tier: str = "",
+        agent_name: str = "",
     ) -> None:
         self.llm_router = llm_router
+        self.risk_tier = risk.normalize(risk_tier)
+        if agent_name:
+            self.agent_name = agent_name
         self.tool_registry = tool_registry
         if tool_config:
             tool_registry.apply_tool_config(
@@ -417,7 +427,87 @@ class AgentExecutor:
             return None
         return resp if isinstance(resp, LLMResponse) and resp.content else None
 
+    def _begin_governed_run(self) -> tuple[Any, Any, Any]:
+        parent = governance.current()
+        # the stored tier wins over a lower one a caller passed
+        base = risk.highest([self.risk_tier, governance.agent_tier(self.agent_id)])
+        if parent is not None:
+            # a nested agent never runs below the run that called it
+            base = risk.highest([base, parent.tier])
+        ctx = governance.RunContext(
+            tenant_id=str(getattr(self, "tenant_id", "") or ""),
+            execution_id=str(self.execution_id or ""),
+            agent_name=str(getattr(self, "agent_name", "") or ""),
+            base_tier=base,
+            tier=base,
+            scope="agent",
+            subject_id=str(self.agent_id or ""),
+            parent=parent,
+        )
+        if base != "low":
+            ctx.reasons.append({"tier": base, "source": "agent", "detail": ""})
+        return ctx, parent, governance.begin_run(ctx)
+
+    @staticmethod
+    def _end_governed_run(ctx: Any, parent: Any, token: Any, who: str) -> None:
+        governance.end_run(token)
+        if parent is not None:
+            parent.raise_to(ctx.tier, f"agent:{who}")
+
+    async def _governance_refusal(self) -> dict[str, Any] | None:
+        """Kill switches and the tier's model list, checked before any token is spent."""
+        await governance.ensure_fresh()
+        tenant = str(getattr(self, "tenant_id", "") or "")
+        try:
+            governance.check(tenant, "agent", str(self.agent_id or "*"))
+            governance.check(tenant, "model", str(self.model or "*"))
+        except governance.Stopped as s:
+            return {
+                "code": "KILL_SWITCH",
+                "message": s.message(),
+                "scope": s.scope,
+                "target": s.target,
+            }
+        ctx = governance.current()
+        tier = ctx.tier if ctx else self.risk_tier
+        if not risk.model_allowed(governance.policy(tenant, tier), self.model):
+            return {
+                "code": "MODEL_NOT_ALLOWED",
+                "message": (
+                    f"The model {self.model} is not on the allowed list for {tier} risk work "
+                    "in this tenant. Pick an allowed model or ask an admin to add it "
+                    "under Admin, Risk and Controls."
+                ),
+                "scope": "model",
+                "target": str(self.model or ""),
+            }
+        return None
+
     async def invoke(self, input_message: str) -> ExecutionResult:
+        await governance.ensure_fresh()
+        ctx, parent, token = self._begin_governed_run()
+        try:
+            refusal = await self._governance_refusal()
+            if refusal is not None:
+                result = ExecutionResult(
+                    output=refusal["message"],
+                    model=self.model,
+                    governance_refusal=refusal,
+                )
+            else:
+                result = await self._invoke_governed(input_message)
+        finally:
+            self._end_governed_run(
+                ctx,
+                parent,
+                token,
+                str(getattr(self, "agent_name", "") or self.agent_id),
+            )
+        result.risk_tier = ctx.tier
+        result.risk_reasons = list(ctx.reasons)
+        return result
+
+    async def _invoke_governed(self, input_message: str) -> ExecutionResult:
         from engine.tracing import get_tracer, current_trace_id
 
         credentials.set_tenant(getattr(self, "tenant_id", ""))
@@ -935,6 +1025,45 @@ class AgentExecutor:
         )
 
     async def stream(self, input_message: str) -> AsyncGenerator[ExecutionEvent, None]:
+        await governance.ensure_fresh()
+        ctx, parent, token = self._begin_governed_run()
+        try:
+            refusal = await self._governance_refusal()
+            if refusal is not None:
+                yield ExecutionEvent(event="token", data=refusal["message"])
+                yield ExecutionEvent(
+                    event="done",
+                    data={
+                        "total_tokens": 0,
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cost": 0.0,
+                        "duration_ms": 0,
+                        "model": self.model,
+                        "error": refusal["message"],
+                        "failure_code": refusal["code"],
+                        "governance_refusal": refusal,
+                        "risk_tier": ctx.tier,
+                        "risk_reasons": list(ctx.reasons),
+                    },
+                )
+                return
+            async for ev in self._stream_governed(input_message):
+                if ev.event == "done" and isinstance(ev.data, dict):
+                    ev.data["risk_tier"] = ctx.tier
+                    ev.data["risk_reasons"] = list(ctx.reasons)
+                yield ev
+        finally:
+            self._end_governed_run(
+                ctx,
+                parent,
+                token,
+                str(getattr(self, "agent_name", "") or self.agent_id),
+            )
+
+    async def _stream_governed(
+        self, input_message: str
+    ) -> AsyncGenerator[ExecutionEvent, None]:
         from engine.tracing import get_tracer, current_trace_id
 
         tracer = get_tracer("abenix.agent_executor")
@@ -1741,7 +1870,11 @@ def _ensure_tool_classes() -> None:
         AtlasDescribeTool,
     )
     from engine.tools.atlas_cypher import AtlasCypherTool, AtlasAsOfTool
+    from engine.tools.decision_tools import DECISION_TOOLS
+    from engine.tools.source_tools import SOURCE_TOOLS
 
+    _CONTEXT_TOOL_FACTORIES.update(DECISION_TOOLS)
+    _CONTEXT_TOOL_FACTORIES.update(SOURCE_TOOLS)
     _CONTEXT_TOOL_FACTORIES.update(
         {
             "memory_store": MemoryStoreTool,
@@ -1905,6 +2038,21 @@ def build_tool_registry(
         context_tools["sandboxed_job"] = lambda: SandboxCls(
             tenant_id=tenant_id,
             redis_url=_redis_url,
+        )
+    from engine.tools.decision_tools import DECISION_TOOLS as _DECISION_TOOLS
+    from engine.tools.source_tools import SOURCE_TOOLS as _SOURCE_TOOLS
+
+    _acting_user = ""
+    if acting_subject and isinstance(acting_subject, dict):
+        _acting_user = str(
+            acting_subject.get("user_id") or acting_subject.get("sub") or ""
+        )
+    for _dname, _DCls in {**_DECISION_TOOLS, **_SOURCE_TOOLS}.items():
+        context_tools[_dname] = lambda Cls=_DCls: Cls(
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            user_id=user_id or _acting_user,
+            agent_name=agent_name,
         )
     CodeAssetCls = _CONTEXT_TOOL_FACTORIES.get("code_asset")
     if CodeAssetCls:

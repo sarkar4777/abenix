@@ -73,6 +73,7 @@ def _safe_eval(node: ast.AST) -> Any:
 
 class CalculatorTool(BaseTool):
     name = "calculator"
+    risk_tier = "low"
     description = (
         "Evaluate a mathematical expression safely. Supports basic arithmetic, "
         "exponentiation, and math functions (sqrt, log, sin, cos, etc.)."

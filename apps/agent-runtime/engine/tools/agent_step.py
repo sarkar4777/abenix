@@ -94,6 +94,7 @@ class AgentStepTool(BaseTool):
     # The LLM provider keys, declared here so they sit on the admin screen.
     config_fields = PROVIDER_CONFIG_FIELDS
     name = "agent_step"
+    risk_tier = "low"
     description = (
         "Run a full AI agent as a pipeline step. The agent has its own LLM loop, "
         "can use tools, and iterates autonomously until it produces a final answer. "

@@ -1,0 +1,188 @@
+{{- /*
+Warm code runners. The runner Deployments themselves are created at call
+time by engine/code_runners.py, one per tenant and asset version. This file
+ships what is shared: the runner NATS login, the network policies that
+select runner pods by label, and the reaper that drains old versions and
+scales idle runners to zero.
+*/}}
+{{- $cr := default dict .Values.codeRunners }}
+{{- if $cr.enabled }}
+{{- if ne (default "celery" .Values.scaling.queueBackend) "nats" }}
+{{- fail "codeRunners.enabled needs scaling.queueBackend=nats, the runners are called over NATS" }}
+{{- end }}
+{{- $release := .Release.Name }}
+{{- $ns := .Release.Namespace }}
+{{- $nats := default dict $cr.nats }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $release }}-code-runner-nats
+  namespace: {{ $ns }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  user: {{ default "coderun" $nats.user | quote }}
+  {{- $crPass := $nats.password | default "" }}
+  {{- if not $crPass }}
+  {{- $liveCr := lookup "v1" "Secret" $ns (printf "%s-code-runner-nats" $release) }}
+  {{- if and $liveCr $liveCr.data (hasKey $liveCr.data "password") }}
+  {{- $crPass = index $liveCr.data "password" | b64dec }}
+  {{- else }}
+  {{- $crPass = randAlphaNum 32 }}
+  {{- end }}
+  {{- end }}
+  password: {{ $crPass | quote }}
+{{- if ne (toString (default "true" $cr.networkPolicy)) "false" }}
+{{- range $mode := list "none" "open" }}
+---
+# Runner pods ({{ $mode }} network) reach DNS, the API for the code fetch and NATS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $release }}-code-runner-{{ $mode }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "abenix.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: abenix-code-runner
+      abenix.io/network: {{ $mode }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: abenix-prometheus
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keda
+      ports:
+        - port: 9464
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api
+      ports:
+        - port: 8000
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+      ports:
+        - port: 4222
+          protocol: TCP
+    {{- if eq $mode "open" }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+    {{- end }}
+{{- end }}
+{{- if $.Values.networkPolicy.enabled }}
+---
+# The API policy only admits web and ingress, runners need the fetch endpoint too
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $release }}-api-from-code-runners
+  namespace: {{ $ns }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: abenix-code-runner
+      ports:
+        - port: 8000
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- $img := .Values.scaling.agentRuntimeImage | default (index .Values "agent-runtime" "image") }}
+{{- $reaper := default dict $cr.reaper }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $release }}-code-runner-reaper
+  namespace: {{ $ns }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+spec:
+  schedule: {{ default "*/2 * * * *" $reaper.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: code-runner-reaper
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+          containers:
+            - name: reaper
+              image: "{{ $img.repository }}:{{ $img.tag }}"
+              imagePullPolicy: {{ $img.pullPolicy | default "IfNotPresent" }}
+              command: ["python3", "-m", "engine.code_runners", "reap"]
+              envFrom:
+                - secretRef:
+                    name: {{ $release }}-secrets
+                - configMapRef:
+                    name: {{ $release }}-config
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 384Mi }
+              volumeMounts:
+                - name: shared-data
+                  mountPath: /data
+                  readOnly: true
+          volumes:
+            - name: shared-data
+              {{- if .Values.sharedData.usePVC }}
+              persistentVolumeClaim:
+                claimName: abenix-shared-data
+              {{- else }}
+              hostPath:
+                path: {{ .Values.sharedDataHostPath | default "/var/lib/abenix/data" }}
+                type: DirectoryOrCreate
+              {{- end }}
+{{- end }}

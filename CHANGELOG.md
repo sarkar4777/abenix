@@ -1,5 +1,41 @@
 # Changelog
 
+## v2.5.2 — 2026-10-03
+
+### Added
+- Warm code runners. Each tenant and code asset version gets its own runner Deployment, built once and called over NATS (`code.<tenant>.<asset>.<version>`). A warm call adds about 2 ms over the code's run time in process mode and under 1 ms in handler mode, against about 4.6 s for a one-off Job. The first call after scale to zero runs as a Job while the runner warms. Idle runners scale to zero, old versions drain and are removed by a reaper CronJob. Runners run non-root on a read-only root with no capabilities, the NATS login and the user code sit in separate containers and uids, and closed runners only reach DNS, the API and NATS. Off by default in the chart, on in values-local and values-azure (`codeRunners`). See apps/code-runner/README.md.
+- Approvals can be returned for changes. The reviewer has to say what to fix, and a returned decision version goes back to draft with the note on it.
+- Approvals escalate. Each risk tier sets how long an approval may wait before admins are notified (off for low and medium, 24 hours for high, 4 for critical by default). Editable on the risk tier policies page.
+- Approval gates raised by high and critical runs get the tier's sign-off count and signing rules, whatever the agent asked for.
+- Evaluation suites for agents and pipelines: golden cases with JSON field, pattern, schema, tool, cost, duration, citation and model-judged assertions, scored runs with bounded concurrency, run and model comparison, cron and model-change reruns, and an `eval.completed` event
+- Tier policies gain `require_eval_pass`, on for high and critical by default. Publishing then needs a passing gating-suite run against the exact config being published
+- Save as eval case on the execution page turns a past run into a case with suggested assertions
+- Source Watch. Watch a web page, PDF, spreadsheet, CSV, JSON or feed on a schedule. Each change is kept as an immutable snapshot with a text or row diff and a materiality hint, and emits `source.changed`. Fetches are SSRF checked, rate limited per host, honour a tenant host allowlist and pause after repeated failures. Snapshots can feed a knowledge base with citations back to the snapshot. Agents get `source_list`, `source_snapshot_get`, `source_diff` and `source_check`.
+- Python and TypeScript SDKs: the decision lifecycle (new draft, save, import rules, propose, withdraw, publish plan, diff, update), a Source Watch client, an events client for webhook and run subscriptions with signature checks, return for changes on approvals, agent create, update and exact slug lookup, and the caller's permissions. Refused calls raise `AbenixError` with the platform's message and code.
+- `scripts/lint-agent-seeds.py` also validates agent seeds of standalone apps that opt in with `<app>/seeds/manifest.yaml`
+
+### Changed
+
+### Fixed
+- The code runner reaper crashed when LOG_LEVEL was lower case.
+- deploy.sh reported the Grafana port as taken by an unknown process when it was its own forward.
+- Decision drafts could not be saved from the browser. The CORS preflight rejected If-Match.
+- Platform events never reached the NATS bus. The dispatcher connected without credentials.
+- Eval cases saved from a run failed on the next run because the suggested duration and cost limits were too tight.
+- Confirm dialogs are announced as dialogs, with a labelled close button and focus on Cancel. Sidebar groups report whether they are open.
+- Code asset, ML model and KB invocation logging opened a new database login per call. It now reuses one pool per process.
+- Knowledge search, hybrid search, connector calls, meeting speech and the memory tools reused nothing either. They now share a pooled engine, and the memory tools no longer leak a pool when they fail.
+- Warm code calls are faster under load. The asset, its secrets and the sandbox gate are cached for 2 seconds and the last test write moved off the call path. On one runner a warm call adds about 3 ms and a 200 call burst runs at about 57 calls a second, up from 22.
+- The API image the cluster builds kept uvicorn's 5 second keep-alive, so reused client sockets were reset. It now keeps them for 75 seconds and the worker count comes from API_WORKERS.
+- Code runner images upgrade OS packages and pip at build time.
+- Under heavy load valid callers could get 401 or 500. Auth and capability lookups now load once per user when the cache is cold, and a busy database answers 503 with Retry-After.
+- NATS passwords are generated per install and kept in Secrets. They used to be the same fixed strings in every cluster, with the application password in a ConfigMap. Set secrets.natsPassword, secrets.natsSysPassword or codeRunners.nats.password to supply your own. Running code runners pick up a changed password on their next restart, which their health check triggers within about two minutes.
+- Expired approvals emit approval.resolved, and an expired decision publish approval no longer leaves its version in proposed.
+- Redelivering a dead webhook gives it the full retry budget again.
+- Switching a subscription to webhook returns its new signing secret once.
+- Docs for warm code runners, Source Watch, evaluation suites and outbound events, plus updates to approvals, governance, env vars and the load test baseline.
+- Outbound webhooks can reach named in-cluster receivers through eventsAllowedInternalHosts (EVENTS_ALLOWED_INTERNAL_HOSTS). Names must match exactly, every other private address stays blocked.
+
 ## v2.5.1 — 2026-10-02
 
 ### Added

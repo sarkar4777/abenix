@@ -35,6 +35,7 @@ import {
   FileJson,
   Inbox,
   Brain,
+  FlaskConical,
   Webhook,
   Wrench,
   X,
@@ -46,10 +47,16 @@ import {
   Network,
   Archive,
   Video,
+  ShieldAlert,
+  UserCog,
+  Scale,
+  Bell,
+  Radar,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/stores/sidebar';
 import { useIsMobile } from '@/hooks/useMediaQuery';
+import { holds, type MyPermissions } from '@/lib/capabilities';
 
 // Feature flag: hide marketplace/billing for enterprise self-hosted deployments
 // Set NEXT_PUBLIC_ENABLE_MONETIZATION=false to hide Marketplace, Creator Hub, Billing
@@ -62,6 +69,7 @@ interface NavItem {
   href: string;
   feature?: string;          // permissions.features key — must be true
   adminOnly?: boolean;       // hard role gate (admin only)
+  capability?: string;       // permissions.capabilities must hold it
   badge?: string;            // tiny badge (e.g. "new", count)
   external?: boolean;        // open in new tab (e.g. /docs)
 }
@@ -92,6 +100,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Agent Builder',     icon: Wand2,    href: '/builder',           feature: 'use_builder' },
       { label: 'Tools Catalogue',   icon: Wrench,   href: '/tools',             feature: 'use_builder' },
+      { label: 'Decisions',         icon: Scale,    href: '/decisions',         capability: 'decisions.view' },
+      { label: 'Source Watch',      icon: Radar,    href: '/sources' },
       { label: 'Code Runner',       icon: Code2,    href: '/code-runner',       feature: 'use_code_runner' },
       { label: 'ML Models',         icon: Brain,    href: '/ml-models',         feature: 'use_ml_models' },
       { label: 'Knowledge Bases',   icon: Database, href: '/knowledge',         feature: 'use_kb' },
@@ -109,6 +119,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'SDK Playground',  icon: Code2, href: '/sdk-playground',  feature: 'use_sdk_playground' },
       { label: 'Load Playground', icon: Gauge, href: '/load-playground', feature: 'use_load_playground' },
       { label: 'Triggers',        icon: Zap,   href: '/triggers',        feature: 'use_triggers' },
+      { label: 'Evaluations',     icon: FlaskConical, href: '/evals',   capability: 'evals.run' },
       { label: 'Meetings',        icon: Video, href: '/meetings',        feature: 'use_meetings' },
     ],
   },
@@ -150,10 +161,14 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Tool Configuration', icon: Wrench,     href: '/admin/tool-config',  feature: 'manage_settings' },
       { label: 'LLM Pricing',       icon: DollarSign,  href: '/admin/llm-pricing',  feature: 'manage_settings' },
       { label: 'Connectors',        icon: Plug,        href: '/admin/connectors',   feature: 'manage_settings' },
+      { label: 'Events',            icon: Bell,        href: '/settings/webhooks',  capability: 'events.manage' },
       // Moderation + Alerts already render under MONITOR for view_alerts
       { label: 'Review Queue',      icon: ShieldCheck, href: '/review-queue',       feature: 'review_queue' },
+      // Governance follows capabilities, so a tenant can hand it to non-admins
+      { label: 'Risk & Controls',   icon: ShieldAlert, href: '/admin/risk',         capability: 'risk.view' },
       // People + access
       { label: 'Team',              icon: Users,       href: '/settings/team',      feature: 'manage_team' },
+      { label: 'Permissions',       icon: UserCog,     href: '/admin/permissions',  capability: 'permissions.manage' },
     ],
   },
   {
@@ -191,11 +206,7 @@ function useMiniStats() {
 }
 
 function useMyPermissions() {
-  const { data } = useApi<{
-    role: string;
-    is_admin: boolean;
-    features: Record<string, boolean>;
-  }>('/api/me/permissions');
+  const { data } = useApi<MyPermissions>('/api/me/permissions');
   return data;
 }
 
@@ -245,6 +256,7 @@ function SidebarNav({
     .map(group => {
       const items = group.items.filter(item => {
         if (item.adminOnly && !isAdmin) return false;
+        if (item.capability && !holds(perms?.capabilities, item.capability)) return false;
         if (item.feature && features[item.feature] === false) return false;
         if (item.feature && !perms && ADMIN_DEFAULT_FEATURES.includes(item.feature) && !isAdmin) return false;
         return true;
@@ -263,6 +275,7 @@ function SidebarNav({
             {!collapsed && !isPinned && (
               <button
                 onClick={() => toggleGroup(group.id)}
+                aria-expanded={open}
                 className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors"
               >
                 <ChevronRight
@@ -404,6 +417,11 @@ function SidebarFooter({
     </div>
   );
 }
+
+// route -> label, so the top bar names every page the way the sidebar does
+export const NAV_ROUTE_LABELS: Record<string, string> = Object.fromEntries(
+  NAV_GROUPS.flatMap((g) => g.items.filter((i) => !i.external).map((i) => [i.href, i.label])),
+);
 
 export default function Sidebar() {
   const isMobile = useIsMobile();
