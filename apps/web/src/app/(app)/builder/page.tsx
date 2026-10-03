@@ -50,6 +50,7 @@ import BuilderTopBar, { type BuilderMode } from '@/components/builder/BuilderTop
 import PipelineCanvas from '@/components/builder/pipeline/PipelineCanvas';
 import PipelineToolbar from '@/components/builder/pipeline/PipelineToolbar';
 import StepConfigPanel from '@/components/builder/pipeline/StepConfigPanel';
+import type { InputVariable as PipelineInputVariable } from '@/components/builder/InputVariablesEditor';
 import PipelineExecutionViewer from '@/components/builder/pipeline/PipelineExecutionViewer';
 import { usePipelineStore } from '@/components/builder/pipeline/usePipelineStore';
 import {
@@ -739,10 +740,8 @@ export default function BuilderPage() {
       modelConfig.tools = selectedTools;
     }
 
-    // Save input variables if defined
-    if (config.input_variables && config.input_variables.length > 0) {
-      modelConfig.input_variables = config.input_variables.filter((v) => v.name.trim() !== '');
-    }
+    // an empty list clears parameters the user removed
+    modelConfig.input_variables = (config.input_variables || []).filter((v) => v.name.trim() !== '');
 
     // Example prompts — what the YAML seeds call `example_prompts`. Stored
     // inside model_config so the info page / marketplace card can pick
@@ -1232,6 +1231,8 @@ export default function BuilderPage() {
           <PipelineModeContent
             showExecutionViewer={showExecutionViewer}
             setShowExecutionViewer={setShowExecutionViewer}
+            inputVariables={(config.input_variables || []) as PipelineInputVariable[]}
+            onInputVariablesChange={(vars) => updateConfig({ input_variables: vars })}
           />
         )}
       </div>
@@ -1244,9 +1245,13 @@ export default function BuilderPage() {
 function PipelineModeContent({
   showExecutionViewer,
   setShowExecutionViewer,
+  inputVariables,
+  onInputVariablesChange,
 }: {
   showExecutionViewer: boolean;
   setShowExecutionViewer: (v: boolean) => void;
+  inputVariables: PipelineInputVariable[];
+  onInputVariablesChange: (vars: PipelineInputVariable[]) => void;
 }) {
   const pipelineStore = usePipelineStore();
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
@@ -1503,6 +1508,8 @@ B: {{${b}.response}}`);
         allSteps={pipelineStore.steps}
         onUpdate={(id, updates) => pipelineStore.updateStep(id, updates)}
         onClose={() => pipelineStore.setSelectedStep(null)}
+        inputVariables={inputVariables}
+        onInputVariablesChange={onInputVariablesChange}
       />
     </>
   );

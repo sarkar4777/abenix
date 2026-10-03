@@ -19,6 +19,7 @@ import { apiFetch } from '@/lib/api-client';
 import { usePipelineStore, type ValidationError } from './usePipelineStore';
 import { TOOL_DOCS, type ToolParam } from '@/lib/tool-docs';
 import ModelPicker from '@/components/ModelPicker';
+import InputVariablesEditor, { type InputVariable } from '@/components/builder/InputVariablesEditor';
 import { ModelStatusBanner } from '@/components/ModelStatusBanner';
 
 // Props
@@ -28,6 +29,8 @@ interface StepConfigPanelProps {
   allSteps: PipelineStep[];
   onUpdate: (stepId: string, updates: Partial<PipelineStep>) => void;
   onClose: () => void;
+  inputVariables?: InputVariable[];
+  onInputVariablesChange?: (vars: InputVariable[]) => void;
 }
 
 // Constants
@@ -190,10 +193,13 @@ function FieldErrorGroup({
 
 function PipelineOverview({
   allSteps,
-  onClose,
+  inputVariables,
+  onInputVariablesChange,
 }: {
   allSteps: PipelineStep[];
   onClose: () => void;
+  inputVariables?: InputVariable[];
+  onInputVariablesChange?: (vars: InputVariable[]) => void;
 }) {
   const validation = validatePipeline(allSteps);
 
@@ -263,6 +269,17 @@ function PipelineOverview({
             </div>
           )}
         </div>
+
+        {onInputVariablesChange && (
+          <div className="pt-2 border-t border-slate-800">
+            <InputVariablesEditor
+              value={inputVariables || []}
+              onChange={onInputVariablesChange}
+              subject="pipeline"
+              templateHint
+            />
+          </div>
+        )}
 
         {/* Info */}
         <div className="pt-2 border-t border-slate-800">
@@ -463,6 +480,132 @@ function isLongTextField(param: ToolParam): boolean {
   return longNames.some((n) => param.name.toLowerCase().includes(n));
 }
 
+function JsonObjectField({
+  id,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(() =>
+    value === undefined || value === null ? '' : typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value),
+  );
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <>
+      <textarea
+        id={id}
+        value={text}
+        spellCheck={false}
+        placeholder={placeholder}
+        onChange={(e) => {
+          const t = e.target.value;
+          setText(t);
+          if (!t.trim()) {
+            setErr(null);
+            onChange(undefined);
+            return;
+          }
+          try {
+            const v = JSON.parse(t);
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+              setErr(null);
+              onChange(v);
+            } else setErr('This must be a JSON object, like {"key": "value"}.');
+          } catch {
+            setErr('Not valid JSON yet. Keys and text values need double quotes.');
+          }
+        }}
+        rows={6}
+        aria-invalid={!!err}
+        className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-xs font-mono text-white resize-y focus:border-cyan-500 focus:outline-none ${err ? 'border-red-500/60' : 'border-slate-700'}`}
+      />
+      {err ? (
+        <p className="text-[10px] text-red-400 mt-1" role="alert" data-testid={`${id}-error`}>{err}</p>
+      ) : (
+        <TemplatePreview value={text} />
+      )}
+    </>
+  );
+}
+
+interface PublishedDecision {
+  key: string;
+  name: string;
+  required_facts?: string[];
+  published?: { version: number }[];
+}
+
+function DecisionKeyField({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [rows, setRows] = useState<PublishedDecision[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<PublishedDecision[]>('/api/decisions', { silent: true, throwOnError: false }).then((r) => {
+      if (cancelled) return;
+      if (r.data) setRows(r.data);
+      else setFailed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const known = (rows || []).some((d) => d.key === value);
+  const picked = (rows || []).find((d) => d.key === value);
+  if (failed) {
+    return (
+      <input
+        id={id}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="decision key, e.g. freight.surcharge"
+        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:border-cyan-500 focus:outline-none"
+      />
+    );
+  }
+  return (
+    <>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={rows === null}
+        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none"
+      >
+        <option value="">{rows === null ? 'Loading decisions…' : rows.length ? 'Pick a decision…' : 'No decisions yet'}</option>
+        {value && !known && rows !== null && <option value={value}>{value} (not found)</option>}
+        {(rows || []).map((d) => (
+          <option key={d.key} value={d.key}>
+            {d.name} ({d.key}){(d.published || []).length ? '' : ' — not published'}
+          </option>
+        ))}
+      </select>
+      {rows !== null && rows.length === 0 && (
+        <p className="text-[10px] text-slate-500 mt-1">Create and publish one on the <a href="/decisions" className="text-cyan-400 hover:underline">Decisions</a> page.</p>
+      )}
+      {picked && !(picked.published || []).length && (
+        <p className="text-[10px] text-amber-400 mt-1">This decision has no published version yet, so the step will fail until it is published.</p>
+      )}
+      {picked && (picked.required_facts || []).length > 0 && (
+        <p className="text-[10px] text-slate-500 mt-1">Needs facts: {(picked.required_facts || []).join(', ')}</p>
+      )}
+    </>
+  );
+}
+
 function SchemaArgumentsForm({
   toolName,
   args,
@@ -524,8 +667,11 @@ function SchemaArgumentsForm({
               {param.required && <span className="text-cyan-400">*</span>}
             </label>
 
-            {/* ENUM -> Dropdown */}
-            {param.enum ? (
+            {/* decision key -> pick from the tenant's decisions */}
+            {toolName.startsWith('decision_') && param.name === 'decision' ? (
+              <DecisionKeyField id={fieldId} value={String(value ?? '')} onChange={(v) => updateField(param.name, v)} />
+            ) : /* ENUM -> Dropdown */
+            param.enum ? (
               <select
                 id={fieldId}
                 value={String(value ?? param.default ?? '')}
@@ -672,23 +818,19 @@ function SchemaArgumentsForm({
                   </div>
                 )}
               </div>
-            ) : /* OBJECT -> Small JSON textarea */
+            ) : /* OBJECT -> JSON textarea that keeps what is typed */
             param.type === 'object' ? (
-              <textarea
+              <JsonObjectField
                 id={fieldId}
-                value={
-                  typeof value === 'object'
-                    ? JSON.stringify(value, null, 2)
-                    : String(value || '{}')
-                }
-                onChange={(e) => {
-                  try {
-                    updateField(param.name, JSON.parse(e.target.value));
-                  } catch {
-                  }
+                value={value}
+                onChange={(v) => {
+                  if (v === undefined) {
+                    const next = { ...args };
+                    delete next[param.name];
+                    onArgsChange(next);
+                  } else updateField(param.name, v);
                 }}
-                rows={4}
-                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-white resize-none focus:border-cyan-500 focus:outline-none"
+                placeholder={param.description || '{}'}
               />
             ) : (
               <input
@@ -1725,6 +1867,8 @@ export default function StepConfigPanel({
   allSteps,
   onUpdate,
   onClose,
+  inputVariables,
+  onInputVariablesChange,
 }: StepConfigPanelProps) {
   const [tab, setTab] = useState<Tab>('general');
 
@@ -1742,7 +1886,7 @@ export default function StepConfigPanel({
 
   // Show pipeline overview when no step is selected
   if (!step) {
-    return <PipelineOverview allSteps={allSteps} onClose={onClose} />;
+    return <PipelineOverview allSteps={allSteps} onClose={onClose} inputVariables={inputVariables} onInputVariablesChange={onInputVariablesChange} />;
   }
 
   const stepIcon = getStepIcon(step.toolName);
@@ -2067,6 +2211,7 @@ export default function StepConfigPanel({
               </>
             ) : (
               <SchemaArgumentsForm
+                key={step.id}
                 toolName={step.toolName}
                 args={step.arguments || {}}
                 onArgsChange={handleArgumentsChange}

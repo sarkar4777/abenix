@@ -285,6 +285,8 @@ export default function AgentChatPage() {
                   </label>
                   {v.type === 'select' && v.options ? (
                     <select
+                      aria-label={v.name}
+                      data-testid={`chat-param-${v.name}`}
                       value={paramValues[v.name] || (v.default as string) || ''}
                       onChange={(e) => setParamValues((prev) => ({ ...prev, [v.name]: e.target.value }))}
                       className="w-full px-2 py-1.5 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:border-cyan-500 focus:outline-none"
@@ -296,6 +298,7 @@ export default function AgentChatPage() {
                     <label className="flex items-center gap-2 text-xs text-slate-300">
                       <input
                         type="checkbox"
+                        data-testid={`chat-param-${v.name}`}
                         checked={paramValues[v.name] === 'true'}
                         onChange={(e) => setParamValues((prev) => ({ ...prev, [v.name]: e.target.checked ? 'true' : 'false' }))}
                         className="rounded border-slate-600"
@@ -304,6 +307,8 @@ export default function AgentChatPage() {
                     </label>
                   ) : (
                     <input
+                      aria-label={v.name}
+                      data-testid={`chat-param-${v.name}`}
                       type={v.type === 'number' ? 'number' : 'text'}
                       value={paramValues[v.name] || (v.default as string) || ''}
                       placeholder={v.type === 'connection_string' ? 'postgresql://user:pass@host:5432/db' : v.type === 'url' ? 'https://...' : `Enter ${v.name}`}

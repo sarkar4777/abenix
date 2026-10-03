@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Layers, Loader2, Plus, Save } from 'lucide-react';
+import { ArrowLeft, Layers, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { useApi } from '@/hooks/useApi';
 import { holds, useMyPermissions } from '@/lib/capabilities';
@@ -16,12 +16,13 @@ function fromLines(text: string) {
   return Array.from(new Set(text.split(/[\n,\t]/).map((s) => s.trim()).filter(Boolean)));
 }
 
-function Editor({ row, onSaved }: { row: SetRow; onSaved: () => void }) {
+function Editor({ row, onSaved, onDeleted }: { row: SetRow; onSaved: () => void; onDeleted: () => void }) {
   const { data } = useApi<SetRow>(`/api/decision-reference-sets/${row.key}`);
   const [text, setText] = useState('');
   const [name, setName] = useState(row.name);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => { if (data?.values) setText(toLines(data.values)); }, [data]);
   const vals = fromLines(text);
   async function save() {
@@ -30,6 +31,14 @@ function Editor({ row, onSaved }: { row: SetRow; onSaved: () => void }) {
     setBusy(false);
     if (r.error) setMsg(r.error);
     else { setMsg(r.data.version !== row.version ? `Saved as version ${r.data.version}. ${r.data.note}` : 'No change to the values.'); onSaved(); }
+  }
+  async function remove() {
+    setBusy(true);
+    const r = await apiFetch<any>(`/api/decision-reference-sets/${row.key}`, { method: 'DELETE', throwOnError: false });
+    setBusy(false);
+    setConfirmDelete(false);
+    if (r.error) setMsg(r.error);
+    else onDeleted();
   }
   return (
     <div className="mt-3 grid gap-3 md:grid-cols-[1fr_260px]">
@@ -44,7 +53,20 @@ function Editor({ row, onSaved }: { row: SetRow; onSaved: () => void }) {
         <button type="button" onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-cyan-500 text-white disabled:opacity-40" data-testid={`refset-save-${row.key}`}>
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
         </button>
-        {msg && <p className="text-xs text-cyan-200" role="status">{msg}</p>}
+        {msg && <p className="text-xs text-cyan-200" role="status" data-testid={`refset-msg-${row.key}`}>{msg}</p>}
+        <div className="pt-3 border-t border-slate-800">
+          {confirmDelete ? (
+            <div className="space-y-1.5">
+              <p className="text-xs text-slate-300">Delete {row.key}? Published decisions keep the values they were compiled with.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={remove} disabled={busy} className="px-2 py-1 rounded text-xs bg-rose-600 text-white disabled:opacity-40" data-testid={`refset-delete-confirm-${row.key}`}>Delete</button>
+                <button type="button" onClick={() => setConfirmDelete(false)} className="px-2 py-1 rounded text-xs text-slate-300">Keep</button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setConfirmDelete(true)} className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-rose-300" data-testid={`refset-delete-${row.key}`}><Trash2 className="w-3.5 h-3.5" /> Delete set</button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -88,7 +110,7 @@ export default function ReferenceSetsPage() {
           </div>
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} placeholder={'IV27\nZE2\nHS2'} className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 font-mono" aria-label="Values" data-testid="refset-new-values" />
           <p className="text-[11px] text-slate-500">{fromLines(text).length} values. One per line, or paste a spreadsheet column.</p>
-          {err && <p className="text-xs text-rose-300">{err}</p>}
+          {err && <p className="text-xs text-rose-300" role="alert" data-testid="refset-create-error">{err}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setCreating(false)} className="px-3 py-1.5 text-sm text-slate-300">Cancel</button>
             <button type="button" onClick={create} disabled={!name.trim() || !autoKey} className="px-3 py-1.5 rounded-md text-sm bg-cyan-500 text-white disabled:opacity-40" data-testid="refset-create-go">Create</button>
@@ -107,7 +129,7 @@ export default function ReferenceSetsPage() {
                 <span className="text-xs font-mono text-slate-500">{r.key}</span>
                 <span className="ml-auto text-xs text-slate-400">{r.count} values · version {r.version}</span>
               </button>
-              {open === r.key && (canAuthor ? <Editor row={r} onSaved={mutate} /> : <p className="mt-2 text-xs text-slate-500">Editing needs the decisions.author capability.</p>)}
+              {open === r.key && (canAuthor ? <Editor row={r} onSaved={mutate} onDeleted={() => { setOpen(null); mutate(); }} /> : <p className="mt-2 text-xs text-slate-500">Editing needs the decisions.author capability.</p>)}
             </li>
           ))}
         </ul>

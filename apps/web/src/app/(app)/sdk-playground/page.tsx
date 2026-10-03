@@ -7,8 +7,8 @@ import {
   FileCode2, Boxes, Zap, AlertCircle, Database, BookOpen,
   ShieldAlert, ChevronDown,
 } from 'lucide-react';
-import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
 
 interface Asset {
   id: string;
@@ -64,7 +64,14 @@ const USE_CASES: UseCase[] = [
 ];
 
 export default function SDKPlaygroundPage() {
-  const { data: agents } = useApi<Asset[]>('/api/agents?limit=100');
+  // a tenant can have more than one page of agents, search must see all of them
+  const [agents, setAgents] = useState<Asset[] | null>(null);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
+  useEffect(() => {
+    fetchAllAgents<Asset>()
+      .then(r => setAgents(r.agents))
+      .catch(e => { setAgents([]); setAgentsError(e?.message || 'Could not load agents'); });
+  }, []);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [sdk, setSdk] = useState<'python' | 'typescript' | 'java'>('python');
   const [useCase, setUseCase] = useState<string>('one_shot');
@@ -122,11 +129,30 @@ export default function SDKPlaygroundPage() {
 
   const fillFromExample = (example: string) => {
     if (!assetContext) return;
-    const vars = assetContext.input_variables || [];
-    const messageVar = vars.find(v => v.name === 'message') || vars[0];
-    if (messageVar) {
-      setInputValues(prev => ({ ...prev, [messageVar.name]: example }));
+    setInputValues(prev => ({ ...prev, message: example }));
+  };
+
+  // every declared input goes in the context, the message is its own field
+  const liveRequest = () => {
+    const message = (inputValues.message || '').trim() || 'run';
+    const context: Record<string, unknown> = {};
+    for (const v of assetContext?.input_variables || []) {
+      if (v.name === 'message') continue;
+      const raw = inputValues[v.name];
+      if (raw !== undefined && raw !== '') {
+        if (v.type === 'integer' || v.type === 'number') {
+          const n = Number(raw);
+          context[v.name] = Number.isFinite(n) ? n : raw;
+        } else if (v.type === 'boolean') {
+          context[v.name] = raw === 'true' || raw === '1';
+        } else if (v.type === 'object' || v.type === 'array' || raw.trim().startsWith('{') || raw.trim().startsWith('[')) {
+          try { context[v.name] = JSON.parse(raw); } catch { context[v.name] = raw; }
+        } else {
+          context[v.name] = raw;
+        }
+      }
     }
+    return { message, context };
   };
 
   const runLive = async () => {
@@ -134,27 +160,7 @@ export default function SDKPlaygroundPage() {
     setLiveRunning(true);
     setLiveResult(null);
     try {
-      const messageVar =
-        (assetContext?.input_variables || []).find(v => v.name === 'message')
-        || (assetContext?.input_variables || [])[0];
-      const message = messageVar ? (inputValues[messageVar.name] || '') : (inputValues.message || '').trim() || 'run';
-      const context: Record<string, unknown> = {};
-      for (const v of assetContext?.input_variables || []) {
-        if (messageVar && v.name === messageVar.name) continue;
-        const raw = inputValues[v.name];
-        if (raw !== undefined && raw !== '') {
-          if (v.type === 'integer' || v.type === 'number') {
-            const n = Number(raw);
-            context[v.name] = Number.isFinite(n) ? n : raw;
-          } else if (v.type === 'boolean') {
-            context[v.name] = raw === 'true' || raw === '1';
-          } else if (v.type === 'object' || v.type === 'array' || raw.trim().startsWith('{') || raw.trim().startsWith('[')) {
-            try { context[v.name] = JSON.parse(raw); } catch { context[v.name] = raw; }
-          } else {
-            context[v.name] = raw;
-          }
-        }
-      }
+      const { message, context } = liveRequest();
       const body: Record<string, unknown> = {
         message,
         wait_mode: 'until_gate',
@@ -187,6 +193,7 @@ export default function SDKPlaygroundPage() {
           sdk,
           use_case: useCase,
           user_prompt: userPrompt,
+          ...liveRequest(),
         }),
       });
       const data = res.data || {};
@@ -289,7 +296,14 @@ export default function SDKPlaygroundPage() {
                 placeholder="Search agents..."
                 className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none mb-2"
               />
-              <div className="max-h-60 overflow-y-auto space-y-1">
+              <div className="max-h-60 overflow-y-auto space-y-1" data-testid="playground-agent-list">
+                {agents === null && (
+                  <div className="flex items-center gap-2 text-[11px] text-slate-400 px-1 py-2"><Loader2 className="w-3 h-3 animate-spin" /> Loading agents...</div>
+                )}
+                {agentsError && <p className="text-[11px] text-rose-300 px-1 py-2" role="alert">{agentsError}</p>}
+                {agents !== null && !agentsError && filteredAgents.length === 0 && (
+                  <p className="text-[11px] text-slate-500 px-1 py-2">{search ? `No agent matches "${search}".` : 'No agents yet. Build one in the Agent Builder.'}</p>
+                )}
                 {filteredAgents.map(a => (
                   <button
                     key={a.id}
@@ -372,6 +386,7 @@ export default function SDKPlaygroundPage() {
               >
                 {generating ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Sparkles className="w-3.5 h-3.5" /> Generate Code</>}
               </button>
+              {selectedAsset && <p className="text-[10px] text-slate-500 mt-2">The code uses the message and inputs filled in under Live inputs.</p>}
             </div>
 
             {/* Inputs panel — driven by the agent/pipeline's declared
@@ -407,6 +422,20 @@ export default function SDKPlaygroundPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
+                    {!(assetContext.input_variables || []).some(v => v.name === 'message') && (
+                      <div>
+                        <label htmlFor="live-message" className="text-[10px] font-mono text-slate-300 mb-1 block">message <span className="text-[9px] uppercase tracking-wider text-slate-500">optional</span></label>
+                        <textarea
+                          id="live-message"
+                          data-testid="live-message-input"
+                          value={inputValues.message || ''}
+                          onChange={e => setInputValues(prev => ({ ...prev, message: e.target.value }))}
+                          rows={2}
+                          placeholder={assetContext.is_pipeline ? 'Optional note for the run' : 'What should the agent do?'}
+                          className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white font-mono focus:border-cyan-500 focus:outline-none"
+                        />
+                      </div>
+                    )}
                     {(assetContext.example_prompts || []).length > 0 && (
                       <details className="rounded-lg bg-slate-900/40 border border-slate-700/50">
                         <summary className="cursor-pointer flex items-center justify-between px-3 py-2 text-[11px] text-slate-300">
@@ -439,6 +468,8 @@ export default function SDKPlaygroundPage() {
                           </label>
                           {v.enum && Array.isArray(v.enum) && v.enum.length > 0 ? (
                             <select
+                              aria-label={v.name}
+                              data-testid={`live-input-${v.name}`}
                               value={inputValues[v.name] || ''}
                               onChange={e => setInputValues(prev => ({ ...prev, [v.name]: e.target.value }))}
                               className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white focus:border-cyan-500 focus:outline-none"
@@ -450,6 +481,8 @@ export default function SDKPlaygroundPage() {
                             </select>
                           ) : isLong ? (
                             <textarea
+                              aria-label={v.name}
+                              data-testid={`live-input-${v.name}`}
                               value={inputValues[v.name] || ''}
                               onChange={e => setInputValues(prev => ({ ...prev, [v.name]: e.target.value }))}
                               placeholder={v.description?.slice(0, 200) || ''}
@@ -459,6 +492,8 @@ export default function SDKPlaygroundPage() {
                           ) : (
                             <input
                               type="text"
+                              aria-label={v.name}
+                              data-testid={`live-input-${v.name}`}
                               value={inputValues[v.name] || ''}
                               onChange={e => setInputValues(prev => ({ ...prev, [v.name]: e.target.value }))}
                               placeholder={v.description?.slice(0, 60) || ''}

@@ -281,7 +281,8 @@ build_core_service() {
       err "${svc}: image build failed, the running image was left as it is"
       return 1
     fi
-    if ! "${hostenv[@]}" minikube image load "${image}" || ! "${hostenv[@]}" minikube image load "${registry}/${svc}:latest"; then
+    # minikube image load keeps a tag it already has, so a rebuild at the same SHA never landed
+    if ! (set -o pipefail; "${hostenv[@]}" docker save "${image}" "${registry}/${svc}:latest" | docker load | tail -2); then
       err "${svc}: could not load the image into minikube"
       return 1
     fi
