@@ -32,8 +32,10 @@ def test_lock_keys_are_distinct():
         scheduler.ARCHIVE_LOCK_KEY,
         scheduler.SWEEP_LOCK_KEY,
         scheduler.DRIFT_LOCK_KEY,
+        scheduler.ESCALATE_LOCK_KEY,
+        scheduler.VACUUM_LOCK_KEY,
     }
-    assert len(keys) == 4
+    assert len(keys) == 6
 
 
 @pytest.mark.asyncio
@@ -79,3 +81,31 @@ def test_scan_interval_has_a_floor(monkeypatch):
     assert scheduler.drift_scan_interval_seconds() == 30
     monkeypatch.delenv("DRIFT_SCAN_INTERVAL_SECONDS")
     assert scheduler.drift_scan_interval_seconds() == 300
+
+
+@pytest.mark.asyncio
+async def test_pinecone_vacuum_skips_without_the_lock():
+    seen: list[int] = []
+    enqueue = AsyncMock(return_value=True)
+    with patch.object(scheduler, "advisory_lock", _lock(False, seen)), patch(
+        "app.workers.kb_reembed.enqueue_pinecone_vacuum", enqueue
+    ):
+        await scheduler.enqueue_pinecone_vacuum()
+    assert seen == [scheduler.VACUUM_LOCK_KEY]
+    enqueue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pinecone_vacuum_enqueues_under_the_lock():
+    seen: list[int] = []
+    enqueue = AsyncMock(return_value=True)
+    with patch.object(scheduler, "advisory_lock", _lock(True, seen)), patch(
+        "app.workers.kb_reembed.enqueue_pinecone_vacuum", enqueue
+    ):
+        await scheduler.enqueue_pinecone_vacuum()
+    enqueue.assert_awaited_once()
+
+
+def test_pinecone_vacuum_is_scheduled():
+    src = inspect.getsource(scheduler.start_scheduler)
+    assert "enqueue_pinecone_vacuum" in src

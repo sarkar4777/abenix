@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import uuid as _uuid
+from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
@@ -658,17 +659,254 @@ class AtlasDescribeTool(BaseTool):
             return ToolResult(content=f"atlas_describe failed: {e}", is_error=True)
 
 
+def _parse_as_of(raw: str | None) -> datetime | None:
+    if not raw:
+        return datetime.now(timezone.utc)
+    s = str(raw).strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _as_dt(v: Any) -> datetime | None:
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    if isinstance(v, str) and v:
+        return _parse_as_of(v)
+    return None
+
+
+def _in_window(row: dict[str, Any], as_of: datetime) -> bool:
+    created = _as_dt(row.get("created_at"))
+    vf = _as_dt(row.get("valid_from"))
+    vt = _as_dt(row.get("valid_to"))
+    if created and created > as_of:
+        return False
+    if vf and vf > as_of:
+        return False
+    if vt and vt <= as_of:
+        return False
+    return True
+
+
+def _shape_as_of(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    label_like: str,
+    kind: str,
+    limit: int,
+) -> dict[str, Any]:
+    by_id = {str(n["id"]): n for n in nodes}
+    picked = [
+        n
+        for n in nodes
+        if (not label_like or label_like in str(n.get("label") or "").lower())
+        and (not kind or str(n.get("kind") or "") == kind)
+    ]
+    picked_ids = {str(n["id"]) for n in picked}
+    filtered = bool(label_like or kind)
+    rel = [
+        e
+        for e in edges
+        if str(e.get("from_node_id")) in by_id
+        and str(e.get("to_node_id")) in by_id
+        and (
+            not filtered
+            or str(e.get("from_node_id")) in picked_ids
+            or str(e.get("to_node_id")) in picked_ids
+        )
+    ]
+    return {
+        "node_total": len(picked),
+        "edge_total": len(rel),
+        "truncated": len(picked) > limit or len(rel) > limit,
+        "nodes": [
+            {
+                "id": str(n["id"]),
+                "label": n.get("label"),
+                "kind": n.get("kind"),
+                "description": n.get("description") or "",
+            }
+            for n in picked[:limit]
+        ],
+        "edges": [
+            {
+                "id": str(e["id"]),
+                "label": e.get("label"),
+                "from": {
+                    "id": str(e["from_node_id"]),
+                    "label": by_id[str(e["from_node_id"])].get("label"),
+                },
+                "to": {
+                    "id": str(e["to_node_id"]),
+                    "label": by_id[str(e["to_node_id"])].get("label"),
+                },
+            }
+            for e in rel[:limit]
+        ],
+    }
+
+
+class AtlasAsOfTool(BaseTool):
+    name = "atlas_as_of"
+    risk_tier = "low"
+    description = (
+        "Show an atlas graph as it stood at a past moment. Reads the newest "
+        "saved snapshot taken at or before the timestamp, or the live graph "
+        "when nothing changed since then, and honours valid_from / valid_to "
+        "on live rows. Use for 'what did the ontology say on date X' and audit "
+        "questions. Optionally narrow to nodes whose label contains a term."
+    )
+    input_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "graph_id": {
+                "type": "string",
+                "description": "Optional. Defaults to the agent's primary atlas.",
+            },
+            "as_of": {
+                "type": "string",
+                "description": "ISO-8601 date or timestamp, UTC when no offset is given. Defaults to now.",
+            },
+            "label_like": {
+                "type": "string",
+                "description": "Only nodes whose label contains this text (case-insensitive), plus their edges.",
+            },
+            "kind": {
+                "type": "string",
+                "enum": ["concept", "instance", "document", "property"],
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max nodes and max edges returned.",
+                "default": 100,
+                "minimum": 1,
+                "maximum": 1000,
+            },
+        },
+    }
+
+    def __init__(
+        self,
+        tenant_id: str,
+        agent_id: str = "",
+        allowed_graph_ids: list[str] | None = None,
+    ) -> None:
+        self.tenant_id = tenant_id
+        self.agent_id = agent_id
+        self.allowed_graph_ids = allowed_graph_ids or []
+
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        as_of = _parse_as_of(arguments.get("as_of"))
+        if as_of is None:
+            return ToolResult(
+                content="as_of must be an ISO-8601 date or timestamp", is_error=True
+            )
+        label_like = (arguments.get("label_like") or "").strip().lower()
+        kind = (arguments.get("kind") or "").strip()
+        limit = max(1, min(int(arguments.get("limit") or 100), 1000))
+        try:
+            pool = await _pool()
+            async with pool.acquire() as conn:
+                gid = await _resolve_graph_id(
+                    conn,
+                    self.tenant_id,
+                    self.allowed_graph_ids,
+                    arguments.get("graph_id"),
+                )
+                if not gid:
+                    return ToolResult(
+                        content="No accessible atlas graph found.", is_error=True
+                    )
+                gid_uuid = _uuid.UUID(gid)
+                graph = await conn.fetchrow(
+                    "SELECT created_at, updated_at, version FROM atlas_graphs WHERE id = $1",
+                    gid_uuid,
+                )
+                out: dict[str, Any] = {"graph_id": gid, "as_of": as_of.isoformat()}
+                created = _as_dt(graph["created_at"]) if graph else None
+                if created and as_of < created:
+                    out.update(
+                        found=False,
+                        reason=f"the graph was created at {created.isoformat()}",
+                    )
+                    return ToolResult(content=json.dumps(out, indent=2))
+
+                updated = _as_dt(graph["updated_at"]) if graph else None
+                if updated is None or as_of >= updated:
+                    node_rows = await conn.fetch(
+                        "SELECT id, label, kind::text AS kind, description, "
+                        "created_at, valid_from, valid_to FROM atlas_nodes "
+                        "WHERE graph_id = $1",
+                        gid_uuid,
+                    )
+                    edge_rows = await conn.fetch(
+                        "SELECT id, from_node_id, to_node_id, label, created_at, "
+                        "valid_from, valid_to FROM atlas_edges WHERE graph_id = $1",
+                        gid_uuid,
+                    )
+                    nodes = [dict(r) for r in node_rows if _in_window(dict(r), as_of)]
+                    edges = [dict(r) for r in edge_rows if _in_window(dict(r), as_of)]
+                    out.update(
+                        found=True,
+                        source="live",
+                        version=graph["version"] if graph else None,
+                    )
+                else:
+                    snap = await conn.fetchrow(
+                        "SELECT id, version, label, created_at, payload "
+                        "FROM atlas_snapshots WHERE graph_id = $1 AND created_at <= $2 "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        gid_uuid,
+                        as_of,
+                    )
+                    if not snap:
+                        first = await conn.fetchval(
+                            "SELECT min(created_at) FROM atlas_snapshots WHERE graph_id = $1",
+                            gid_uuid,
+                        )
+                        reason = "no snapshot was saved at or before as_of"
+                        if first:
+                            reason += f", the earliest is {_as_dt(first).isoformat()}"
+                        out.update(found=False, reason=reason)
+                        return ToolResult(content=json.dumps(out, indent=2))
+                    payload = snap["payload"]
+                    if isinstance(payload, str):
+                        payload = json.loads(payload)
+                    payload = payload or {}
+                    nodes = list(payload.get("nodes") or [])
+                    edges = list(payload.get("edges") or [])
+                    out.update(
+                        found=True,
+                        source="snapshot",
+                        version=snap["version"],
+                        snapshot={
+                            "id": str(snap["id"]),
+                            "version": snap["version"],
+                            "label": snap["label"],
+                            "created_at": _as_dt(snap["created_at"]).isoformat(),
+                        },
+                    )
+                out.update(
+                    _shape_as_of(
+                        nodes, edges, label_like=label_like, kind=kind, limit=limit
+                    )
+                )
+                return ToolResult(content=json.dumps(out, indent=2, default=str))
+        except Exception as e:
+            logger.exception("atlas_as_of failed")
+            return ToolResult(content=f"atlas_as_of failed: {e}", is_error=True)
+
+
 ATLAS_TOOL_NAMES = {
     "atlas_query": AtlasQueryTool,
     "atlas_traverse": AtlasTraverseTool,
     "atlas_search_grounded": AtlasSearchGroundedTool,
     "atlas_describe": AtlasDescribeTool,
+    "atlas_as_of": AtlasAsOfTool,
 }
-
-try:
-    from engine.tools.atlas_cypher import AtlasAsOfTool, AtlasCypherTool
-
-    ATLAS_TOOL_NAMES["atlas_cypher"] = AtlasCypherTool
-    ATLAS_TOOL_NAMES["atlas_as_of"] = AtlasAsOfTool
-except Exception:
-    pass

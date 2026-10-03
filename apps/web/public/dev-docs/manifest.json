@@ -41,6 +41,10 @@
         {
           "slug": "01-architecture/06-atlas-knowledge-engine",
           "title": "Atlas + Knowledge Engine"
+        },
+        {
+          "slug": "01-architecture/07-governance",
+          "title": "Governance: risk tiers, kill switches, capabilities, audit"
         }
       ]
     },
@@ -111,6 +115,26 @@
         {
           "slug": "02-runtime/15-v2-knowledge-enterprise",
           "title": "v2.0 enterprise knowledge stack (ACL / OCR / temporal graph / GDPR)"
+        },
+        {
+          "slug": "02-runtime/16-warm-code-runners",
+          "title": "Warm code runners"
+        },
+        {
+          "slug": "02-runtime/17-source-watch",
+          "title": "Source Watch"
+        },
+        {
+          "slug": "02-runtime/18-evaluation-suites",
+          "title": "Evaluation suites"
+        },
+        {
+          "slug": "02-runtime/19-outbound-events",
+          "title": "Outbound events + webhooks"
+        },
+        {
+          "slug": "02-runtime/20-decision-service",
+          "title": "Decision service"
         }
       ]
     },
@@ -145,6 +169,14 @@
           "title": "ERD + conventions"
         },
         {
+          "slug": "04-data-model/01-agents",
+          "title": "Agents table"
+        },
+        {
+          "slug": "04-data-model/02-executions",
+          "title": "Executions table"
+        },
+        {
           "slug": "04-data-model/03-knowledge",
           "title": "Knowledge + Atlas + Cognify (incl. v2 bi-temporal + ACL + GDPR)"
         },
@@ -153,12 +185,16 @@
           "title": "Polymorphic resource_shares"
         },
         {
-          "slug": "04-data-model/01-agents",
-          "title": "Agents table"
+          "slug": "04-data-model/05-governance-decisions",
+          "title": "Governance, approvals and decisions"
         },
         {
-          "slug": "04-data-model/02-executions",
-          "title": "Executions table"
+          "slug": "04-data-model/06-evals-sources-events",
+          "title": "Evals, sources and events"
+        },
+        {
+          "slug": "04-data-model/07-tools-and-operations",
+          "title": "Tools, models, integrations, archives"
         },
         {
           "slug": "document-versioning",
@@ -197,6 +233,10 @@
           "title": "Deploy overview"
         },
         {
+          "slug": "06-deployment/01-images",
+          "title": "Container images"
+        },
+        {
           "slug": "06-deployment/02-helm",
           "title": "Helm chart structure"
         },
@@ -217,8 +257,8 @@
           "title": "Kubernetes specifics"
         },
         {
-          "slug": "06-deployment/01-images",
-          "title": "Container images"
+          "slug": "06-deployment/deploy-only-trap",
+          "title": "The --only deploy trap"
         },
         {
           "slug": "06-deployment/disaster-recovery",
@@ -227,10 +267,6 @@
         {
           "slug": "06-deployment/load-test-baseline",
           "title": "Load-test baseline"
-        },
-        {
-          "slug": "06-deployment/deploy-only-trap",
-          "title": "The --only deploy trap"
         }
       ]
     },
@@ -299,6 +335,22 @@
         {
           "slug": "08-howto/08-tool-configuration",
           "title": "Tool configuration"
+        },
+        {
+          "slug": "08-howto/09-decisions",
+          "title": "Decisions: business rules without code"
+        },
+        {
+          "slug": "08-howto/10-evals",
+          "title": "Add an evaluation suite to an agent"
+        },
+        {
+          "slug": "08-howto/11-governance",
+          "title": "Set risk tiers, kill switches and permission sets"
+        },
+        {
+          "slug": "08-howto/12-source-watch-and-events",
+          "title": "Watch a source and react when it changes"
         }
       ]
     },
@@ -315,20 +367,20 @@
           "title": "Environment variables"
         },
         {
-          "slug": "09-reference/03-glossary",
-          "title": "Glossary"
-        },
-        {
-          "slug": "09-reference/05-sso",
-          "title": "SSO / OIDC sign-in"
-        },
-        {
           "slug": "09-reference/02-cli",
           "title": "CLI cheatsheet"
         },
         {
+          "slug": "09-reference/03-glossary",
+          "title": "Glossary"
+        },
+        {
           "slug": "09-reference/04-platform-settings",
           "title": "Platform settings"
+        },
+        {
+          "slug": "09-reference/05-sso",
+          "title": "SSO / OIDC sign-in"
         },
         {
           "slug": "sso",

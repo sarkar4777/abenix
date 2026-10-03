@@ -1,7 +1,8 @@
-"""Hybrid Search Engine â€” combines vector similarity with knowledge graph traversal"""
+"""Hybrid Search Engine — combines vector similarity with knowledge graph traversal"""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ from engine.knowledge.neo4j_client import get_neo4j_driver, is_neo4j_available
 from engine.knowledge.prompts import SEARCH_ENTITY_EXTRACTION
 
 logger = logging.getLogger(__name__)
+
+RERANK_CANDIDATES = 50
 
 
 class EmbeddingProviderError(Exception):
@@ -32,19 +35,39 @@ def _normalize_azure_endpoint(raw: str) -> str:
     return s.rstrip("/")
 
 
-async def _embed_query(query: str) -> list[float] | None:
-    """Embed a search query using Azure OpenAI if configured, else direct
-    OpenAI. Returns None when no provider is configured so callers can fall
-    back to other backends instead of treating it as a hard error."""
+def _model_names(model: str | None) -> tuple[str, str, dict]:
+    """(openai model, azure deployment, extra request kwargs) for a collection's model."""
+    import os
+
+    try:
+        import embedding_models as em
+
+        return (
+            em.provider_model(model),
+            em.azure_deployment(model),
+            em.request_kwargs(model),
+        )
+    except ImportError:
+        name = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        return name, os.environ.get("AZURE_EMBEDDING_DEPLOYMENT", name), {}
+
+
+async def _embed_query(query: str, model: str | None = None) -> list[float] | None:
+    """Embed a search query with the model the collection was indexed with.
+
+    Azure OpenAI if configured, else direct OpenAI. Returns None when no
+    provider is configured so callers can fall back to other backends instead
+    of treating it as a hard error."""
     import os
 
     # Same fallback the ingest path uses, and it has to be the same one:
     # vectors from two schemes share a space and nothing else.
     try:
+        from local_embeddings import MODEL_ID as _LOCAL_ID
         from local_embeddings import embed as _local_embed
         from local_embeddings import is_enabled as _local_enabled
 
-        if _local_enabled():
+        if model == _LOCAL_ID or _local_enabled():
             return _local_embed(query)
     except ImportError:
         pass
@@ -63,7 +86,7 @@ async def _embed_query(query: str) -> list[float] | None:
             )
             _AZURE_STRIP_WARNED = True
     openai_key = os.environ.get("OPENAI_API_KEY", "")
-    openai_model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+    openai_model, deployment, extra = _model_names(model)
 
     if azure_key and azure_endpoint:
         try:
@@ -76,8 +99,9 @@ async def _embed_query(query: str) -> list[float] | None:
                     "AZURE_OPENAI_API_VERSION", "2024-10-01-preview"
                 ),
             )
-            deployment = os.environ.get("AZURE_EMBEDDING_DEPLOYMENT", openai_model)
-            resp = await client.embeddings.create(input=query, model=deployment)
+            resp = await client.embeddings.create(
+                input=query, model=deployment, **extra
+            )
             return resp.data[0].embedding
         except Exception:
             # Azure failed live — fall through to OpenAI if a direct key is
@@ -90,10 +114,7 @@ async def _embed_query(query: str) -> list[float] | None:
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(api_key=openai_key)
-    resp = await client.embeddings.create(
-        model=openai_model,
-        input=query,
-    )
+    resp = await client.embeddings.create(model=openai_model, input=query, **extra)
     return resp.data[0].embedding
 
 
@@ -121,6 +142,52 @@ class HybridSearchResponse:
     entities_found: list[str] = field(default_factory=list)
     graph_hops: int = 0
     latency_ms: int = 0
+    hidden_documents: int = 0
+
+
+def _acl_scope(hidden: set[str]) -> str:
+    if not hidden:
+        return ""
+    return hashlib.sha256(",".join(sorted(hidden)).encode()).hexdigest()[:16]
+
+
+async def _rerank(
+    query: str, results: list[SearchResult], top_k: int
+) -> list[SearchResult]:
+    from engine.knowledge import reranker
+
+    if reranker.provider() == "none" or len(results) <= 1:
+        return results[:top_k]
+    pool = results[:RERANK_CANDIDATES]
+    items = [{"content": r.content, "_i": i} for i, r in enumerate(pool)]
+    try:
+        ranked = await reranker.rerank(query, items, top_k=top_k)
+    except Exception as e:
+        logger.warning("rerank failed, keeping retrieval order: %s", e)
+        return results[:top_k]
+    out: list[SearchResult] = []
+    for row in ranked:
+        r = pool[row["_i"]]
+        if "reranker" in row:
+            r.metadata = {
+                **r.metadata,
+                "retrieval_score": r.score,
+                "reranker": row["reranker"],
+            }
+            r.score = float(row.get("score", r.score))
+        out.append(r)
+    return out
+
+
+def _attach_citations(results: list[SearchResult]) -> None:
+    from engine.knowledge.reranker import build_citation
+
+    for r in results:
+        if r.source_type != "chunk" or "citation" in r.metadata:
+            continue
+        c = build_citation({**r.metadata, "filename": r.source})
+        if c is not None:
+            r.metadata = {**r.metadata, "citation": c.to_dict()}
 
 
 async def hybrid_search(
@@ -132,11 +199,23 @@ async def hybrid_search(
     graph_weight: float = 0.4,
     tenant_id: str = "",
     use_cache: bool = True,
+    user_id: str = "",
+    user_role: str = "",
+    agent_id: str = "",
 ) -> HybridSearchResponse:
-    """Execute hybrid search across vector store and knowledge graph."""
+    """Execute hybrid search across vector store and knowledge graph.
+
+    user_id / user_role / agent_id feed the per-document ACL: documents
+    restricted by document_grants are dropped before ranking."""
     import time
 
+    from engine.knowledge.document_acl import hidden_for_search
+
     start = time.monotonic()
+
+    hidden = await hidden_for_search(
+        kb_ids, user_id=user_id, user_role=user_role, agent_id=agent_id
+    )
 
     # KB v2 query cache (5-min TTL). Best-effort: redis miss/failure
     # falls through to live search.
@@ -150,6 +229,7 @@ async def hybrid_search(
             query=query,
             mode=mode.value,
             top_k=top_k,
+            scope=_acl_scope(hidden),
         )
         cached = await search_cache.get(cache_k)
         if cached:
@@ -162,21 +242,28 @@ async def hybrid_search(
                     entities_found=cached.get("entities_found", []),
                     graph_hops=cached.get("graph_hops", 0),
                     latency_ms=int((time.monotonic() - start) * 1000),
+                    hidden_documents=len(hidden),
                 )
                 return resp
             except Exception:
-                # Schema drift on cached blob â€” ignore and recompute.
+                # Schema drift on cached blob — ignore and recompute.
                 pass
 
-    response = HybridSearchResponse(results=[], mode_used=mode.value)
+    response = HybridSearchResponse(
+        results=[], mode_used=mode.value, hidden_documents=len(hidden)
+    )
 
+    from engine.knowledge import reranker
+
+    fetch = top_k * 2
+    if reranker.provider() != "none":
+        fetch = max(fetch, RERANK_CANDIDATES)
     vector_results: list[SearchResult] = []
     if mode in (SearchMode.VECTOR, SearchMode.HYBRID):
-        vector_results = await _vector_search(query, kb_ids, top_k=top_k * 2)
+        vector_results = await _vector_search(query, kb_ids, top_k=fetch, hidden=hidden)
         response.vector_results_count = len(vector_results)
 
     graph_results: list[SearchResult] = []
-    graph_entities: list[str] = []
 
     if mode in (SearchMode.GRAPH, SearchMode.HYBRID) and await is_neo4j_available():
         # Extract entity mentions from the query
@@ -184,22 +271,23 @@ async def hybrid_search(
         response.entities_found = query_entities
 
         if query_entities:
-            graph_results, graph_entities = await _graph_search(
+            graph_results, _found = await _graph_search(
                 query_entities,
                 kb_ids,
                 depth=graph_depth,
+                hidden=hidden,
             )
             response.graph_results_count = len(graph_results)
             response.graph_hops = graph_depth
 
     if mode == SearchMode.VECTOR:
-        response.results = vector_results[:top_k]
+        ranked = vector_results
     elif mode == SearchMode.GRAPH:
-        response.results = graph_results[:top_k]
+        ranked = graph_results
     else:
-        # Hybrid: combine and re-rank
-        merged = _merge_results(vector_results, graph_results, graph_weight)
-        response.results = merged[:top_k]
+        ranked = _merge_results(vector_results, graph_results, graph_weight)
+    response.results = await _rerank(query, ranked, top_k)
+    _attach_citations(response.results)
 
     response.latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -232,25 +320,32 @@ async def hybrid_search(
     return response
 
 
-async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
-    """Look up vector_backend per kb in one round-trip."""
+def _async_db_url() -> str:
+    import os
+
+    db_url = (
+        os.environ.get("DATABASE_URL") or os.environ.get("ASYNC_DATABASE_URL") or ""
+    )
+    if db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return db_url
+
+
+async def _kb_index_settings(kb_ids: list[str]) -> dict[str, tuple[str, str | None]]:
+    """(vector_backend, embedding_model) per kb in one round-trip."""
     if not kb_ids:
         return {}
+    fallback = {kb: ("pinecone", None) for kb in kb_ids}
     try:
-        import os
         import uuid as _uuid
         from sqlalchemy.ext.asyncio import AsyncSession
         from sqlalchemy import text as _t
 
-        db_url = (
-            os.environ.get("DATABASE_URL") or os.environ.get("ASYNC_DATABASE_URL") or ""
-        )
+        db_url = _async_db_url()
         if not db_url:
-            return {kb: "pinecone" for kb in kb_ids}
-        if db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
-            db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return fallback
         # Filter out non-UUID strings (legacy subject-namespace hack)
-        # â€” those can't be in knowledge_collections anyway.
+        # — those can't be in knowledge_collections anyway.
         uuid_inputs: list[_uuid.UUID] = []
         passthrough: list[str] = []
         for s in kb_ids:
@@ -258,7 +353,9 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
                 uuid_inputs.append(_uuid.UUID(s))
             except (ValueError, AttributeError):
                 passthrough.append(s)
-        result: dict[str, str] = {p: "pinecone" for p in passthrough}
+        result: dict[str, tuple[str, str | None]] = {
+            p: ("pinecone", None) for p in passthrough
+        }
         if not uuid_inputs:
             return result
         from engine.db_pool import shared_engine
@@ -268,33 +365,39 @@ async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
             rows = (
                 await session.execute(
                     _t(
-                        "SELECT id::text, vector_backend FROM knowledge_collections "
-                        "WHERE id = ANY(:ids)"
+                        "SELECT id::text, vector_backend, embedding_model "
+                        "FROM knowledge_collections WHERE id = ANY(:ids)"
                     ).bindparams(ids=uuid_inputs)
                 )
             ).all()
         for r in rows:
-            result[r[0]] = r[1] or "pinecone"
+            result[r[0]] = (r[1] or "pinecone", r[2] or None)
         return result
     except Exception:
-        return {kb: "pinecone" for kb in kb_ids}
+        return fallback
+
+
+async def _classify_kb_backends(kb_ids: list[str]) -> dict[str, str]:
+    """Look up vector_backend per kb in one round-trip."""
+    return {k: v[0] for k, v in (await _kb_index_settings(kb_ids)).items()}
 
 
 async def _vector_search_pgvector(
     query: str,
     kb_ids: list[str],
     top_k: int,
+    model: str | None = None,
+    hidden: set[str] | frozenset[str] = frozenset(),
 ) -> list[SearchResult]:
     """Vector search via Postgres+pgvector for collections opted into it."""
     try:
-        import os
         import httpx
         import openai
         from sqlalchemy.ext.asyncio import AsyncSession
         from sqlalchemy import text as _t
 
         try:
-            emb = await _embed_query(query)
+            emb = await _embed_query(query, model)
         except (openai.RateLimitError, openai.APIError, httpx.HTTPStatusError) as e:
             logger.error("Embedding provider unavailable (pgvector path): %s", e)
             raise EmbeddingProviderError(str(e)) from e
@@ -302,11 +405,7 @@ async def _vector_search_pgvector(
             return []
         emb_str = "[" + ",".join(f"{x:.7f}" for x in emb) + "]"
 
-        db_url = (
-            os.environ.get("DATABASE_URL") or os.environ.get("ASYNC_DATABASE_URL") or ""
-        )
-        if db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
-            db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        db_url = _async_db_url()
         # text() will not bind `:emb::vector` — its parameter regex refuses a
         # name followed by a colon, so the cast swallowed the placeholder and
         # every search died on "no bound parameter named 'emb'". CAST() reads
@@ -321,6 +420,7 @@ async def _vector_search_pgvector(
                 continue
         if not id_params:
             return []
+        hidden_params = [_uuid.UUID(h) for h in hidden]
 
         from engine.db_pool import shared_engine
 
@@ -336,10 +436,13 @@ async def _vector_search_pgvector(
                        1 - (embedding <=> CAST(:emb AS vector)) AS score
                 FROM chunks
                 WHERE collection_id = ANY(:ids)
+                  AND NOT (document_id = ANY(:hidden))
                 ORDER BY embedding <=> CAST(:emb AS vector)
                 LIMIT :k
                 """
-                    ).bindparams(emb=emb_str, ids=id_params, k=top_k)
+                    ).bindparams(
+                        emb=emb_str, ids=id_params, hidden=hidden_params, k=top_k
+                    )
                 )
             ).all()
         for r in rows:
@@ -378,19 +481,42 @@ async def _vector_search_pgvector(
 
 
 async def _vector_search(
-    query: str, kb_ids: list[str], top_k: int = 20
+    query: str,
+    kb_ids: list[str],
+    top_k: int = 20,
+    hidden: set[str] | frozenset[str] = frozenset(),
 ) -> list[SearchResult]:
-    """Perform vector similarity search across kb_ids."""
-    backends = await _classify_kb_backends(kb_ids)
-    pgv_ids = [k for k in kb_ids if backends.get(k) == "pgvector"]
-    pin_ids = [k for k in kb_ids if backends.get(k) != "pgvector"]
+    """Perform vector similarity search across kb_ids.
 
-    pgv_results: list[SearchResult] = []
-    if pgv_ids:
-        pgv_results = await _vector_search_pgvector(query, pgv_ids, top_k)
-    if not pin_ids:
-        return pgv_results
+    Each collection is queried with the embedding model it was indexed with."""
+    settings = await _kb_index_settings(kb_ids)
+    groups: dict[tuple[str, str | None], list[str]] = {}
+    for k in kb_ids:
+        backend, model = settings.get(k, ("pinecone", None))
+        key = ("pgvector" if backend == "pgvector" else "pinecone", model)
+        groups.setdefault(key, []).append(k)
 
+    results: list[SearchResult] = []
+    for (backend, model), ids in groups.items():
+        if backend == "pgvector":
+            results.extend(
+                await _vector_search_pgvector(query, ids, top_k, model, hidden)
+            )
+        else:
+            results.extend(
+                await _vector_search_pinecone(query, ids, top_k, model, hidden)
+            )
+    results.sort(key=lambda r: r.score, reverse=True)
+    return results
+
+
+async def _vector_search_pinecone(
+    query: str,
+    kb_ids: list[str],
+    top_k: int,
+    model: str | None = None,
+    hidden: set[str] | frozenset[str] = frozenset(),
+) -> list[SearchResult]:
     try:
         import os
         import httpx
@@ -407,22 +533,21 @@ async def _vector_search(
         index_name = os.environ.get("PINECONE_INDEX_NAME", "agentforge-knowledge")
 
         if not pinecone_key:
-            return pgv_results
+            return []
         if not ((azure_key and azure_endpoint) or openai_key):
-            return pgv_results
-        kb_ids = pin_ids  # rest of the function operates on Pinecone-only set
+            return []
 
-        # Embed query. Embedding-provider failures (rate-limit, 5xx, transport
-        # errors) must NOT degrade to an empty result — that hides a real
-        # outage as "no match". Re-raise as EmbeddingProviderError so the
-        # router can return 503 instead of 200/empty.
+        # Embedding-provider failures (rate-limit, 5xx, transport errors) must
+        # NOT degrade to an empty result — that hides a real outage as "no
+        # match". Re-raise as EmbeddingProviderError so the router can return
+        # 503 instead of 200/empty.
         try:
-            query_vector = await _embed_query(query)
+            query_vector = await _embed_query(query, model)
         except (openai.RateLimitError, openai.APIError, httpx.HTTPStatusError) as e:
             logger.error("Embedding provider unavailable: %s", e)
             raise EmbeddingProviderError(str(e)) from e
         if query_vector is None:
-            return pgv_results
+            return []
 
         # Search across all KB namespaces (Pinecone v7+ returns structured objects)
         pc = Pinecone(api_key=pinecone_key)
@@ -430,7 +555,9 @@ async def _vector_search(
 
         results: list[SearchResult] = []
         for kb_id in kb_ids:
-            _filter = {"persona_scope": {"$ne": "_persona_"}}
+            _filter: dict[str, Any] = {"persona_scope": {"$ne": "_persona_"}}
+            if hidden:
+                _filter["doc_id"] = {"$nin": sorted(hidden)}
             try:
                 response = index.query(
                     namespace=kb_id,
@@ -452,7 +579,7 @@ async def _vector_search(
             matches = (
                 getattr(response, "matches", None) or response.get("matches", [])
                 if isinstance(response, dict)
-                else []
+                else getattr(response, "matches", None) or []
             )
             for m in matches:
                 meta = getattr(m, "metadata", None) or (
@@ -463,9 +590,21 @@ async def _vector_search(
                 # arg). Generic search must NEVER surface persona data.
                 if isinstance(meta, dict) and meta.get("persona_scope"):
                     continue
+                doc_id = meta.get("doc_id", "") if isinstance(meta, dict) else ""
+                if doc_id and doc_id in hidden:
+                    continue
                 score = getattr(m, "score", None) or (
                     m.get("score", 0.0) if isinstance(m, dict) else 0.0
                 )
+                carried: dict[str, Any] = {
+                    "kb_id": kb_id,
+                    "doc_id": doc_id,
+                    "chunk_index": (
+                        meta.get("chunk_index", 0) if isinstance(meta, dict) else 0
+                    ),
+                }
+                if isinstance(meta, dict) and meta.get("page") is not None:
+                    carried["page"] = meta.get("page")
                 results.append(
                     SearchResult(
                         content=(
@@ -480,20 +619,9 @@ async def _vector_search(
                             else "unknown"
                         ),
                         source_type="chunk",
-                        metadata={
-                            "kb_id": kb_id,
-                            "doc_id": (
-                                meta.get("doc_id", "") if isinstance(meta, dict) else ""
-                            ),
-                            "chunk_index": meta.get("chunk_index", 0),
-                        },
+                        metadata=carried,
                     )
                 )
-
-        # Merge pgvector results from collections that opted in
-        # before sort, so the top_k cut sees both backends together.
-        results.extend(pgv_results)
-        results.sort(key=lambda r: r.score, reverse=True)
         return results
 
     except EmbeddingProviderError:
@@ -501,8 +629,7 @@ async def _vector_search(
         raise
     except Exception as e:
         logger.error("Vector search failed: %s", e)
-        # Even on Pinecone failure, return whatever pgvector found.
-        return pgv_results
+        return []
 
 
 async def _extract_query_entities(query: str) -> list[str]:
@@ -532,10 +659,18 @@ async def _extract_query_entities(query: str) -> list[str]:
     return [w for w in words if len(w) > 3 and w[0].isupper()]
 
 
+# a graph fact stays visible while at least one of its source documents is
+_VISIBLE = (
+    "(size(coalesce({v}.source_doc_ids, [])) = 0 "
+    "OR any(d IN {v}.source_doc_ids WHERE NOT d IN $hidden))"
+)
+
+
 async def _graph_search(
     entity_names: list[str],
     kb_ids: list[str],
     depth: int = 2,
+    hidden: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[list[SearchResult], list[str]]:
     """Search the knowledge graph for entities and their relationships.
 
@@ -544,21 +679,24 @@ async def _graph_search(
     driver = await get_neo4j_driver()
     results: list[SearchResult] = []
     found_entities: list[str] = []
+    hidden_list = sorted(hidden)
 
     async with driver.session() as session:
         for kb_id in kb_ids:
             # Find matching entities (exact or alias match)
             entity_match = await session.run(
-                """
-                MATCH (e:Entity {kb_id: $kb_id})
-                WHERE e.canonical_name IN $names
-                   OR any(a IN e.aliases WHERE a IN $names)
+                f"""
+                MATCH (e:Entity {{kb_id: $kb_id}})
+                WHERE (e.canonical_name IN $names
+                   OR any(a IN e.aliases WHERE a IN $names))
+                  AND {_VISIBLE.format(v="e")}
                 RETURN e.canonical_name AS name, e.entity_type AS type,
                        e.description AS description, e.mention_count AS mentions,
                        e.pg_id AS pg_id
                 """,
                 kb_id=kb_id,
                 names=entity_names,
+                hidden=hidden_list,
             )
 
             matched_names = []
@@ -583,15 +721,17 @@ async def _graph_search(
                 continue
 
             # Traverse graph N hops from matched entities
-            # Depth is validated to 1-4 range â€” safe to interpolate as integer
+            # Depth is validated to 1-4 range — safe to interpolate as integer
             safe_depth = max(1, min(4, int(depth)))
             traversal = await session.run(
                 f"""
                 MATCH (start:Entity {{kb_id: $kb_id}})
                 WHERE start.canonical_name IN $names
                 MATCH path = (start)-[r*1..{safe_depth}]->(connected:Entity {{kb_id: $kb_id}})
-                WITH connected, relationships(path) AS r, length(path) AS hops
+                WITH start, connected, relationships(path) AS r, length(path) AS hops
                 WHERE connected.canonical_name <> start.canonical_name
+                  AND {_VISIBLE.format(v="connected")}
+                  AND all(rel IN r WHERE {_VISIBLE.format(v="rel")})
                 RETURN DISTINCT
                     connected.canonical_name AS name,
                     connected.entity_type AS type,
@@ -604,13 +744,14 @@ async def _graph_search(
                 """,
                 kb_id=kb_id,
                 names=matched_names,
+                hidden=hidden_list,
             )
 
             async for record in traversal:
                 # Score decreases with hops
                 hop_penalty = 1.0 / (1 + record["hops"] * 0.3)
                 rel_chain = (
-                    " â†’ ".join(record["rel_types"]) if record["rel_types"] else ""
+                    " → ".join(record["rel_types"]) if record["rel_types"] else ""
                 )
 
                 results.append(
@@ -629,9 +770,12 @@ async def _graph_search(
 
             # Get direct relationships between matched entities
             rel_query = await session.run(
-                """
-                MATCH (a:Entity {kb_id: $kb_id})-[r]->(b:Entity {kb_id: $kb_id})
-                WHERE a.canonical_name IN $names OR b.canonical_name IN $names
+                f"""
+                MATCH (a:Entity {{kb_id: $kb_id}})-[r]->(b:Entity {{kb_id: $kb_id}})
+                WHERE (a.canonical_name IN $names OR b.canonical_name IN $names)
+                  AND {_VISIBLE.format(v="r")}
+                  AND {_VISIBLE.format(v="a")}
+                  AND {_VISIBLE.format(v="b")}
                 RETURN a.canonical_name AS source, type(r) AS rel_type,
                        b.canonical_name AS target, r.description AS description,
                        r.weight AS weight
@@ -640,15 +784,16 @@ async def _graph_search(
                 """,
                 kb_id=kb_id,
                 names=matched_names,
+                hidden=hidden_list,
             )
 
             async for record in rel_query:
                 weight = record["weight"] or 1.0
                 results.append(
                     SearchResult(
-                        content=f"{record['source']} â€”[{record['rel_type']}]â†’ {record['target']}: {record['description'] or ''}",
+                        content=f"{record['source']} —[{record['rel_type']}]→ {record['target']}: {record['description'] or ''}",
                         score=0.75 * min(1.0, weight),
-                        source=f"{record['source']}â†’{record['target']}",
+                        source=f"{record['source']}→{record['target']}",
                         source_type="relationship",
                         metadata={
                             "kb_id": kb_id,

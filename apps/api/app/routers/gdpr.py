@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import log_action
@@ -26,6 +27,13 @@ from models.user import User, UserRole
 router = APIRouter(prefix="/api/gdpr", tags=["gdpr"])
 
 
+async def _in_tenant(db: AsyncSession, user: User, subject_id: uuid.UUID) -> bool:
+    found = await db.execute(
+        select(User.id).where(User.id == subject_id, User.tenant_id == user.tenant_id)
+    )
+    return found.scalar_one_or_none() is not None
+
+
 @router.post("/users/{user_id}/purge")
 async def purge_endpoint(
     user_id: uuid.UUID,
@@ -35,6 +43,8 @@ async def purge_endpoint(
 ) -> Any:
     if user.role != UserRole.ADMIN and user.id != user_id:
         return error("Forbidden", 403)
+    if not await _in_tenant(db, user, user_id):
+        return error("User not found", 404)
     receipt = await purge_user(
         db,
         tenant_id=user.tenant_id,
@@ -67,6 +77,8 @@ async def receipts_endpoint(
 ) -> Any:
     if user.role != UserRole.ADMIN and user.id != user_id:
         return error("Forbidden", 403)
+    if not await _in_tenant(db, user, user_id):
+        return error("User not found", 404)
     rows = await list_receipts(db, user_id, limit=min(limit, 1000))
     return success(
         [
@@ -76,6 +88,7 @@ async def receipts_endpoint(
                 "status": r.status,
                 "error": r.error,
                 "retries": r.retries,
+                "affected": r.affected_count,
                 "attempted_at": r.attempted_at.isoformat() if r.attempted_at else None,
                 "completed_at": r.completed_at.isoformat() if r.completed_at else None,
                 "requested_by": str(r.requested_by) if r.requested_by else None,

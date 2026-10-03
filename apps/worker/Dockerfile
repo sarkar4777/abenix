@@ -42,7 +42,7 @@ WORKDIR /app/apps/worker
 # #1 throughput bottleneck at >10 parallel workflows. Default raised to
 # 8 — a prefork worker with 8 children still fits in ~512MB RAM per pod.
 ENV CELERY_CONCURRENCY=8 \
-    CELERY_QUEUES=documents,agents \
+    CELERY_QUEUES=documents \
     CELERY_LOGLEVEL=info
 # NB: cognify is intentionally NOT in the general worker's queue
 # list — the dedicated abenix-cognify-worker pod consumes that

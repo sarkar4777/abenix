@@ -147,15 +147,19 @@ def execution_metrics(execution: Any) -> dict[str, Any]:
         n_in = n_out = n_fail = n_calls = 0
         n_cost = 0.0
         for nr in node_results.values():
-            o = nr.get("output") if isinstance(nr, dict) else None
-            if not isinstance(o, dict):
+            if not isinstance(nr, dict):
                 continue
-            n_in += int(o.get("input_tokens", 0) or 0)
-            n_out += int(o.get("output_tokens", 0) or 0)
-            n_cost += float(o.get("cost", 0) or 0)
-            n_calls += int(o.get("tool_calls_count", 1) or 1)
             if nr.get("status") == "failed":
                 n_fail += 1
+            md = nr.get("metadata") if isinstance(nr.get("metadata"), dict) else {}
+            o = nr.get("output")
+            src = md if isinstance(md.get("cost"), (int, float)) else o
+            if not isinstance(src, dict):
+                continue
+            n_in += int(src.get("input_tokens", 0) or 0)
+            n_out += int(src.get("output_tokens", 0) or 0)
+            n_cost += float(src.get("cost", 0) or 0)
+            n_calls += int(src.get("tool_calls_count", 1) or 1)
         if input_tokens is None:
             input_tokens = n_in
         if output_tokens is None:

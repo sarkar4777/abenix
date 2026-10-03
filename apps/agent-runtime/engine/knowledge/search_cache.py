@@ -48,8 +48,11 @@ def cache_key(
     query: str,
     mode: str,
     top_k: int,
+    scope: str = "",
 ) -> str:
-    """Stable cache key — sorts kb_ids so order doesn't matter."""
+    """Stable cache key — sorts kb_ids so order doesn't matter.
+
+    scope separates callers that see different documents of the same KBs."""
     payload = json.dumps(
         {
             "t": tenant_id,
@@ -57,6 +60,7 @@ def cache_key(
             "q": query.strip().lower(),
             "m": mode,
             "n": top_k,
+            "s": scope,
         },
         sort_keys=True,
     )

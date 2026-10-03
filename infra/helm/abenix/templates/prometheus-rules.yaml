@@ -73,6 +73,7 @@ data:
               severity: critical
             annotations:
               summary: "PostgreSQL is unreachable"
+              description: "The API has failed its Postgres probe for 2 minutes (abenix_health_check, refreshed every 30s by each API pod)."
 
           - alert: RedisDown
             expr: abenix_health_check{component="redis"} == 0
@@ -81,4 +82,5 @@ data:
               severity: critical
             annotations:
               summary: "Redis is unreachable"
+              description: "The API has failed its Redis probe for 2 minutes (abenix_health_check, refreshed every 30s by each API pod)."
 {{- end }}

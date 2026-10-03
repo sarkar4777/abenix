@@ -552,6 +552,23 @@ declare -A BUILD_CONTEXTS=(
 # cognify-worker is NOT a separate image — it reuses `worker`.
 _cognify_worker_is_alias() { return 0; }
 
+# NEXT_PUBLIC_* are inlined into the web bundle at build time, so forward the ones set in .env or the shell
+WEB_PUBLIC_VARS=(NEXT_PUBLIC_API_URL NEXT_PUBLIC_APP_URL NEXT_PUBLIC_ENABLE_MONETIZATION NEXT_PUBLIC_AUDIT_NATIVE NEXT_PUBLIC_GRAFANA_URL)
+web_build_args() { # web_build_args <svc>, fills BUILD_ARGS
+  BUILD_ARGS=()
+  [ "$1" = "web" ] || return 0
+  local v host
+  # the web bundle links to Grafana on its ingress host, known from the last deploy
+  if [ -z "${NEXT_PUBLIC_GRAFANA_URL:-}" ]; then
+    host="$(get_endpoint 2>/dev/null || true)"
+    [ -n "${host}" ] && NEXT_PUBLIC_GRAFANA_URL="http://grafana.${host}"
+  fi
+  for v in "${WEB_PUBLIC_VARS[@]}"; do
+    [ -n "${!v:-}" ] && BUILD_ARGS+=(--build-arg "${v}=${!v}")
+  done
+  return 0
+}
+
 build_push_image() {
   local svc="$1"
   local df="${DOCKERFILES[$svc]:-}"
@@ -570,12 +587,14 @@ build_push_image() {
   local svc_log="${ROOT_DIR}/logs/build-${svc}.log"
   mkdir -p "${ROOT_DIR}/logs"
   log "Building+pushing ${svc} → ${img}:${IMAGE_TAG}  (full log: logs/build-${svc}.log)"
+  web_build_args "${svc}"
   if ! docker buildx build \
         --platform=linux/amd64 \
         --network=host \
         --push \
         -t "${img}:${IMAGE_TAG}" \
         -t "${img}:latest" \
+        ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} \
         -f "${abs_df}" "${ctx}" >"${svc_log}" 2>&1; then
     err "${svc}: build/push FAILED — last 30 lines:"
     tail -30 "${svc_log}" >&2
@@ -1838,16 +1857,6 @@ EOF
         NEXT_PUBLIC_ABENIX_WEB_URL="${abenix_web_url}" 2>&1 | tail -1 || true
     fi
   done
-
-  # Stamp Grafana + Tempo URLs so the "View Trace" button on /executions/[id]
-  # resolves to the ingress (not /grafana on the abenix origin, which 404s).
-  local grafana_url="http://grafana.${host}"
-  local tempo_url="http://tempo.${host}"
-  if kubectl -n "${NAMESPACE}" get deploy "${RELEASE_NAME}-web" >/dev/null 2>&1; then
-    kubectl -n "${NAMESPACE}" set env deploy/"${RELEASE_NAME}-web" \
-      NEXT_PUBLIC_GRAFANA_URL="${grafana_url}" \
-      NEXT_PUBLIC_TEMPO_URL="${tempo_url}" 2>&1 | tail -1 || true
-  fi
 
   ok "Ingress ready: http://${host}  (ciq, tourism, iot, care, claims, safety, wm, grafana, prom, tempo each .${host})"
 }

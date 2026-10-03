@@ -866,12 +866,12 @@ wait_port_listening 3000 "Web server" 60 "abenix-web" "$WEB_PID" || exit 1
 cd "$ROOT_DIR/apps/worker"
 PYTHONPATH=".:../../packages/db:../agent-runtime" $PYTHON -m celery \
   -A worker.celery_app worker \
-  -Q documents,cognify,agents \
+  -Q documents,cognify \
   -l info --pool=solo \
   > "$LOG_DIR/celery.log" 2>&1 &
 CELERY_PID=$!
 cd "$ROOT_DIR"
-ok "Celery worker starting (PID $CELERY_PID, pool=solo) — queues: documents, cognify, agents — log: $LOG_DIR/celery.log"
+ok "Celery worker starting (PID $CELERY_PID, pool=solo) — queues: documents, cognify — log: $LOG_DIR/celery.log"
 
 # Start the Wave-2 per-pool consumer — this is what drains NATS agent
 # jobs locally. Same binary the AKS per-pool Deployment runs, so the
@@ -1044,7 +1044,7 @@ for k,v in json.load(sys.stdin).items(): print(f'{k}={v}')
   echo -e "  ${YELLOW}Services:${NC}"
   echo -e "    API:     PID $API_PID — port 8000"
   echo -e "    Web:     PID $WEB_PID — port 3000"
-  echo -e "    Celery:  PID $CELERY_PID — queues: documents, cognify, agents"
+  echo -e "    Celery:  PID $CELERY_PID — queues: documents, cognify"
   echo -e "    Neo4j:   bolt://localhost:7687 (user: neo4j, pass: abenix)"
   echo ""
   echo -e "  ${YELLOW}Logs:${NC} (per-process — $LOG_DIR/)"

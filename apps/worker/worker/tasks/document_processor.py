@@ -5,9 +5,13 @@ Pipeline: detect type -> extract text -> chunk -> embed -> store in Pinecone -> 
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 from worker.celery_app import celery_app
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +21,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 # Default embedding model name. Both the Azure deployment alias and the
 # OpenAI direct-API model fall back to this. Override per-environment via
 # OPENAI_EMBEDDING_MODEL (OpenAI direct) and AZURE_EMBEDDING_DEPLOYMENT
-# (Azure deployment name). EMBEDDING_DIM must match the model's output
-# (1536 for text-embedding-3-small / text-embedding-ada-002, 3072 for
-# text-embedding-3-large).
+# (Azure deployment name). A collection's own embedding_model wins over both.
 EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIMENSIONS = 1536
 
@@ -56,7 +58,52 @@ def _strip_file_scheme(p: str) -> str:
     return p
 
 
-def _extract_text(file_path: str, file_type: str) -> str:
+def _sync_db_url() -> str:
+    db_url = os.environ.get(
+        "DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix"
+    )
+    sync_url = db_url.replace("+asyncpg", "").replace(
+        "postgresql+asyncpg", "postgresql"
+    )
+    # asyncpg accepts `?ssl=...` but psycopg2 rejects it
+    if "?" in sync_url:
+        base, query = sync_url.split("?", 1)
+        kept = [p for p in query.split("&") if not p.lower().startswith("ssl=")]
+        sync_url = base + (("?" + "&".join(kept)) if kept else "")
+    return sync_url
+
+
+def _local_path(file_path: str, file_type: str) -> tuple[str, str | None]:
+    """A readable local path for a storage URL, plus a temp file to remove afterwards."""
+    if not (
+        file_path.startswith("s3://")
+        or file_path.startswith("az://")
+        or file_path.startswith("file://")
+    ):
+        return file_path, None
+    import asyncio
+    import tempfile
+
+    try:
+        from engine.storage import get_storage
+
+        storage = get_storage()
+        loop = asyncio.new_event_loop()
+        try:
+            data = loop.run_until_complete(storage.download(file_path))
+        finally:
+            loop.close()
+        suffix = f".{file_type}" if file_type else ""
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp.write(data)
+        tmp.close()
+        return tmp.name, tmp.name
+    except Exception as e:
+        logger.warning("StorageService download failed, trying direct path: %s", e)
+        return _strip_file_scheme(file_path), None
+
+
+def _extract_text_legacy(file_path: str, file_type: str) -> str:
     path = Path(_strip_file_scheme(file_path))
     ft = file_type.lower()
 
@@ -80,10 +127,29 @@ def _extract_text(file_path: str, file_type: str) -> str:
         doc = Document(str(path))
         return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
-    if ft in ("csv", "text/csv"):
-        return path.read_text(encoding="utf-8", errors="replace")
-
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _extract_blocks(
+    file_path: str, file_type: str
+) -> tuple[list[tuple[str, int | None]], str | None, float | None]:
+    """(text, page) blocks plus the extraction method and quality the dispatcher picked."""
+    import asyncio
+
+    path = _strip_file_scheme(file_path)
+    try:
+        from engine.knowledge.extractors import extract_document
+    except ImportError:
+        text = _extract_text_legacy(path, file_type)
+        return ([(text, None)] if text.strip() else []), None, None
+    blocks, method, quality = asyncio.run(extract_document(path, file_type=file_type))
+    out = [(b.text, b.page) for b in blocks if (b.text or "").strip()]
+    return out, method, quality
+
+
+def _extract_text(file_path: str, file_type: str) -> str:
+    blocks, _method, _quality = _extract_blocks(file_path, file_type)
+    return "\n\n".join(t for t, _p in blocks)
 
 
 def _chunk_text(
@@ -98,6 +164,23 @@ def _chunk_text(
         separators=["\n\n", "\n", ". ", " ", ""],
     )
     return splitter.split_text(text)
+
+
+def _chunk_blocks(
+    blocks: list[tuple[str, int | None]], chunk_size: int, chunk_overlap: int
+) -> tuple[list[str], list[int | None]]:
+    """Chunk page by page when pages are known, so every chunk can cite its page."""
+    if not any(p is not None for _t, p in blocks):
+        text = "\n\n".join(t for t, _p in blocks)
+        chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        return chunks, [None] * len(chunks)
+    chunks: list[str] = []
+    pages: list[int | None] = []
+    for text, page in blocks:
+        for c in _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap):
+            chunks.append(c)
+            pages.append(page)
+    return chunks, pages
 
 
 EMBEDDING_DIM = 1536
@@ -139,8 +222,28 @@ def _local_embeddings_enabled() -> bool:
         return False
 
 
-def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
+def _model_names(model: str | None) -> tuple[str, str, dict]:
+    try:
+        import embedding_models as em
+
+        return (
+            em.provider_model(model),
+            em.azure_deployment(model),
+            em.request_kwargs(model),
+        )
+    except ImportError:
+        return (
+            EMBEDDING_MODEL,
+            os.environ.get("AZURE_EMBEDDING_DEPLOYMENT", EMBEDDING_MODEL),
+            {},
+        )
+
+
+def _embed_chunks(
+    chunks: list[str], model: str | None = None, strict: bool = False
+) -> tuple[list[list[float]], bool]:
     """Returns (embeddings, used_real_model). Provider selection:
+      0. The local hashing embedder when the collection is indexed with it.
       1. Azure OpenAI if AZURE_OPENAI_API_KEY + endpoint are set (preferred —
          that's what the production cluster pays for).
       2. Direct OpenAI fallback if OPENAI_API_KEY is set and Azure errored
@@ -152,9 +255,22 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
     providers were attempted returns the (zero-vectors, False) tuple. The
     caller marks the document DEGRADED with the honest reason in
     documents.error_message; the KB rollup goes DEGRADED so the UI never
-    paints a green checkmark over a doc that nothing can actually search."""
+    paints a green checkmark over a doc that nothing can actually search.
+
+    strict=True (re-embedding) raises instead of degrading or switching to
+    the local embedder, so a collection is never re-indexed half and half."""
     import asyncio
 
+    try:
+        from local_embeddings import MODEL_ID as _LOCAL_ID
+    except ImportError:
+        _LOCAL_ID = "local-hashing-v1"
+    if model == _LOCAL_ID:
+        from local_embeddings import embed_many
+
+        return embed_many(chunks), True
+
+    openai_model, deployment, extra = _model_names(model)
     azure_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
     azure_endpoint_raw = os.environ.get("AZURE_OPENAI_ENDPOINT", "") or os.environ.get(
         "AZURE_OPENAI_API_BASE", ""
@@ -179,16 +295,15 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
                     "AZURE_OPENAI_API_VERSION", "2024-10-01-preview"
                 ),
             )
-            deployment = os.environ.get(
-                "AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"
-            )
 
             async def _run() -> list[list[float]]:
                 out: list[list[float]] = []
                 batch_size = 100
                 for i in range(0, len(chunks), batch_size):
                     batch = chunks[i : i + batch_size]
-                    resp = await client.embeddings.create(input=batch, model=deployment)
+                    resp = await client.embeddings.create(
+                        input=batch, model=deployment, **extra
+                    )
                     for item in resp.data:
                         out.append(item.embedding)
                 return out
@@ -206,6 +321,8 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
                     exc,
                 )
             else:
+                if strict:
+                    raise EmbeddingProviderError(str(exc)) from exc
                 logger.warning(
                     "Azure embedding call failed (%s) and no OPENAI_API_KEY "
                     "fallback is configured; marking doc DEGRADED with the "
@@ -223,11 +340,15 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
             batch_size = 100
             for i in range(0, len(chunks), batch_size):
                 batch = chunks[i : i + batch_size]
-                response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
+                response = client.embeddings.create(
+                    model=openai_model, input=batch, **extra
+                )
                 for item in response.data:
                     embeddings.append(item.embedding)
             return embeddings, True
         except Exception as exc:
+            if strict:
+                raise EmbeddingProviderError(str(exc)) from exc
             logger.warning(
                 "OpenAI embedding call failed (%s); both providers exhausted, "
                 "doc will be marked DEGRADED with the honest provider error",
@@ -239,7 +360,7 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
     # a fresh clone, fall back to the local hashing embedder. It is lexical
     # rather than semantic and says so, but it makes knowledge_search return
     # the chunk that contains the words you typed instead of nothing at all.
-    if _local_embeddings_enabled():
+    if _local_embeddings_enabled() and not strict:
         from local_embeddings import embed_many
 
         logger.warning(
@@ -257,34 +378,40 @@ def _embed_chunks(chunks: list[str]) -> tuple[list[list[float]], bool]:
     )
 
 
-def _vector_backend_for(kb_id: str) -> str:
-    """Return 'pinecone' or 'pgvector' based on the collection setting."""
+def _kb_settings(kb_id: str) -> tuple[str, str | None]:
+    """(vector_backend, embedding_model) of the collection."""
     import psycopg2
 
-    db_url = os.environ.get(
-        "DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix"
-    )
-    sync_url = db_url.replace("+asyncpg", "").replace(
-        "postgresql+asyncpg", "postgresql"
-    )
-    if "?" in sync_url:
-        base, query = sync_url.split("?", 1)
-        kept = [p for p in query.split("&") if not p.lower().startswith("ssl=")]
-        sync_url = base + (("?" + "&".join(kept)) if kept else "")
     try:
-        conn = psycopg2.connect(sync_url)
+        conn = psycopg2.connect(_sync_db_url())
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT vector_backend FROM knowledge_collections WHERE id = %s",
+                    "SELECT vector_backend, embedding_model FROM knowledge_collections WHERE id = %s",
                     (kb_id,),
                 )
                 row = cur.fetchone()
-                return (row[0] if row and row[0] else "pinecone") or "pinecone"
+                if not row:
+                    return "pinecone", None
+                return (row[0] or "pinecone"), (row[1] or None)
         finally:
             conn.close()
     except Exception:
-        return "pinecone"
+        return "pinecone", None
+
+
+def _vector_backend_for(kb_id: str) -> str:
+    """Return 'pinecone' or 'pgvector' based on the collection setting."""
+    return _kb_settings(kb_id)[0]
+
+
+def _chunk_meta(
+    filename: str, i: int, chunk: str, pages: list[int | None] | None
+) -> dict:
+    meta = {"filename": filename, "chunk_index": i, "text_preview": chunk[:200]}
+    if pages and i < len(pages) and pages[i] is not None:
+        meta["page"] = pages[i]
+    return meta
 
 
 def _store_vectors_pgvector(
@@ -293,32 +420,18 @@ def _store_vectors_pgvector(
     filename: str,
     chunks: list[str],
     embeddings: list[list[float]],
+    pages: list[int | None] | None = None,
 ) -> int:
     """Insert chunks + embeddings directly into Postgres (pgvector)."""
     import json as _json
     import uuid as _uuid
     import psycopg2
 
-    db_url = os.environ.get(
-        "DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix"
-    )
-    sync_url = db_url.replace("+asyncpg", "").replace(
-        "postgresql+asyncpg", "postgresql"
-    )
-    if "?" in sync_url:
-        base, query = sync_url.split("?", 1)
-        kept = [p for p in query.split("&") if not p.lower().startswith("ssl=")]
-        sync_url = base + (("?" + "&".join(kept)) if kept else "")
-
-    conn = psycopg2.connect(sync_url)
+    conn = psycopg2.connect(_sync_db_url())
     try:
         with conn.cursor() as cur:
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-                metadata = {
-                    "filename": filename,
-                    "chunk_index": i,
-                    "text_preview": chunk[:200],
-                }
+                metadata = _chunk_meta(filename, i, chunk, pages)
                 # pgvector accepts string-formatted arrays: '[0.1, 0.2, ...]'
                 emb_str = "[" + ",".join(f"{x:.7f}" for x in embedding) + "]"
                 cur.execute(
@@ -342,10 +455,36 @@ def _store_vectors_pgvector(
                         emb_str,
                     ),
                 )
+            # a re-processed document may now have fewer chunks
+            cur.execute(
+                "DELETE FROM chunks WHERE document_id = %s AND chunk_index >= %s",
+                (doc_id, len(embeddings)),
+            )
             conn.commit()
             return len(embeddings)
     finally:
         conn.close()
+
+
+def _pinecone_vector(
+    kb_id: str,
+    doc_id: str,
+    filename: str,
+    i: int,
+    chunk: str,
+    embedding: list[float],
+    pages: list[int | None] | None = None,
+) -> dict:
+    meta = {
+        "kb_id": kb_id,
+        "doc_id": doc_id,
+        "filename": filename,
+        "chunk_index": i,
+        "text": chunk[:8000],
+    }
+    if pages and i < len(pages) and pages[i] is not None:
+        meta["page"] = pages[i]
+    return {"id": f"{doc_id}_{i}", "values": embedding, "metadata": meta}
 
 
 def _store_vectors_pinecone(
@@ -354,28 +493,17 @@ def _store_vectors_pinecone(
     filename: str,
     chunks: list[str],
     embeddings: list[list[float]],
+    pages: list[int | None] | None = None,
 ) -> int:
     from pinecone import Pinecone
 
     pc = Pinecone(api_key=PINECONE_API_KEY)
     index = pc.Index(PINECONE_INDEX_NAME)
 
-    vectors = []
-    for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-        vector_id = f"{doc_id}_{i}"
-        vectors.append(
-            {
-                "id": vector_id,
-                "values": embedding,
-                "metadata": {
-                    "kb_id": kb_id,
-                    "doc_id": doc_id,
-                    "filename": filename,
-                    "chunk_index": i,
-                    "text": chunk[:8000],
-                },
-            }
-        )
+    vectors = [
+        _pinecone_vector(kb_id, doc_id, filename, i, chunk, embedding, pages)
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings))
+    ]
 
     batch_size = 100
     for i in range(0, len(vectors), batch_size):
@@ -391,27 +519,35 @@ def _store_vectors(
     filename: str,
     chunks: list[str],
     embeddings: list[list[float]],
+    pages: list[int | None] | None = None,
+    backend: str | None = None,
 ) -> int:
     """Dispatch to the collection's configured vector backend, with"""
     import logging
 
     log = logging.getLogger(__name__)
-    backend = _vector_backend_for(kb_id)
+    backend = backend or _vector_backend_for(kb_id)
 
     if backend == "pgvector":
         try:
-            return _store_vectors_pgvector(kb_id, doc_id, filename, chunks, embeddings)
+            return _store_vectors_pgvector(
+                kb_id, doc_id, filename, chunks, embeddings, pages
+            )
         except Exception as e:
             log.warning(
                 "pgvector store failed for kb=%s, falling back to Pinecone: %s",
                 kb_id,
                 e,
             )
-            return _store_vectors_pinecone(kb_id, doc_id, filename, chunks, embeddings)
+            return _store_vectors_pinecone(
+                kb_id, doc_id, filename, chunks, embeddings, pages
+            )
 
     # backend == "pinecone" (default for legacy collections).
     try:
-        return _store_vectors_pinecone(kb_id, doc_id, filename, chunks, embeddings)
+        return _store_vectors_pinecone(
+            kb_id, doc_id, filename, chunks, embeddings, pages
+        )
     except Exception as e:
         # Common failure: the Pinecone index doesn't exist in the tenant
         # account (404) or the API key is missing. pgvector is
@@ -422,7 +558,9 @@ def _store_vectors(
             kb_id,
             e,
         )
-        return _store_vectors_pgvector(kb_id, doc_id, filename, chunks, embeddings)
+        return _store_vectors_pgvector(
+            kb_id, doc_id, filename, chunks, embeddings, pages
+        )
 
 
 def _update_document_status(
@@ -431,30 +569,28 @@ def _update_document_status(
     status: str,
     chunk_count: int = 0,
     error_message: str | None = None,
+    extraction_method: str | None = None,
+    extraction_quality: float | None = None,
 ) -> None:
     import psycopg2
 
-    db_url = os.environ.get(
-        "DATABASE_URL", "postgresql+asyncpg://abenix:abenix@localhost:5432/abenix"
-    )
-    sync_url = db_url.replace("+asyncpg", "").replace(
-        "postgresql+asyncpg", "postgresql"
-    )
-    # asyncpg accepts `?ssl=...` but psycopg2 rejects it — strip the ssl query
-    # params (and sslmode if invalid) so the sync connection succeeds.
-    if "?" in sync_url:
-        base, query = sync_url.split("?", 1)
-        kept = [p for p in query.split("&") if not p.lower().startswith("ssl=")]
-        sync_url = base + (("?" + "&".join(kept)) if kept else "")
-
     db_status = status.upper()
 
-    conn = psycopg2.connect(sync_url)
+    conn = psycopg2.connect(_sync_db_url())
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE documents SET status = %s, chunk_count = %s, error_message = %s WHERE id = %s",
-                (db_status, chunk_count, error_message, doc_id),
+                "UPDATE documents SET status = %s, chunk_count = %s, error_message = %s, "
+                "extraction_method = COALESCE(%s, extraction_method), "
+                "extraction_quality = COALESCE(%s, extraction_quality) WHERE id = %s",
+                (
+                    db_status,
+                    chunk_count,
+                    error_message,
+                    extraction_method,
+                    extraction_quality,
+                    doc_id,
+                ),
             )
             # KB rollup: a single DEGRADED doc taints the whole collection —
             # the operator needs to know vectors are missing somewhere.
@@ -503,61 +639,53 @@ def process_document(
     """Process a single document: extract -> chunk -> embed -> store."""
     self.update_state(state="PROCESSING", meta={"doc_id": doc_id, "step": "extracting"})
 
+    tmp_path: str | None = None
     try:
-        # Download from StorageService if URI (s3://, az://), otherwise use local path
-        actual_path = file_path
-        if (
-            file_path.startswith("s3://")
-            or file_path.startswith("az://")
-            or file_path.startswith("file://")
-        ):
-            import asyncio
-            import tempfile
-
-            try:
-                from engine.storage import get_storage
-
-                storage = get_storage()
-                loop = asyncio.new_event_loop()
-                data = loop.run_until_complete(storage.download(file_path))
-                loop.close()
-                # Write to temp file for extraction
-                suffix = f".{file_type}" if file_type else ""
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                tmp.write(data)
-                tmp.close()
-                actual_path = tmp.name
-            except Exception as e:
-                logger.warning(
-                    "StorageService download failed, trying direct path: %s", e
-                )
-
-        text = _extract_text(actual_path, file_type)
-        if not text.strip():
-            _update_document_status(doc_id, kb_id, "failed", 0)
+        actual_path, tmp_path = _local_path(file_path, file_type)
+        blocks, method, quality = _extract_blocks(actual_path, file_type)
+        if not blocks:
+            _update_document_status(
+                doc_id,
+                kb_id,
+                "failed",
+                0,
+                error_message="No text could be extracted",
+                extraction_method=method,
+                extraction_quality=quality,
+            )
             return {"status": "failed", "doc_id": doc_id, "error": "No text extracted"}
 
         self.update_state(
             state="PROCESSING", meta={"doc_id": doc_id, "step": "chunking"}
         )
-        chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        chunks, pages = _chunk_blocks(blocks, chunk_size, chunk_overlap)
 
         if not chunks:
             _update_document_status(doc_id, kb_id, "failed", 0)
             return {"status": "failed", "doc_id": doc_id, "error": "No chunks produced"}
 
+        backend, model = _kb_settings(kb_id)
         self.update_state(
             state="PROCESSING",
             meta={"doc_id": doc_id, "step": "embedding", "chunks": len(chunks)},
         )
-        embeddings, real_vectors = _embed_chunks(chunks)
+        embeddings, real_vectors = _embed_chunks(chunks, model)
 
         self.update_state(
             state="PROCESSING", meta={"doc_id": doc_id, "step": "storing"}
         )
         if real_vectors:
             try:
-                stored = _store_vectors(kb_id, doc_id, filename, chunks, embeddings)
+                stored = _store_vectors(
+                    kb_id, doc_id, filename, chunks, embeddings, pages, backend
+                )
+                # a re-embed may have switched the collection's model meanwhile
+                _b, model_now = _kb_settings(kb_id)
+                if model_now != model:
+                    embeddings, _real = _embed_chunks(chunks, model_now, strict=True)
+                    stored = _store_vectors(
+                        kb_id, doc_id, filename, chunks, embeddings, pages, backend
+                    )
                 final_status = "ready"
                 error_message = None
             except Exception as ve:
@@ -592,15 +720,22 @@ def process_document(
             )
 
         _update_document_status(
-            doc_id, kb_id, final_status, stored, error_message=error_message
+            doc_id,
+            kb_id,
+            final_status,
+            stored,
+            error_message=error_message,
+            extraction_method=method,
+            extraction_quality=quality,
         )
 
         logger.info(
-            "Document %s processed: %d chunks, %d vectors stored, status=%s",
+            "Document %s processed: %d chunks, %d vectors stored, status=%s, extractor=%s",
             doc_id,
             len(chunks),
             stored,
             final_status,
+            method,
         )
 
         return {
@@ -608,6 +743,7 @@ def process_document(
             "doc_id": doc_id,
             "chunks": len(chunks),
             "vectors": stored,
+            "extraction_method": method,
             "error": error_message,
         }
 
@@ -615,3 +751,9 @@ def process_document(
         logger.exception("Failed to process document %s", doc_id)
         _update_document_status(doc_id, kb_id, "failed", 0)
         raise self.retry(exc=exc)
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass

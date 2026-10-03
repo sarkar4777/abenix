@@ -1,0 +1,25 @@
+{{- if and .Values.backup.enabled .Values.backup.persistentVolume.enabled }}
+# Shared by the Postgres and Neo4j backup CronJobs. They run an hour apart, so
+# ReadWriteOnce works on one node; multi-node clusters use a ReadWriteMany class.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "abenix.fullname" . }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "abenix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+  annotations:
+    # backups must survive helm uninstall
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.backup.persistentVolume.accessMode | default "ReadWriteOnce" }}
+  {{- /* an empty storageClassName disables dynamic provisioning, only emit a named class */}}
+  {{- with .Values.backup.persistentVolume.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.persistentVolume.size | default "20Gi" }}
+{{- end }}

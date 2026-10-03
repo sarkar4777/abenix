@@ -424,6 +424,37 @@ async def dispatch_execution(
         await db.commit()
         await db.refresh(execution)
 
+    from engine.agent_budget import BUDGET_EXCEEDED, check_agent_budget
+
+    breach = await check_agent_budget(
+        db,
+        agent_id=agent.id,
+        tenant_id=execution.tenant_id,
+        agent_name=getattr(agent, "name", ""),
+        daily_cost_limit=getattr(agent, "daily_cost_limit", None),
+        daily_budget_usd=getattr(agent, "daily_budget_usd", None),
+    )
+    if breach:
+        execution.status = ExecutionStatus.FAILED
+        execution.error_message = breach.message
+        execution.failure_code = BUDGET_EXCEEDED
+        execution.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        if trigger_id:
+            try:
+                await _notify_trigger_failure(
+                    db,
+                    tenant_id=execution.tenant_id,
+                    user_id=user.id,
+                    trigger_id=trigger_id,
+                    execution_id=str(execution.id),
+                    error=breach.message,
+                )
+                await db.commit()
+            except Exception:
+                pass
+        return execution, False
+
     if settings.scaling_exec_remote and pool != "inline":
         try:
             runtime_path = Path(__file__).resolve().parents[3] / "agent-runtime"
@@ -483,6 +514,17 @@ async def dispatch_execution(
     _BACKGROUND_TASKS.add(_t)
     _t.add_done_callback(_BACKGROUND_TASKS.discard)
     return execution, True
+
+
+def _not_dispatched_error(execution: Any) -> Any:
+    if getattr(execution, "failure_code", None) == "BUDGET_EXCEEDED":
+        return error(
+            execution.error_message,
+            429,
+            error_code="BUDGET_EXCEEDED",
+            details={"execution_id": str(execution.id)},
+        )
+    return error("Trigger execution could not be queued", 503)
 
 
 async def _notify_trigger_failure(
@@ -646,7 +688,7 @@ async def receive_webhook(
     if not dispatched:
         trigger.last_status = "failed"
         await db.commit()
-        return error("Trigger execution could not be queued", 503)
+        return _not_dispatched_error(execution)
 
     return success(
         {
@@ -705,9 +747,11 @@ async def _execute_triggered_agent(
             model=model_cfg.get("model", "claude-sonnet-4-5-20250929"),
             temperature=model_cfg.get("temperature", 0.3),
             agent_id=str(agent.id),
+            cost_limit=getattr(agent, "per_execution_cost_limit", None),
         )
 
         result = await executor.invoke(message)
+        _over = bool(getattr(result, "budget_exceeded", False))
 
         # Update execution in database
         import asyncpg
@@ -717,8 +761,9 @@ async def _execute_triggered_agent(
         )
         try:
             await conn.execute(
-                "UPDATE executions SET status = 'COMPLETED', output_message = $1, "
+                "UPDATE executions SET status = $7, output_message = $1, "
                 "input_tokens = $2, output_tokens = $3, cost = $4, duration_ms = $5, "
+                "failure_code = $8, error_message = $9, "
                 "completed_at = now() WHERE id = $6::uuid",
                 result.output[:10000],
                 result.input_tokens,
@@ -726,11 +771,15 @@ async def _execute_triggered_agent(
                 float(result.cost),
                 result.duration_ms,
                 execution_id,
+                "FAILED" if _over else "COMPLETED",
+                result.failure_code if _over else None,
+                result.output[-1000:] if _over else None,
             )
             if trigger_id:
                 await conn.execute(
-                    "UPDATE agent_triggers SET last_status = 'completed' WHERE id = $1::uuid",
+                    "UPDATE agent_triggers SET last_status = $2 WHERE id = $1::uuid",
                     trigger_id,
+                    "failed" if _over else "completed",
                 )
         finally:
             await conn.close()
@@ -837,7 +886,7 @@ async def run_trigger_now(
     if not dispatched:
         trigger.last_status = "failed"
         await db.commit()
-        return error("Trigger execution could not be queued", 503)
+        return _not_dispatched_error(execution)
 
     return success(
         {

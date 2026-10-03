@@ -9,6 +9,7 @@ interface Receipt {
   status: string;
   error: string | null;
   retries: number;
+  affected: number | null;
   attempted_at: string;
   completed_at: string | null;
   requested_by: string | null;
@@ -127,6 +128,7 @@ export default function GDPRPage() {
                 <th className="text-left py-2">Status</th>
                 <th className="text-left py-2">Attempted</th>
                 <th className="text-left py-2">Completed</th>
+                <th className="text-left py-2">Removed</th>
                 <th className="text-left py-2">Retries</th>
               </tr>
             </thead>
@@ -139,6 +141,7 @@ export default function GDPRPage() {
                   </td>
                   <td className="text-slate-500">{r.attempted_at?.slice(0, 19)}</td>
                   <td className="text-slate-500">{r.completed_at?.slice(0, 19) || '—'}</td>
+                  <td className="text-slate-500">{r.affected ?? '—'}</td>
                   <td className="text-slate-500">{r.retries}</td>
                 </tr>
               ))}

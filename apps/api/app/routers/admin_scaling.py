@@ -551,6 +551,7 @@ async def list_pipelines(
     Each node carries the resolved pool / tool-config so the UI can render
     where each piece actually runs in the cluster.
     """
+    _ensure_admin(user)
     from models.tool_runtime_config import ToolRuntimeConfig
 
     # All agents that have a pipeline definition (mode=pipeline OR model_config carries pipeline_config)

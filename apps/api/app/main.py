@@ -624,6 +624,10 @@ async def on_startup():
 
     await ws_manager.start()
 
+    from app.core import dependency_health
+
+    dependency_health.start()
+
     try:
         import sys
         from pathlib import Path
@@ -645,6 +649,10 @@ async def on_shutdown():
     from app.core.ws_manager import ws_manager
 
     await ws_manager.stop()
+
+    from app.core import dependency_health
+
+    await dependency_health.stop()
 
 
 @app.get("/api/health")
@@ -707,6 +715,11 @@ async def readiness_check() -> dict[str, Any]:
         ]
     )
     checks["llm_provider"] = "ok" if llm_ok else "no_key_configured"
+
+    from app.core import dependency_health
+
+    dependency_health.record("postgres", checks["postgres"] == "ok")
+    dependency_health.record("redis", checks["redis"] == "ok")
 
     all_ok = all(v == "ok" for v in checks.values())
     return {"status": "ok" if all_ok else "degraded", **checks}

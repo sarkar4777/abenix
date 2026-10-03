@@ -635,7 +635,7 @@ async def sign_off(
     if a.status != ApprovalStatus.pending:
         return error(f"Approval is already {a.status.value}", 409)
 
-    denial = await approver_denial(db, user, a.requested_by, a.policy)
+    denial = await approver_denial(db, user, a.requested_by, a.policy, a.gate_kind)
     if denial:
         return error(denial, 403)
 

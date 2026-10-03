@@ -1,8 +1,9 @@
 """v2 enterprise endpoints on top of the existing /api/knowledge surface.
 
-Five admin-only verbs that the Fortune-500 ingest workflow needs:
+Admin verbs for the enterprise ingest workflow:
 
   POST   /api/knowledge/{kb_id}/documents/{doc_id}/replace   versioning
+  GET    /api/knowledge/{kb_id}/reembed                      model + job progress
   POST   /api/knowledge/{kb_id}/reembed                      embed-model swap
   GET    /api/knowledge/cognify-config                       per-tenant config
   PUT    /api/knowledge/cognify-config                       update threshold etc.
@@ -12,6 +13,7 @@ Five admin-only verbs that the Fortune-500 ingest workflow needs:
 
 from __future__ import annotations
 
+import logging
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -29,11 +31,13 @@ from app.core.responses import error, success
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 
+import embedding_models
 from models.cognify_config import CognifyConfig, CognifyConflict
 from models.knowledge_base import Document, KnowledgeBase
 from models.user import User, UserRole
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+logger = logging.getLogger(__name__)
 
 
 def _is_admin(user: User) -> bool:
@@ -113,6 +117,55 @@ class ReembedRequest(BaseModel):
     dry_run: bool = Field(default=False)
 
 
+def _job_is_live(state: dict | None) -> bool:
+    """A queued or running job that has not outlived the worker's time limit."""
+    from app.workers.kb_reembed import ACTIVE
+
+    if not state or state.get("status") not in ACTIVE:
+        return False
+    stamp = state.get("started_at") or state.get("queued_at")
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return False
+    limit = 6 * 3600 if state.get("status") == "running" else 3600
+    return age.total_seconds() < limit
+
+
+async def _reembed_kb_or_error(
+    db: AsyncSession, kb_id: uuid.UUID, user: User
+) -> KnowledgeBase | None:
+    res = await db.execute(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.tenant_id == user.tenant_id,
+        )
+    )
+    return res.scalar_one_or_none()
+
+
+@router.get("/{kb_id}/reembed")
+async def reembed_status(
+    kb_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    from app.services.kb_access import user_can_access_collection
+    from app.workers.kb_reembed import get_status
+
+    kb = await _reembed_kb_or_error(db, kb_id, user)
+    if kb is None or not await user_can_access_collection(db, user=user, kb=kb):
+        return error("Knowledge base not found", 404)
+    return success(
+        {
+            "kb_id": str(kb_id),
+            "embedding_model": kb.embedding_model,
+            "supported_models": list(embedding_models.SUPPORTED),
+            "job": await get_status(kb_id),
+        }
+    )
+
+
 @router.post("/{kb_id}/reembed")
 async def reembed_kb(
     kb_id: uuid.UUID,
@@ -123,25 +176,25 @@ async def reembed_kb(
 ) -> Any:
     if not _is_admin(user):
         return error("Only admins can re-embed a KB", 403)
-    res = await db.execute(
-        select(KnowledgeBase).where(
-            KnowledgeBase.id == kb_id,
-            KnowledgeBase.tenant_id == user.tenant_id,
-        )
-    )
-    kb = res.scalar_one_or_none()
+    kb = await _reembed_kb_or_error(db, kb_id, user)
     if kb is None:
         return error("Knowledge base not found", 404)
+    if not embedding_models.is_supported(body.embedding_model):
+        return error(
+            f"Unsupported embedding model {body.embedding_model}. "
+            f"Choose one of: {', '.join(embedding_models.SUPPORTED)}",
+            400,
+        )
 
     old_model = kb.embedding_model
+    chunks = await db.execute(
+        select(Document.chunk_count).where(Document.kb_id == kb_id)
+    )
+    total = sum(c or 0 for (c,) in chunks.all())
     if body.dry_run:
-        # Cost estimate: chunks * approximate per-1k-tokens for typical 250-token chunk.
-        chunks = await db.execute(
-            select(Document.chunk_count).where(Document.kb_id == kb_id)
-        )
-        total = sum(c or 0 for (c,) in chunks.all())
-        # rough — actual rate depends on provider
-        estimated_usd = round(total * 250 / 1_000_000 * 0.02, 4)
+        # rough, about 250 tokens a chunk at the small-model rate
+        local = embedding_models.is_local(body.embedding_model)
+        estimated_usd = 0.0 if local else round(total * 250 / 1_000_000 * 0.02, 4)
         return success(
             {
                 "kb_id": str(kb_id),
@@ -150,11 +203,24 @@ async def reembed_kb(
                 "chunks_to_reembed": total,
                 "estimated_usd": estimated_usd,
                 "estimated_seconds": max(60, total // 50),
+                "supported_models": list(embedding_models.SUPPORTED),
             }
         )
 
-    kb.embedding_model = body.embedding_model
-    await db.commit()
+    from app.workers.kb_reembed import enqueue_reembed, get_status
+
+    current = await get_status(kb_id)
+    if _job_is_live(current):
+        return error(
+            f"A re-embed of this collection is already {current['status']}", 409
+        )
+    try:
+        job_id = await enqueue_reembed(
+            kb_id=kb_id, new_model=body.embedding_model, from_model=old_model
+        )
+    except Exception as e:
+        return error(f"Could not queue the re-embed job: {e}", 503)
+
     await log_action(
         db,
         user.tenant_id,
@@ -162,28 +228,23 @@ async def reembed_kb(
         "kb.reembed_started",
         {
             "kb_id": str(kb_id),
+            "job_id": str(job_id),
             "from_model": old_model,
             "to_model": body.embedding_model,
         },
         request,
     )
     await db.commit()
-
-    try:
-        from app.workers.kb_reembed import enqueue_reembed
-
-        job_id = await enqueue_reembed(kb_id=kb_id, new_model=body.embedding_model)
-    except Exception as e:
-        return error(f"Failed to enqueue re-embed job: {e}", 500)
-
     return success(
         {
             "kb_id": str(kb_id),
-            "job_id": str(job_id) if job_id else None,
+            "job_id": str(job_id),
             "from_model": old_model,
             "to_model": body.embedding_model,
+            "chunks_to_reembed": total,
             "status": "queued",
-        }
+        },
+        status_code=202,
     )
 
 
@@ -320,7 +381,42 @@ async def list_conflicts(
 
 
 class ResolveConflictRequest(BaseModel):
-    resolved_value: str = Field(min_length=1)
+    resolved_value: str = Field(min_length=1, max_length=100)
+
+
+async def _apply_entity_type(
+    db: AsyncSession, kb_id: uuid.UUID, entity: str, value: str
+) -> bool:
+    """Write the chosen type to the graph, Postgres mirror first, then Neo4j."""
+    from sqlalchemy import text
+
+    r = await db.execute(
+        text(
+            "UPDATE graph_entities SET entity_type = :v, updated_at = now() "
+            "WHERE kb_id = :kb AND canonical_name = :name"
+        ),
+        {"v": value, "kb": kb_id, "name": entity},
+    )
+    try:
+        sys.path.insert(
+            0, str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+        )
+        from engine.knowledge.neo4j_client import get_neo4j_session, is_neo4j_available
+
+        if await is_neo4j_available():
+            session = await get_neo4j_session()
+            async with session:
+                await session.run(
+                    "MATCH (e:Entity {kb_id: $kb, canonical_name: $name}) "
+                    "SET e.entity_type = $v, e.updated_at = datetime()",
+                    kb=str(kb_id),
+                    name=entity,
+                    v=value,
+                )
+            return True
+    except Exception:
+        logger.exception("could not apply conflict resolution to Neo4j")
+    return bool(r.rowcount)
 
 
 @router.post("/cognify-conflicts/{conflict_id}/resolve")
@@ -344,10 +440,20 @@ async def resolve_conflict(
         return error("Conflict not found", 404)
     if c.status != "open":
         return error(f"Conflict already {c.status}", 409)
+    if c.property_name == "entity_type" and body.resolved_value not in (
+        c.source_a_value,
+        c.source_b_value,
+    ):
+        return error("Pick one of the two values the sources gave", 400)
     c.resolved_value = body.resolved_value
     c.resolved_by = user.id
     c.resolved_at = datetime.now(timezone.utc)
     c.status = "resolved"
+    applied = False
+    if c.property_name == "entity_type":
+        applied = await _apply_entity_type(
+            db, c.knowledge_base_id, c.entity_canonical_name, body.resolved_value
+        )
     await db.commit()
     await log_action(
         db,
@@ -358,7 +464,7 @@ async def resolve_conflict(
         request,
     )
     await db.commit()
-    return success({"resolved": True})
+    return success({"resolved": True, "applied_to_graph": applied})
 
 
 __all__ = ["router"]

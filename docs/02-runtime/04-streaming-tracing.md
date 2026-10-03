@@ -123,6 +123,10 @@ Every span carries:
 
 These are queryable in Tempo. From the executions detail page in the UI there's a **"View Trace"** chip that deep-links to the Tempo Explore view filtered to that trace_id.
 
+### Context across the queue
+
+With `OTEL_EXPORTER_OTLP_ENDPOINT` set, one trace spans a whole run. The NATS backend puts the W3C `traceparent` in the message's `trace` field, and the pool consumer starts its `agent_runtime.run` span under it. `invoke_agent` sends the header on the execute call it makes for a child agent, and the runtime's HTTP server continues any incoming `traceparent`. So API, queue, runtime and child runs share one `trace_id`.
+
 ### What's instrumented automatically
 
 - FastAPI requests (via `opentelemetry-instrumentation-fastapi`)

@@ -2,7 +2,7 @@
 
 > A complete reference for architects and developers who want to understand the Abenix platform, extend it, add features, debug it, or build on top of its SDK.
 
-These docs are written to be read **two ways**: on GitHub (the markdown renders Mermaid diagrams natively) or inside the app at `/dev-docs` (which adds a sidebar, in-page anchors, and full-text search).
+These docs are written to be read **two ways**: on GitHub (the markdown renders Mermaid diagrams natively) or inside the app at `/docs` (which adds a sidebar, in-page anchors and full-text search). The app serves a copy from `apps/web/public/dev-docs/`, refreshed by `scripts/sync-dev-docs.sh`, which `scripts/check-before-push.sh` runs along with a check that every page here is in `manifest.json`.
 
 ---
 
@@ -21,6 +21,9 @@ These docs are written to be read **two ways**: on GitHub (the markdown renders 
 | **You're orchestrating multiple agents** | [02-runtime/06-agent-to-agent](02-runtime/06-agent-to-agent.md) |
 | **You're tuning scaling / queue depth / KEDA** | [02-runtime/08-queue-scaling](02-runtime/08-queue-scaling.md) |
 | **You're debugging a stuck execution / pending approval** | [02-runtime/09-state-machines](02-runtime/09-state-machines.md) |
+| **You're adding business rules an agent must follow** | [08-howto/09-decisions](08-howto/09-decisions.md) |
+| **You're setting risk tiers, sign-off or kill switches** | [01-architecture/07-governance](01-architecture/07-governance.md) |
+| **You're testing agent quality before release** | [08-howto/10-evals](08-howto/10-evals.md) |
 
 ---
 
@@ -61,6 +64,7 @@ How an agent runs end-to-end, what a tool is, how pipelines work, how agents tal
 - [17 — Source Watch](02-runtime/17-source-watch.md)
 - [18 — Evaluation suites](02-runtime/18-evaluation-suites.md)
 - [19 — Outbound events + webhooks](02-runtime/19-outbound-events.md)
+- [20 — Decision service (resolution, evaluation, recording)](02-runtime/20-decision-service.md)
 
 ### 3. SDK
 The polyglot client surface — how external apps and standalone verticals talk to the platform.
@@ -78,6 +82,10 @@ The shape of the database and how it maps to the runtime concepts.
 - [02 — Executions, invocations, traces](04-data-model/02-executions.md)
 - [03 — Knowledge bases, documents, atlas graph](04-data-model/03-knowledge.md)
 - [04 — Resource sharing (the polymorphic table)](04-data-model/04-resource-shares.md)
+- [05 — Governance, approvals and decisions](04-data-model/05-governance-decisions.md)
+- [06 — Evals, sources and events](04-data-model/06-evals-sources-events.md)
+- [07 — Tools, models, integrations, archives](04-data-model/07-tools-and-operations.md)
+- [Document versioning](document-versioning.md)
 
 ### 5. UI
 The Next.js app — layout, routing, state, design language.
@@ -95,7 +103,11 @@ From `git clone` to a running cluster.
 - [02 — Helm chart structure](06-deployment/02-helm.md)
 - [03 — Autoscaling with KEDA](06-deployment/03-keda.md)
 - [04 — Observability stack (Prometheus, Grafana, Tempo)](06-deployment/04-observability.md)
+- [05 — Edge runtime](06-deployment/05-edge-runtime.md)
+- [06 — Kubernetes specifics](06-deployment/06-k8s-specifics.md)
+- [Disaster recovery](06-deployment/disaster-recovery.md)
 - [Load test baseline](06-deployment/load-test-baseline.md)
+- [The `--only` deploy trap](06-deployment/deploy-only-trap.md)
 
 ### 7. Building apps on Abenix
 How a third party builds a vertical app that uses Abenix as a remote platform. Includes references for the six example apps in this monorepo.
@@ -119,6 +131,9 @@ Concrete step-by-step guides for the most common developer tasks.
 - [07 — Finding your way around](08-howto/07-finding-your-way-around.md)
 - [08 — Tool configuration (credentials, the admin screen, the lint)](08-howto/08-tool-configuration.md)
 - [09 — Decisions: business rules without code](08-howto/09-decisions.md)
+- [10 — Add an evaluation suite to an agent](08-howto/10-evals.md)
+- [11 — Set risk tiers, kill switches and permission sets](08-howto/11-governance.md)
+- [12 — Watch a source and react when it changes](08-howto/12-source-watch-and-events.md)
 
 ### 9. Reference
 Catalogues and tables you'll look up rather than read end-to-end.
@@ -126,15 +141,17 @@ Catalogues and tables you'll look up rather than read end-to-end.
 - [00 — REST API reference](09-reference/00-rest-api.md)
 - [01 — Environment variables](09-reference/01-env-vars.md)
 - [02 — CLI cheatsheet (`deploy-azure.sh`, etc.)](09-reference/02-cli.md)
-- [04 — Platform settings (runtime knobs in the admin UI)](09-reference/04-platform-settings.md)
 - [03 — Glossary](09-reference/03-glossary.md)
+- [04 — Platform settings (runtime knobs in the admin UI)](09-reference/04-platform-settings.md)
+- [05 — SSO / OIDC sign-in](09-reference/05-sso.md)
+- [SSO setup](sso.md)
 
 ---
 
 ## Conventions used in these docs
 
 - **Source-file callouts** look like [`apps/api/app/main.py:75`](../apps/api/app/main.py#L75) — clickable on GitHub, copyable everywhere else.
-- **Diagrams** are Mermaid in fenced code blocks. GitHub renders them inline. the in-app viewer also renders them.
+- **Diagrams** are Mermaid in fenced code blocks. GitHub renders them inline and the in-app viewer also renders them.
 - **Code examples** are runnable as-is unless explicitly marked otherwise.
 - **`> Why`** call-outs explain the *rationale* behind a design choice. Useful when the code looks weirder than necessary.
 - **`> Trap`** call-outs flag known footguns. If something has bitten us in production it's here.

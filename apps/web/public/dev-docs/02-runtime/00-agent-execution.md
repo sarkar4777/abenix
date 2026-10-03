@@ -1,184 +1,189 @@
 # Agent execution — the loop in detail
 
-> Read [01-architecture/02-request-lifecycle](../01-architecture/02-request-lifecycle.md) first. This doc zooms into the *runtime*'s loop — what happens inside a single agent-runtime pod from the moment it picks up `exec.start` to the moment it persists the terminal result.
+> Read [01-architecture/02-request-lifecycle](../01-architecture/02-request-lifecycle.md) first. This doc zooms into the *runtime*: what happens from the moment a run is picked up to the moment its terminal row is written.
 
 ---
 
-## The runtime is a NATS consumer + a loop
+## Two places a run executes
+
+The same `AgentExecutor` runs in two places.
+
+| Path | When | Who writes the row |
+|---|---|---|
+| Queue | The API enqueues to the agent's pool and an agent-runtime pod consumes it | `apps/agent-runtime/consumer.py` |
+| Inline | The API runs the executor in its own process, for streaming chat and the older paths | `apps/api/app/routers/agents.py` |
+
+The rest of this page follows the queue path. The inline path builds the executor with the same arguments and maps the result to the row the same way.
+
+## The runtime is a queue consumer plus a loop
 
 ```mermaid
 flowchart TB
-  N[NATS subscription<br/>exec.start] --> Pickup
-  Pickup[Pickup handler<br/>load agent from DB] --> CreateContext[Build ExecutionContext<br/>tenant, subject, OTel span]
-  CreateContext --> Loop
+  N[JetStream pull subscription<br/>agents.pool] --> Pickup
+  Pickup[Load execution, agent, tools<br/>stamp started_at] --> Gov
+  Gov{Kill switch or<br/>model not allowed?} -->|yes| Refuse[Fail with KILL_SWITCH<br/>or MODEL_NOT_ALLOWED]
+  Gov -->|no| Loop
 
-  subgraph Loop["Agent loop"]
+  subgraph Loop["Agent loop, up to max_iterations"]
     direction TB
-    Build[Build prompt<br/>system + history + input]
-    LLM[Call LLM provider]
+    LLM[Call the LLM router]
     Parse{Tool calls<br/>or final text?}
-    Exec[Execute tool<br/>append result to history]
-    Final[Validate output_schema<br/>or accept text]
-    Build --> LLM --> Parse
-    Parse -->|tool_calls| Exec --> Build
+    Exec[Run each tool through<br/>its governed wrapper]
+    Final[Moderation, required tools]
+    LLM --> Parse
+    Parse -->|tool_calls| Exec --> LLM
     Parse -->|final text| Final
   end
 
-  Loop --> Persist[Persist execution row<br/>status=completed/failed]
-  Persist --> Emit[Publish exec.completed<br/>to NATS]
+  Loop --> Persist[Write the execution row<br/>status, cost, tier, trace]
+  Persist --> Emit[Publish done or error<br/>on exec:events:id]
 ```
 
-The agent-runtime pod runs `apps/agent-runtime/main.py` which starts:
-1. A NATS consumer subscribed to `exec.{pool}.>`.
-2. An HTTP server on `:8001` exposing `/health` + `/metrics`.
-3. A graceful-shutdown handler that drains the consumer before terminating.
+The pod runs `python consumer.py` with `RUNTIME_MODE=remote`. It:
 
-When SIGTERM arrives (rolling deploy), the handler:
-1. Unsubscribes the consumer (no new messages).
-2. Lets any in-flight loops finish up to `agent.timeout` seconds.
-3. Force-stops anything still running and lets Postgres' uncommitted-tx be rolled back by the connection close.
+1. Pulls jobs from JetStream subject `agents.<RUNTIME_POOL>` with durable consumer `abenix-<pool>-consumer`, one message per fetch. With `QUEUE_BACKEND` other than `nats` the consumer logs that queued agents need NATS and exits.
+2. Runs up to `AGENT_CONCURRENCY` (or `CONSUMER_MAX_CONCURRENCY`, default 8) jobs at once.
+3. Serves `/health` and `/metrics` on `HEALTH_PORT` (default 8001).
+4. Starts the tool stream consumer alongside, unless `TOOL_WORKER_ENABLED=0`.
+
+A message is acked only after the run ends. Before running, the consumer claims a lease on the execution row (`runner_id`, `lease_expires_at`, `delivery_attempts`) and renews it, along with an `in_progress` heartbeat to JetStream, while the run lives. A duplicate for a finished run is dropped, a live lease makes the duplicate wait, and an expired lease means the first runner died, so this one reruns the agent from the start. After `CONSUMER_MAX_ATTEMPTS` pickups the run fails with `STALE_SWEEP`. See [08-queue-scaling](08-queue-scaling.md#at-least-once-delivery).
+
+On SIGTERM the consumer sets a stop flag and leaves its loop when the next message arrives. Jobs already running are not drained. Their messages stay unacked, so another pod picks them up once the lease runs out.
+
+## Building the executor
+
+For each job the consumer:
+
+1. Loads the execution row, the agent and its `model_config`. A missing row publishes an `error` event and stops.
+2. Stamps `started_at` and sets the credential tenant.
+3. Builds the tool registry from `model_config.tools`, with MCP connections resolved when the agent has any. Context tools such as `human_approval` get the execution id, tenant and agent name.
+4. Applies `tool_config`: `parameter_defaults` (hidden from the model and locked unless `locked_defaults: false`), `max_calls` and `require_approval`. See [02-tools](02-tools.md).
+5. Appends tool configuration notes and MCP warnings to the system prompt.
+6. Loads the tenant's moderation gate, `require_knowledge_search` and `require_tools`.
+
+Model settings come from `model_config`: `model` (default `claude-sonnet-4-5-20250929`, or the job's `model_override`), `temperature` (0.7), `max_iterations` (10), `max_tokens` (4096).
+
+The consumer drives `executor.stream()`, so every token, tool call, tool result and node trace is published to Redis channel `exec:events:<execution_id>` as it happens, and appended to a replay log of the last 500 events kept for an hour. See [04-streaming-tracing](04-streaming-tracing.md).
 
 ---
 
-## ExecutionContext — everything a tool needs
+## Governance at run start
 
-When the runtime picks up a message, it builds an `ExecutionContext` that gets threaded through every tool call:
+Before any token is spent the executor opens a governed run and checks it ([`engine/governance.py`](../../apps/agent-runtime/engine/governance.py), [`engine/risk.py`](../../apps/agent-runtime/engine/risk.py)).
 
-```python
-@dataclass
-class ExecutionContext:
-    execution_id: UUID
-    tenant_id: UUID
-    agent_id: UUID
-    subject: ActingSubject | None     # actAs identity
-    actor_id: UUID                    # platform user who triggered (often = subject.user_id)
-    started_at: datetime
-    otel_span: Span                   # current OpenTelemetry span — children attach here
-    db_url: str
-    blob_url: str
-    redis_url: str
-    nats: NatsClient                  # for event emission
-    inputs: dict                      # original input payload
-    history: list[Message]            # mutable — the loop appends here
-    cost_so_far_usd: float            # rolled up across LLM calls
-```
+1. **Starting tier.** The highest of the tier passed in, the agent's stored `model_config.risk_tier`, and, for a nested agent, the tier of the run that called it. A nested agent never runs below its caller. A start above low adds a reason `{tier, source: "agent"}`.
+2. **Kill switches.** `governance.check()` for scope `agent` with the agent id, then scope `model` with the model id. A hit refuses the run with `failure_code: KILL_SWITCH` and the message "The agent <id> is stopped by a kill switch. Reason given: …".
+3. **Allowed models.** If the tier policy's `allowed_models` is not empty and the model is not on it (exact id, or a prefix ending `*`), the run is refused with `MODEL_NOT_ALLOWED`.
 
-Tools accept this context as a constructor argument and use it to:
-- Connect to the tenant-scoped DB.
-- Emit events (`ctx.nats.publish(...)`).
-- Open OTel child spans (`with ctx.otel_span.start_child(...)`).
-- Append to history (rare — usually only the runtime touches `history`).
+A refused run is written as `failed`, with the refusal message as output and error, and `ExecutionResult.governance_refusal` set to `{code, message, scope, target}`.
 
-> **Why** — tools are stateless. All session state lives on the context. This makes tools trivial to test in isolation: build a fake context, call `tool.execute()`, assert on the result.
+Checks read an in-memory snapshot of `risk_policies`, active `kill_switches` and agents above low tier, refreshed every 5 seconds behind the caller, so a check never waits on the database. Switches match on the tenant first, then platform-wide switches with no tenant, and on `(scope, "*")` or `(scope, target)` or `("all", "*")`.
 
----
+Kill switch scopes are `all`, `agent`, `pipeline`, `tool`, `model`, `trigger`, `decision` and `source`.
 
-## Building the prompt
+## The loop
 
-Each loop iteration starts by building the LLM messages:
+Each iteration:
 
-```python
-messages = [
-    {"role": "system", "content": agent.system_prompt},
-    *agent.example_prompts_messages,    # few-shot examples if any
-    *ctx.history,
-    {"role": "user", "content": json.dumps(ctx.inputs)},
-]
-tool_schemas = [
-    registry.get(slug).schema_for_llm(ctx)
-    for slug in agent.model_config_["tools"]
-]
-```
+1. Checks the sandbox timeout. Over budget ends the run with "Execution timed out." (`SANDBOX_TIMEOUT` on the queue path).
+2. Calls the LLM router with the conversation, the system prompt and every registered tool. The router may swap the model (`model_resolver`), walks the provider chain, gives the first provider 3 attempts and each fallback provider one, and reports which model actually served the call. See [LLM provider abstraction](#llm-provider-abstraction).
+3. With no tool calls, the reply is final. It goes through the post-LLM moderation check, then the required-tools check, and the run ends.
+4. With tool calls, each one is run in order and its result appended for the next iteration.
+5. After the tool results are added, an estimate of the conversation size (characters / 4) above 180,000 tokens stops the run with what it has.
 
-`schema_for_llm` produces the per-tool JSONSchema the LLM provider expects. For Anthropic this is the `tools` array on the `messages.create` call. for OpenAI it's `tools` on `chat.completions.create`. The runtime has provider-specific shims in [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-runtime/engine/llm_router.py).
+The sandbox defaults are 300 seconds (`SANDBOX_TIMEOUT_SECONDS`, or the admin setting `sandbox.timeout_seconds`) and 50 tool calls per run. When `max_iterations` is above 10 both scale up by `max_iterations / 10`. Past the call cap each further call gets "Tool call limit exceeded".
+
+### The step limit
+
+When `max_iterations` runs out, `invoke()` makes one more LLM call telling the model to stop calling tools and answer from what it gathered. If that fails the output is "Max iterations reached." The `stream()` path, which the queue consumer uses, has no extra turn and ends with whatever text was streamed. Neither sets a failure code.
 
 ---
 
 ## Tool dispatch
 
-When the LLM returns `tool_calls`, the runtime iterates:
+Every tool's `execute` is wrapped once per class by `BaseTool.__init_subclass__` in [`engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py). For each call the wrapper:
 
-```python
-for call in response.tool_calls:
-    tool = registry.instantiate(call.tool_slug, ctx)
-    cfg = ctx.tool_config.get(call.tool_slug, {})
+1. Refreshes the credential snapshot.
+2. If no governed tool call is already in progress, refreshes the governance snapshot and runs `_govern`. Nested wrappers (a `_DefaultedTool` around the real tool) are checked once, at the outermost call.
+3. Sets the tool's own tenant when it was built with one.
+4. Runs the tool. A `ToolNeedsConfiguration` raise becomes the standard "X is not configured. An admin can add it under Admin -> Tool Configuration." result.
 
-    # Apply per-tool param defaults (from agent's tool_config block)
-    args = {**cfg.get("parameter_defaults", {}), **call.arguments}
+`_govern` checks, in order:
 
-    # Approval gate?
-    if cfg.get("require_approval") and not _is_approved(ctx, call):
-        await _request_approval_and_pause(ctx, call)
-        return  # the loop suspends; resumed later by exec.resume
+- Kill switch scope `tool` for the tool name.
+- For every run in the chain, the current one and its parents, kill switch scope `agent` or `pipeline` for its id. A switch set while a run is going stops it at its next tool call, nested runs included.
 
-    # max_calls cap?
-    if not _within_call_cap(ctx, call.tool_slug, cfg.get("max_calls")):
-        result = ToolResult(content="Tool call cap reached", is_error=True)
-    else:
-        # Real call
-        with ctx.otel_span.start_child(f"tool.{call.tool_slug}"):
-            result = await tool.execute(args)
+A hit returns an error result with `metadata.stopped = {scope, target}`. The model sees the message and the loop goes on.
 
-    # Log invocation
-    await _log_invocation(ctx, call, result)
+### Risk tier during a run
 
-    # Emit streaming event
-    await ctx.nats.publish(f"exec.{ctx.execution_id}.tool", {
-        "tool_slug": call.tool_slug,
-        "args": args,
-        "result_preview": str(result.content)[:500],
-        "is_error": result.is_error,
-    })
+Each tool class declares `risk_tier` (default `low`). When a tool's tier is above the run's current tier (`risk.above`), the tenant's policy for the tool's tier decides through `tool_call_action`:
 
-    # Append to history for the next LLM iteration
-    ctx.history.append(_tool_result_to_message(call, result))
-```
+| Action | Default for | Effect |
+|---|---|---|
+| `allow` | low, medium | The call runs and the run is raised to the tool's tier, reason `tool:<name>` |
+| `approval` | high, critical | A `human_approval` gate opens, `call <tool> (<tier> risk)` with the arguments as details. Approved, the run is raised with the reviewer in the reason. Rejected or timed out, the call returns an error with `metadata.risk_approval` |
+| `block` | none | The call returns an error with `metadata.risk_blocked = {tool_tier, run_tier}` and a message to raise the agent's tier |
 
-The full registry + framework is documented in [02-runtime/02-tools](02-tools.md).
+`RunContext.raise_to(tier, source, detail)` only ever raises, and appends `{tier, source, detail}` to the run's reasons. When a nested agent or pipeline ends, its final tier is raised onto the parent with source `agent:<name>` or `pipeline:<id>`.
+
+The final tier and reasons come back as `ExecutionResult.risk_tier` and `risk_reasons` (and on the stream's `done` payload) and are written to `executions.risk_tier` and `executions.risk_reasons`. See [05-approvals-hitl](05-approvals-hitl.md#gating-another-tool) and [Governance](../01-architecture/07-governance.md).
+
+### What the model sees
+
+The tool result goes back to the model through `_model_visible_content`:
+
+- Metadata the model would never see is appended as one line, `[tool notes] a | b`. It takes `metadata.warnings`, `metadata.sources_skipped` (as "sources not queried: …"), a `needs_configuration` key and a `skipped` reason.
+- With notes, an `[instruction]` line asks the model to pass each note on to the user. For a missing configuration it names the exact wording to repeat.
+- The result is capped at `MAX_TOOL_RESULT_CHARS` (12,000). A longer one keeps the first and last 6,000 characters with `[... truncated N chars ...]` between.
+
+### What is recorded
+
+Each tool call entry on the run keeps `name`, `arguments`, `result`, `is_error`, `duration_ms`, an `output_summary`, and a `decision_record` when the tool returned one. `result` is cut to `TOOL_RESULT_PERSIST_CHARS` (default 8,000) with "[N more characters not kept]". Each call also gets a `tool.<name>` OpenTelemetry span and a node trace with the first 500 characters of the result and its metadata.
+
+An unknown tool name returns "Unknown tool: <name>" to the model.
 
 ---
 
-## Iteration limit + output schema
+## Required tools
 
-Two safety nets at the end of the loop:
+`model_config.require_tools` lists tools the run must call. `require_knowledge_search: true` adds `knowledge_search` to the list. A run that ends without calling every listed tool fails:
 
-### `max_iterations`
-- Default 10. Set on `model_config.max_iterations`.
-- If we hit it, the runtime emits `exec.iteration_cap_hit`, marks the execution `completed` with `failure_code='iteration_cap'`, and returns whatever the LLM said last.
-- The cap is a hard cost-protection — without it a stuck agent in a tool-call loop could burn hundreds of dollars.
+| Missing | Output | `failure_code` |
+|---|---|---|
+| Only `knowledge_search` | `Grounded-response agent completed without invoking knowledge_search; output cannot be certified as grounded.` | `GROUNDING_REQUIRED_VIOLATION` |
+| Anything else, on the stream path | `[required tools not called: a, b]` appended | `REQUIRED_TOOLS_VIOLATION` |
 
-### `output_schema`
-- Optional. JSONSchema-shaped object on `model_config.output_schema`.
-- When the LLM finally produces text (no tool call), the runtime attempts to parse it as JSON and validate against the schema.
-- On validation failure: one **retry with feedback** — the runtime appends an assistant message + a user message: "Your previous reply did not match the required schema. Here are the errors: …. Reply only with valid JSON."
-- After one retry, if still invalid: emits `exec.output_invalid`, marks execution `completed` with `failure_code='output_schema'` and returns the raw text as `output.raw`.
+The `done` payload carries `missing_tools`. The non-streaming `invoke()` path reports any miss as `GROUNDING_REQUIRED_VIOLATION`. A cache hit counts as no tool calls, so it fails the check too.
 
-> **Why the retry** — empirical evidence shows ~70% of schema failures self-correct on a single retry with the validator output. More retries don't help. the LLM either gets it or stays stuck.
+A run with tools available that called none gets the warning "completed without calling any tool although tools were available" on its trace.
+
+## Output schema
+
+When `model_config.output_schema` is set, the consumer runs `engine/post_process.py` over the final output. It parses the JSON, normalises obvious enum drift and, when that works, stores the cleaned JSON. Problems become `validation_warnings` on the `done` event. There is no retry and no failure code for a schema miss. A per-agent post-processor registered for the agent's slug runs after it.
+
+Tier policies with `require_output_schema` refuse to activate an agent that has none. That check is at publish time, not run time.
+
+---
+
+## Provenance
+
+A database trigger, `executions_provenance`, runs `BEFORE INSERT` on `executions`, so no insert path can skip it. For a row with an `agent_id` and no `provenance` yet it:
+
+1. Hashes the agent's `system_prompt` and `model_config` together (SHA-256) into `config_hash`.
+2. Stores that pair in `execution_config_snapshots`, keyed by the hash, once.
+3. Sets `prompt_hash` (SHA-256 of the system prompt), `agent_revision` (the highest revision number) and the starting `risk_tier` from the agent's `model_config.risk_tier`, unless the insert gave one.
+4. Writes `provenance` as `{config_hash, agent_version, model, temperature, tools, risk_tier}`.
+
+The run's final tier overwrites `risk_tier` at the end. `GET /api/governance/runs/{execution_id}/provenance` returns these fields, the snapshot, and `changed_since`, the keys that differ from the agent now. `POST /api/governance/runs/{execution_id}/replay` reruns an agent execution on its recorded input, `pinned` to the snapshot or on the `current` agent. Both need `runs.replay`. Evaluation suites use `config_hash` for the publish gate, see [18-evaluation-suites](18-evaluation-suites.md#publish-gate).
 
 ---
 
 ## LLM provider abstraction
 
-The runtime supports Anthropic, OpenAI, Azure OpenAI and Google out of the box, plus a Claude subscription provider. Every implementation lives in one file, [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-runtime/engine/llm_router.py):
+The runtime supports Anthropic, OpenAI, Azure OpenAI and Google out of the box, plus a Claude subscription provider. Every implementation lives in one file, [`apps/agent-runtime/engine/llm_router.py`](../../apps/agent-runtime/engine/llm_router.py).
 
-```python
-class ChatProvider(Protocol):
-    async def chat(
-        self,
-        model: str,
-        messages: list[Message],
-        tools: list[ToolSchema],
-        temperature: float,
-        max_tokens: int,
-    ) -> ChatResponse: ...
-
-    def estimate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float: ...
-```
-
-The runtime picks a provider by inspecting `model_config.model`:
-- `claude-*` → Anthropic
-- `gpt-*` → OpenAI
-- `gemini-*` → Google
+Cost is split by model prefix for the per-provider columns: `claude*` is Anthropic, `gpt*`, `o1*` and `chatgpt*` are OpenAI, `gemini*` is Google, anything else is other.
 
 To add a new provider:
 1. Subclass `LLMProvider` in `llm_router.py`. There is no separate providers
@@ -240,55 +245,40 @@ than surfacing the downstream provider's message on its own.
 
 ---
 
-## Resumable execution (approval gates)
+## Approval gates
 
-If a tool with `require_approval=True` fires, the runtime doesn't keep waiting. It:
-
-1. Inserts an `approvals` row with `status='pending'` and `payload={tool_slug, args, agent_id, execution_id}`.
-2. Snapshots the current `history` + `cost_so_far_usd` + iteration count into `executions.pause_state` (JSONB).
-3. Updates `executions.status='waiting_approval'`.
-4. Publishes `exec.{id}.approval_requested` (consumed by abenix-api which emits notifications + SSE).
-5. **Exits the loop and acks the NATS message.** The runtime pod is now free.
-
-When the approval is decided:
-- API publishes `exec.{id}.resume` if approved.
-- Runtime consumer picks up the resume message, loads `pause_state` from Postgres, rebuilds `ctx.history`, and re-enters the loop from where it left off.
-
-```mermaid
-sequenceDiagram
-  participant R as agent-runtime
-  participant PG as Postgres
-  participant API as abenix-api
-  participant H as Human
-
-  R->>R: tool call needs approval
-  R->>PG: INSERT approvals + UPDATE executions.pause_state
-  R->>API: publish exec.approval_requested
-  R-->>R: exit loop, ack NATS
-  API->>H: notification (in-app + email)
-  H->>API: POST /approvals/{id}/signoff
-  API->>PG: UPDATE approvals
-  alt signoffs >= required
-    API->>R: publish exec.resume
-    R->>PG: load pause_state
-    R->>R: resume loop
-  end
-```
-
-> **Why** — a 30-minute pending approval should not pin a pod for 30 minutes. By exiting and re-entering, a single 4-replica pool can hold thousands of paused executions cheaply.
+A gate does not suspend the run. The `human_approval` or `approval_gate` tool call blocks inside the loop and polls every 2 seconds until someone decides or the gate times out, then returns a normal tool result. The run keeps its runtime slot the whole time. A `hitl:waiting:<execution_id>` key in Redis keeps the stale sweeper away from it. See [05-approvals-hitl](05-approvals-hitl.md).
 
 ---
 
 ## Cost roll-up
 
-After each LLM call, the runtime calls `provider.estimate_cost(...)` and accumulates into `ctx.cost_so_far_usd`. On terminal write:
+Each LLM response carries its cost. The executor adds them up, plus the final-answer turn when there is one, and splits them by provider. On the terminal write the consumer stores `cost` (rounded to 6 places, 0 written as 0 rather than left NULL), the token counts, `model_used`, `duration_ms` and `trace_id`, and debits the API key's and user's usage counters.
 
-```python
-execution.cost_usd = ctx.cost_so_far_usd
-execution.duration_ms = (now - ctx.started_at).total_seconds() * 1000
-```
+These are the numbers the Analytics page rolls up.
 
-These are the numbers the Analytics page rolls up. The `tool_invocations.cost_usd` on individual tool rows is set when a tool *itself* incurs external API cost (e.g. a tavily-search call) — most tools have cost=0 because they're DB or local.
+## Spend caps
+
+Two daily caps on the agent row are checked before a run starts, in [`engine/agent_budget.py`](../../apps/agent-runtime/engine/agent_budget.py).
+
+| Column | Caps |
+|---|---|
+| `daily_cost_limit` | What the agent spends per UTC day, across every caller and tenant |
+| `daily_budget_usd` | What one tenant spends on that agent per UTC day |
+
+A value of 0 or less means no cap. Spend is the sum of `executions.cost` for the agent since midnight UTC, plus the cost of steps where a pipeline ran this agent through `agent_step` (read from the pipeline row's `node_results` by `metadata.billed_agent_id`).
+
+The daily caps apply before any run starts, on every path: the agent page and `POST /api/agents/{id}/execute`, triggers, the `/api/pipelines/{id}/execute*` routes, pipeline steps, meetings, OracleNet, governance replays, `POST /api/a2a/agents/{id}/invoke` and `POST /api/batch/execute`. A refused API call gets HTTP 429 with `error_code: BUDGET_EXCEEDED`, a plain message with today's spend (UTC) and who can raise the cap (the agent's owner for `daily_cost_limit`, an admin under Admin, Scaling for `daily_budget_usd`), and `details` holding `limit`, `cap_usd` and `spent_today_usd`. A triggered run (webhook, schedule, Run now) is written as `failed` with that code and message, and the trigger owner is notified. An `agent_step` whose saved agent is over its cap returns an error result with `failure_code: BUDGET_EXCEEDED`. A meeting bot over its cap does not join and the meeting log says why. A batch checks once before it is queued and again before each input, so inputs after the cap is reached come back failed with `BUDGET_EXCEEDED`.
+
+A saved agent run as a pipeline step counts toward its own daily caps as well as the pipeline's bill. Its spend is read from the pipeline row's `node_results`, so it counts once the pipeline run finishes, and the organization totals are not counted twice because the step has no execution row of its own.
+
+### Per-run cost limit
+
+`per_execution_cost_limit` caps one run. After each model call the executor checks what the run has spent. Once spend reaches the limit and the model asks for another step, the run stops with `failure_code: BUDGET_EXCEEDED`. The answer so far and every step stay in the Flight Recorder, ending with a `budget_stop` step that records the limit and the spend. A final answer that crosses the limit is kept, since no further step was asked for. Pipelines apply the same limit across their steps: before each node the pipeline compares the spend so far with the limit and fails the node once it is reached. An API caller can pass `cost_limit` in the request body (pipelines, a2a, batch), which can only tighten the agent's limit, never raise it.
+
+### Pipeline run cost
+
+A pipeline row's `cost`, `input_tokens` and `output_tokens` are the sum over every node, completed or failed. A node's spend is read from its `metadata.cost` (what `agent_step` and `llm_call` report), falling back to a `cost` field in its output. A node that is retried keeps the spend of its failed attempts, added into its `metadata.cost` with the part from earlier attempts in `metadata.earlier_attempts_cost`. `pipeline_usage` in [`engine/pipeline.py`](../../apps/agent-runtime/engine/pipeline.py) does the sum and `serialize_pipeline_result` returns it, so the inline API paths, the `/api/pipelines` routes, the queue consumer and the daily caps all see the same number. A failed pipeline's spend is also debited from the API key's and user's monthly counters.
 
 ---
 
@@ -296,16 +286,20 @@ These are the numbers the Analytics page rolls up. The `tool_invocations.cost_us
 
 | Failure mode | What the runtime does | What you'll see |
 |---|---|---|
-| LLM 5xx | Retry with exp backoff up to 3 times | extra latency. `execution.cost_usd` excludes retried tokens |
-| LLM rate-limit | Retry-after honored. one retry | execution.duration_ms includes the wait |
-| Tool exception | Caught. `ToolResult(is_error=True)` written. agent sees the error message in next iteration | tool_invocations.is_error=true |
-| Tool timeout | killed at `tool.timeout` seconds (default 60). same as exception | failure_code='tool_timeout' |
-| `output_schema` invalid | one retry. then `failure_code='output_schema'` | execution completes with output.raw populated, output.parsed=None |
-| `max_iterations` hit | abort. `failure_code='iteration_cap'` | execution completes with output = last LLM text |
-| Pod OOM-killed mid-loop | Reconciler sweeper (in worker) marks failed after agent.timeout | failure_code='runtime_died_or_timeout' |
-| NATS message redelivery | Idempotent — runtime checks executions.status before starting. skips if not 'queued' | none visible |
+| LLM error | The first provider gets 3 attempts, each fallback provider in the chain gets one | `model_used` and `model_fallback_reason` show what served the call |
+| Kill switch at start | Refused before the first LLM call | `failure_code=KILL_SWITCH` |
+| Model not on the tier's list | Refused before the first LLM call | `failure_code=MODEL_NOT_ALLOWED` |
+| Kill switch during the run | The next tool call returns an error result, the loop continues | `metadata.stopped` on the tool call |
+| Tool raises or returns `is_error` | The model sees the error text in the next iteration | `is_error: true` on the tool call |
+| Moderation blocks input or output | The run ends with the block message | `failure_code=MODERATION_BLOCKED` |
+| Required tool not called | The run fails after the final answer | `GROUNDING_REQUIRED_VIOLATION` or `REQUIRED_TOOLS_VIOLATION` |
+| Sandbox timeout | The run ends at the next iteration check | `failure_code=SANDBOX_TIMEOUT` |
+| `max_iterations` hit | One final-answer turn on `invoke()`, none on `stream()` | Completed, no failure code |
+| Context estimate over 180,000 tokens | The run stops with what it has | Completed, no failure code |
+| Unhandled exception | The row is failed with a code from `classify_exception` and a dead letter is written | `failure_code` such as `LLM_RATE_LIMIT`, `INFRA_CRASH`, `UNKNOWN_ERROR` |
+| Pod dies mid-run | On a pool, JetStream redelivers and another pod reruns the agent from the start once the lease (`CONSUMER_LEASE_SECONDS`, 25) expires. Tool side effects can repeat. After `CONSUMER_MAX_ATTEMPTS` (3) pickups the run is failed. An inline run stays `running` until the API's sweeper fails `running` rows older than `STALE_EXECUTION_MAX_MINUTES` (default 10), skipping runs on a HITL gate or with a live lease | A second attempt in the logs, or `failure_code=STALE_SWEEP` |
 
-Every failure increments a Prometheus counter `abenix_executions_failed_total{failure_code=…}`. The `/help` page → "Alerts" lists the codes worth paging on.
+Every terminal outcome increments `abenix_executions_failed_total{failure_code=…}` or the completed counter. The full list of codes is in [09-state-machines](09-state-machines.md#failure-codes).
 
 ---
 
@@ -316,3 +310,20 @@ Every failure increments a Prometheus counter `abenix_executions_failed_total{fa
 - [02-runtime/04-streaming-tracing](04-streaming-tracing.md) — events + OTel
 - [02-runtime/05-approvals-hitl](05-approvals-hitl.md) — the full HITL flow
 - [08-howto/04-debugging](../08-howto/04-debugging.md) — common failure modes + traces
+
+---
+
+## Source map
+
+| What | Where |
+|---|---|
+| **Queue consumer** | [`apps/agent-runtime/consumer.py`](../../apps/agent-runtime/consumer.py) — `main`, `_run_one`, `_mark_done` |
+| **Executor loop** | [`apps/agent-runtime/engine/agent_executor.py`](../../apps/agent-runtime/engine/agent_executor.py) — `AgentExecutor`, `_model_visible_content`, `_persisted_result` |
+| **Governance snapshot, kill switches, run tier** | [`apps/agent-runtime/engine/governance.py`](../../apps/agent-runtime/engine/governance.py) |
+| **Tier policies** | [`apps/agent-runtime/engine/risk.py`](../../apps/agent-runtime/engine/risk.py) |
+| **Per-call wrapper** | [`apps/agent-runtime/engine/tools/base.py`](../../apps/agent-runtime/engine/tools/base.py) — `BaseTool.__init_subclass__`, `_govern` |
+| **Sandbox limits** | [`apps/agent-runtime/engine/sandbox.py`](../../apps/agent-runtime/engine/sandbox.py) |
+| **Provenance trigger** | [`packages/db/alembic/versions/c1d2e3f4a5b6_governance_core.py`](../../packages/db/alembic/versions/c1d2e3f4a5b6_governance_core.py) |
+| **Provenance and replay endpoints** | [`apps/api/app/routers/governance.py`](../../apps/api/app/routers/governance.py) |
+| **Failure codes** | [`apps/api/app/core/failure_codes.py`](../../apps/api/app/core/failure_codes.py) |
+| **Stale sweeper** | [`apps/api/app/core/scheduler.py`](../../apps/api/app/core/scheduler.py) — `sweep_stale_executions` |

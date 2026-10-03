@@ -29,6 +29,8 @@ import {
 import Link from 'next/link';
 import { LiveDagView } from '@/components/shared/LiveDagView';
 import { FallbackBadge } from '@/components/FallbackBadge';
+import DecisionRunCard from '@/components/decisions/DecisionRunCard';
+import type { DecisionRecord } from '@/lib/decisions';
 
 interface ChildExecution {
   id: string;
@@ -36,6 +38,17 @@ interface ChildExecution {
   status: string;
   duration_ms?: number | null;
   created_at?: string | null;
+}
+
+interface ToolCallEntry {
+  name: string;
+  arguments?: Record<string, unknown>;
+  result?: string;
+  result_preview?: string;
+  is_error?: boolean;
+  duration_ms?: number;
+  node_id?: string;
+  decision_record?: DecisionRecord;
 }
 
 interface ExecutionDetail {
@@ -55,14 +68,14 @@ interface ExecutionDetail {
   fallback_reason?: string;
   trace_id?: string | null;
   // a list on current rows, an object {total} on rows written before 2.5
-  tool_calls?: Array<{ name: string; arguments?: Record<string, unknown>; result?: string; result_preview?: string; is_error?: boolean; duration_ms?: number; node_id?: string }> | { total?: number };
+  tool_calls?: Array<ToolCallEntry> | { total?: number };
   confidence_score?: number;
   failure_code?: string | null;
   parent_execution_id?: string | null;
   // a dict keyed by node id on the wire
   node_results?: Record<string, { node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }> | Array<{ node_id: string; label?: string; tool_name: string; status: string; duration_ms?: number; output?: unknown; error?: string }>;
   execution_trace?: {
-    steps?: Array<{ label?: string; node_type?: string; type?: string; tool?: string; node_id?: string; name?: string; status?: string; input?: unknown; output?: unknown; output_preview?: string; duration_ms?: number; tokens?: number; is_error?: boolean; error?: string | null }>;
+    steps?: Array<{ label?: string; node_type?: string; type?: string; tool?: string; node_id?: string; name?: string; status?: string; input?: unknown; output?: unknown; output_preview?: string; duration_ms?: number; tokens?: number; is_error?: boolean; error?: string | null; metadata?: { decision_record?: DecisionRecord } }>;
     tool_calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
     warnings?: string[];
     confidence_score?: number;
@@ -498,7 +511,7 @@ export default function ExecutionDetailPage() {
   }
 
   const totalDuration = execution.duration_ms || 1;
-  const toolCalls: Array<{ name: string; arguments?: Record<string, unknown>; result?: string; result_preview?: string; is_error?: boolean; duration_ms?: number; node_id?: string }> = Array.isArray(execution.tool_calls) ? execution.tool_calls : [];
+  const toolCalls: ToolCallEntry[] = Array.isArray(execution.tool_calls) ? execution.tool_calls : [];
   const trace = execution.execution_trace;
   const steps = trace?.steps || [];
   // node_results is a dict keyed by node id, older rows may hold a list
@@ -770,6 +783,7 @@ export default function ExecutionDetailPage() {
                   {typeof tc.duration_ms === 'number' ? <span className="text-slate-600">{tc.duration_ms}ms</span> : <span className="text-slate-700">duration not recorded</span>}
                 </div>
                 <div className="ml-7 space-y-1">
+                  {tc.decision_record && <DecisionRunCard record={tc.decision_record} args={tc.arguments} />}
                   <DataPanel title="Arguments" data={tc.arguments} isJson />
                   {(tc.result ?? tc.result_preview) ? (
                     <DataPanel title={tc.result ? 'Result' : 'Result (first 500 chars)'} data={tc.result ?? tc.result_preview} />
@@ -907,6 +921,9 @@ export default function ExecutionDetailPage() {
                       {typeof st.duration_ms === 'number' && <span className="text-slate-600">{st.duration_ms}ms</span>}
                       {failed && <span className="text-[10px] px-1.5 rounded bg-red-500/10 text-red-300">failed</span>}
                     </div>
+                    {st.node_type === 'pipeline_node' && st.metadata?.decision_record && (
+                      <DecisionRunCard record={st.metadata.decision_record} args={st.input && typeof st.input === 'object' ? (st.input as Record<string, unknown>) : undefined} />
+                    )}
                     {st.input !== undefined && <DataPanel title="Input" data={st.input} isJson />}
                     {(st.output_preview || st.output !== undefined) && <DataPanel title="Output" data={st.output_preview ?? st.output} isJson={st.output_preview === undefined} />}
                     {st.error && <p className="text-[10px] text-red-300">{st.error}</p>}

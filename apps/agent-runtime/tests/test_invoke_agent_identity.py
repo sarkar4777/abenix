@@ -241,3 +241,18 @@ def test_registry_hands_caller_identity_to_the_tool():
     assert tool._execution_id == PARENT_EXEC
     assert tool._agent_id == CALLER_AGENT
     assert tool._depth == 2
+
+
+@pytest.mark.asyncio
+async def test_child_run_submit_carries_the_parent_trace(monkeypatch):
+    from engine.tracing import extract_carrier, get_tracer
+
+    seen = _install(monkeypatch, agents=[_agent()])
+    parent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+    ctx = extract_carrier({"traceparent": parent})
+    with get_tracer("t").start_as_current_span("parent", context=ctx):
+        res = await _tool().execute({"agent_slug": "child-agent", "input": {}})
+    assert not res.is_error, res.content
+    post = next(r for r in seen if r.method == "POST")
+    assert "0af7651916cd43dd8448eb211c80319c" in post.headers["traceparent"]
+    assert post.headers["authorization"].startswith("Bearer ")

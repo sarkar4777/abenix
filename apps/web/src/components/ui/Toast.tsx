@@ -112,7 +112,12 @@ export function ToastContainer() {
   const toasts = useToastStore((s) => s.toasts);
 
   return (
-    <div className="pointer-events-none fixed right-4 top-4 z-[100] flex w-80 flex-col gap-2">
+    <div
+      className="pointer-events-none fixed right-4 top-4 z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2"
+      role="region"
+      aria-live="polite"
+      aria-label="Notifications"
+    >
       <AnimatePresence mode="popLayout">
         {toasts.map((t) => (
           <ToastCard key={t.id} toast={t} />

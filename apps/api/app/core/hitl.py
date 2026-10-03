@@ -190,14 +190,21 @@ async def approver_denial(
     user: Any,
     requester_id: uuid.UUID | str | None,
     policy: dict[str, Any] | None = None,
+    gate_kind: str | None = None,
 ) -> str | None:
     """Reason the caller may not sign off, or None when allowed.
 
     Without a policy, admins and creators sign off and a requester approving
     their own request is recorded as self_approved. A policy, set from the
     risk tier, adds separation of duties: a signing capability and, when
-    asked, no approving your own change.
+    asked, no approving your own change. Publishing a decision also needs
+    decisions.review.
     """
+    if gate_kind == "decision_publish":
+        from app.core.capabilities import has_capability
+
+        if not await has_capability(db, user, "decisions.review"):
+            return "Approving a decision for publication needs the decisions.review capability. An admin can grant it under Admin, Permissions."
     if policy:
         from app.core.capabilities import has_capability
 

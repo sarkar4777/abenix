@@ -37,6 +37,23 @@ class ResolvedRelationship:
     description: str
     source_doc_ids: list[str] = field(default_factory=list)
     weight: float = 1.0
+    confidence: float = 1.0
+
+
+@dataclass
+class EntityConflict:
+    """Two sources disagree on one property of the same entity."""
+
+    entity: str
+    property: str
+    a_doc_id: str
+    a_value: str
+    a_confidence: float
+    b_doc_id: str
+    b_value: str
+    b_confidence: float
+    status: str = "open"
+    resolved_value: str | None = None
 
 
 @dataclass
@@ -47,6 +64,41 @@ class ResolutionResult:
     total_raw_entities: int = 0
     tokens_used: int = 0
     cost: float = 0.0
+    conflicts: list[EntityConflict] = field(default_factory=list)
+
+
+CONFLICT_ACTIONS = ("flag", "split", "lower_conf_wins", "higher_conf_wins")
+
+
+def _type_sides(
+    group: list[ExtractedEntity], existing: dict[str, Any] | None
+) -> dict[str, tuple[str, float, int]]:
+    """type -> (doc id, best confidence, mentions) across the group and the stored entity."""
+    sides: dict[str, tuple[str, float, int]] = {}
+    for e in group:
+        doc, conf, n = sides.get(e.entity_type, ("", -1.0, 0))
+        if e.confidence > conf:
+            doc, conf = e.source_doc_id, e.confidence
+        sides[e.entity_type] = (doc, conf, n + 1)
+    if existing and existing.get("entity_type"):
+        t = existing["entity_type"]
+        docs = existing.get("source_doc_ids") or []
+        conf = float(existing.get("confidence") or 1.0)
+        doc, best, n = sides.get(t, ("", -1.0, 0))
+        sides[t] = (doc or (docs[0] if docs else ""), max(best, conf), n)
+    return sides
+
+
+def _pick_type(
+    sides: dict[str, tuple[str, float, int]],
+    primary: str,
+    action: str,
+) -> str:
+    if action == "higher_conf_wins":
+        return max(sides, key=lambda t: (sides[t][1], t == primary))
+    if action == "lower_conf_wins":
+        return min(sides, key=lambda t: (sides[t][1], t != primary))
+    return primary
 
 
 async def resolve_entities(
@@ -54,9 +106,19 @@ async def resolve_entities(
     raw_relationships: list[ExtractedRelationship],
     existing_entities: list[dict[str, Any]] | None = None,
     model: str = "claude-sonnet-4-5-20250929",
+    conflict_action: str = "flag",
 ) -> ResolutionResult:
-    """Resolve (deduplicate) extracted entities and remap relationships."""
+    """Resolve (deduplicate) extracted entities and remap relationships.
+
+    When sources disagree on an entity's type, conflict_action decides:
+    flag keeps the stored or majority type and records an open conflict,
+    higher/lower_conf_wins picks by confidence, split keeps both as
+    "Name (type)" variants linked by VARIANT_OF."""
     total_raw = len(raw_entities)
+    if conflict_action not in CONFLICT_ACTIONS:
+        conflict_action = "flag"
+    conflicts: list[EntityConflict] = []
+    variant_links: list[tuple[str, str]] = []
 
     name_groups: dict[str, list[ExtractedEntity]] = {}
     for e in raw_entities:
@@ -81,8 +143,8 @@ async def resolve_entities(
 
     for key, group in name_groups.items():
         # Check if this entity exists in the KB already
-        if key in existing_map:
-            ex = existing_map[key]
+        ex = existing_map.get(key)
+        if ex is not None:
             canonical = ex["canonical_name"]
         else:
             # Use the most descriptive name variant as canonical
@@ -91,11 +153,61 @@ async def resolve_entities(
                 key=lambda n: len(n),
             )
 
-        # Determine entity type (majority vote)
+        # Determine entity type (majority vote, the stored type takes precedence)
         type_counts: dict[str, int] = {}
         for e in group:
             type_counts[e.entity_type] = type_counts.get(e.entity_type, 0) + 1
-        entity_type = max(type_counts, key=type_counts.get)  # type: ignore
+        majority = max(type_counts, key=type_counts.get)  # type: ignore
+        primary = (ex or {}).get("entity_type") or majority
+        sides = _type_sides(group, ex)
+        entity_type = _pick_type(sides, primary, conflict_action)
+        if len(sides) > 1:
+            status = {"flag": "open", "split": "split"}.get(
+                conflict_action, "auto_resolved"
+            )
+            for other in sides:
+                if other == primary:
+                    continue
+                a, b = sides[primary], sides[other]
+                conflicts.append(
+                    EntityConflict(
+                        entity=canonical,
+                        property="entity_type",
+                        a_doc_id=a[0],
+                        a_value=primary,
+                        a_confidence=max(a[1], 0.0),
+                        b_doc_id=b[0],
+                        b_value=other,
+                        b_confidence=max(b[1], 0.0),
+                        status=status,
+                        resolved_value=None if status == "open" else entity_type,
+                    )
+                )
+            if conflict_action == "split":
+                for other in list(sides):
+                    members = [e for e in group if e.entity_type == other]
+                    if other == entity_type or not members:
+                        continue
+                    vname = f"{canonical} ({other})"
+                    merged[vname] = ResolvedEntity(
+                        canonical_name=vname,
+                        entity_type=other,
+                        description=max(
+                            (e.description for e in members if e.description),
+                            key=len,
+                            default="",
+                        ),
+                        aliases=[],
+                        source_doc_ids=list(
+                            {e.source_doc_id for e in members if e.source_doc_id}
+                        ),
+                        mention_count=len(members),
+                        confidence=max(e.confidence for e in members),
+                    )
+                    variant_links.append((vname, canonical))
+                    group = [e for e in group if e.entity_type != other]
+        chosen = [e for e in group if e.entity_type == entity_type] or group
+        confidence = max((e.confidence for e in chosen), default=1.0)
 
         # Best description (longest)
         description = max(
@@ -118,6 +230,7 @@ async def resolve_entities(
             existing.aliases = list(set(existing.aliases + aliases))
             if len(description) > len(existing.description):
                 existing.description = description
+            existing.confidence = max(existing.confidence, confidence)
             merges += len(group) - 1
         else:
             merged[canonical] = ResolvedEntity(
@@ -127,6 +240,7 @@ async def resolve_entities(
                 aliases=aliases,
                 source_doc_ids=doc_ids,
                 mention_count=len(group),
+                confidence=confidence,
             )
             if len(group) > 1:
                 merges += len(group) - 1
@@ -185,6 +299,7 @@ async def resolve_entities(
             rel_key_map[key].source_doc_ids = list(
                 set(rel_key_map[key].source_doc_ids + [r.source_doc_id])
             )
+            rel_key_map[key].confidence = max(rel_key_map[key].confidence, r.confidence)
         else:
             rel_key_map[key] = ResolvedRelationship(
                 source=src_canonical,
@@ -192,6 +307,17 @@ async def resolve_entities(
                 relationship_type=r.relationship_type,
                 description=r.description,
                 source_doc_ids=[r.source_doc_id] if r.source_doc_id else [],
+                confidence=r.confidence,
+            )
+
+    for vname, canonical in variant_links:
+        if vname in merged and canonical in merged:
+            rel_key_map[f"{vname}|VARIANT_OF|{canonical}"] = ResolvedRelationship(
+                source=vname,
+                target=canonical,
+                relationship_type="VARIANT_OF",
+                description="Sources disagree on the type of this entity",
+                source_doc_ids=merged[vname].source_doc_ids,
             )
 
     logger.info(
@@ -209,6 +335,7 @@ async def resolve_entities(
         total_raw_entities=total_raw,
         tokens_used=tokens_used,
         cost=cost,
+        conflicts=conflicts,
     )
 
 

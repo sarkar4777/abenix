@@ -40,6 +40,21 @@
 - Decision risk tier can be changed after creation.
 - The SDK playground finds every agent, sends declared inputs as context, and its generated Python, TypeScript and Java code carries exactly what was run.
 - A UI journey spec covers rules, validation, publishing, an agent and a pipeline that use the decision, chat, the Flight Recorder and the SDK playground.
+- Decisions made inside agent and pipeline runs are kept as evaluation records linked to the run. The Flight Recorder shows a decision card with the outcome, outputs, rules applied with citations, version, trace hash and a link to reopen the facts in Try, and each decision has an Evaluations tab that links back to the runs.
+- Pipeline tool calls show their arguments in the Flight Recorder.
+- approval_gate links to the run and calls the API as the run's user instead of failing with 401.
+- execute with wait_mode until_gate notices human_approval gates.
+- Named in-cluster webhook receivers can be saved when listed in eventsAllowedInternalHosts.
+- GDPR erasure works end to end. The purge used to fail on every run and never scrubbed the account, soft-deleted every tenant's agent memories, could target another tenant's user, and left Neo4j, Pinecone, files and trajectories untouched. It now erases the person's conversations and run content, Cognify entities naming them, persona vectors, uploads, trajectories and cloned voice, scoped to the tenant, with a true count per step.
+- Agent budgets are enforced. Daily caps apply on every run path including a2a, batch, meetings, OracleNet and replays, the per-run cap stops agent runs and pipelines, and pipeline steps and failed steps count toward spend.
+- Queued runs are at-least-once with a lease per run, so a runtime pod crash no longer loses work. Trace context follows a run across the queue.
+- The knowledge stack is wired: extractors, reranking with citations, document level access rules, Cognify confidence and conflict settings, a real re-embed with progress in the UI, and a scheduled Pinecone vacuum. atlas_as_of works, atlas_cypher is removed.
+- Backups run: the chart creates the backup volume, Neo4j exports over Bolt, and S3 uploads use boto3.
+- Admin tool runtime and scaling routes require admin, decision publish sign-off needs decisions.review, toasts show, expired sessions return to sign-in, network policies allow the platform's own traffic, metrics cover every API worker and the Postgres and Redis alerts fire.
+- a2a and batch runs are recorded and get moderation, MCP tools and knowledge grants. Agent execution runs on NATS only.
+- The user guide and developer docs were checked against the code and rewritten where they were wrong.
+- Pipeline runs pass the tenant moderation gate before they start, the same as agent runs.
+- Card-number moderation patterns only fire on numbers that pass the Luhn check, so ids and counts no longer block requests. Moderation events are saved when a pipeline input is blocked.
 
 ## v2.5.1 — 2026-10-02
 

@@ -1456,48 +1456,165 @@ def _target_label(t: CompareTarget) -> str:
     return " ".join(bits)
 
 
+EVAL_OUTCOMES = ("decided", "no_match", "missing_facts", "invalid_facts")
+
+
+def _eval_row(e: DecisionEvaluation, number: int | None) -> dict[str, Any]:
+    caller = e.caller or {}
+    return {
+        "id": str(e.public_id),
+        "outcome": e.outcome,
+        "version": number,
+        "version_id": str(e.version_id),
+        "facts": e.facts,
+        "result": e.result,
+        "applied_rules": e.applied_rules,
+        "trace_hash": e.trace_hash,
+        "as_of": e.as_of,
+        "known_at": _iso(e.known_at),
+        "content_hash": e.content_hash,
+        "caller": caller,
+        "execution_id": caller.get("execution_id") or None,
+        "created_at": _iso(e.created_at),
+    }
+
+
+async def _version_numbers(db: AsyncSession, model_id: Any) -> dict[str, int]:
+    rows = (
+        await db.execute(
+            select(DecisionVersion.id, DecisionVersion.version).where(
+                DecisionVersion.model_id == model_id
+            )
+        )
+    ).all()
+    return {str(r[0]): r[1] for r in rows}
+
+
 @router.get("/{key}/evaluations")
 async def list_evaluations(
     key: str,
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    outcome: str | None = Query(None),
+    execution_id: str | None = Query(None, max_length=64),
+    version: int | None = Query(None, ge=1),
     user: User = Depends(require_capability("decisions.view")),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     m = await _model(db, user, key)
     if m is None:
         return error(f"There is no decision called {key}.", 404)
+    if outcome and outcome not in EVAL_OUTCOMES:
+        return error(
+            "outcome must be decided, no_match, missing_facts or invalid_facts", 400
+        )
+    numbers = await _version_numbers(db, m.id)
+    base = [
+        DecisionEvaluation.tenant_id == user.tenant_id,
+        DecisionEvaluation.model_id == m.id,
+    ]
+    if execution_id:
+        base.append(DecisionEvaluation.caller["execution_id"].astext == execution_id)
+    if version is not None:
+        vid = next((k for k, n in numbers.items() if n == version), None)
+        if vid is None:
+            return error(f"{key} has no version {version}.", 404)
+        base.append(DecisionEvaluation.version_id == uuid.UUID(vid))
+    counts = {
+        o: n
+        for o, n in (
+            await db.execute(
+                select(DecisionEvaluation.outcome, func.count())
+                .where(*base)
+                .group_by(DecisionEvaluation.outcome)
+            )
+        ).all()
+    }
+    where = base + ([DecisionEvaluation.outcome == outcome] if outcome else [])
     rows = (
         (
             await db.execute(
                 select(DecisionEvaluation)
-                .where(
-                    DecisionEvaluation.tenant_id == user.tenant_id,
-                    DecisionEvaluation.model_id == m.id,
+                .where(*where)
+                .order_by(
+                    desc(DecisionEvaluation.created_at), desc(DecisionEvaluation.id)
                 )
-                .order_by(desc(DecisionEvaluation.created_at))
+                .offset(offset)
                 .limit(limit)
             )
         )
         .scalars()
         .all()
     )
+    total = counts.get(outcome, 0) if outcome else sum(counts.values())
     return success(
-        [
-            {
-                "id": str(e.public_id),
-                "outcome": e.outcome,
-                "facts": e.facts,
-                "result": e.result,
-                "applied_rules": e.applied_rules,
-                "trace_hash": e.trace_hash,
-                "as_of": e.as_of,
-                "content_hash": e.content_hash,
-                "caller": e.caller,
-                "created_at": _iso(e.created_at),
-            }
-            for e in rows
-        ]
+        [_eval_row(e, numbers.get(str(e.version_id))) for e in rows],
+        meta={
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "counts": counts,
+            "log_mode": m.log_mode,
+        },
     )
+
+
+@router.get("/{key}/evaluations/{evaluation_id}")
+async def get_evaluation(
+    key: str,
+    evaluation_id: str,
+    user: User = Depends(require_capability("decisions.view")),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    m = await _model(db, user, key)
+    if m is None:
+        return error(f"There is no decision called {key}.", 404)
+    try:
+        pid = uuid.UUID(evaluation_id)
+    except ValueError:
+        return error("That is not an evaluation id.", 404)
+    e = (
+        await db.execute(
+            select(DecisionEvaluation).where(
+                DecisionEvaluation.tenant_id == user.tenant_id,
+                DecisionEvaluation.model_id == m.id,
+                DecisionEvaluation.public_id == pid,
+            )
+        )
+    ).scalar_one_or_none()
+    if e is None:
+        return error(f"{key} has no evaluation {evaluation_id}.", 404)
+    v = (
+        await db.execute(
+            select(DecisionVersion).where(DecisionVersion.id == e.version_id)
+        )
+    ).scalar_one_or_none()
+    out = _eval_row(e, v.version if v else None)
+    rules = [r for r in ((v.authoring or {}).get("rules") or [])] if v else []
+    replay: dict[str, Any] = {}
+    # the stored version and facts give the same trace again, which proves the record
+    if v is not None:
+        try:
+            r = await run_compiled(
+                v.content_hash,
+                v.content,
+                e.facts,
+                required=list(v.required_facts or []),
+                fact_types=dict(v.fact_types or {}),
+                as_of=e.as_of,
+                want_trace=True,
+            )
+            replay = r.to_dict()
+            replay["reproduced"] = (
+                r.trace_hash == e.trace_hash and r.outcome == e.outcome
+            )
+        except Exception as exc:  # noqa: BLE001
+            replay = {"error": f"The evaluation could not be repeated: {exc}"}
+    out["applied"] = S.applied_rule_details(
+        rules, e.applied_rules or [], replay.get("trace")
+    )
+    out["replay"] = replay
+    return success(out)
 
 
 class TestBody(BaseModel):

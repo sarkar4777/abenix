@@ -1,70 +1,117 @@
 # KEDA autoscaling
 
-> Four agent-runtime pools, each with its own KEDA ScaledObject reading NATS JetStream depth. Plus one for the cognify-worker on Redis queue depth.
+> Each agent-runtime pool gets its own ScaledObject that scales on its queue backlog, with an optional latency trigger. Warm code runners get one ScaledObject each, scaling on runner load. Everything else uses plain HPAs.
 
 ---
 
-## What KEDA does
+## Why queue depth
 
-Native Kubernetes HPAs scale on CPU/memory. That's wrong for our workload — an agent-runtime pod can have 80% idle CPU while sitting on a 500-message NATS backlog. We want to scale on **queue depth**.
+A CPU HPA is the wrong signal for agent runs. A runtime pod can sit at 80% idle
+CPU while hundreds of runs wait in its queue, because most of a run is spent
+waiting on an LLM. KEDA reads the backlog and drives the HPA replica count from
+that.
 
-KEDA bridges. It deploys a controller that watches external metrics (NATS, Redis, Kafka, Prometheus, etc.) and adjusts the underlying HPA replica count. To the cluster it looks like a regular HPA. the magic is in how the desired replica count is computed.
-
----
-
-## The four runtime pools
-
-```mermaid
-flowchart LR
-  N["NATS JetStream<br/>per-pool subjects"]
-  N --> SO1[ScaledObject<br/>runtime-default<br/>min=2 max=20]
-  N --> SO2[ScaledObject<br/>runtime-chat<br/>min=1 max=10]
-  N --> SO3[ScaledObject<br/>runtime-heavy<br/>min=1 max=4]
-  N --> SO4[ScaledObject<br/>runtime-long-running<br/>min=1 max=2]
-  SO1 --> D1[Deployment<br/>agent-runtime-default]
-  SO2 --> D2[Deployment<br/>agent-runtime-chat]
-  SO3 --> D3[Deployment<br/>agent-runtime-heavy-reasoning]
-  SO4 --> D4[Deployment<br/>agent-runtime-long-running]
-```
-
-Each pool is a separate Deployment because:
-- They have different resource footprints (the heavy pool wants 4Gi mem. the chat pool wants 512Mi).
-- They have different timeouts (chat = 30s. long-running = 30min).
-- An OOM in one pool shouldn't affect the others.
-
-Agents choose their pool via `model_config.runtime_pool`.
+KEDA is installed by the deploy scripts. `deploy-azure.sh provision` and
+`deploy` both run `ensure_keda`. `deploy.sh local` installs it when
+`scaling.keda.enabled` is true in `values-local.yaml`, or when `KEDA_ENABLED=true`.
+Both install the `kedacore/keda` chart into the `keda` namespace and skip it
+when the CRDs already exist.
 
 ---
 
-## Sample ScaledObject
+## Runtime pools
+
+`templates/agent-runtime-pools.yaml` renders, for every entry in
+`scaling.pools`, a Deployment and a Service named
+`<release>-agent-runtime-<key>`, and a ScaledObject of the same name when
+`scaling.keda.enabled` is true. Pods run `python3 consumer.py` with
+`RUNTIME_POOL=<key>` and drain that pool's queue.
+
+| Pool (Azure values) | min | max | Runs per replica | Queue trigger |
+|---|---|---|---|---|
+| `default` | 1 | 5 | 3 | 3 |
+| `chat` | 0 | 3 | 6 | 3 |
+| `heavy-reasoning` | 0 | 4 | 2 | 3 |
+| `long-running` | 0 | 3 | 1 | 1 |
+
+`values-local.yaml` ships only `default`, min 1, max 2.
+`values-local-runtime.yaml` adds the other pools on minikube.
+
+Agents pick a pool with `model_config.runtime_pool`. With
+`scaling.execRemote` on, an agent whose pool is `inline` still runs in the API
+process.
+
+### The ScaledObject
 
 ```yaml
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: runtime-default
-  namespace: abenix
+  name: abenix-agent-runtime-default
 spec:
   scaleTargetRef:
-    name: agent-runtime-default
-  minReplicaCount: 2
-  maxReplicaCount: 20
-  pollingInterval: 15       # check NATS every 15s
-  cooldownPeriod: 300       # wait 5min after queue is empty before scaling down
+    name: abenix-agent-runtime-default
+  minReplicaCount: 1            # pool min_replicas, default 1
+  maxReplicaCount: 5            # pool max_replicas, default 10
+  pollingInterval: 15
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown: {stabilizationWindowSeconds: 600, selectPolicy: Min, policies: [{type: Percent, value: 50, periodSeconds: 60}, {type: Pods, value: 1, periodSeconds: 60}]}
+        scaleUp:   {stabilizationWindowSeconds: 0,   selectPolicy: Max, policies: [{type: Percent, value: 100, periodSeconds: 15}, {type: Pods, value: 4, periodSeconds: 15}]}
   triggers:
-  - type: nats-jetstream
-    metadata:
-      natsServerMonitoringEndpoint: http://nats:8222
-      account: $G
-      stream: exec
-      consumer: runtime-default
-      lagThreshold: "5"     # target: 1 replica per 5 pending messages
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "abenix-nats.abenix.svc.cluster.local:8222"
+        account: "A"
+        stream: "agents"
+        consumer: "abenix-default-consumer"
+        lagThreshold: "3"       # pool keda_queue_trigger, default 3
+    - type: prometheus           # only when scaling.keda.prometheusUrl is set
+      metadata:
+        serverAddress: http://abenix-prometheus.abenix.svc.cluster.local:9090
+        metricName: abenix_execution_p95_ms
+        query: histogram_quantile(0.95, sum by(le) (rate(abenix_execution_duration_seconds_bucket{pool="default"}[5m]))) * 1000
+        threshold: "90000"
 ```
 
+Pools need `scaling.queueBackend: nats`. The chart refuses to render them with
+`celery`, since nothing consumes queued agent runs from Celery.
+
 Tunables that matter:
-- `lagThreshold` — lower = more aggressive scaling. Default 5 = roughly 1 replica per 5 pending messages.
-- `cooldownPeriod` — don't scale down too quickly. a sudden empty queue might fill again.
-- `pollingInterval` — how fast KEDA reacts. 15s is a good default. faster makes the cluster more reactive but more chatty.
+
+- `keda_queue_trigger` per pool. Lower scales sooner. `long-running` uses 1 so a single queued job brings a pod up from zero.
+- `min_replicas`. 0 saves money and costs a cold start on the first run.
+- `concurrency_per_replica` becomes `AGENT_CONCURRENCY`, the runs one pod takes at once.
+
+---
+
+## Warm code runners
+
+The agent-runtime creates one Deployment per tenant and asset version when an
+asset is first called. With `codeRunners.keda.enabled` and a Prometheus URL it
+also creates a ScaledObject:
+
+| Field | Value |
+|---|---|
+| Trigger | `prometheus`, `sum(abenix_coderunner_load{runner="<name>"}) or vector(0)` |
+| Threshold | `CODE_RUNNER_CONCURRENCY`, activation 0 |
+| Min replicas | the warm floor, the larger of the tier floor, the asset's own `min_warm` and 1 while the asset is hot, capped at max |
+| Max replicas | `CODE_RUNNER_MAX_REPLICAS` |
+| Polling, cooldown | 10s, `CODE_RUNNER_IDLE_SECONDS` |
+
+Without KEDA the runtime creates a CPU HPA at 70% instead, min 1. The
+`<release>-code-runner-reaper` CronJob scales idle runners to zero and removes
+old versions. Details in [02-runtime/16-warm-code-runners](../02-runtime/16-warm-code-runners.md).
+
+---
+
+## Everything else
+
+The `api`, `web`, `worker` and `agent-runtime` subcharts each render a CPU HPA
+from their `autoscaling` values. The cognify worker gets one when
+`cognifyWorker.autoscaling.enabled` is true, off by default.
 
 ---
 
@@ -72,54 +119,37 @@ Tunables that matter:
 
 ```bash
 kubectl -n abenix get scaledobjects
-# NAME                       SCALETARGETKIND   SCALETARGETNAME            MIN  MAX  TRIGGERS         READY
-# runtime-default            Deployment        agent-runtime-default      2    20   nats-jetstream   True
-# runtime-chat               Deployment        agent-runtime-chat         1    10   nats-jetstream   True
-# runtime-heavy-reasoning    Deployment        agent-runtime-heavy        1    4    nats-jetstream   True
-# runtime-long-running       Deployment        agent-runtime-long-running 1    2    nats-jetstream   True
+kubectl -n abenix get hpa          # KEDA manages one HPA per ScaledObject
+kubectl -n keda logs deploy/keda-operator --tail=50
 ```
 
-```bash
-kubectl -n abenix get hpa
-# Shows the actual HPA KEDA manages — useful to see current replicas + target metric value
-```
-
-```bash
-kubectl -n keda logs deploy/keda-operator | tail
-# Decisions: "scaled runtime-default from 4 to 8 because pending messages = 47"
-```
-
-The `/admin/scaling` UI surfaces all of this without kubectl.
+The `/admin/scaling` page shows pool state without kubectl.
 
 ---
 
 ## Manual overrides
 
-For maintenance / load tests:
-
 ```bash
-# Pin to N replicas, bypass KEDA:
-kubectl -n abenix annotate scaledobject runtime-default autoscaling.keda.sh/paused=true
-kubectl -n abenix scale deploy agent-runtime-default --replicas=10
+# pin a pool, KEDA paused
+kubectl -n abenix annotate scaledobject abenix-agent-runtime-default autoscaling.keda.sh/paused=true
+kubectl -n abenix scale deploy abenix-agent-runtime-default --replicas=4
 
-# Resume:
-kubectl -n abenix annotate scaledobject runtime-default autoscaling.keda.sh/paused-
+# resume
+kubectl -n abenix annotate scaledobject abenix-agent-runtime-default autoscaling.keda.sh/paused-
 ```
-
-Or use the admin UI's "Override" button.
 
 ---
 
 ## Cost protection
 
-`maxReplicaCount` caps blow-up scenarios. Worst case: 20 default + 10 chat + 4 heavy + 2 long = 36 runtime pods total at 250m-1000m CPU each = ~10-20 cores. At AKS B-series pricing that's <$10/hour even at max. Per-pool caps keep the bill bounded.
-
-For finer cost control, set per-tenant execution caps via `tenant_settings.executions_per_day_cap`.
+`max_replicas` per pool caps the worst case. With the Azure values that is
+5 + 3 + 4 + 3 = 15 runtime pods, plus `codeRunners.maxReplicas` per active
+runner. Pools at min 0 cost nothing while idle.
 
 ---
 
 ## See also
 
 - [00-overview](00-overview.md) — overall deploy flow
-- [03-services](../01-architecture/03-services.md) — what each pool is for
-- [/admin/scaling page](../05-ui/03-page-catalogue.md) — UI for KEDA introspection
+- [02-helm](02-helm.md) — the `scaling` and `codeRunners` values
+- [02-runtime/08-queue-scaling](../02-runtime/08-queue-scaling.md) — how runs are queued

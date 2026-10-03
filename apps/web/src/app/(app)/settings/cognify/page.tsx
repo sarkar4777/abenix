@@ -49,11 +49,16 @@ export default function CognifyConfigPage() {
   }
 
   async function resolve(id: string, value: string) {
-    await apiFetch(`/api/knowledge/cognify-conflicts/${id}/resolve`, {
-      method: 'POST',
-      body: JSON.stringify({ resolved_value: value }),
-    });
-    setConflicts(prev => prev.filter(c => c.id !== id));
+    setError(null);
+    try {
+      await apiFetch(`/api/knowledge/cognify-conflicts/${id}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ resolved_value: value }),
+      });
+      setConflicts(prev => prev.filter(c => c.id !== id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   if (cfg === null) {
@@ -89,7 +94,7 @@ export default function CognifyConfigPage() {
             className="mt-1 w-32 rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-white"
           />
           <span className="ml-2 text-xs text-slate-500">
-            proposals at or above this confidence land directly; lower ones queue for review.
+            entities and relationships the extractor rates below this are left out of the graph and counted in the job report.
           </span>
         </label>
 

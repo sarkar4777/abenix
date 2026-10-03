@@ -56,10 +56,16 @@ def _fetch_document_chunks(kb_id: str, doc_ids: list[str], config: dict) -> list
             storage_url = row[3]
 
             # Extract text from document
+            tmp_path = None
             try:
-                from worker.tasks.document_processor import _extract_text, _chunk_text
+                from worker.tasks.document_processor import (
+                    _chunk_text,
+                    _extract_text,
+                    _local_path,
+                )
 
-                text_content = _extract_text(storage_url, file_type)
+                local, tmp_path = _local_path(storage_url, file_type)
+                text_content = _extract_text(local, file_type)
                 chunks = _chunk_text(
                     text_content,
                     chunk_size=config.get("chunk_size", 1000),
@@ -74,6 +80,12 @@ def _fetch_document_chunks(kb_id: str, doc_ids: list[str], config: dict) -> list
                 )
             except Exception as e:
                 logger.error("Failed to process document %s: %s", doc_id, e)
+            finally:
+                if tmp_path:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
 
     return documents
 
@@ -188,9 +200,11 @@ def run_cognify_job(
                         """
                         INSERT INTO cognify_reports (id, job_id, kb_id, entities_by_type, top_entities,
                             relationship_types, new_entities, merged_entities, new_relationships,
-                            strengthened_relationships, documents_processed, chunks_analyzed)
+                            strengthened_relationships, documents_processed, chunks_analyzed,
+                            processing_details)
                         VALUES (:id, CAST(:job_id AS uuid), CAST(:kb_id AS uuid), CAST(:ent_types AS jsonb), CAST(:top_ent AS jsonb),
-                            CAST(:rel_types AS jsonb), :new_ent, :merged, :new_rels, :strengthened, :docs, :chunks)
+                            CAST(:rel_types AS jsonb), :new_ent, :merged, :new_rels, :strengthened, :docs, :chunks,
+                            CAST(:details AS jsonb))
                     """
                     ),
                     {
@@ -209,6 +223,16 @@ def run_cognify_job(
                         "strengthened": 0,
                         "docs": result.documents_processed,
                         "chunks": result.chunks_analyzed,
+                        "details": json.dumps(
+                            {
+                                "auto_accept_threshold": result.auto_accept_threshold,
+                                "entities_held_back": result.entities_held_back,
+                                "relationships_held_back": result.relationships_held_back,
+                                "held_back": result.held_back,
+                                "conflicts_recorded": result.conflicts_recorded,
+                                "documents_skipped_budget": result.documents_skipped_budget,
+                            }
+                        ),
                     },
                 )
         except Exception as e:

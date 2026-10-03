@@ -137,7 +137,7 @@ The run resumes on the server after sign-off, so `row.status` may still be `runn
 
 ## Errors
 
-`execute`, `approvals` and `knowledge` throw a plain `Error` carrying the server's message. `executions` and `agents` do not check the status at all and resolve to `undefined` (or `[]` for lists) on an error. `stream` yields an `error` event. The newer calls throw `AbenixError` or `AbenixDecisionError` with `status`, `code`, `details` and `message`, see [Errors from these clients](#errors-from-these-clients).
+`execute`, `approvals` and `knowledge` throw a plain `Error` carrying the server's message. `executions`, `agents` and the top-level `approve` and `reject` do not check the status at all. On an error the single-row calls resolve to `null` (the envelope's `data`) and the list calls to `[]`. `stream` yields an `error` event. The newer calls throw `AbenixError` or `AbenixDecisionError` with `status`, `code`, `details` and `message`, see [Errors from these clients](#errors-from-these-clients).
 
 ```ts
 try {
@@ -161,7 +161,17 @@ import { Abenix, AbenixDecisionError, EventsClient } from "@abenix/sdk";
 const client = new Abenix({ apiKey: "af_xxx", baseUrl: "http://localhost:8000" });
 ```
 
-The TS client is behind Python here. Not in TS yet: `me()`, `agents.bySlug`, `agents.create`, `agents.update`, `decisions.tests`, `decisions.retire`, `events.redeliver`. Neither SDK wraps the server's decision `check` and `try` endpoints.
+The TS client is behind Python here. Not in TS yet:
+
+- `me()`, `watch()` and `executions.watchRawSse`
+- `agents.bySlug`, `agents.create`, `agents.update`, `agents.findBySlug`
+- `decisions.create`, `versions`, `version`, `retire`, `tests`, `addTest`, `evaluations`, `referenceSet`, `putReferenceSet`
+- `sources.snapshots`, `validateUrl`, `preview`, `settings`
+- `events.test`, `events.redeliver`
+- `knowledge.bootstrapProject`, `knowledge.ensureSubjectCollection`
+- the `chat`, `tools`, `presets` and `mlModels` sub-clients
+
+Neither SDK wraps the server's decision `check` and `try` endpoints.
 
 ### Errors from these clients
 
@@ -253,8 +263,12 @@ await client.decisions.update(key, { riskTier: "medium", tags: ["credit"] });
 | `publish` | `(key, version, opts?: { expectedCurrent })` |
 | `diff` | `(key, a, b)` |
 | `update` | `(key, fields: { name, description, riskTier, tags, logMode })` |
-
-Also there: `list`, `get`, `compare`, `proposeRules`, `export`, `referenceSets`.
+| `list` | `(q = "")` |
+| `get` | `(key)` |
+| `compare` | `(key, facts, targets)`, each target `{ label, version }` or `{ as_of, known_at }` |
+| `proposeRules` | `(key, rules, note, mode = "merge")`, new draft, import and propose in one call |
+| `export` | `(key, version?)` |
+| `referenceSets` | `()` |
 
 ### Sources
 
@@ -318,6 +332,50 @@ await client.approvals.returnForChanges(approvalId, "Cap should be 200k, not 250
 ```
 
 Rejects when `reason` is blank. It calls `signoff(approvalId, "return", ...)` and resolves to the updated `Approval`.
+
+---
+
+## Other sub-clients
+
+The older sub-clients. Errors behave as described under [Errors](#errors).
+
+### `approvals`
+
+Every call resolves to an `Approval` (camelCase: `id`, `agentId`, `agentExecutionId`, `title`, `payload`, `requiredSignoffs`, `signoffs`, `status`, `requestedBy`, `expiresAt`, `decidedAt`, `createdAt`, `gateKind`, `clientToken`) unless noted.
+
+| Method | Notes |
+|---|---|
+| `list(opts?: { status, executionId, agentId, kind, limit })` | `GET /api/approvals`, `limit` defaults to 200 |
+| `get(approvalId)` | `GET /api/approvals/{id}` |
+| `create(title, payload, opts?: { requiredSignoffs, expiresSeconds, gateKind, agentId, agentExecutionId, clientToken })` | `POST /api/approvals`. Defaults are 1 signoff and 86400 s |
+| `signoff(approvalId, decision, opts?: { reason, clientToken })` | `decision` is `"approve"`, `"deny"` or `"return"` |
+| `approve(approvalId, opts?)` / `deny(approvalId, opts?)` | `signoff` with that decision |
+| `returnForChanges(approvalId, reason, opts?: { clientToken })` | see above |
+| `waitFor(approvalId, opts?: { timeoutSeconds, pollSeconds })` | Long-polls `/wait` in chunks of up to 120 s, default 60 s total |
+| `subscribe()` | Async generator over `GET /api/notifications/stream?types=approval_pending,approval_resolved`, yields `{ event, data }` |
+| `configureWebhook({ url, secret })` | `PUT /api/approvals/webhooks`, resolves `{ url, hasSecret }`. A missing field is sent as `null` |
+
+### `executions`
+
+`live()`, `get(executionId)`, `replay(executionId)`, `tree(executionId)` and `pendingApprovals()` wrap `GET /api/executions/live`, `/api/executions/{id}`, `/api/executions/{id}/replay`, `/api/executions/tree/{id}` and `/api/executions/approvals`. `replay` returns the stored trace, it does not run anything.
+
+### `agents`
+
+`list()` (first page, 20 agents) and `get(agentId)`.
+
+### `knowledge`
+
+| Method | Notes |
+|---|---|
+| `cognify(kbId, opts?: { docIds, model, chunkSize, chunkOverlap })` | Resolves `{ jobId, status, documents, message }` |
+| `graphStats(kbId)` | Resolves `{ entities, relationships, entityTypes }` |
+| `search(kbId, query, opts?: { mode, topK, graphDepth })` | Defaults `hybrid`, 5, 2. Resolves `{ results, graphEntities }` |
+| `graph(kbId, limit = 100)` | Subgraph for display |
+| `cognifyJobs(kbId)` | Job history |
+
+### Top-level `approve` and `reject`
+
+`approve(executionId, gateId, comment?)` and `reject(...)` post to `/api/executions/{id}/approve?gate_id=`. They are the old gate shape. Prefer `approvals.approve`.
 
 ---
 

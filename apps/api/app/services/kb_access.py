@@ -24,7 +24,7 @@ def _is_tenant_admin(user) -> bool:
     return role.lower() == "admin"
 
 
-_WRITE_PERMS = {"edit", "admin"}
+_WRITE_PERMS = {"write", "edit", "admin"}
 
 
 async def user_can_edit_collection(

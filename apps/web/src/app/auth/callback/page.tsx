@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { safeReturnPath } from '@/lib/auth-redirect';
 
 export default function OAuthCallback() {
   const [status, setStatus] = useState<'working' | 'error'>('working');
@@ -13,7 +14,7 @@ export default function OAuthCallback() {
     const params = new URLSearchParams(hash);
     const access = params.get('access_token');
     const refresh = params.get('refresh_token');
-    const returnTo = params.get('return_to') || '/dashboard';
+    const returnTo = safeReturnPath(params.get('return_to'));
 
     if (!access || !refresh) {
       setStatus('error');

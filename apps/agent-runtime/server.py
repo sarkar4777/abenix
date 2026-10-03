@@ -15,9 +15,30 @@ logger = logging.getLogger("agent-runtime")
 app = FastAPI(title="Abenix Runtime", version="0.1.0")
 
 
+@app.middleware("http")
+async def _trace_context(request: Request, call_next):
+    # continue the caller's trace when it sent a traceparent
+    if "traceparent" not in request.headers:
+        return await call_next(request)
+    from engine.tracing import extract_carrier, get_tracer
+
+    ctx = extract_carrier(dict(request.headers))
+    with get_tracer("abenix.runtime").start_as_current_span(
+        f"{request.method} {request.url.path}", context=ctx
+    ):
+        return await call_next(request)
+
+
 @app.on_event("startup")
 async def _start_tool_consumer():
     import asyncio
+
+    try:
+        from engine.tracing import init_tracing
+
+        init_tracing("agent-runtime")
+    except Exception as e:
+        logger.warning("tracing init failed (continuing without): %s", e)
 
     try:
         from tool_stream_consumer import consumer_loop
@@ -133,6 +154,7 @@ async def execute(request: Request):
                 or body.get("require_knowledge_search")
             ),
             moderation_gate=_gate,
+            cost_limit=body.get("cost_limit"),
         )
 
         result = await executor.invoke(body.get("message", ""))
@@ -146,6 +168,8 @@ async def execute(request: Request):
                 "duration_ms": result.duration_ms,
                 "tool_calls": result.tool_calls,
                 "model": result.model,
+                "failure_code": result.failure_code or None,
+                "error": result.output if result.budget_exceeded else None,
             }
         )
 
@@ -198,6 +222,7 @@ async def execute_stream(request: Request):
                     or body.get("require_knowledge_search")
                 ),
                 moderation_gate=_gate,
+                cost_limit=body.get("cost_limit"),
             )
 
             async for event in executor.stream(body.get("message", "")):

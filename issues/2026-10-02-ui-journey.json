@@ -964,5 +964,269 @@
       "bug"
     ],
     "number": 146
+  },
+  {
+    "title": "approval_gate failed with 401 inside agent runs",
+    "area": "approvals",
+    "problem": "The tool said the runtime filled in the execution, agent and auth token, but it did not. Without an explicit auth_token it fell back to INTERNAL_API_TOKEN, which the API does not accept, so creating the approval failed and nothing linked it to the run.",
+    "fix": "approval_gate is built per run with its execution, agent, tenant and user, links the approval to the execution, and calls the API with a short-lived token for the run's user. Explicit arguments still win.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 147
+  },
+  {
+    "title": "Named in-cluster webhook receivers could not be saved",
+    "area": "events",
+    "problem": "Delivery honoured EVENTS_ALLOWED_INTERNAL_HOSTS but saving a subscription still refused every .cluster.local, .internal and .local name, so only bare service names worked.",
+    "fix": "Saving a subscription honours the same exact-name allowlist.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 148
+  },
+  {
+    "title": "until_gate never saw human_approval gates",
+    "area": "sdk",
+    "problem": "execute with wait_mode until_gate only watched the approvals table, so a run paused on a human_approval gate, which lives in Redis, looked like it was still running until the wait timed out.",
+    "fix": "The watcher also checks the run's Redis gates and returns paused_at with the hitl id that approvals.signoff accepts.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 149
+  },
+  {
+    "title": "GDPR purge soft-deleted every agent memory on the platform",
+    "area": "gdpr",
+    "problem": "The Postgres step ran UPDATE agent_memories with no filter, so purging one person soft-deleted every tenant's agent memories.",
+    "fix": "Agent memories are purged only for agents the person created in that tenant.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 150
+  },
+  {
+    "title": "GDPR purge could target a user in another tenant",
+    "area": "gdpr",
+    "problem": "Both purge endpoints accepted any user id without checking the subject belonged to the caller's tenant.",
+    "fix": "Both endpoints check the subject is in the caller's tenant.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 151
+  },
+  {
+    "title": "GDPR Neo4j and Pinecone steps never purged anything",
+    "area": "gdpr",
+    "problem": "The Neo4j step imported a missing atlas neo4j_client and the Pinecone step a missing pinecone_client, so both recorded 0 and left the person's data in place, and purge_log had no count column.",
+    "fix": "The Neo4j step deletes Cognify entities naming the person and the matching Postgres graph rows, Pinecone deletes the person's persona vectors, and every step records a true affected_count shown on /settings/gdpr.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 152
+  },
+  {
+    "title": "atlas_cypher and atlas_as_of always failed",
+    "area": "atlas",
+    "problem": "Both imported a module that does not exist, and Atlas lives in Postgres so Cypher never applied.",
+    "fix": "atlas_as_of answers from atlas snapshots and live tables, atlas_cypher is removed because free Cypher on the shared graph cannot be scoped to a tenant safely.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 153
+  },
+  {
+    "title": "Extractors, reranker, document ACL and Cognify settings were never used",
+    "area": "knowledge",
+    "problem": "The extractors, reranker, document_access pre-filter and cognify_config values existed but nothing called them, and the old ACL rule would have hidden every document from users without a full grant.",
+    "fix": "Ingest uses the extractors, search reranks and cites, documents with grants are filtered before ranking with a corrected rule, and Cognify honours confidence threshold, conflict action, parallelism and daily budget.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 154
+  },
+  {
+    "title": "KB re-embed was a stub and Pinecone vacuum never ran",
+    "area": "knowledge",
+    "problem": "kb_reembed returned queued without doing anything, the vacuum body was pass, and neither task was included or routed to a queue the worker consumes.",
+    "fix": "Re-embed re-reads and re-chunks every document and switches the collection in one step with progress in the UI, and the vacuum runs daily at 02:30 UTC from the API scheduler.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 155
+  },
+  {
+    "title": "Pinecone search returned no matches",
+    "area": "knowledge",
+    "problem": "An operator precedence bug read SDK response objects as empty, so Pinecone-backed collections returned nothing.",
+    "fix": "Matches are read correctly from SDK and dict responses.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 156
+  },
+  {
+    "title": "Celery queue backend could never run agents",
+    "area": "runtime",
+    "problem": "CeleryBackend imported a task that does not exist and no worker consumed its queues, so a celery install sat idle.",
+    "fix": "Agent execution runs on NATS only, celery fails fast with a clear message, and helm refuses remote execution without NATS.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 157
+  },
+  {
+    "title": "Queued runs were lost when a runtime pod crashed",
+    "area": "runtime",
+    "problem": "Messages were acked when a run started, so a crash lost the run until the sweeper failed it.",
+    "fix": "Messages are acked after the run with heartbeats and a lease on the execution row, so another pod takes over a dead pod's run.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 158
+  },
+  {
+    "title": "Trace context stopped at the queue",
+    "area": "observability",
+    "problem": "inject_carrier and extract_carrier were never called, so a trace ended at the API.",
+    "fix": "traceparent rides the NATS envelope and child agent calls, so one trace spans API, queue, runtime and child runs.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 159
+  },
+  {
+    "title": "Backups could not run",
+    "area": "deploy",
+    "problem": "The backup CronJobs mounted a PVC nothing created, and the Neo4j dump ran in a pod without the data volume on an edition that cannot dump online.",
+    "fix": "The chart creates the backup PVC and Neo4j is exported over Bolt with APOC.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 160
+  },
+  {
+    "title": "decisions.review gated nothing",
+    "area": "governance",
+    "problem": "The capability was in the catalog but no endpoint checked it.",
+    "fix": "Signing a decision publish approval needs decisions.review plus the tier's signing capability.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 161
+  },
+  {
+    "title": "Admin tool runtime and scaling pipelines were open to any user",
+    "area": "security",
+    "problem": "C:/Program Files/Git/api/admin/tool-runtime and /api/admin/scaling/pipelines only checked sign-in.",
+    "fix": "They require admin, and a test asserts every admin route returns 403 to a non-admin.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 162
+  },
+  {
+    "title": "Toasts never showed and session expiry went to a missing page",
+    "area": "web",
+    "problem": "ToastProvider was never mounted and a failed refresh redirected to /login, which does not exist.",
+    "fix": "One toast stack is mounted app-wide, and an expired session returns to the sign-in form with a notice and back to the page afterwards.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 163
+  },
+  {
+    "title": "Settings showed Events to users who cannot use it",
+    "area": "web",
+    "problem": "The settings sub-nav listed Webhooks to everyone while the sidebar gated it on events.manage.",
+    "fix": "The entry is renamed Events and gated, and the page explains how to get access.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 164
+  },
+  {
+    "title": "API metrics saw one worker and two alerts could never fire",
+    "area": "observability",
+    "problem": "The cluster API image set no PROMETHEUS_MULTIPROC_DIR, and PostgresDown and RedisDown used a metric nothing exported.",
+    "fix": "The image runs multi-process metrics, and a dependency probe exports abenix_health_check for Postgres and Redis.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 165
+  },
+  {
+    "title": "Network policies blocked the platform's own traffic",
+    "area": "deploy",
+    "problem": "With policies on, runtime and worker pods matched no rule, nothing allowed NATS, Prometheus scrapes were blocked, and names collided with the bitnami policies.",
+    "fix": "The policies are rewritten with shared egress, a NATS policy, renamed data store policies and a rendering test of required and blocked flows.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 166
+  },
+  {
+    "title": "Web build settings never reached the bundle",
+    "area": "deploy",
+    "problem": "docker/Dockerfile.web took no build args, so NEXT_PUBLIC values did nothing.",
+    "fix": "The image takes the five NEXT_PUBLIC values as build args and the deploy scripts pass them.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 167
+  },
+  {
+    "title": "Agent budget limits were never enforced",
+    "area": "budgets",
+    "problem": "daily_cost_limit, daily_budget_usd and per_execution_cost_limit were stored but never checked.",
+    "fix": "Daily caps are enforced at every run entry point with BUDGET_EXCEEDED, and the per-run cap stops pipelines.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 168
+  },
+  {
+    "title": "Pipeline runs skipped the moderation gate",
+    "area": "moderation",
+    "problem": "The tenant moderation policy was applied inside the agent executor only, so a pipeline run took its message and inputs to every step unchecked, PII included.",
+    "fix": "Pipeline runs pass the gate before they start. A block refuses the run with 422 MODERATION_BLOCKED, a redact masks the message and every text input, and the events are recorded.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 169
+  },
+  {
+    "title": "The UX walkthrough left a redact policy active for the whole tenant",
+    "area": "testing",
+    "problem": "Its cleanup deleted the policy, but a policy with recorded events cannot be deleted, so every run left its policy active and the tenant default switched off, changing the outcome of later specs.",
+    "fix": "The walkthrough remembers the active policies, switches its own off and the old ones back on in afterAll, even when a test fails.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 170
   }
 ]

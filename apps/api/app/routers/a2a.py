@@ -156,37 +156,67 @@ async def invoke_agent(
 
     message = body.get("message", "")
     context = body.get("context", {})
-    body.get("stream", False)
+    requested_limit = body.get("cost_limit")
 
     if not message:
         return error("message is required", 400)
 
-    # Get agent
     result = await db.execute(
         select(Agent).where(Agent.id == agent_id, Agent.status == AgentStatus.ACTIVE)
     )
     agent = result.scalar_one_or_none()
     if not agent:
         return error("Agent not found or not active", 404)
+    from app.services.agent_share import resolve_agent_access
+    from models.resource_share import SharePermission
 
-    # Execute (non-streaming for A2A — external platforms typically want JSON back)
+    if not agent.is_published and not await resolve_agent_access(
+        db, user, agent, permission_required=SharePermission.EXECUTE
+    ):
+        return error("Agent not found or not active", 404)
+
+    from app.core.budget_gate import budget_error, per_run_cost_limit
+
+    over = await budget_error(db, agent, user.tenant_id)
+    if over is not None:
+        return over
+
+    from app.core.acting_subject import subject_columns_for
     from app.core.config import settings
+    from app.services import inline_run
+    from engine.agent_executor import AgentExecutor
     from engine.llm_router import LLMRouter
-    from engine.agent_executor import AgentExecutor, build_tool_registry
 
     mc = agent.model_config_ or {}
-    tool_names = mc.get("tools", [])
+    model = mc.get("model", "claude-sonnet-4-5-20250929")
+    if mc.get("mode") == "pipeline":
+        return error(
+            "Pipeline agents run through /api/agents/{id}/execute, not a2a.", 400
+        )
 
-    # Inject context into message
     if context:
         context_lines = "\n".join(f"  {k}: {v}" for k, v in context.items())
         message = f"{message}\n\n[Input Parameters]\n{context_lines}"
 
-    registry = build_tool_registry(
-        tool_names,
+    execution = inline_run.open_run(
+        agent=agent,
+        user=user,
+        message=message,
+        model=model,
+        subject=subject_columns_for(user),
+    )
+    db.add(execution)
+    await db.commit()
+    await db.refresh(execution)
+
+    parts = await inline_run.prepare(
+        db,
+        agent,
+        user,
+        execution,
         agent_id=str(agent.id),
         tenant_id=str(user.tenant_id),
-        execution_id=str(uuid.uuid4()),
+        execution_id=str(execution.id),
         agent_name=agent.name,
         db_url=str(settings.database_url).replace("+asyncpg", ""),
         user_id=str(user.id),
@@ -195,28 +225,45 @@ async def invoke_agent(
 
     executor = AgentExecutor(
         llm_router=LLMRouter(),
-        tool_registry=registry,
-        system_prompt=str(agent.system_prompt or ""),
-        model=mc.get("model", "claude-sonnet-4-5-20250929"),
+        tool_registry=parts["registry"],
+        system_prompt=parts["system_prompt"],
+        moderation_gate=parts["moderation"].gate,
+        model=model,
         temperature=mc.get("temperature", 0.3),
         agent_id=str(agent.id),
+        execution_id=str(execution.id),
+        tenant_id=str(user.tenant_id),
+        cost_limit=per_run_cost_limit(agent, requested_limit),
     )
 
     try:
         result = await executor.invoke(message)
-        return success(
-            {
-                "protocol": "abenix-a2a-v1",
-                "agent_id": str(agent.id),
-                "agent_name": agent.name,
-                "output": result.output,
-                "model": result.model,
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-                "cost": float(result.cost),
-                "duration_ms": result.duration_ms,
-                "tool_calls": result.tool_calls,
-            }
-        )
     except Exception as e:
-        return error(f"Execution failed: {str(e)[:500]}", 500)
+        inline_run.record_error(execution, e)
+        await inline_run.after(db, execution, parts)
+        await inline_run.settle(db, execution, getattr(user, "_api_key_id", None))
+        return error(
+            f"Execution failed: {str(e)[:500]}",
+            500,
+            details={"execution_id": str(execution.id)},
+        )
+    code = inline_run.record_result(execution, result, "a2a")
+    await inline_run.after(db, execution, parts)
+    await inline_run.settle(db, execution, getattr(user, "_api_key_id", None))
+    return success(
+        {
+            "protocol": "abenix-a2a-v1",
+            "execution_id": str(execution.id),
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
+            "status": execution.status.value,
+            "failure_code": code,
+            "output": result.output,
+            "model": result.model,
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "cost": float(result.cost),
+            "duration_ms": result.duration_ms,
+            "tool_calls": result.tool_calls,
+        }
+    )

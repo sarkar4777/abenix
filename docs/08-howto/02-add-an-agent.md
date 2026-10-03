@@ -1,16 +1,16 @@
 # How to add a new agent
 
-> Three options ordered by effort + flexibility: YAML seed (declarative, version-controlled), Builder UI (interactive), and direct DB insert (rare).
+> Three ways, ordered by how often they are used: a YAML seed (declarative, version-controlled), the Builder UI (interactive), and the API or SDK (from code).
 
 ---
 
-## Option 1 — YAML seed (recommended for platform agents)
+## Option 1. YAML seed (platform agents)
 
-The most-used path. Every platform-shipped agent + every standalone-app agent is defined this way.
+Every agent the platform ships, and the agents of the standalone apps, are defined this way.
 
 ### File location
-- Platform agents → `packages/db/seeds/agents/<slug>.yaml`
-- Vertical-app agents → same directory. convention `<app>_<purpose>.yaml`
+
+- `packages/db/seeds/agents/<name>.yaml`. One directory for all of them. App agents are prefixed by app, for example `contractiq_*.yaml`, `wingman_*.yaml`, `iot_*.yaml`.
 
 ### Minimal shape
 
@@ -24,28 +24,36 @@ version: "1.0.0"
 status: active
 mode: agent
 system_prompt: |
-  You convert currency amounts using the currency_convert tool. Always call the tool;
+  You convert currency amounts using the currency_convert tool. Always call the tool,
   never compute conversions yourself.
 
   ## Input
   JSON with: {amount: number, from: ISO4217, to: ISO4217}
 
-  ## Output (STRICT JSON only — no prose, no fences)
-  ```json
+  ## Output (STRICT JSON only, no prose, no fences)
   {"result": <number>, "rate": <number>, "as_of": "<YYYY-MM-DD>"}
-  ```
 
 model_config:
   model: claude-haiku-4-5-20251001
   temperature: 0.1
   max_iterations: 5
   max_tokens: 1024
+  risk_tier: low
   tools:
     - current_time
     - currency_convert
-  tool_config:
-    currency_convert:
-      usage_instructions: "Always pass amount, from_currency, to_currency from the input."
+
+tool_config:
+  currency_convert:
+    usage_instructions: "Always pass amount, from_currency, to_currency from the input."
+
+output_schema:
+  type: object
+  required: [result, rate, as_of]
+  properties:
+    result: {type: number}
+    rate: {type: number}
+    as_of: {type: string}
 
 input_variables:
   - name: message
@@ -58,119 +66,158 @@ example_prompts:
   - '{"amount": 1, "from": "BTC", "to": "USD"}'
 ```
 
-### Fields in detail
+### Fields
+
+The schema is `AgentSeedSchema` in `packages/db/seeds/agent_seed_schema.py`. Only `name` and `slug` are required. Unknown top-level keys are allowed, but `model_config` refuses keys that belong at the top level, so a mis-indented `pipeline_config` fails loudly instead of turning a pipeline into a plain agent.
 
 | Field | Required | Purpose |
 |---|---|---|
-| `name` | yes | Display name in /agents |
-| `slug` | yes | Stable identifier — used by SDK callers + tool catalogues |
-| `description` | yes | Sub-title in the UI |
-| `agent_type` | yes | `oob` (out-of-the-box, shipped with the platform) or `custom` (user-created) |
-| `category` | no | Groups in the /agents catalogue |
-| `version` | yes | Semver. Re-seeding bumps the version row. older versions stay accessible by ID |
-| `status` | yes | `active` / `paused` / `draft` / `archived` |
-| `mode` | yes | `agent` (single LLM loop) or `pipeline` (DAG) |
-| `system_prompt` | yes | The prompt. Include the JSON-output contract |
-| `model_config.model` | yes | LLM model ID. Use `claude-haiku-4-5-20251001` for fast/cheap, `claude-sonnet-4-6-20251215` for harder reasoning |
-| `model_config.temperature` | no | 0.0–1.0. Default 0.2 |
-| `model_config.max_iterations` | no | Default 10 |
-| `model_config.tools` | no | List of tool slugs |
-| `model_config.tool_config` | no | Per-tool overrides |
-| `model_config.output_schema` | no | JSONSchema the final reply must match |
-| `model_config.runtime_pool` | no | `default` / `chat` / `heavy-reasoning` / `long-running`. Default `default` |
-| `input_variables` | no | Inputs the agent expects. Documented for callers |
-| `example_prompts` | no | Shown in the /agents UI. used by the test runner |
+| `name` | yes | Display name in `/agents` |
+| `slug` | yes | Lowercase letters, digits, `-` and `_`. Stable identifier used by SDK callers, the seeder and the lint |
+| `description` | no | Subtitle in the UI |
+| `agent_type` | no | `oob` (default), `custom` or `vertical` |
+| `category` | no | Groups the `/agents` catalogue |
+| `version` | no | Free text, default `1.0.0` |
+| `status` | no | `active` (default), `draft`, `pending_review`, `rejected` or `archived` |
+| `mode` | no | `agent` (one LLM loop) or `pipeline` (a DAG, needs a top-level `pipeline_config`) |
+| `system_prompt` | no | The prompt. Include the output contract |
+| `model_config.model` | no | Model id. The seeds use `claude-haiku-4-5-20251001` for fast work and `claude-sonnet-4-5-20250929` for harder reasoning |
+| `model_config.temperature` | no | 0 to 2. Unset, the run uses 0.7 |
+| `model_config.max_iterations` | no | 1 to 200. Unset, the platform setting `agent.max_iterations` applies, 10 by default |
+| `model_config.max_tokens` | no | 1 to 200,000 |
+| `model_config.tools` | no | Tool slugs, as listed on `/tools` |
+| `model_config.risk_tier` | no | `low`, `medium`, `high` or `critical`, see [11-governance](11-governance.md) |
+| `tool_config` | no | Per-tool `usage_instructions`, `parameter_defaults`, `max_calls`, `require_approval`. Also accepted inside `model_config` |
+| `output_schema` | no | JSON Schema the final reply is checked against. A mismatch is sent back to the model once to correct |
+| `input_variables` | no | Inputs the agent expects. The chat page and the SDK playground build their forms from them |
+| `example_prompts` | no | Shown on the agent page |
+| `requires_credentials` | no | Keys the agent's tools cannot run without. The lint fails when a tool with a required key is used and the key is missing here |
+| `runtime_pool` | no | `default`, `chat`, `heavy-reasoning`, `long-running` or `inline` (runs on the API pod). Default `default`, or `inline` when the slug contains `chat` |
+| `min_replicas`, `max_replicas`, `concurrency_per_replica`, `rate_limit_qps`, `daily_budget_usd` | no | Per-agent scaling, surfaced at `/admin/scaling`. `daily_budget_usd` caps one tenant's spend on the agent per UTC day, see [Spend caps](../02-runtime/00-agent-execution.md#spend-caps) |
+
+`input_variables`, `example_prompts`, `tool_config`, `output_schema` and `max_tokens` can sit at the top level, where the seeder copies them into `model_config`, or inside `model_config` directly.
+
+### Lint it
+
+```bash
+python scripts/lint-agent-seeds.py
+```
+
+It validates every YAML against the schema, fails an agent that lists `knowledge_search` without a knowledge base granting it a collection in `packages/db/seeds/kb/`, and fails one that uses a tool with a required key not listed in `requires_credentials`. CI and `check-before-push.sh` run it, and `deploy-azure.sh` refuses to seed when it fails.
 
 ### Seed it
 
+`scripts/dev-local.sh` runs the seeders from the working tree on every start. On a cluster the seeds are baked into the API image, so rebuild first (`bash scripts/deploy.sh local`), then:
+
 ```bash
-# Inside the api pod
-python /app/packages/db/seeds/seed_agents.py
+kubectl -n abenix exec deploy/abenix-api -c api -- python /app/packages/db/seeds/seed_agents.py
 ```
 
-The script:
+The seeder:
+
 1. Reads every `*.yaml` in `packages/db/seeds/agents/`.
-2. Validates each against an internal schema.
-3. Inserts or updates by `slug`. New versions are appended. older versions stay.
-4. Re-seeds the agent's `agent_revisions` history so the UI's version dropdown is populated.
+2. Validates them all first. If any fails it prints every failure, writes nothing, and exits non-zero.
+3. Creates or updates each agent by `slug`, in the shared system tenant. An update overwrites the row in place. There is no version history from seeding.
+4. Archives slugs listed as retired.
 
-You should see:
+You should see one line per file:
+
 ```
-+ Seeded Currency Quoter (currency-quoter) v1.0.0 [default]
+  Creating: Currency Quoter (currency-quoter) [default]
 ```
+
+or `Updating:` when the slug exists. The deploy scripts then print which seeded agents still need a tool credential.
 
 ### Test
-1. Visit `/agents` — your agent shows up.
-2. Click into it → click **Test** → use one of your `example_prompts`.
-3. Open the resulting execution → trace shows tool calls + final output.
+
+1. Visit `/agents`, your agent is listed.
+2. Open it and send one of your `example_prompts`.
+3. Open the run. The Flight Recorder at `/executions/<id>` shows each tool call and the final output.
+
+To keep a good answer as a regression check, save that run as an evaluation case, see [10-evals](10-evals.md).
 
 ---
 
-## Option 2 — Builder UI (interactive)
+## Option 2. Builder UI
 
-For one-off exploration / customer-specific agents.
+For one-off exploration and tenant-specific agents.
 
-1. Visit `/builder`. Empty canvas.
-2. Drag a tool from the palette onto the canvas (wires automatically to the centre agent node).
-3. Click the agent node → fill in name, model, system prompt in the right panel.
-4. Click **Test** in the top bar to dry-run.
-5. Click **Save**. The agent is created as a `draft`.
-6. Click **Publish** to make it `active`.
+1. Visit `/builder`.
+2. Add tools from the palette. Each lands on the canvas wired to the agent node.
+3. On the agent panel set the name, description, prompt, model and risk tier.
+4. **Save draft**. The URL gains `?agent=<id>`.
+5. **Publish**, then pick who sees it. Publishing checks the tier policy, an output schema or an allowed model may be required, and for high and critical tiers the agent's gating evaluation suites must pass.
 
-The Builder serialises to the same `model_config_` JSONB the YAML produces. The two paths are interchangeable — you can export a Builder-created agent to YAML via `GET /api/agents/{id}/export`.
+The builder writes the same `model_config` the YAML produces. `GET /api/agents/{id}/export` returns a builder agent in the importable form, and `POST /api/agents/import` takes it back.
 
 ---
 
-## Option 3 — Pipeline mode
+## Option 3. API or SDK
 
-Switch the Builder's mode toggle to **Pipeline**. The canvas becomes a DAG editor.
+```python
+agent = await forge.agents.create({
+    "name": "Currency Quoter",
+    "system_prompt": "You convert currency amounts using the currency_convert tool.",
+    "model_config": {"model": "claude-haiku-4-5-20251001", "tools": ["currency_convert"], "risk_tier": "low"},
+})
+```
 
-Pipelines are described in [`02-runtime/01-pipelines`](../02-runtime/01-pipelines.md). The YAML form for a pipeline:
+`POST /api/agents` takes the same fields. `PUT /api/agents/{id}` (`forge.agents.update`) replaces `model_config` whole, so send the full object, and a `name` in the body also renames the slug.
+
+---
+
+## Pipelines
+
+Switch the builder to **Pipeline** and the canvas becomes a DAG editor. Pipelines are described in [02-runtime/01-pipelines](../02-runtime/01-pipelines.md). In YAML, `pipeline_config` sits at the top level, never inside `model_config`:
 
 ```yaml
 name: "Contract Triage"
 slug: contract-triage
-agent_type: oob
 mode: pipeline
 model_config:
-  mode: pipeline
-  pipeline_config:
-    nodes:
-      - id: extract
-        type: agent
-        agent_slug: contractiq-clause-extractor
-        inputs: {document_id: "{{context.document_id}}"}
-      - id: classify
-        type: agent
-        agent_slug: contractiq-risk-flagger
-        inputs: {clauses: "{{extract.clauses}}"}
-      - id: gate
-        type: human
-        title: "Review high-risk contract"
-        required_signoffs: 2
-        when: "{{classify.max_severity}} == 'high'"
-    edges:
-      - {from: extract, to: classify}
-      - {from: classify, to: gate}
-    output:
-      from: classify
-      field: clauses
+  tools: [decision_evaluate]
+input_variables:
+  - {name: document_id, type: string, required: true}
+pipeline_config:
+  nodes:
+    - id: extract
+      type: agent
+      agent_slug: contractiq-clause-extractor
+      input: "Extract the clauses of document {{input.document_id}}"
+    - id: classify
+      type: agent
+      agent_slug: contractiq-risk-flagger
+      input: "Flag the risky clauses: {{extract.clauses}}"
+    - id: route
+      tool_name: decision_evaluate
+      arguments:
+        decision: contracts.review.route
+        facts: {contract: {max_severity: "{{classify.max_severity}}"}}
+    - id: summary
+      type: structured
+      output:
+        clauses: "{{classify.clauses}}"
+        reviewer: "{{route.result.reviewer}}"
 ```
+
+Every node has an `id` and either a `type` (`agent`, `tool`, `structured`, `switch`, `loop`) or a `tool_name`. Dependencies are inferred from the `{{node.field}}` references, and `depends_on` adds more. Pipeline inputs are read as `{{input.<name>}}`. The pipeline's answer is the output of the last node that completed. The agent slugs above are placeholders, use your own.
 
 ---
 
 ## Tips that save hours
 
-1. **Always declare an `output_schema`** on agents called from production code. The runtime auto-retries on schema mismatch — much more reliable than parsing free-form JSON.
-2. **Pin a `client_token`** on every SDK execute call so retries are idempotent.
-3. **Use `max_iterations: 5` for tight agents** that should fail loud if they need more rounds. Default 10 is generous but lets bugs hide.
-4. **Don't anchor the LLM on stale example outputs.** Use `<placeholder>` syntax in your example block for any time-dependent value — see the [`feedback_no_pinned_dates`](../) memory.
-5. **Group related tools.** An agent with 20 tools confuses the LLM. Keep `tools` under 10. let pipelines compose specialists.
+1. **Declare an `output_schema`** on agents called from code. The runtime checks the reply and asks the model once to correct a mismatch, which beats parsing free-form JSON. High and critical tiers require one by default.
+2. **Send an `Idempotency-Key` header** on `POST /api/agents/{id}/execute` so a retried call does not start a second run.
+3. **Use `max_iterations: 5` for tight agents** that should fail loud if they need more rounds.
+4. **Don't anchor the model on stale example outputs.** Use `<placeholder>` values in the prompt for anything time dependent, and let the agent call `current_time`.
+5. **Keep `tools` short.** An agent with twenty tools picks badly. Keep it under ten and let pipelines compose specialists.
 
 ---
 
 ## See also
 
-- [02-runtime/00-agent-execution](../02-runtime/00-agent-execution.md) — what happens when the agent runs
-- [02-runtime/01-pipelines](../02-runtime/01-pipelines.md) — pipeline mode details
-- [03-sdk/00-overview](../03-sdk/00-overview.md) — calling your new agent from the SDK
+- [02-runtime/00-agent-execution](../02-runtime/00-agent-execution.md), what happens when the agent runs
+- [02-runtime/01-pipelines](../02-runtime/01-pipelines.md), pipeline mode in detail
+- [01-add-a-tool](01-add-a-tool.md), give the agent a new tool
+- [10-evals](10-evals.md), regression cases and the publish gate
+- [03-sdk/00-overview](../03-sdk/00-overview.md), calling the agent from the SDK

@@ -172,7 +172,7 @@ function CreateDialog({ start, onClose }: { start: 'blank' | 'import' | 'example
   const [key, setKey] = useState(start === 'example' ? 'freight.remote.surcharge' : '');
   const [keyTouched, setKeyTouched] = useState(start === 'example');
   const [tier, setTier] = useState<Tier>(start === 'example' ? 'high' : 'low');
-  const [description, setDescription] = useState(start === 'example' ? 'Whether an import falls under the EU Carbon Border Adjustment Mechanism.' : '');
+  const [description, setDescription] = useState(start === 'example' ? 'Whether a shipment to a remote postcode carries a surcharge.' : '');
   const [json, setJson] = useState(start === 'example' ? JSON.stringify(CLIENT_SAMPLE, null, 2) : '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

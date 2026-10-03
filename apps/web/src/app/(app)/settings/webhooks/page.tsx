@@ -266,19 +266,38 @@ function CreateDialog({ catalog, agents, onClose, onCreated }: { catalog: Catalo
 }
 
 export default function EventsSettingsPage() {
-  const { perms } = useMyPermissions();
+  const { perms, loading: permsLoading } = useMyPermissions();
   const canManage = holds(perms?.capabilities, 'events.manage');
-  const { data: subs, mutate, isLoading } = useApi<Sub[]>('/api/webhooks');
-  const { data: catalog } = useApi<CatalogItem[]>('/api/webhooks/catalog');
+  const { data: subs, mutate, isLoading } = useApi<Sub[]>(canManage ? '/api/webhooks' : null);
+  const { data: catalog } = useApi<CatalogItem[]>(canManage ? '/api/webhooks/catalog' : null);
   const [agents, setAgents] = useState<{ id: string; name: string; mode: string }[]>([]);
   const [creating, setCreating] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    if (!canManage) return;
     fetchAllAgents<any>().then(({ agents }) => setAgents(agents.map((a) => ({ id: String(a.id), name: a.name, mode: (a.model_config?.mode || 'agent') === 'pipeline' ? 'pipeline' : 'agent' })))).catch(() => {});
-  }, []);
+  }, [canManage]);
   const names = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
+
+  if (permsLoading && !perms) {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-8" aria-busy="true">
+        <div className="h-24 rounded-xl bg-slate-800/40 animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!canManage) {
+    return (
+      <div className="max-w-3xl mx-auto px-6 py-16 text-center" data-testid="events-no-access">
+        <Bell className="w-10 h-10 text-slate-500 mx-auto mb-3" aria-hidden="true" />
+        <h1 className="text-xl font-semibold text-white">Events</h1>
+        <p className="text-slate-400 mt-2">Event subscriptions need the events.manage capability. An admin can grant it under Admin, Permissions.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -302,8 +321,6 @@ export default function EventsSettingsPage() {
           </div>
         </div>
       )}
-
-      {!canManage && <p className="mb-4 text-xs text-slate-500">You can see subscriptions. Creating or changing them needs the events.manage capability.</p>}
 
       {isLoading && !subs ? (
         <div className="space-y-3">{[0, 1].map((i) => <div key={i} className="h-24 rounded-xl bg-slate-800/40 animate-pulse" />)}</div>

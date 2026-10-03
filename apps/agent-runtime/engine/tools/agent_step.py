@@ -9,10 +9,10 @@ from engine.provider_credentials import PROVIDER_CONFIG_FIELDS
 from engine.tools.base import BaseTool, ToolResult
 
 
-async def _agent_model_config(agent_id: str, db_url: str) -> dict[str, Any]:
-    """model_config of a saved agent, empty for an inline step or on any failure."""
+async def _agent_settings(agent_id: str, db_url: str) -> tuple[dict[str, Any], Any]:
+    """model_config and per-run cost cap of a saved agent, empty for an inline step or on any failure."""
     if not agent_id or not db_url:
-        return {}
+        return {}, None
     try:
         from sqlalchemy import text as _t
         from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,21 +21,41 @@ async def _agent_model_config(agent_id: str, db_url: str) -> dict[str, Any]:
 
         engine = await _get_pipeline_engine(db_url)
         if engine is None:
-            return {}
+            return {}, None
         async with AsyncSession(engine) as session:
             row = (
                 await session.execute(
                     _t(
-                        "SELECT model_config FROM agents WHERE id = CAST(:aid AS uuid)"
+                        "SELECT model_config, per_execution_cost_limit FROM agents "
+                        "WHERE id = CAST(:aid AS uuid)"
                     ).bindparams(aid=agent_id)
                 )
             ).first()
         cfg = row[0] if row else {}
         if isinstance(cfg, str):
             cfg = json.loads(cfg)
-        return cfg if isinstance(cfg, dict) else {}
+        return (cfg if isinstance(cfg, dict) else {}), (row[1] if row else None)
     except Exception:
-        return {}
+        return {}, None
+
+
+async def _budget_breach(agent_id: str, tenant_id: str, db_url: str) -> Any:
+    """The saved agent's daily cap breach, None for an inline step or when the check cannot run."""
+    if not agent_id or not tenant_id or not db_url:
+        return None
+    try:
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from engine.agent_budget import check_agent_budget_by_id
+        from engine.pipeline import _get_pipeline_engine
+
+        engine = await _get_pipeline_engine(db_url)
+        if engine is None:
+            return None
+        async with AsyncSession(engine) as session:
+            return await check_agent_budget_by_id(session, agent_id, tenant_id)
+    except Exception:
+        return None
 
 
 async def _hold_to_schema(
@@ -180,6 +200,20 @@ class AgentStepTool(BaseTool):
         if not system_prompt.strip():
             return ToolResult(content="Error: system_prompt is required", is_error=True)
 
+        import os as _os
+
+        breach = await _budget_breach(
+            str(arguments.get("__agent_id__") or ""),
+            str(arguments.get("__tenant_id__") or ""),
+            _os.environ.get("DATABASE_URL", ""),
+        )
+        if breach is not None:
+            return ToolResult(
+                content=f"Budget exceeded: {breach.message}",
+                is_error=True,
+                metadata={"failure_code": "BUDGET_EXCEEDED", **breach.details()},
+            )
+
         try:
             from engine.agent_executor import AgentExecutor, build_tool_registry
             from engine.llm_router import LLMRouter
@@ -200,9 +234,9 @@ class AgentStepTool(BaseTool):
             import os as _os
 
             # the agent's own tool settings, e.g. which code asset it is bound to
-            agent_cfg = await _agent_model_config(
-                str(arguments.get("__agent_id__") or ""),
-                _os.environ.get("DATABASE_URL", ""),
+            child_agent_id = str(arguments.get("__agent_id__") or "")
+            agent_cfg, cost_cap = await _agent_settings(
+                child_agent_id, _os.environ.get("DATABASE_URL", "")
             )
             tool_cfg = agent_cfg.get("tool_config") or {}
             if tool_cfg:
@@ -239,9 +273,25 @@ class AgentStepTool(BaseTool):
                 sandbox=sub_sandbox,
                 tool_config=tool_cfg or None,
                 asset_schemas=asset_schemas or None,
+                cost_limit=cost_cap,
             )
 
             result = await executor.invoke(input_message)
+            # the child's spend is read back from this metadata for its own daily caps
+            billing = {"billed_agent_id": child_agent_id} if child_agent_id else {}
+            if getattr(result, "budget_exceeded", False):
+                return ToolResult(
+                    content=f"Budget exceeded: {result.output}",
+                    is_error=True,
+                    metadata={
+                        **billing,
+                        "failure_code": "BUDGET_EXCEEDED",
+                        "model": result.model,
+                        "input_tokens": result.input_tokens,
+                        "output_tokens": result.output_tokens,
+                        "cost": result.cost,
+                    },
+                )
             final_output, schema_warnings = await _hold_to_schema(
                 router,
                 agent_cfg.get("output_schema"),
@@ -266,6 +316,7 @@ class AgentStepTool(BaseTool):
             return ToolResult(
                 content=json.dumps(output, indent=2, default=str),
                 metadata={
+                    **billing,
                     **(
                         {"validation_warnings": schema_warnings}
                         if schema_warnings

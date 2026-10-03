@@ -1,13 +1,15 @@
 # TypeScript SDK
 
-> Same surface as the Python SDK, idiomatic for TS/JS. Works in browsers (via `fetch`), in Node ≥18 (built-in `fetch`), and in edge runtimes (Cloudflare Workers, Vercel Edge).
+> A smaller surface than the Python SDK, idiomatic for TS/JS. One file, built on the global `fetch`.
 
-Install:
+Build it from the monorepo:
 ```bash
-npm install @abenix/sdk
-# or in this monorepo:
-cd packages/sdk/typescript && npm link
+cd packages/sdk/js && npm install && npm run build
+# then, from your app
+npm install /path/to/agentforge/packages/sdk/js
 ```
+
+The package is `@abenix/sdk`. It has no runtime dependencies. It needs a global `fetch` and `AbortSignal.timeout`, so Node 18+ or a modern browser.
 
 ---
 
@@ -17,12 +19,12 @@ cd packages/sdk/typescript && npm link
 import { Abenix } from "@abenix/sdk";
 
 const client = new Abenix({
-  apiUrl: process.env.ABENIX_API_URL!,
   apiKey: process.env.ABENIX_API_KEY!,
+  baseUrl: process.env.ABENIX_API_URL,
 });
 
-const result = await client.execute("wingman-market-brief", {}, { wait: "complete" });
-console.log(result.output);
+const result = await client.execute("wingman-market-brief", "Brief me on today's crude market");
+console.log(result.status, result.output);
 ```
 
 ---
@@ -30,18 +32,17 @@ console.log(result.output);
 ## Client construction
 
 ```ts
-interface AbenixOptions {
-  apiUrl: string;
-  apiKey?: string;
-  token?: string;
-  fetch?: typeof fetch;       // override; useful for testing or polyfills
-  timeoutMs?: number;         // default 30000
-  retries?: number;           // default 3 on 5xx + 429
-  signal?: AbortSignal;       // honoured on every call
+interface AbenixConfig {
+  apiKey: string;
+  baseUrl?: string;          // default "http://localhost:8000"
+  timeout?: number;          // ms, default 120000
+  actAs?: ActingSubject;     // default subject for execute and stream
 }
 ```
 
-There's no `async`-context to close — the SDK is stateless beyond the per-call `fetch`. No `await client.close()` needed.
+Every request sends `X-API-Key` and is aborted after `timeout`. `execute` also derives the server-side wait from it (`timeout / 1000 - 5` seconds, clamped to 5..1800). There is nothing to close.
+
+Sub-clients: `executions`, `agents`, `knowledge`, `approvals`, `decisions`, `sources`, `events`. Top-level methods: `permissions`, `execute`, `stream`, `approve`, `reject`, `setActAs`.
 
 ---
 
@@ -49,121 +50,352 @@ There's no `async`-context to close — the SDK is stateless beyond the per-call
 
 ```ts
 const subject = {
-  subject_type: "wingman" as const,
-  subject_id: "trader-42",
+  subjectType: "wingman",
+  subjectId: "trader-42",
   email: "alice@trading-desk.com",
-  display_name: "Alice — Crude Desk",
+  displayName: "Alice — Crude Desk",
 };
 
-const result = await client
-  .withSubject(subject)
-  .execute("wingman-mispricing-extractor", { corridor: { id: "USGC-NWE" } });
+const result = await client.execute(
+  "wingman-mispricing-extractor",
+  "Scan USGC-NWE",
+  { actAs: subject },
+);
 ```
 
-`withSubject` returns a new client wrapper that adds `X-Abenix-Subject` to each call.
+Pass `actAs` per call, or set a default with the constructor or `client.setActAs(subject)`. A per-call subject wins. Fields are camelCase here and go out as the snake_case JSON object in `X-Abenix-Subject`. Only `execute` and `stream` send the header. The API key needs the `can_delegate` scope.
+
+---
+
+## Execute
+
+```ts
+async execute(agentSlugOrId: string, message: string, options?: ExecuteOptions): Promise<ExecutionResult>
+
+interface ExecuteOptions {
+  context?: Record<string, unknown>;   // input variables for agents and pipelines
+  actAs?: ActingSubject;
+  wait?: "completed" | "submitted" | "until_gate" | boolean;
+  stream?: boolean;
+  maxTokens?: number;
+  temperature?: number;
+}
+```
+
+`ExecutionResult` has `output` (string), `inputTokens`, `outputTokens`, `cost`, `durationMs`, `model`, `toolCalls`, `confidenceScore?`, `executionId?`, `status` and `pausedAt?`. `pausedAt` is an `ApprovalRef` with `approvalId`, `title`, `payload`, `requiredSignoffs`, `expiresAt`, `gateKind`.
+
+| `wait` | Behaviour |
+|---|---|
+| omitted or `true` or `"completed"` | Blocks until the run ends. |
+| `"submitted"` | Returns at once with `executionId` and `status`. `output` is empty. |
+| `"until_gate"` | Blocks, but returns early with `status: "paused"` and `pausedAt` when a HITL gate opens. |
+| `false` | Asks the server not to wait. |
+
+Unlike Python, the TS client does not poll. If the server hands back an async response, `output` is empty and you poll `client.executions.get(executionId)` yourself. `maxTokens` and `temperature` are sent in the body but the execute endpoint ignores them. Use `stream()` rather than `stream: true` here.
 
 ---
 
 ## Streaming
 
 ```ts
-for await (const event of client.executeStream("agent-slug", input)) {
-  if (event.type === "tool.end") {
-    console.log(`tool ${event.toolSlug} latency=${event.latencyMs}ms`);
-  } else if (event.type === "completed") {
-    console.log(event.output);
-  }
+for await (const event of client.stream("deep-research", "Analyze market trends for EVs")) {
+  if (event.type === "token") process.stdout.write(event.text ?? "");
+  else if (event.type === "tool_call") console.log(`\ntool ${event.name}`);
+  else if (event.type === "done") console.log(`\ncost ${event.cost} in ${event.durationMs}ms`);
+  else if (event.type === "error") console.log("\nfailed:", event.message);
 }
 ```
 
-Built on the Streams API (`ReadableStream<TextEvent>`). Works in browsers + Node.
+`stream(agentSlugOrId, message, options?)` is an async generator of `StreamEvent`. `type` is one of `token`, `tool_call`, `tool_result`, `node_start`, `node_complete`, `done`, `error`. An HTTP error does not throw. It yields one `error` event and ends. There is no reconnect and no TS `watch` for runs started elsewhere.
 
-For React, there's a `useAbenixStream` hook in `@abenix/sdk-react`:
-
-```tsx
-import { useAbenixStream } from "@abenix/sdk-react";
-
-function LiveScan({ corridorId }: { corridorId: string }) {
-  const { events, terminal, error } = useAbenixStream(
-    "wingman-mispricing-extractor",
-    { corridor: { id: corridorId } },
-  );
-
-  return (
-    <>
-      {events.map(e => <EventRow key={e.id} event={e} />)}
-      {terminal && <Result output={terminal.output} />}
-      {error && <Error err={error} />}
-    </>
-  );
-}
-```
-
-The hook handles reconnection, last-event-id, and cleanup.
+For React there is no streaming hook. `@abenix/react` (`packages/sdk/react`) ships one component, `AgentChat`, an embeddable chat box. Its props are `apiKey`, `agentSlug`, `baseUrl`, `theme`, `height`, `placeholder`, `onMessage`, `onError`, `onCostUpdate` and `className`.
 
 ---
 
 ## HITL
 
-Same wait modes as Python:
-
 ```ts
 const result = await client.execute(
   "contract-execute-flow",
-  { counterparty_id, amount_usd },
-  { wait: "approval_or_complete" },
+  "Execute the Acme renewal",
+  { wait: "until_gate", context: { counterparty_id: cpId, amount_usd: 2_400_000 } },
 );
 
-if (result.status === "waiting_approval") {
-  console.log("Pending:", result.approvalRef!.id);
-  // ... later
-  const final = await client.executions.wait(result.executionId, "terminal");
-  console.log(final.output);
+if (result.status === "paused" && result.pausedAt) {
+  console.log("Pending:", result.pausedAt.approvalId, result.pausedAt.title);
+  const approval = await client.approvals.waitFor(result.pausedAt.approvalId, { timeoutSeconds: 3600 });
+  if (approval.status === "approved") {
+    const row = await client.executions.get(result.executionId!);
+    console.log(row.status, row.output_message);
+  }
 }
 ```
+
+The run resumes on the server after sign-off, so `row.status` may still be `running`. Poll until it is terminal.
 
 ---
 
 ## Errors
 
-```ts
-import { AbenixError } from "@abenix/sdk";
+`execute`, `approvals` and `knowledge` throw a plain `Error` carrying the server's message. `executions`, `agents` and the top-level `approve` and `reject` do not check the status at all. On an error the single-row calls resolve to `null` (the envelope's `data`) and the list calls to `[]`. `stream` yields an `error` event. The newer calls throw `AbenixError` or `AbenixDecisionError` with `status`, `code`, `details` and `message`, see [Errors from these clients](#errors-from-these-clients).
 
+```ts
 try {
-  await client.execute(...);
+  await client.execute("invoice-triage", "Route INV-1042");
 } catch (e) {
-  if (e instanceof AbenixError) {
-    console.log(e.errorCode);   // stable string
-    console.log(e.message);     // human
-    console.log(e.status);      // HTTP status
-    console.log(e.details);     // record
-  } else throw e;
+  console.log((e as Error).message);   // server message, or "HTTP 500"
 }
 ```
 
-Subclasses for common codes: `AbenixRateLimited`, `AbenixValidationError`, etc.
+The SDK does not retry anything itself.
 
 ---
+
+## Platform clients
+
+These calls return the `data` field of the response and throw on any 4xx or 5xx. The examples assume:
+
+```ts
+import { Abenix, AbenixDecisionError, EventsClient } from "@abenix/sdk";
+
+const client = new Abenix({ apiKey: "af_xxx", baseUrl: "http://localhost:8000" });
+```
+
+The TS client is behind Python here. Not in TS yet:
+
+- `me()`, `watch()` and `executions.watchRawSse`
+- `agents.bySlug`, `agents.create`, `agents.update`, `agents.findBySlug`
+- `decisions.create`, `versions`, `version`, `retire`, `tests`, `addTest`, `evaluations`, `referenceSet`, `putReferenceSet`
+- `sources.snapshots`, `validateUrl`, `preview`, `settings`
+- `events.test`, `events.redeliver`
+- `knowledge.bootstrapProject`, `knowledge.ensureSubjectCollection`
+- the `chat`, `tools`, `presets` and `mlModels` sub-clients
+
+Neither SDK wraps the server's decision `check` and `try` endpoints.
+
+### Errors from these clients
+
+```ts
+class AbenixError extends Error {
+  status: number;      // HTTP status
+  code?: string;       // server error_code, e.g. "STALE_DRAFT"
+  details?: unknown;
+}
+class AbenixDecisionError extends Error { /* same fields */ }
+```
+
+`AbenixDecisionError` does not extend `AbenixError`, so check for both if you need to. Decision calls throw `AbenixDecisionError`. `permissions()`, `sources` and `events` throw `AbenixError`. The older `execute`, `approvals` and `knowledge` methods still throw a plain `Error`.
+
+```ts
+try {
+  await client.decisions.get("no-such-decision");
+} catch (e) {
+  if (e instanceof AbenixDecisionError) console.log(e.status, e.code, e.message);
+  else throw e;
+}
+```
+
+### `permissions()`
+
+```ts
+const perms = await client.permissions();
+if (!perms.capabilities.includes("decisions.publish")) {
+  console.log(`${perms.email} cannot publish decisions`);
+}
+```
+
+### Decisions
+
+See [08-howto/09-decisions](../08-howto/09-decisions.md).
+
+```ts
+const res = await client.decisions.evaluate(
+  "credit-limit",
+  { segment: "smb", annual_revenue: 1_200_000 },
+  { asOf: "2026-10-01" },
+);
+if (res.outcome === "decided") console.log(res.result, res.applied_rules);
+else if (res.outcome === "missing_facts") console.log("need", res.missing_facts);
+
+const batch = await client.decisions.evaluateBatch("credit-limit", [
+  { facts: { segment: "smb", annual_revenue: 900_000 } },
+  { facts: { segment: "enterprise", annual_revenue: 40_000_000 } },
+]);
+console.log(batch.counts);
+```
+
+Drafts carry an `etag`. Pass it as `etag` to `saveDraft` or `importRules` and it goes out as `If-Match`. A stale save throws with `code === "STALE_DRAFT"`. Each save returns the new `etag`.
+
+```ts
+const key = "credit-limit";
+const draft = await client.decisions.newDraft(key, { note: "Raise SMB cap" });
+const n: number = draft.version;
+
+let saved = await client.decisions.importRules(key, n, rules, { mode: "merge", etag: draft.etag });
+saved = await client.decisions.saveDraft(key, n, {
+  etag: saved.etag,
+  validFrom: "2026-11-01",
+  changeNote: "SMB cap to 250k",
+});
+
+console.log(await client.decisions.validate(key, n));
+console.log(await client.decisions.diff(key, n - 1, n));
+console.log(await client.decisions.publishPlan(key, n));
+await client.decisions.propose(key, n, "SMB cap to 250k");
+// await client.decisions.withdraw(key, n);
+
+// after sign-off
+await client.decisions.publish(key, n, { expectedCurrent: n - 1 });
+await client.decisions.update(key, { riskTier: "medium", tags: ["credit"] });
+```
+
+| Method | Signature |
+|---|---|
+| `evaluate` | `(key, facts, opts?: { asOf, knownAt, version, trace, persist, idempotencyKey })` |
+| `evaluateBatch` | `(key, items, opts?: { asOf, version })` |
+| `newDraft` | `(key, opts?: { note, fromVersion })` |
+| `saveDraft` | `(key, version, fields: { etag, authoring, content, validFrom, validTo, clearValidFrom, clearValidTo, changeNote, provenance })` |
+| `importRules` | `(key, version, rules, opts?: { mode: "merge" \| "replace", etag })` |
+| `validate` | `(key, version)` |
+| `propose` | `(key, version, note = "")` |
+| `withdraw` | `(key, version)` |
+| `publishPlan` | `(key, version)` |
+| `publish` | `(key, version, opts?: { expectedCurrent })` |
+| `diff` | `(key, a, b)` |
+| `update` | `(key, fields: { name, description, riskTier, tags, logMode })` |
+| `list` | `(q = "")` |
+| `get` | `(key)` |
+| `compare` | `(key, facts, targets)`, each target `{ label, version }` or `{ as_of, known_at }` |
+| `proposeRules` | `(key, rules, note, mode = "merge")`, new draft, import and propose in one call |
+| `export` | `(key, version?)` |
+| `referenceSets` | `()` |
+
+### Sources
+
+See [02-runtime/17-source-watch](../02-runtime/17-source-watch.md).
+
+```ts
+const src = await client.sources.create({
+  name: "EU AI Act page",
+  url: "https://example.org/ai-act",
+  kind: "html",
+  cadence_minutes: 1440,
+  selector: "main",
+  tags: ["ai-act"],
+});
+const { outcome } = await client.sources.checkNow(src.id);
+const recent = await client.sources.changes(20);
+const full = await client.sources.change(recent[0].id);
+```
+
+`create` takes one object with snake_case keys. Other methods: `list(q)`, `get`, `update(sourceId, fields)`, `delete`, `pause(sourceId, reason)`, `resume`, `sourceChanges(sourceId, limit)`, `snapshot(snapshotId, { full })`. The Python `snapshots`, `validate_url`, `preview` and `settings` have no TS version.
+
+### Events
+
+See [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md).
+
+```ts
+const catalog = await client.events.catalog();
+
+const sub = await client.events.subscribe(["decision.published", "source.changed"], {
+  url: "https://hooks.example.com/abenix",
+  name: "rules feed",
+});
+const secret: string = sub.signing_secret; // returned once
+
+const failed = await client.events.deliveries(sub.id, { limit: 20, status: "failed" });
+```
+
+`subscribe(events, opts?: { url, name, filter, targetType, target })` rejects on an empty list. `targetType` is `webhook`, `agent` or `pipeline`. There is no `redeliver` in TS, use the Python SDK or `POST /api/webhooks/deliveries/{id}/redeliver`.
+
+`EventsClient.verifySignature(secret, body, signature)` is static and async. It computes `"sha256=" + HMAC-SHA256(secret, body)` with Web Crypto and compares it to the `X-Abenix-Signature` header in constant time. `body` must be the raw request text. It resolves `false` when the secret or header is missing.
+
+```ts
+// Express
+app.post("/abenix", express.text({ type: "*/*" }), async (req, res) => {
+  const ok = await EventsClient.verifySignature(SECRET, req.body, req.get("X-Abenix-Signature"));
+  if (!ok) return res.sendStatus(401);
+  const event = JSON.parse(req.body);
+  console.log(req.get("X-Abenix-Event"), event.id);
+  res.sendStatus(200);
+});
+```
+
+### Approvals: return for changes
+
+See [02-runtime/05-approvals-hitl](../02-runtime/05-approvals-hitl.md).
+
+```ts
+await client.approvals.returnForChanges(approvalId, "Cap should be 200k, not 250k", {
+  clientToken: "ret-123",
+});
+```
+
+Rejects when `reason` is blank. It calls `signoff(approvalId, "return", ...)` and resolves to the updated `Approval`.
+
+---
+
+## Other sub-clients
+
+The older sub-clients. Errors behave as described under [Errors](#errors).
+
+### `approvals`
+
+Every call resolves to an `Approval` (camelCase: `id`, `agentId`, `agentExecutionId`, `title`, `payload`, `requiredSignoffs`, `signoffs`, `status`, `requestedBy`, `expiresAt`, `decidedAt`, `createdAt`, `gateKind`, `clientToken`) unless noted.
+
+| Method | Notes |
+|---|---|
+| `list(opts?: { status, executionId, agentId, kind, limit })` | `GET /api/approvals`, `limit` defaults to 200 |
+| `get(approvalId)` | `GET /api/approvals/{id}` |
+| `create(title, payload, opts?: { requiredSignoffs, expiresSeconds, gateKind, agentId, agentExecutionId, clientToken })` | `POST /api/approvals`. Defaults are 1 signoff and 86400 s |
+| `signoff(approvalId, decision, opts?: { reason, clientToken })` | `decision` is `"approve"`, `"deny"` or `"return"` |
+| `approve(approvalId, opts?)` / `deny(approvalId, opts?)` | `signoff` with that decision |
+| `returnForChanges(approvalId, reason, opts?: { clientToken })` | see above |
+| `waitFor(approvalId, opts?: { timeoutSeconds, pollSeconds })` | Long-polls `/wait` in chunks of up to 120 s, default 60 s total |
+| `subscribe()` | Async generator over `GET /api/notifications/stream?types=approval_pending,approval_resolved`, yields `{ event, data }` |
+| `configureWebhook({ url, secret })` | `PUT /api/approvals/webhooks`, resolves `{ url, hasSecret }`. A missing field is sent as `null` |
+
+### `executions`
+
+`live()`, `get(executionId)`, `replay(executionId)`, `tree(executionId)` and `pendingApprovals()` wrap `GET /api/executions/live`, `/api/executions/{id}`, `/api/executions/{id}/replay`, `/api/executions/tree/{id}` and `/api/executions/approvals`. `replay` returns the stored trace, it does not run anything.
+
+### `agents`
+
+`list()` (first page, 20 agents) and `get(agentId)`.
+
+### `knowledge`
+
+| Method | Notes |
+|---|---|
+| `cognify(kbId, opts?: { docIds, model, chunkSize, chunkOverlap })` | Resolves `{ jobId, status, documents, message }` |
+| `graphStats(kbId)` | Resolves `{ entities, relationships, entityTypes }` |
+| `search(kbId, query, opts?: { mode, topK, graphDepth })` | Defaults `hybrid`, 5, 2. Resolves `{ results, graphEntities }` |
+| `graph(kbId, limit = 100)` | Subgraph for display |
+| `cognifyJobs(kbId)` | Job history |
+
+### Top-level `approve` and `reject`
+
+`approve(executionId, gateId, comment?)` and `reject(...)` post to `/api/executions/{id}/approve?gate_id=`. They are the old gate shape. Prefer `approvals.approve`.
+
+---
+
 
 ## OTel propagation
 
-If `@opentelemetry/api` is loaded and a `Span` is active, the SDK propagates W3C `traceparent`. Otherwise no header is set.
-
-The SDK does **not** auto-instrument your service. Use `@opentelemetry/instrumentation-fetch` / `@opentelemetry/sdk-node` separately.
+The SDK has no OpenTelemetry code and sets no `traceparent` header. To join platform runs to your traces, instrument `fetch` yourself, for example with `@opentelemetry/instrumentation-undici` in Node or `@opentelemetry/instrumentation-fetch` in the browser.
 
 ---
 
-## Bundle size
+## Dependencies
 
-The minified + gzipped bundle is **~6 KB** when tree-shaken. The SDK has no runtime dependencies beyond the standard Web Streams + Fetch APIs.
+None at runtime. The whole SDK is [`packages/sdk/js/src/index.ts`](../../packages/sdk/js/src/index.ts), compiled with `tsc` to `dist/`.
 
 ---
 
-## Browser-specific notes
+## Browser notes
 
-- The browser SDK will auto-refresh JWTs using a stored refresh token if a `localStorage` adapter is wired. See `@abenix/sdk-browser`.
-- CORS: the platform's API enables CORS with credentials. Your app must serve from a domain in `ALLOWED_ORIGINS` (env on abenix-api).
-- The browser SDK does **not** ship `apiKey` support — use JWT auth in browsers. API keys belong on backends.
+- Every request sends `X-API-Key`, and there is no JWT option. An API key in a browser bundle is visible to anyone, so keep SDK calls on a backend.
+- CORS: the API allows the origins in `CORS_ORIGINS` (default `http://localhost:3000`, set from `corsOrigins` in the Helm values).
 
 ---
 

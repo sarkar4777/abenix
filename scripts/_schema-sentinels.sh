@@ -68,6 +68,9 @@ SCHEMA_CANONICAL_COLUMNS=(
   "eval_cases.assertions"
   "eval_runs.config_hash"
   "eval_results.assertion_results"
+  "executions.lease_expires_at"
+  "executions.delivery_attempts"
+  "gdpr_purge_log.affected_count"
 )
 
 SCHEMA_USE_CASE_COLUMNS=(

@@ -53,12 +53,16 @@ COPY pharmavigil/code-assets/ ./pharmavigil/code-assets/
 WORKDIR /app/apps/api
 
 ENV PYTHONPATH="/app/packages/db:/app/packages/sdk/python:/app/apps/agent-runtime"
+# Multi-process mode so /api/metrics sums every uvicorn worker, not whichever one answered.
+# The chart mounts an emptyDir on /tmp, so the dir is recreated and emptied on each start.
+ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prom-multiproc
 
-RUN adduser --system --uid 1001 appuser
+RUN adduser --system --uid 1001 appuser && \
+    mkdir -p /tmp/prom-multiproc && chown appuser /tmp/prom-multiproc
 USER appuser
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
 # keep-alive outlives client pools that reuse idle sockets, the 5 s default dropped them mid-reuse
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2} --timeout-keep-alive ${API_KEEPALIVE_SECONDS:-75}"]
+CMD ["sh", "-c", "mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && rm -f \"$PROMETHEUS_MULTIPROC_DIR\"/*.db && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2} --timeout-keep-alive ${API_KEEPALIVE_SECONDS:-75}"]

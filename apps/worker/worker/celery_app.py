@@ -32,17 +32,18 @@ celery_app.conf.update(
     task_soft_time_limit=int(os.environ.get("CELERY_TASK_SOFT_TIME_LIMIT", "1500")),
     task_time_limit=int(os.environ.get("CELERY_TASK_TIME_LIMIT", "1800")),
     task_routes={
-        "worker.tasks.agent_tasks.*": {"queue": "agents"},
         "worker.tasks.document_processor.*": {"queue": "documents"},
-        "worker.tasks.export_tasks.*": {"queue": "exports"},
         "worker.tasks.cognify_task.*": {"queue": "cognify"},
+        "worker.tasks.kb_reembed.*": {"queue": "documents"},
+        "worker.tasks.pinecone_vacuum.*": {"queue": "documents"},
     },
 )
 
 celery_app.conf.update(
     include=[
-        "worker.tasks.agent_tasks",
         "worker.tasks.document_processor",
         "worker.tasks.cognify_task",
+        "worker.tasks.kb_reembed",
+        "worker.tasks.pinecone_vacuum",
     ],
 )

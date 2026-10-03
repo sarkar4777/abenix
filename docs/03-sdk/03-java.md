@@ -162,7 +162,7 @@ client.approvals().signoff(approvalId, "approve", "Looks right", "signoff-123");
 | `signoff` | `(approvalId, decision, reason, clientToken)` |
 | `approve` / `deny` | `(approvalId, reason)` |
 | `waitFor` | `(approvalId, timeoutSeconds)`, long-polls `/wait` in chunks of up to 120 s |
-| `configureWebhook` | `(url, secret)`, admin only |
+| `configureWebhook` | `(url, secret)`, needs the admin or owner role. A null `url` clears the URL, a null `secret` keeps the stored one |
 
 They return the `Approval` record. There is no `returnForChanges` in Java, send `signoff(approvalId, "return", reason, null)` instead. `client.approve(executionId, gateId, comment)` and `client.reject(...)` are the old gate-id shape.
 

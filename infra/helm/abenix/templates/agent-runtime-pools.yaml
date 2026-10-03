@@ -11,6 +11,9 @@ pools appear without breaking anything else.
 {{- $release := .Release.Name -}}
 {{- $ns := .Release.Namespace -}}
 {{- $img := .Values.scaling.agentRuntimeImage | default (index .Values "agent-runtime" "image") -}}
+{{- if and (or .Values.scaling.execRemote (and .Values.scaling.enabled .Values.scaling.pools)) (ne (default "celery" .Values.scaling.queueBackend) "nats") }}
+{{- fail "scaling.execRemote and scaling.pools need scaling.queueBackend=nats, queued agent runs are consumed from NATS JetStream only" }}
+{{- end }}
 {{- if .Values.scaling.enabled }}
 
 {{- range .Values.scaling.pools }}

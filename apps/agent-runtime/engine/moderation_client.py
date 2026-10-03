@@ -84,6 +84,31 @@ async def _call_openai(
         return r.json()
 
 
+_CARD_SHAPE = r"\d{4}[-\s]?){3}\d{4}"
+
+
+def _luhn_ok(text: str) -> bool:
+    digits = [int(c) for c in text if c.isdigit()]
+    if not 13 <= len(digits) <= 19:
+        return False
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        if i % 2:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+def _real_matches(pat: str, content: str) -> list[re.Match]:
+    # a card-number pattern only counts when the digits pass the Luhn check, ids and counts rarely do
+    found = list(re.finditer(pat, content, flags=re.IGNORECASE))
+    if _CARD_SHAPE in pat:
+        found = [m for m in found if _luhn_ok(m.group())]
+    return found
+
+
 def _redact(content: str, patterns: list[Any], mask: str) -> str:
     """Mask offending spans matched by custom regex patterns."""
     out = content
@@ -95,7 +120,8 @@ def _redact(content: str, patterns: list[Any], mask: str) -> str:
         if not isinstance(pat, str):
             continue
         try:
-            out = re.sub(pat, mask, out, flags=re.IGNORECASE)
+            for m in reversed(_real_matches(pat, out)):
+                out = out[: m.start()] + mask + out[m.end() :]
         except re.error:
             continue
     return out
@@ -112,7 +138,7 @@ def _custom_pattern_hit(content: str, patterns: list[Any]) -> list[str]:
         if not isinstance(pat, str):
             continue
         try:
-            if re.search(pat, content, flags=re.IGNORECASE):
+            if _real_matches(pat, content):
                 hits.append(pat)
         except re.error:
             continue

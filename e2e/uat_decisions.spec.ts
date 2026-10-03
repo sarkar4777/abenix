@@ -219,7 +219,7 @@ test('a high tier change needs a second person on the Approvals page', async ({ 
   const email = `signer-${RUN}@abenix.dev`;
   const mk = await api(page, tok, 'POST', '/api/team/dev-create-member', { email, password: 'Signer123!', role: 'user', name: 'Signer' });
   test.skip(mk.status >= 400, 'cannot create a second user here');
-  const ps = await api(page, tok, 'POST', '/api/governance/permission-sets', { name: `Signers ${RUN}`, capabilities: ['approvals.sign'] });
+  const ps = await api(page, tok, 'POST', '/api/governance/permission-sets', { name: `Signers ${RUN}`, capabilities: ['approvals.sign', 'decisions.review'] });
   await api(page, tok, 'POST', `/api/governance/permission-sets/${ps.json.data.id}/members`, { email });
 
   await visit(page, '/approvals');

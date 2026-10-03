@@ -1,4 +1,7 @@
 {{- if .Values.backup.enabled | default false }}
+{{- $s3 := eq (.Values.objectStorage.type | default "local") "s3" }}
+{{- $pvc := .Values.backup.persistentVolume.enabled | default false }}
+{{- $pgRtImg := index .Values "agent-runtime" "image" }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -23,7 +26,13 @@ spec:
             app.kubernetes.io/component: backup
         spec:
           restartPolicy: OnFailure
+          {{- if $s3 }}
+          # postgres:16-alpine has no aws cli, so the dump runs first and a
+          # python image that already ships boto3 uploads it
+          initContainers:
+          {{- else }}
           containers:
+          {{- end }}
             - name: pg-backup
               image: {{ .Values.backup.image | default "postgres:16-alpine" }}
               command:
@@ -33,69 +42,49 @@ spec:
                   set -e
                   TIMESTAMP=$(date +%Y%m%d-%H%M%S)
                   DAY_OF_WEEK=$(date +%u)
-                  BACKUP_FILE="abenix-pg-${TIMESTAMP}.sql.gz"
+                  # custom format, compressed by pg_dump, restore with pg_restore
+                  BACKUP_FILE="abenix-pg-${TIMESTAMP}.dump"
 
                   echo "[backup] Starting PostgreSQL backup at $(date)"
+                  rm -f /backup/*.part
 
-                  # Run pg_dump and compress
                   PGPASSWORD="${POSTGRES_PASSWORD}" pg_dump \
-                    -h {{ .Release.Name }}-postgresql \
+                    -h {{ .Release.Name }}-postgresql{{ if eq (.Values.postgresql.architecture | default "standalone") "replication" }}-primary{{ end }} \
                     -U postgres \
                     -d {{ .Values.databaseName | default "abenix" }} \
                     --no-owner \
                     --no-privileges \
                     --format=custom \
                     --compress=9 \
-                    -f /backup/${BACKUP_FILE}
+                    -f /backup/${BACKUP_FILE}.part
+                  mv /backup/${BACKUP_FILE}.part /backup/${BACKUP_FILE}
+                  chmod 644 /backup/${BACKUP_FILE}
 
                   echo "[backup] Dump complete: ${BACKUP_FILE} ($(du -h /backup/${BACKUP_FILE} | cut -f1))"
 
-                  # Upload to object storage if configured
-                  {{- if eq (.Values.objectStorage.type | default "local") "s3" }}
-                  # Daily backup
-                  aws s3 cp /backup/${BACKUP_FILE} s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/daily/${BACKUP_FILE}
-
-                  # Weekly backup (on Sundays)
-                  if [ "${DAY_OF_WEEK}" = "7" ]; then
-                    aws s3 cp /backup/${BACKUP_FILE} s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/weekly/${BACKUP_FILE}
-                  fi
-
-                  # Prune daily backups older than 7 days
-                  aws s3 ls s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/daily/ | \
-                    awk '{print $4}' | sort | head -n -7 | while read OLD_FILE; do
-                    [ -n "${OLD_FILE}" ] && aws s3 rm "s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/daily/${OLD_FILE}"
-                  done
-
-                  # Prune weekly backups older than 4 weeks
-                  aws s3 ls s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/weekly/ | \
-                    awk '{print $4}' | sort | head -n -4 | while read OLD_FILE; do
-                    [ -n "${OLD_FILE}" ] && aws s3 rm "s3://{{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket }}/backups/weekly/${OLD_FILE}"
-                  done
+                  # Keep 7 daily in the volume
+                  ls -1t /backup/abenix-pg-*.dump 2>/dev/null | tail -n +8 | xargs rm -f 2>/dev/null || true
+                  {{- if $s3 }}
+                  echo "${BACKUP_FILE}" > /backup/.latest
+                  chmod 644 /backup/.latest
                   {{- else }}
-                  # Local backup — rotate in PVC
-                  # Keep 7 daily
-                  ls -1t /backup/abenix-pg-*.sql.gz 2>/dev/null | tail -n +8 | xargs rm -f 2>/dev/null || true
 
                   # Copy Sunday backups to weekly dir
                   if [ "${DAY_OF_WEEK}" = "7" ]; then
                     mkdir -p /backup/weekly
                     cp /backup/${BACKUP_FILE} /backup/weekly/${BACKUP_FILE}
                     # Keep 4 weekly
-                    ls -1t /backup/weekly/abenix-pg-*.sql.gz 2>/dev/null | tail -n +5 | xargs rm -f 2>/dev/null || true
+                    ls -1t /backup/weekly/abenix-pg-*.dump 2>/dev/null | tail -n +5 | xargs rm -f 2>/dev/null || true
                   fi
-                  {{- end }}
 
                   echo "[backup] Backup and rotation complete at $(date)"
+                  {{- end }}
               env:
                 - name: POSTGRES_PASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: abenix-secrets
                       key: postgres-password
-                {{- if eq (.Values.objectStorage.type | default "local") "s3" }}
-                - name: AWS_DEFAULT_REGION
-                  value: {{ .Values.objectStorage.region | default "us-east-1" | quote }}
-                {{- end }}
               volumeMounts:
                 - name: backup-data
                   mountPath: /backup
@@ -106,9 +95,85 @@ spec:
                 limits:
                   cpu: 500m
                   memory: 512Mi
+          {{- if $s3 }}
+          containers:
+            - name: s3-upload
+              image: "{{ .Values.backup.uploaderImage | default (printf "%s:%s" $pgRtImg.repository ($pgRtImg.tag | toString)) }}"
+              imagePullPolicy: {{ $pgRtImg.pullPolicy | default "IfNotPresent" }}
+              command: ["python3", "-c"]
+              args:
+                - |
+                  import datetime, os
+                  import boto3
+
+                  bucket = os.environ["BACKUP_BUCKET"]
+                  if not bucket:
+                      raise SystemExit("[backup] no bucket, set backup.s3Bucket or objectStorage.bucket")
+                  kw = {"region_name": os.environ.get("STORAGE_S3_REGION") or None}
+                  if os.environ.get("STORAGE_S3_ENDPOINT"):
+                      kw["endpoint_url"] = os.environ["STORAGE_S3_ENDPOINT"]
+                  # empty keys fall back to the pod's role (IRSA, instance profile)
+                  if os.environ.get("STORAGE_S3_ACCESS_KEY"):
+                      kw["aws_access_key_id"] = os.environ["STORAGE_S3_ACCESS_KEY"]
+                      kw["aws_secret_access_key"] = os.environ.get("STORAGE_S3_SECRET_KEY", "")
+                  s3 = boto3.client("s3", **kw)
+
+                  with open("/backup/.latest", encoding="utf-8") as f:
+                      name = f.read().strip()
+                  path = f"/backup/{name}"
+                  s3.upload_file(path, bucket, f"backups/daily/{name}")
+                  print(f"[backup] uploaded s3://{bucket}/backups/daily/{name}", flush=True)
+                  if datetime.datetime.now(datetime.timezone.utc).isoweekday() == 7:
+                      s3.upload_file(path, bucket, f"backups/weekly/{name}")
+                      print(f"[backup] uploaded s3://{bucket}/backups/weekly/{name}", flush=True)
+
+                  def prune(prefix, keep):
+                      keys = []
+                      for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+                          keys += [o["Key"] for o in page.get("Contents", []) if o["Key"].rsplit("/", 1)[-1].startswith("abenix-pg-")]
+                      for key in sorted(keys)[:-keep]:
+                          s3.delete_object(Bucket=bucket, Key=key)
+                          print(f"[backup] pruned s3://{bucket}/{key}", flush=True)
+
+                  prune("backups/daily/", 7)
+                  prune("backups/weekly/", 4)
+                  print("[backup] Backup and rotation complete", flush=True)
+              env:
+                - name: BACKUP_BUCKET
+                  value: {{ .Values.backup.s3Bucket | default .Values.objectStorage.bucket | default "" | quote }}
+                - name: STORAGE_S3_REGION
+                  value: {{ .Values.objectStorage.region | default "us-east-1" | quote }}
+                - name: AWS_DEFAULT_REGION
+                  value: {{ .Values.objectStorage.region | default "us-east-1" | quote }}
+                - name: STORAGE_S3_ENDPOINT
+                  value: {{ .Values.objectStorage.endpoint | default "" | quote }}
+                - name: STORAGE_S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: abenix-secrets
+                      key: STORAGE_S3_ACCESS_KEY
+                      optional: true
+                - name: STORAGE_S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: abenix-secrets
+                      key: STORAGE_S3_SECRET_KEY
+                      optional: true
+              volumeMounts:
+                - name: backup-data
+                  mountPath: /backup
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          {{- end }}
           volumes:
             - name: backup-data
-              {{- if .Values.backup.persistentVolume.enabled | default false }}
+              {{- if $pvc }}
               persistentVolumeClaim:
                 claimName: {{ include "abenix.fullname" . }}-backup
               {{- else }}
@@ -117,6 +182,12 @@ spec:
               {{- end }}
 ---
 {{- if .Values.backup.neo4j.enabled | default false }}
+{{- $rtImg := index .Values "agent-runtime" "image" }}
+{{- $db := .Values.neo4j.database | default "neo4j" }}
+# The chart runs Neo4j Community, which has no online backup and only dumps a
+# stopped database. This job streams an APOC Cypher export over Bolt instead,
+# so it needs no access to the Neo4j data volume and no downtime.
+# Restore: gunzip -c FILE | cypher-shell -u neo4j -p PASSWORD -d {{ $db }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -141,32 +212,67 @@ spec:
             app.kubernetes.io/component: neo4j-backup
         spec:
           restartPolicy: OnFailure
+          securityContext:
+            runAsUser: 1001
+            runAsGroup: 1001
+            fsGroup: 1001
           containers:
             - name: neo4j-backup
-              image: {{ .Values.neo4j.image.repository }}:{{ .Values.neo4j.image.tag }}
-              command:
-                - /bin/bash
-                - -c
+              # the runtime image already carries python and the neo4j driver
+              image: "{{ .Values.backup.neo4j.image | default (printf "%s:%s" $rtImg.repository ($rtImg.tag | toString)) }}"
+              imagePullPolicy: {{ $rtImg.pullPolicy | default "IfNotPresent" }}
+              command: ["python3", "-c"]
+              args:
                 - |
-                  set -e
-                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                  BACKUP_FILE="abenix-neo4j-${TIMESTAMP}.dump"
+                  import datetime, glob, gzip, os
+                  from neo4j import GraphDatabase
 
-                  echo "[backup] Starting Neo4j backup at $(date)"
-
-                  neo4j-admin database dump \
-                    --to-path=/backup \
-                    {{ .Values.neo4j.database | default "neo4j" }}
-
-                  mv /backup/{{ .Values.neo4j.database | default "neo4j" }}.dump /backup/${BACKUP_FILE}
-                  gzip /backup/${BACKUP_FILE}
-
-                  echo "[backup] Neo4j dump complete: ${BACKUP_FILE}.gz ($(du -h /backup/${BACKUP_FILE}.gz | cut -f1))"
-
-                  # Rotate: keep 7 daily
-                  ls -1t /backup/abenix-neo4j-*.dump.gz 2>/dev/null | tail -n +8 | xargs rm -f 2>/dev/null || true
-
-                  echo "[backup] Neo4j backup complete at $(date)"
+                  keep = int(os.environ["KEEP"])
+                  out_dir = "/backup/neo4j"
+                  os.makedirs(out_dir, exist_ok=True)
+                  stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+                  path = f"{out_dir}/abenix-neo4j-{stamp}.cypher.gz"
+                  query = (
+                      "CALL apoc.export.cypher.all(null, {stream: true, format: 'cypher-shell', "
+                      "useOptimizations: {type: 'UNWIND_BATCH', unwindBatchSize: 500}, batchSize: 5000}) "
+                      "YIELD nodes, relationships, cypherStatements "
+                      "RETURN nodes, relationships, cypherStatements"
+                  )
+                  print(f"[backup] Neo4j export starting at {stamp}", flush=True)
+                  drv = GraphDatabase.driver(
+                      os.environ["NEO4J_URI"],
+                      auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
+                  )
+                  nodes = rels = 0
+                  try:
+                      with drv.session(database=os.environ["NEO4J_DATABASE"]) as s, gzip.open(path + ".part", "wt", encoding="utf-8") as f:
+                          for rec in s.run(query):
+                              nodes = max(nodes, rec["nodes"] or 0)
+                              rels = max(rels, rec["relationships"] or 0)
+                              if rec["cypherStatements"]:
+                                  f.write(rec["cypherStatements"])
+                  finally:
+                      drv.close()
+                  os.replace(path + ".part", path)
+                  print(f"[backup] wrote {path}, {nodes} nodes, {rels} relationships, {os.path.getsize(path)} bytes", flush=True)
+                  for old in sorted(glob.glob(f"{out_dir}/abenix-neo4j-*.cypher.gz"))[:-keep]:
+                      os.remove(old)
+                  for part in glob.glob(f"{out_dir}/*.part"):
+                      os.remove(part)
+              env:
+                - name: NEO4J_URI
+                  value: "bolt://{{ .Release.Name }}-neo4j:7687"
+                - name: NEO4J_DATABASE
+                  value: {{ $db | quote }}
+                - name: NEO4J_USER
+                  value: {{ .Values.neo4j.auth.username | default "neo4j" | quote }}
+                - name: NEO4J_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.neo4j.auth.existingSecret | default "abenix-secrets" }}
+                      key: {{ .Values.neo4j.auth.existingSecretPasswordKey | default "neo4j-password" }}
+                - name: KEEP
+                  value: {{ .Values.backup.neo4j.keep | default 7 | quote }}
               volumeMounts:
                 - name: backup-data
                   mountPath: /backup

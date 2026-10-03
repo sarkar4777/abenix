@@ -6,16 +6,17 @@
 
 ## What you are building
 
-A tool is one Python class. It declares four things and the platform does the rest:
+A tool is one Python class. It declares five things and the platform does the rest:
 
 | Declaration | Who reads it |
 |---|---|
 | `name` and `description` | The model, when deciding whether to call it. The catalogue at `/tools`. |
 | `input_schema` | The model, to build the call. The runtime validates against it before dispatch. |
+| `risk_tier` | The run's risk tier and the tenant's tier policy, see [11-governance](11-governance.md). **Admin -> Risk & Controls** lists it. The lint fails a tool without one. |
 | `config_fields` | **Admin -> Tool Configuration**, which renders one row per field. The `/tools` catalogue and the builder palette, which show a credential badge. The Integrations page. The lint in CI. |
 | `execute()` | The runtime. |
 
-Nothing else needs editing when you add a tool. There is no registry of credentials in the API, no list in the web app, no helm value to add. If the tool reads a key, it declares it, and the admin screen shows it.
+Apart from one registry line (step 2) nothing else needs editing when you add a tool. There is no registry of credentials in the API, no list in the web app, no helm value to add. If the tool reads a key, it declares it, and the admin screen shows it.
 
 The example below is `currency_convert`. It works with no key against the ECB's free daily rates and gets intraday rates when an admin adds an Open Exchange Rates app id. That covers both patterns you will meet: a tool that degrades without a key, and a value an admin can add at run time.
 
@@ -44,6 +45,8 @@ _RATES_CACHE: dict[str, dict[str, float]] = {}
 
 class CurrencyConvertTool(BaseTool):
     name = "currency_convert"
+    # low | medium | high | critical, see engine/risk.py TIER_GUIDE
+    risk_tier = "low"
     description = (
         "Convert an amount between two currencies. Uses ECB daily reference rates, "
         "or intraday rates when Open Exchange Rates is configured. Supports 30 major currencies."
@@ -156,23 +159,31 @@ __all__ = ["CurrencyConvertTool"]
 The parts that matter:
 
 - **`config_fields`** is the whole of the tool's configuration contract. `kind` is one of `secret`, `string`, `url`, `int`, `bool`, `select`. `group` is the provider name the admin screen groups by, so two tools that read the same key end up in one card. `required=True` means the tool cannot run without it, and only single-provider tools should say so.
-- **`self.cfg(KEY)`** is how you read a value. Never `os.environ`. The resolver checks, in order, a value an admin saved, the process environment, `packages/db/seeds/tool_defaults.yaml`, then the declared default. `self.cfg(KEY, required=True)` raises when nothing provides it, and the base class turns that into one standard answer for every tool: *"KEY is not configured. An admin can add it under Admin -> Tool Configuration. Get a key at <url>"*.
+- **`risk_tier`** says how much damage a wrong call can do. A read-only lookup is `low`. A tool that writes to another system, sends mail or moves money is `medium` or higher. When a run at a lower tier calls it, the tenant's policy allows it, asks a person, or blocks it.
+- **`self.cfg(KEY)`** is how you read a value. Never `os.environ`. The resolver checks, in order, a value saved for the running tenant, a value saved for the platform, the process environment, `packages/db/seeds/tool_defaults.yaml`, then the declared default. `self.cfg(KEY, required=True)` raises when nothing provides it, and the base class turns that into one standard answer for every tool: *"KEY is not configured. An admin can add it under Admin -> Tool Configuration. Get a key at <url>"*.
 - **`warnings`** in the metadata reach the model. When a tool skips a source or runs in a degraded mode, say so there. The model will tell the user instead of inventing a reason.
-- **`config_test`** is optional. When present, the admin screen shows a Test button that calls it with the saved values plus whatever the admin has typed. It runs in the API pod, so keep it to one cheap request.
+- **`config_test`** is optional. When present, the admin screen shows a Test button that calls it with the saved values plus whatever the admin has typed. It may be sync or async, the API awaits it either way. It runs in the API pod, so keep it to one cheap request.
 
 ---
 
 ## Step 2. Register it
 
-Edit `apps/agent-runtime/engine/tools/__init__.py`:
+The registry is `_ensure_tool_classes()` in `apps/agent-runtime/engine/agent_executor.py`. Import the class there and add it to the `_TOOL_CLASSES.update({...})` map under its slug:
 
 ```python
-from .currency_convert import CurrencyConvertTool
+    from engine.tools.currency_convert import CurrencyConvertTool
 
-ToolRegistry.register(CurrencyConvertTool)
+    _TOOL_CLASSES.update(
+        {
+            # ...
+            "currency_convert": CurrencyConvertTool,
+        }
+    )
 ```
 
-The registry rejects duplicates at startup. If you forget this step the lint in step 4 tells you, because a `BaseTool` subclass that is not reachable from the registry fails the build.
+Tools in `_TOOL_CLASSES` are built with no arguments for each run. A tool that needs the run's tenant, execution or user in its constructor goes in `_CONTEXT_TOOL_FACTORIES` instead and is wired in `build_tool_registry`, the way `decision_tools.py` and `source_tools.py` are. A plain tool can read the running tenant with `credentials.current_tenant()`.
+
+If you forget this step the lint in step 4 tells you, because a `BaseTool` subclass the registry never offers fails it. A helper class that is deliberately not a tool carries `# tool-registry: exempt <reason>` in its module.
 
 ---
 
@@ -211,9 +222,10 @@ It parses every file under `engine/tools/` and fails when
 - `os.environ` or `os.getenv` appears in a tool, unless the name is infrastructure (`DATABASE_URL`, `REDIS_URL` and the like),
 - a key is read with `cfg()` or `credentials.get()` but no tool declares it,
 - a declared key is never read and is not marked `dynamic=True`,
-- a `BaseTool` subclass is not reachable from the registry.
+- a `BaseTool` subclass is not reachable from the registry,
+- a tool class does not set `risk_tier`, or sets something other than `low`, `medium`, `high` or `critical`.
 
-CI runs it, `deploy.sh` runs it before building images, and `tests/unit/test_tool_contract.py` runs it under pytest. This is what makes the guarantee hold: a tool that passes CI is on the admin screen.
+`--report` also lists every environment read by file. CI runs it in the `python-test` job and fails on any problem, and `tests/unit/test_tool_contract.py` runs it under pytest. `deploy.sh` runs it before building images but only warns. This is what makes the guarantee hold: a tool that passes CI is on the admin screen.
 
 Then regenerate the builder's tool docs. CI runs the same script with `--check` and fails when the file is stale.
 
@@ -225,7 +237,7 @@ python scripts/gen-tool-docs.py --write
 
 ## Step 5. See it on the admin screen
 
-Nothing to write. Deploy, or restart the API locally, then open **Admin -> Tool Configuration**. There is a card called Open Exchange Rates with one row, `OPENEXCHANGERATES_APP_ID`, marked optional, "not set", with "used by currency_convert" and a link to the signup page. Paste a value and Save. The row now reads "saved here". Agents use it within 30 seconds, no redeploy. Clear it and the environment or the defaults file applies again.
+Nothing to write. Deploy, or restart the API locally, then open **Admin -> Tool Configuration**. There is a card called Open Exchange Rates with one row, `OPENEXCHANGERATES_APP_ID`, marked optional, "not set", with "used by currency_convert" and a link to the signup page. Paste a value and Save. The row now reads "saved for this tenant". Agents use it within 30 seconds, no redeploy. Clear it and the platform value, the environment or the defaults file applies again.
 
 The same declaration shows up as a badge on `/tools`, in the builder palette, and in the agent panel's setup checklist. The Integrations page lists it under Tool credentials.
 
@@ -256,10 +268,10 @@ requires_credentials:
   - OPENEXCHANGERATES_APP_ID
 ```
 
-Re-seed:
+Check it with `python scripts/lint-agent-seeds.py`, then seed. `scripts/dev-local.sh` seeds from the working tree on every start. On a cluster the seed files are baked into the API image, so a new YAML needs a rebuild first (`bash scripts/deploy.sh local` rebuilds every image), then:
 
 ```bash
-kubectl exec deploy/abenix-api -- python /app/packages/db/seeds/seed_agents.py
+kubectl -n abenix exec deploy/abenix-api -c api -- python /app/packages/db/seeds/seed_agents.py
 ```
 
 The deploy prints, after seeding, which seeded agents need credentials that are not set.
@@ -280,7 +292,7 @@ The trace shows the tool call, the result, and under it the tool note about ECB 
 
 ## Step 8. Unit test
 
-`apps/agent-runtime/tests/tools/test_currency_convert.py`:
+`tests/unit/test_currency_convert.py`:
 
 ```python
 import pytest
@@ -321,7 +333,7 @@ def test_declaration_reaches_the_admin_catalogue():
     assert decl.group == "Open Exchange Rates"
 ```
 
-Run `pytest tests/tools/test_currency_convert.py -v`. The last test needs `apps/api` on the path, which `tests/unit/conftest.py` sets up.
+Run `pytest tests/unit/test_currency_convert.py -v` from the repo root. `tests/unit/conftest.py` puts `apps/api`, `apps/agent-runtime`, `packages/db` and `apps/worker` on the path, which the last test needs. CI runs everything under `tests/unit/` on every push. Tests that only touch the runtime can also live in `apps/agent-runtime/tests/`, where the existing tool tests are named `test_<tool>_tool.py`.
 
 ---
 
@@ -332,7 +344,7 @@ bash scripts/deploy.sh local          # minikube
 bash scripts/deploy-azure.sh redeploy # AKS, always the full redeploy
 ```
 
-Both run the lint first and refuse to build when it fails.
+`deploy.sh` runs the lint before building and warns when it fails. The hard stop is CI, so run the lint yourself before pushing.
 
 ---
 
@@ -373,15 +385,27 @@ def _client() -> httpx.AsyncClient:
 
 ### Reading from Postgres
 
+`DATABASE_URL` is infrastructure, so reading it from the environment passes the lint. The runtime image ships asyncpg, not psycopg2.
+
 ```python
+import os
+
 import asyncpg
 
+from engine import credentials
+
 async def execute(self, arguments):
-    async with asyncpg.connect(self.db_url) as conn:
+    tenant = credentials.current_tenant()
+    if not tenant:
+        return ToolResult(content="No tenant in context", is_error=True)
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"].replace("+asyncpg", ""))
+    try:
         count = await conn.fetchval(
             "SELECT COUNT(*) FROM widgets WHERE tenant_id = $1 AND status = $2",
-            self.tenant_id, arguments["status"],
+            tenant, arguments["status"],
         )
+    finally:
+        await conn.close()
     return ToolResult(content=str(count))
 ```
 
@@ -389,8 +413,9 @@ async def execute(self, arguments):
 
 ## Don't forget
 
-- **`tenant_id` filter on every DB query.** The base class gives you `self.tenant_id`.
-- **Timeouts on external calls.** 60s is the runtime cap. Keep HTTP timeouts at 10 to 20s.
+- **`tenant_id` filter on every DB query.** `credentials.current_tenant()` is the running tenant, set by the executor at the start of every run.
+- **A `risk_tier` on the class.** The lint fails without one.
+- **Timeouts on external calls.** Keep HTTP timeouts at 10 to 20s.
 - **Idempotency** if the tool mutates state. The agent may call it twice.
 - **A rejected key is an error, not an empty result.** Return `is_error=True` with `metadata.needs_configuration` naming the key, as above.
 - **Degraded modes go in `warnings`.** Skipped sources go in `sources_skipped`. The model sees both.
@@ -403,6 +428,7 @@ async def execute(self, arguments):
 - [08-tool-configuration](08-tool-configuration.md), how the configuration mechanism works end to end, for admins and operators
 - [02-runtime/02-tools](../02-runtime/02-tools.md), the framework reference
 - [02-add-an-agent](02-add-an-agent.md), give the tool somewhere to be used
+- [11-governance](11-governance.md), what the tool's `risk_tier` does at run time
 - [09-reference/04-platform-settings](../09-reference/04-platform-settings.md), where saved values live
 
 ---
@@ -418,8 +444,9 @@ async def execute(self, arguments):
 | **Catalogue the admin screen is built from** | [`apps/api/app/services/tool_config.py`](../../apps/api/app/services/tool_config.py) |
 | **Admin endpoints** | [`apps/api/app/routers/admin_tool_config.py`](../../apps/api/app/routers/admin_tool_config.py), `/api/admin/tool-config` |
 | **Admin screen** | [`apps/web/src/app/(app)/admin/tool-config/page.tsx`](../../apps/web/src/app/(app)/admin/tool-config/page.tsx) |
-| **Tool registry** | [`apps/agent-runtime/engine/tools/__init__.py`](../../apps/agent-runtime/engine/tools/__init__.py) |
+| **Tool registry** | `_ensure_tool_classes()` and `build_tool_registry()` in [`apps/agent-runtime/engine/agent_executor.py`](../../apps/agent-runtime/engine/agent_executor.py) |
+| **Risk tiers** | [`apps/agent-runtime/engine/risk.py`](../../apps/agent-runtime/engine/risk.py), `TIER_GUIDE` and the default policies |
 | **Existing tools** | [`apps/agent-runtime/engine/tools/`](../../apps/agent-runtime/engine/tools/), copy the closest one |
 | **Tool gate (cache + semaphore + qps + breaker)** | [`apps/api/app/core/tool_gate.py`](../../apps/api/app/core/tool_gate.py) |
 | **Per-tool runtime config (admin UI knobs)** | [`packages/db/models/tool_runtime_config.py`](../../packages/db/models/tool_runtime_config.py), surfaced at `/admin/tool-scaling` |
-| **Connectors framework (for systems with auth)** | [`apps/agent-runtime/engine/tools/_connector_base.py`](../../apps/agent-runtime/engine/tools/) + [14-connectors-and-triggers](../02-runtime/14-connectors-and-triggers.md) |
+| **Connectors (for systems with auth)** | [`apps/agent-runtime/engine/tools/connector_call.py`](../../apps/agent-runtime/engine/tools/connector_call.py), [`api_connector.py`](../../apps/agent-runtime/engine/tools/api_connector.py), [14-connectors-and-triggers](../02-runtime/14-connectors-and-triggers.md) |

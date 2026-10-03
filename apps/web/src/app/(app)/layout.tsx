@@ -7,11 +7,11 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import Sidebar from '@/components/layout/Sidebar';
 import TopBar from '@/components/layout/TopBar';
 import StatusBar from '@/components/layout/StatusBar';
-import { ToastContainer } from '@/components/ui/Toast';
 import CommandPalette from '@/components/ui/CommandPalette';
 import OfflineBanner from '@/components/ui/OfflineBanner';
 import { useSidebar } from '@/stores/sidebar';
 import { useIsMobile } from '@/hooks/useMediaQuery';
+import { currentPath, signInUrl } from '@/lib/auth-redirect';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -22,7 +22,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     if (loading) return;
     const token = localStorage.getItem('access_token');
     if (!token || !user) {
-      router.replace('/');
+      router.replace(signInUrl(currentPath()));
       return;
     }
     setChecked(true);
@@ -60,7 +60,6 @@ function AppShell({ children }: { children: React.ReactNode }) {
         </main>
         {!isMobile && <StatusBar />}
       </motion.div>
-      <ToastContainer />
       <CommandPalette />
       <OfflineBanner />
     </div>

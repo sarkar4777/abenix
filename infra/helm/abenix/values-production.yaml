@@ -78,7 +78,7 @@ agent-runtime:
     - configMapRef:
         name: abenix-config
 
-# -- Worker (Celery — documents + agents) — HA with HPA --------------------
+# -- Worker (Celery — documents) — HA with HPA ----------------------------
 worker:
   replicaCount: 3
   image:
@@ -163,6 +163,9 @@ postgresql:
     secretKeys:
       adminPasswordKey: postgres-password
   primary:
+    # Bitnami's policy admits every pod, templates/networkpolicy.yaml decides instead
+    networkPolicy:
+      enabled: false
     resources:
       requests:
         cpu: "1"
@@ -184,6 +187,8 @@ postgresql:
       random_page_cost = 1.1
   readReplicas:
     replicaCount: 2
+    networkPolicy:
+      enabled: false
     resources:
       requests:
         cpu: 500m
@@ -213,6 +218,9 @@ redis:
   auth:
     existingSecret: abenix-secrets
     existingSecretPasswordKey: redis-password
+  # Bitnami's policy admits every pod, templates/networkpolicy.yaml decides instead
+  networkPolicy:
+    enabled: false
   master:
     resources:
       requests:

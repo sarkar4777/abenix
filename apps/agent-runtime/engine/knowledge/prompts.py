@@ -8,7 +8,8 @@ You must return ONLY valid JSON matching this exact schema:
     {
       "name": "Exact entity name as mentioned",
       "type": "person|organization|concept|location|event|technology|product|metric|document",
-      "description": "One-sentence description of this entity in context"
+      "description": "One-sentence description of this entity in context",
+      "confidence": 0.95
     }
   ],
   "relationships": [
@@ -16,7 +17,8 @@ You must return ONLY valid JSON matching this exact schema:
       "source": "Source entity name (must match an entity above)",
       "target": "Target entity name (must match an entity above)",
       "type": "RELATIONSHIP_TYPE in UPPER_SNAKE_CASE",
-      "description": "Brief description of this relationship"
+      "description": "Brief description of this relationship",
+      "confidence": 0.9
     }
   ]
 }
@@ -28,7 +30,8 @@ Rules:
 - Relationship types should be descriptive: WORKS_AT, CAUSED_BY, DEPENDS_ON, MENTIONS, PART_OF, CREATED_BY, REPORTS_TO, LOCATED_IN, OCCURRED_ON, MEASURES, PRODUCES, COMPETES_WITH, FUNDS, REGULATES
 - If an entity was mentioned in prior context, use the SAME name
 - Do not extract trivial entities (articles, pronouns, generic terms)
-- Every relationship must reference entities that exist in the entities list"""
+- Every relationship must reference entities that exist in the entities list
+- confidence is 0.0-1.0: 0.9 or more when the text states it outright, 0.6-0.9 when it is implied, below 0.6 when it is a guess"""
 
 ENTITY_EXTRACTION_USER = """Extract entities and relationships from this text chunk.
 

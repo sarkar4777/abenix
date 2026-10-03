@@ -75,10 +75,14 @@ class KnowledgeSearchTool(BaseTool):
         kb_ids: list[str],
         tenant_id: str = "",
         agent_id: str = "",
+        user_id: str = "",
+        user_role: str = "",
     ) -> None:
         self.kb_ids = kb_ids
         self.tenant_id = tenant_id
         self.agent_id = agent_id
+        self.user_id = user_id
+        self.user_role = user_role
 
     async def _filter_to_tenant(self, ids: list[str]) -> list[str]:
         """Re-validate that every kb_id is accessible to this agent."""
@@ -208,6 +212,9 @@ class KnowledgeSearchTool(BaseTool):
                 mode=mode,
                 top_k=top_k,
                 tenant_id=str(self.tenant_id) if self.tenant_id else "",
+                user_id=str(self.user_id or ""),
+                user_role=str(self.user_role or ""),
+                agent_id=str(self.agent_id or ""),
             )
 
             if not response.results:

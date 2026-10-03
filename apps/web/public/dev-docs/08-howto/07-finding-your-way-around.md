@@ -8,7 +8,7 @@ and which of its neighbours will notice.
 
 ## The four services
 
-Everything the platform does runs in one of four processes.
+The core of the platform runs in four processes.
 
 | Path | What it is | Runs as |
 |---|---|---|
@@ -16,6 +16,11 @@ Everything the platform does runs in one of four processes.
 | `apps/web` | Next.js app router. The console you look at | `abenix-web` |
 | `apps/agent-runtime` | The agent loop, the pipeline executor, the tools | `abenix-agent-runtime-*` |
 | `apps/worker` | Celery. Document ingest, sweepers, scheduled work | `abenix-worker` |
+
+Two smaller pieces sit beside them. `apps/code-runner` holds the warm runners
+for code assets, one Deployment per tenant and asset version, called over NATS.
+`apps/edge-runtime` is the single-file pod an edge gateway runs to pull `.agent`
+bundles, with C and Rust ports in `apps/edge-runtime-c` and `apps/edge-runtime-rust`.
 
 The runtime is the interesting one. An agent run is a loop over a tool
 registry, and a pipeline is a DAG whose nodes are tool calls, so most
@@ -27,14 +32,19 @@ behaviour questions end up in `apps/agent-runtime/engine/`.
 |---|---|
 | `packages/db` | SQLAlchemy models, alembic revisions, and every seed |
 | `packages/sdk/python` | The canonical Python SDK |
-| `packages/shared` | Types shared between web and the rest |
+| `packages/sdk/js` | `@abenix/sdk`, the JavaScript and TypeScript SDK |
+| `packages/sdk/react` | `@abenix/react`, an embeddable agent chat component |
+| `packages/agent-sdk` | A synced copy of the Python SDK packaged as `abenix-sdk` |
+| `packages/mcp-servers` | MCP servers for BigQuery, Exasol, migration and SQL transform |
+| `packages/shared` | `@abenix/shared`, types shared between web and the rest |
 
 ## The example applications
 
 Seven of them sit at the repository root rather than under `apps/`, because
 they are consumers of the platform rather than parts of it. `contractiq`,
-`resolveai`, `wingman`, `industrial-iot`, `mideasttourism`, `pharmavigil` and
-`claimsiq` each have their own `api/`, `web/` and `k8s/`.
+`resolveai`, `wingman`, `industrial-iot`, `mideasttourism` and `pharmavigil`
+each have their own `api/`, `web/` and `k8s/`. `claimsiq` is a Gradle build with
+`app/` (backend plus `frontend/`), its own Java `sdk/` and `k8s/`.
 
 They talk to the platform through the SDK and never by raw HTTP. If you find
 yourself writing `httpx.post(f"{ABENIX_URL}/api/...")` inside one of them, the
@@ -60,7 +70,10 @@ soon as the deploy finishes.
 **A REST route.** `apps/api/app/routers/`. Responses go through the `success`
 and `error` helpers so every payload has the same envelope.
 
-**A page.** `apps/web/src/app/`. See [Add a new UI page](03-add-a-page.md).
+**A page.** `apps/web/src/app/(app)/` for anything behind sign-in. The sidebar
+entry and its gate go in `apps/web/src/components/layout/Sidebar.tsx`, and a new
+capability goes in `apps/api/app/core/capabilities.py`. See [Add a new UI page](03-add-a-page.md)
+and the [page catalogue](../05-ui/03-page-catalogue.md) for what already exists.
 
 **Anything about how a pod is deployed.** `infra/helm/abenix/`.
 
@@ -78,8 +91,9 @@ green, and every running image kept every finding. `scripts/check-dockerfile-har
 now runs in CI and compares them, so the next time they diverge on base pinning
 or package upgrades it says so.
 
-**The SDK is vendored seven times.** Each example app carries its own copy so
-it can be built without the monorepo. `packages/sdk/python` is canonical and
+**The Python SDK is vendored seven times.** Each Python example app carries its
+own copy under `api/sdk/` so it can be built without the monorepo, and
+`packages/agent-sdk` holds one more. `packages/sdk/python` is canonical and
 `scripts/sync-sdks.sh --check` fails if a copy has drifted. Edit the canonical
 one and run the sync.
 

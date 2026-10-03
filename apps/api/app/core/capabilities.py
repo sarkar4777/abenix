@@ -48,7 +48,7 @@ CATALOG: tuple[Capability, ...] = (
         "decisions.review",
         "Review decisions",
         "Decisions",
-        "Approve or reject a draft submitted for publication.",
+        "Sign off, or reject, a decision version proposed for publication.",
     ),
     Capability(
         "decisions.publish",

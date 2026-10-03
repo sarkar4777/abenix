@@ -58,6 +58,17 @@ class DocumentExtractionResult:
     total_cost: float = 0.0
 
 
+def _confidence(raw: object) -> float:
+    """The model's 0-1 confidence; a missing or garbled value counts as certain."""
+    try:
+        v = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 1.0
+    if v > 1.0 and v <= 100.0:
+        v /= 100.0
+    return max(0.0, min(1.0, v))
+
+
 def _ontology_typing_prior(ontology: dict | None) -> str:
     """Format an ontology schema as a typing prior for the LLM."""
     if not ontology:
@@ -157,6 +168,7 @@ async def extract_from_chunk(
                     description=e.get("description", ""),
                     source_chunk_index=chunk_index,
                     source_doc_id=doc_id,
+                    confidence=_confidence(e.get("confidence")),
                 )
             )
 
@@ -179,6 +191,7 @@ async def extract_from_chunk(
                         description=r.get("description", ""),
                         source_chunk_index=chunk_index,
                         source_doc_id=doc_id,
+                        confidence=_confidence(r.get("confidence")),
                     )
                 )
 

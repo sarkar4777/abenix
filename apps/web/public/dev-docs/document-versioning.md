@@ -28,24 +28,13 @@ If you need an explicit audit query against historical state, pass `include_supe
 
 ### 2. Atlas (knowledge graph)
 
-Atlas uses **bi-temporal edges**. Every relationship in the graph has:
-
-- `valid_from` — when the fact became true in the world
-- `valid_to` — when it stopped being true (NULL = still true)
-
-When you replace a document, Cognify re-runs against the new version and:
-
-- Closes out edges derived from the old document (sets `valid_to = supersede_time`).
-- Opens new edges from the new document (sets `valid_from = now, valid_to = NULL`).
-- Merges entities by canonical name, so an existing "Counterparty Acme Corp" node is enriched, not duplicated.
-
-Default Cypher queries the agents use already filter `WHERE r.valid_to IS NULL`. They see only the current state. Historical queries use the `atlas_as_of(timestamp)` tool:
+A replace does not change the Atlas graph. To see an Atlas graph as it stood before a change, agents call `atlas_as_of`:
 
 ```
 atlas_as_of(graph_id=..., as_of="2025-01-15T00:00:00Z")
 ```
 
-returns the graph as it existed on January 15th, before the replacement.
+It reads the newest snapshot saved at or before that time, or the live graph when nothing has changed since. With no snapshot that old it says so instead of guessing.
 
 ### 3. Cognify (graph builder)
 
@@ -62,11 +51,9 @@ A line manager asks the agent **"What are the current termination clauses in con
 
 1. Agent calls `knowledge_search(query="termination Acme-2024")`.
 2. Hybrid search returns chunks from version 2 only.
-3. Agent calls `atlas_describe(entity="Acme-2024")` to fetch related entities.
-4. Atlas returns the v2-era termination obligation edges.
-5. Agent composes the answer with citations like `Acme-2024.pdf · v2 · page 17 · chunk 4`.
+3. Agent composes the answer with citations like `Acme-2024.pdf · page 17 · chunk 4`, read from each hit's `metadata.citation`.
 
-The same agent, asked **"What were the termination clauses before the November amendment?"** uses `atlas_as_of("2024-10-15T00:00:00Z")` and gets the v1 edges that had `valid_to = "2024-11-01T..."` (closed when the supersede happened).
+Asked how the contract ontology looked before the November amendment, the agent calls `atlas_as_of(as_of="2024-10-15T00:00:00Z")` and gets the Atlas graph from the newest snapshot saved by then.
 
 ## Auditor + compliance workflow
 

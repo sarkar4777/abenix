@@ -9,6 +9,7 @@ from typing import Any
 
 
 from engine import credentials, governance, risk
+from engine.agent_budget import BUDGET_EXCEEDED, run_budget_message, run_cost_limit
 from engine.llm_router import LLMResponse, LLMRouter
 from engine.metrics import (
     agent_active_streams,
@@ -107,6 +108,12 @@ def _persisted_result(content: str | None) -> str:
         return text
     dropped = len(text) - _RESULT_PERSIST_CHARS
     return text[:_RESULT_PERSIST_CHARS] + f"\n[{dropped} more characters not kept]"
+
+
+def _attach_decision_record(tc: dict[str, Any], result: Any) -> None:
+    record = (getattr(result, "metadata", None) or {}).get("decision_record")
+    if record:
+        tc["decision_record"] = record
 
 
 def _model_visible_content(result: Any) -> str:
@@ -298,6 +305,9 @@ class ExecutionResult:
     risk_reasons: list[dict[str, Any]] = field(default_factory=list)
     # set when a kill switch or tier policy refused the run before it started
     governance_refusal: dict[str, Any] | None = None
+    # set when the run stopped at its per-run cost limit
+    budget_exceeded: bool = False
+    failure_code: str = ""
 
     def get_trace_summary(self) -> list[dict[str, Any]]:
         return [t.to_dict() for t in self.node_traces]
@@ -325,8 +335,10 @@ class AgentExecutor:
         require_tools: list[str] | None = None,
         risk_tier: str = "",
         agent_name: str = "",
+        cost_limit: float | None = None,
     ) -> None:
         self.llm_router = llm_router
+        self.cost_limit = run_cost_limit(cost_limit)
         self.risk_tier = risk.normalize(risk_tier)
         if agent_name:
             self.agent_name = agent_name
@@ -379,6 +391,13 @@ class AgentExecutor:
             else:
                 sandbox = ExecutionSandbox()
         self.sandbox = sandbox
+
+    def _over_budget(self, spent: float) -> bool:
+        return self.cost_limit is not None and spent >= self.cost_limit
+
+    def _budget_stop_text(self, spent: float, partial: str = "") -> str:
+        msg = run_budget_message(self.cost_limit or 0.0, spent)
+        return f"{partial}\n\n{msg}" if partial else msg
 
     def _missing_required(self, tool_calls: list[dict[str, Any]]) -> list[str]:
         return _required_tools_missing(self.require_tools, tool_calls)
@@ -757,6 +776,22 @@ class AgentExecutor:
             )
             node_counter += 1
 
+            if resp.tool_calls and self._over_budget(total_cost):
+                return self._budget_result(
+                    start,
+                    resp.content or "",
+                    total_input,
+                    total_output,
+                    total_cost,
+                    provider_costs,
+                    all_tool_calls,
+                    node_traces,
+                    iteration,
+                    node_counter,
+                    effective_model or resp.model,
+                    effective_fallback_reason,
+                )
+
             if not resp.tool_calls:
                 duration = int((time.monotonic() - start) * 1000)
                 agent_execution_duration_seconds.observe(duration / 1000)
@@ -940,6 +975,7 @@ class AgentExecutor:
                     tc["result"] = _persisted_result(result.content)
                     tc["is_error"] = bool(result.is_error)
                     tc["duration_ms"] = tool_dur
+                    _attach_decision_record(tc, result)
                 else:
                     result = ToolResult(
                         content=f"Unknown tool: {tc['name']}", is_error=True
@@ -1022,6 +1058,52 @@ class AgentExecutor:
             grounding_block_source=(
                 "no_knowledge_search_invocation" if grounding_violation else ""
             ),
+        )
+
+    def _budget_result(
+        self,
+        start: float,
+        partial: str,
+        total_input: int,
+        total_output: int,
+        total_cost: float,
+        provider_costs: dict[str, float],
+        tool_calls: list[dict[str, Any]],
+        node_traces: list[NodeTrace],
+        iteration: int,
+        node_counter: int,
+        model: str,
+        fallback_reason: str | None,
+    ) -> ExecutionResult:
+        duration = int((time.monotonic() - start) * 1000)
+        agent_execution_duration_seconds.observe(duration / 1000)
+        node_traces.append(
+            NodeTrace(
+                node_id=f"node_{node_counter}",
+                node_type="budget_stop",
+                iteration=iteration,
+                timestamp_ms=int(time.monotonic() * 1000),
+                input_data={"cost_limit": self.cost_limit},
+                output_data={"spent": round(total_cost, 6)},
+                metadata={"failure_code": BUDGET_EXCEEDED},
+            )
+        )
+        return ExecutionResult(
+            output=self._budget_stop_text(total_cost, partial),
+            input_tokens=total_input,
+            output_tokens=total_output,
+            cost=total_cost,
+            anthropic_cost=provider_costs.get("anthropic", 0.0),
+            openai_cost=provider_costs.get("openai", 0.0),
+            google_cost=provider_costs.get("google", 0.0),
+            other_cost=provider_costs.get("other", 0.0),
+            duration_ms=duration,
+            tool_calls=tool_calls,
+            model=model or self.model,
+            fallback_reason=fallback_reason or "",
+            node_traces=node_traces,
+            budget_exceeded=True,
+            failure_code=BUDGET_EXCEEDED,
         )
 
     async def stream(self, input_message: str) -> AsyncGenerator[ExecutionEvent, None]:
@@ -1243,6 +1325,19 @@ class AgentExecutor:
                 effective_fallback_reason = done_data["fallback_reason"]
 
             stream_tool_calls = done_data.get("tool_calls", [])
+
+            if stream_tool_calls and self._over_budget(total_cost):
+                async for _bev in self._budget_stop_events(
+                    start,
+                    total_input,
+                    total_output,
+                    total_cost,
+                    iteration,
+                    effective_model,
+                    effective_fallback_reason,
+                ):
+                    yield _bev
+                return
 
             if not stream_tool_calls:
                 duration = int((time.monotonic() - start) * 1000)
@@ -1478,6 +1573,7 @@ class AgentExecutor:
                 tc["result"] = _persisted_result(result.content)
                 tc["is_error"] = bool(result.is_error)
                 tc["duration_ms"] = tool_dur
+                _attach_decision_record(tc, result)
                 self._node_traces.append(_trace)
                 yield ExecutionEvent(event="node_trace", data=_trace)
 
@@ -1551,6 +1647,49 @@ class AgentExecutor:
                 "completed without calling any tool although tools were available"
             ]
         yield ExecutionEvent(event="done", data=_done_payload2)
+
+    async def _budget_stop_events(
+        self,
+        start: float,
+        total_input: int,
+        total_output: int,
+        total_cost: float,
+        iteration: int,
+        effective_model: str | None,
+        fallback_reason: str | None,
+    ) -> AsyncGenerator[ExecutionEvent, None]:
+        duration = int((time.monotonic() - start) * 1000)
+        agent_execution_duration_seconds.observe(duration / 1000)
+        agent_active_streams.dec()
+        msg = self._budget_stop_text(total_cost)
+        trace = {
+            "node_type": "budget_stop",
+            "iteration": iteration,
+            "cost_limit": self.cost_limit,
+            "spent": round(total_cost, 6),
+            "is_error": True,
+            "output_preview": msg,
+        }
+        self._node_traces.append(trace)
+        yield ExecutionEvent(event="node_trace", data=trace)
+        yield ExecutionEvent(event="token", data=f"\n\n{msg}")
+        yield ExecutionEvent(
+            event="done",
+            data={
+                "total_tokens": total_input + total_output,
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "cost": round(total_cost, 6),
+                "duration_ms": duration,
+                "model": self.model,
+                "effective_model": effective_model or self.model,
+                "fallback_reason": fallback_reason,
+                "error": msg,
+                "failure_code": BUDGET_EXCEEDED,
+                "budget_exceeded": True,
+                "cost_limit": self.cost_limit,
+            },
+        )
 
 
 _TOOL_CLASSES_LOADED = False
@@ -1838,7 +1977,6 @@ def _ensure_tool_classes() -> None:
             "spg_ratings_api": SPGRatingsTool,
             "fitch_connect": FitchConnectTool,
             "connector_call": ConnectorCallTool,
-            "approval_gate": ApprovalGateTool,
             "mqtt_publish": MqttPublishTool,
             "tsdb_query": TsdbQueryTool,
             "windowed_state": WindowedStateTool,
@@ -1868,8 +2006,8 @@ def _ensure_tool_classes() -> None:
         AtlasTraverseTool,
         AtlasSearchGroundedTool,
         AtlasDescribeTool,
+        AtlasAsOfTool,
     )
-    from engine.tools.atlas_cypher import AtlasCypherTool, AtlasAsOfTool
     from engine.tools.decision_tools import DECISION_TOOLS
     from engine.tools.source_tools import SOURCE_TOOLS
 
@@ -1881,6 +2019,7 @@ def _ensure_tool_classes() -> None:
             "memory_recall": MemoryRecallTool,
             "memory_forget": MemoryForgetTool,
             "human_approval": HumanApprovalTool,
+            "approval_gate": ApprovalGateTool,
             "ml_model": MLModelTool,
             "sandboxed_job": SandboxedJobTool,
             "code_asset": CodeAssetTool,
@@ -1903,7 +2042,6 @@ def _ensure_tool_classes() -> None:
             "atlas_traverse": AtlasTraverseTool,
             "atlas_search_grounded": AtlasSearchGroundedTool,
             "atlas_describe": AtlasDescribeTool,
-            "atlas_cypher": AtlasCypherTool,
             "atlas_as_of": AtlasAsOfTool,
         }
     )
@@ -2019,6 +2157,15 @@ def build_tool_registry(
             execution_id=execution_id,
             tenant_id=tenant_id,
             agent_name=agent_name,
+        )
+    ApprovalGateCls = _CONTEXT_TOOL_FACTORIES.get("approval_gate")
+    if ApprovalGateCls:
+        context_tools["approval_gate"] = lambda: ApprovalGateCls(
+            execution_id=execution_id,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            user_role=user_role,
         )
     MLModelCls = _CONTEXT_TOOL_FACTORIES.get("ml_model")
     if MLModelCls:
@@ -2229,6 +2376,8 @@ def build_tool_registry(
                     kb_ids=kb_ids,
                     tenant_id=tenant_id,
                     agent_id=agent_id,
+                    user_id=user_id,
+                    user_role=user_role,
                 )
             )
         except ImportError:
@@ -2302,6 +2451,8 @@ def build_tool_registry(
                         kb_ids=[kb_namespace],
                         tenant_id=tenant_id,
                         agent_id=agent_id,
+                        user_id=user_id,
+                        user_role=user_role,
                     )
                 )
                 logger.info("Registered knowledge_search with kb_id %s", kb_namespace)

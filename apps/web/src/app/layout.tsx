@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { OrganizationJsonLd } from '@/components/seo/JsonLd';
+import { ToastProvider } from '@/components/ToastProvider';
 import './globals.css';
 
 const inter = Inter({
@@ -68,7 +69,7 @@ export default function RootLayout({
         className={`${inter.variable} font-sans min-h-screen antialiased`}
       >
         <OrganizationJsonLd />
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

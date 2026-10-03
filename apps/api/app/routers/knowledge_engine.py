@@ -357,6 +357,8 @@ async def search_knowledge(
                 top_k=body.top_k,
                 graph_depth=body.graph_depth,
                 tenant_id=str(user.tenant_id),
+                user_id=str(user.id),
+                user_role=getattr(user.role, "value", str(user.role)),
             )
         except EmbeddingProviderError as e:
             # Surface provider outage as 503 so callers can distinguish
@@ -389,6 +391,7 @@ async def search_knowledge(
                 "entities_found": response.entities_found,
                 "graph_hops": response.graph_hops,
                 "latency_ms": response.latency_ms,
+                "hidden_documents": response.hidden_documents,
             }
         )
     except HTTPException:
@@ -483,7 +486,7 @@ async def list_cognify_jobs(
         return error("Knowledge base not found", 404)
 
     try:
-        from models.knowledge_engine import CognifyJob
+        from models.knowledge_engine import CognifyJob, CognifyReport
 
         result = await db.execute(
             select(CognifyJob)
@@ -495,6 +498,14 @@ async def list_cognify_jobs(
             .limit(20)
         )
         jobs = result.scalars().all()
+        details: dict = {}
+        if jobs:
+            reports = await db.execute(
+                select(CognifyReport.job_id, CognifyReport.processing_details).where(
+                    CognifyReport.job_id.in_([j.id for j in jobs])
+                )
+            )
+            details = {jid: d or {} for jid, d in reports.all()}
         return success(
             [
                 {
@@ -513,6 +524,15 @@ async def list_cognify_jobs(
                         j.completed_at.isoformat() if j.completed_at else None
                     ),
                     "error_message": j.error_message,
+                    "entities_held_back": details.get(j.id, {}).get(
+                        "entities_held_back"
+                    ),
+                    "relationships_held_back": details.get(j.id, {}).get(
+                        "relationships_held_back"
+                    ),
+                    "conflicts_recorded": details.get(j.id, {}).get(
+                        "conflicts_recorded"
+                    ),
                 }
                 for j in jobs
             ]

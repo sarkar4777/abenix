@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import tool_gate
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_db, require_role
 from app.core.responses import error, success
 
 from models.tool_invocation import ToolInvocation
@@ -23,6 +23,8 @@ from models.tool_runtime_config import ToolRuntimeConfig
 from models.user import User
 
 router = APIRouter(prefix="/api/admin/tool-runtime", tags=["admin", "tool-runtime"])
+
+_admin = require_role(["admin"])
 
 
 def _serialize(row: ToolRuntimeConfig) -> dict[str, Any]:
@@ -47,7 +49,7 @@ def _serialize(row: ToolRuntimeConfig) -> dict[str, Any]:
 
 @router.get("")
 async def list_configs(
-    user: User = Depends(get_current_user),
+    user: User = Depends(_admin),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Return one row per tool slug. Joined with 24h call counts + last-run latency."""
@@ -104,7 +106,7 @@ async def list_configs(
 @router.get("/{slug}")
 async def get_config(
     slug: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(_admin),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     row = (
@@ -139,7 +141,7 @@ async def get_config(
 @router.post("")
 async def upsert_config(
     body: dict,
-    user: User = Depends(get_current_user),
+    user: User = Depends(_admin),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     slug = body.get("slug")
