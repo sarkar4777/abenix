@@ -138,7 +138,7 @@ def test_fastapi_detail_errors_are_readable():
         )
     )
     with pytest.raises(AbenixError) as e:
-        asyncio.run(sdk.sources.create("EUR-Lex", "https://eur-lex.europa.eu/x"))
+        asyncio.run(sdk.sources.create("Carrier tariff", "https://carrier.example/x"))
     assert e.value.status == 403 and "sources.manage" in str(e.value)
 
     sdk, _ = _client(
@@ -154,9 +154,9 @@ def test_sources_calls():
 
     async def go():
         await sdk.sources.create(
-            "CBAM page",
-            "https://taxation-customs.ec.europa.eu/cbam",
-            tags=["cbam"],
+            "Carrier tariff page",
+            "https://carrier.example/tariff",
+            tags=["tariff"],
             cadence_minutes=1440,
         )
         await sdk.sources.check_now("s1")
@@ -170,7 +170,7 @@ def test_sources_calls():
     asyncio.run(go())
     create = _body(seen[0])
     assert (
-        create["tags"] == ["cbam"]
+        create["tags"] == ["tariff"]
         and create["cadence_minutes"] == 1440
         and create["kind"] == "html"
     )

@@ -308,7 +308,7 @@ function NewSwitch({ optionsFor, onDone }: { optionsFor: (s: Scope) => Option[];
               id="ks-target"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
-              placeholder={scope === 'decision' ? 'Decision key, for example fertiliser-cbam-eligibility' : 'Source id'}
+              placeholder={scope === 'decision' ? 'Decision key, for example freight.remote.surcharge' : 'Source id'}
               className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white"
               data-testid="kill-switch-target"
             />

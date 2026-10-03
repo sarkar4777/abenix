@@ -429,7 +429,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
     description: "Evaluate the same facts under several rule versions or dates and report what changes, for example this year's rules against next year's, or a planning version against the assured one.",
     parameters: [
       { name: "decision", type: "string", required: true, description: "" },
-      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as import.cnCode mean {\"import\": {\"cnCode\": ...}}." },
+      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as shipment.postcode mean {\"shipment\": {\"postcode\": ...}}." },
       { name: "targets", type: "array", required: true, description: "", items: { type: "object" } },
     ],
   },
@@ -439,7 +439,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
     description: "Evaluate a published business rule decision against facts and get a deterministic result, the rules that applied, and a trace. If facts are missing or have the wrong type it says which, instead of guessing. Use as_of for a past or future date and known_at to see what was in force as known then.",
     parameters: [
       { name: "decision", type: "string", required: true, description: "The decision key, from decision_list" },
-      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as import.cnCode mean {\"import\": {\"cnCode\": ...}}." },
+      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as shipment.postcode mean {\"shipment\": {\"postcode\": ...}}." },
       { name: "as_of", type: "string", required: false, description: "The date the activity happens, like 2026-03-01. Default today." },
       { name: "known_at", type: "string", required: false, description: "Optional. Evaluate with the rules as they were known on this date." },
       { name: "record", type: "boolean", required: false, description: "Keep an auditable record of this evaluation", default: false },
@@ -451,7 +451,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
     description: "Explain in plain words why a decision came out the way it did for these facts: which rules applied, the values they looked at, and the sources cited for each rule.",
     parameters: [
       { name: "decision", type: "string", required: true, description: "The decision key, from decision_list" },
-      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as import.cnCode mean {\"import\": {\"cnCode\": ...}}." },
+      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as shipment.postcode mean {\"shipment\": {\"postcode\": ...}}." },
       { name: "as_of", type: "string", required: false, description: "The date the activity happens, like 2026-03-01. Default today." },
       { name: "known_at", type: "string", required: false, description: "Optional. Evaluate with the rules as they were known on this date." },
       { name: "record", type: "boolean", required: false, description: "Keep an auditable record of this evaluation", default: false },
@@ -468,7 +468,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   decision_propose: {
     category: "Decisions & Rules",
     name: "Decision Propose",
-    description: "Propose new or changed business rules for a decision, as typed JSON rules with ruleKey, requiresFacts, when (all/any conditions such as {\"gte\": [{\"fact\": \"import.date\"}, \"2026-01-01\"]}), then and provenance with citations. The proposal is validated and golden tested, then waits for people to approve it. Agents cannot publish.",
+    description: "Propose new or changed business rules for a decision, as typed JSON rules with ruleKey, requiresFacts, when (all/any conditions such as {\"gte\": [{\"fact\": \"shipment.date\"}, \"2026-01-01\"]}), then and provenance with citations. The proposal is validated and golden tested, then waits for people to approve it. Agents cannot publish.",
     parameters: [
       { name: "decision", type: "string", required: true, description: "" },
       { name: "rules", type: "any", required: true, description: "One rule or a list of rules in the typed JSON format" },
@@ -1472,7 +1472,7 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   source_list: {
     category: "Sources & Watch",
     name: "Source List",
-    description: "List the authoritative sources this tenant watches for changes, such as regulator pages, guidance PDFs, data files and feeds, with when each was last checked and last changed. Call this first to find a source id for source_snapshot_get, source_diff or source_check.",
+    description: "List the authoritative sources this tenant watches for changes, such as policy and tariff pages, guidance PDFs, data files and feeds, with when each was last checked and last changed. Call this first to find a source id for source_snapshot_get, source_diff or source_check.",
     parameters: [
       { name: "query", type: "string", required: false, description: "Optional words to match in the name or URL" },
       { name: "jurisdiction", type: "string", required: false, description: "Optional jurisdiction, such as EU" },

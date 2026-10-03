@@ -83,10 +83,10 @@ export default function ReferenceSetsPage() {
       {creating && (
         <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/60 p-4 space-y-3" data-testid="refset-create">
           <div className="grid gap-3 md:grid-cols-2">
-            <div><label className="block text-xs text-slate-400 mb-1" htmlFor="rs-new-name">Name</label><input id="rs-new-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="EU CBAM CN codes" className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white" data-testid="refset-name" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1" htmlFor="rs-new-name">Name</label><input id="rs-new-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Remote postcodes" className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white" data-testid="refset-name" /></div>
             <div><label className="block text-xs text-slate-400 mb-1" htmlFor="rs-new-key">Key used in rules</label><input id="rs-new-key" value={key || autoKey} onChange={(e) => setKey(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-white font-mono" data-testid="refset-key" /></div>
           </div>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} placeholder={'72011000\n72012000\n31021000'} className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 font-mono" aria-label="Values" data-testid="refset-new-values" />
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} placeholder={'IV27\nZE2\nHS2'} className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-200 font-mono" aria-label="Values" data-testid="refset-new-values" />
           <p className="text-[11px] text-slate-500">{fromLines(text).length} values. One per line, or paste a spreadsheet column.</p>
           {err && <p className="text-xs text-rose-300">{err}</p>}
           <div className="flex justify-end gap-2">

@@ -374,20 +374,20 @@ export const STATE_LABEL: Record<VersionSummary['state'], string> = {
 };
 
 export const CLIENT_SAMPLE = {
-  ruleKey: 'eu.cbam.import.applicability',
+  ruleKey: 'freight.remote.surcharge',
   version: 4,
-  jurisdiction: 'EU',
-  regime: 'CBAM',
+  jurisdiction: 'GB',
+  regime: 'FREIGHT',
   status: 'IN_FORCE',
   validFrom: '2026-01-01',
-  requiresFacts: ['import.date', 'import.cnCode', 'import.netMassTonnes', 'importer.annualCbamMassTonnes'],
+  requiresFacts: ['shipment.date', 'shipment.postcode', 'shipment.parcelCount', 'shipment.weightKg'],
   when: {
     all: [
-      { gte: [{ fact: 'import.date' }, '2026-01-01'] },
-      { inReferenceSet: [{ fact: 'import.cnCode' }, 'EU_CBAM_CN_CODES'] },
-      { gt: [{ fact: 'importer.annualCbamMassTonnes' }, 50] },
+      { gte: [{ fact: 'shipment.date' }, '2026-01-01'] },
+      { inReferenceSet: [{ fact: 'shipment.postcode' }, 'REMOTE_POSTCODES'] },
+      { gt: [{ fact: 'shipment.weightKg' }, 50] },
     ],
   },
-  then: { obligation: 'CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER' },
-  provenance: { sourceSnapshotId: 'snapshot-123', citations: ['article-or-guidance-location'] },
+  then: { surcharge: 'REMOTE_AREA_SURCHARGE' },
+  provenance: { sourceSnapshotId: 'snapshot-123', citations: ['Carrier tariff 2026, section 4.2'] },
 };

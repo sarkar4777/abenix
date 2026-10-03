@@ -17,35 +17,39 @@ from engine.decisions import service as S  # noqa: E402
 from engine.decisions import validation as V  # noqa: E402
 
 SAMPLE = {
-    "ruleKey": "eu.cbam.import.applicability",
+    "ruleKey": "freight.remote.surcharge",
     "version": 4,
-    "jurisdiction": "EU",
-    "regime": "CBAM",
+    "jurisdiction": "GB",
+    "regime": "FREIGHT",
     "status": "IN_FORCE",
     "validFrom": "2026-01-01",
     "requiresFacts": [
-        "import.date",
-        "import.cnCode",
-        "import.netMassTonnes",
-        "importer.annualCbamMassTonnes",
+        "shipment.date",
+        "shipment.postcode",
+        "shipment.parcelCount",
+        "shipment.weightKg",
     ],
     "when": {
         "all": [
-            {"gte": [{"fact": "import.date"}, "2026-01-01"]},
-            {"inReferenceSet": [{"fact": "import.cnCode"}, "EU_CBAM_CN_CODES"]},
-            {"gt": [{"fact": "importer.annualCbamMassTonnes"}, 50]},
+            {"gte": [{"fact": "shipment.date"}, "2026-01-01"]},
+            {"inReferenceSet": [{"fact": "shipment.postcode"}, "REMOTE_POSTCODES"]},
+            {"gt": [{"fact": "shipment.weightKg"}, 50]},
         ]
     },
-    "then": {"obligation": "CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER"},
+    "then": {"surcharge": "REMOTE_AREA_SURCHARGE"},
     "provenance": {
         "sourceSnapshotId": "snapshot-123",
-        "citations": ["article-or-guidance-location"],
+        "citations": ["Carrier tariff 2026, section 4.2"],
     },
 }
-REFS = {"EU_CBAM_CN_CODES": ["31021000", "72011000"]}
+REFS = {"REMOTE_POSTCODES": ["HS2", "IV27", "ZE2"]}
 FACTS = {
-    "import": {"date": "2026-03-01", "cnCode": "31021000", "netMassTonnes": 12.5},
-    "importer": {"annualCbamMassTonnes": 120},
+    "shipment": {
+        "date": "2026-03-01",
+        "postcode": "IV27",
+        "parcelCount": 3,
+        "weightKg": 120,
+    },
 }
 
 
@@ -80,10 +84,10 @@ def test_import_infers_types_and_required_facts():
     doc = I.import_rules(SAMPLE)
     types = {f["path"]: f["type"] for f in doc["facts"]}
     assert types == {
-        "import.date": "date",
-        "import.cnCode": "string",
-        "importer.annualCbamMassTonnes": "number",
-        "import.netMassTonnes": "number",
+        "shipment.date": "date",
+        "shipment.postcode": "string",
+        "shipment.weightKg": "number",
+        "shipment.parcelCount": "number",
     }
     assert all(f["required"] for f in doc["facts"])
 
@@ -91,11 +95,11 @@ def test_import_infers_types_and_required_facts():
 def test_import_merges_by_rule_key():
     doc = I.import_rules(SAMPLE)
     changed = copy.deepcopy(SAMPLE)
-    changed["then"] = {"obligation": "NEW"}
+    changed["then"] = {"surcharge": "NEW"}
     doc2 = I.import_rules(changed, base=doc)
     assert (
         len(doc2["rules"]) == 1
-        and doc2["rules"][0]["then"]["obligation"]["value"] == "NEW"
+        and doc2["rules"][0]["then"]["surcharge"]["value"] == "NEW"
     )
 
 
@@ -111,31 +115,28 @@ def test_bad_interchange_names_the_place():
     assert "/when/all/0" in e.value.path and "zz" in e.value.message
 
 
-def test_decides_and_normalises_identifiers():
+def test_decides_and_normalises_numbers():
     _, c = compiled()
     facts = copy.deepcopy(FACTS)
-    facts["import"]["cnCode"] = 31021000
+    facts["shipment"]["weightKg"] = "120"
     r = ev(c, facts, as_of="2026-03-01")
     assert r.outcome == "decided"
-    assert r.result == {"obligation": "CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER"}
-    assert r.applied_rules == ["eu.cbam.import.applicability"]
-    assert r.normalised[0]["to"] == "31021000"
-    assert r.trace[0]["values_seen"]["importer.annualCbamMassTonnes"] == 120
+    assert r.result == {"surcharge": "REMOTE_AREA_SURCHARGE"}
+    assert r.applied_rules == ["freight.remote.surcharge"]
+    assert r.normalised[0]["to"] == 120
+    assert r.trace[0]["values_seen"]["shipment.weightKg"] == 120
 
 
 def test_missing_and_invalid_facts_never_look_like_no_match():
     _, c = compiled()
-    r = ev(c, {"import": {"date": "2026-03-01"}})
-    assert (
-        r.outcome == "missing_facts"
-        and "importer.annualCbamMassTonnes" in r.missing_facts
-    )
+    r = ev(c, {"shipment": {"date": "2026-03-01"}})
+    assert r.outcome == "missing_facts" and "shipment.weightKg" in r.missing_facts
     bad = copy.deepcopy(FACTS)
-    bad["importer"]["annualCbamMassTonnes"] = "lots"
+    bad["shipment"]["weightKg"] = "lots"
     r = ev(c, bad)
     assert (
         r.outcome == "invalid_facts"
-        and r.invalid_facts[0]["fact"] == "importer.annualCbamMassTonnes"
+        and r.invalid_facts[0]["fact"] == "shipment.weightKg"
     )
 
 
@@ -151,7 +152,7 @@ def test_trace_hash_is_deterministic_and_sensitive():
     b = ev(c, copy.deepcopy(FACTS), as_of="2026-03-01")
     assert a.trace_hash == b.trace_hash and len(a.trace_hash) == 64
     other = copy.deepcopy(FACTS)
-    other["importer"]["annualCbamMassTonnes"] = 121
+    other["shipment"]["weightKg"] = 121
     assert ev(c, other, as_of="2026-03-01").trace_hash != a.trace_hash
 
 
@@ -163,7 +164,7 @@ def test_compile_is_deterministic():
         == A.compile_document(d2, REFS).content_hash
     )
     assert (
-        A.compile_document(d1, {"EU_CBAM_CN_CODES": ["1"]}).content_hash
+        A.compile_document(d1, {"REMOTE_POSTCODES": ["1"]}).content_hash
         != A.compile_document(d1, REFS).content_hash
     )
 
@@ -338,10 +339,10 @@ def test_golden_tests_and_regression():
     tests = [
         {
             "id": "t1",
-            "name": "large importer",
+            "name": "heavy remote shipment",
             "facts": FACTS,
             "as_of": "2026-03-01",
-            "expected": {"obligation": "CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER"},
+            "expected": {"surcharge": "REMOTE_AREA_SURCHARGE"},
         },
         {
             "id": "t2",
@@ -461,5 +462,5 @@ def test_many_concurrent_evaluations_agree():
 def test_date_facts_accept_datetimes():
     _, c = compiled()
     facts = copy.deepcopy(FACTS)
-    facts["import"]["date"] = dt.datetime(2026, 3, 1, 12, 0)
+    facts["shipment"]["date"] = dt.datetime(2026, 3, 1, 12, 0)
     assert ev(c, facts, as_of="2026-03-01").outcome == "decided"

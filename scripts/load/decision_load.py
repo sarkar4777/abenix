@@ -16,18 +16,9 @@ import time
 import httpx
 
 FACTS = [
-    {
-        "import": {"date": "2026-03-01", "cnCode": "72011000", "netMassTonnes": 12},
-        "importer": {"annualCbamMassTonnes": 120},
-    },
-    {
-        "import": {"date": "2026-03-01", "cnCode": "31021000", "netMassTonnes": 3},
-        "importer": {"annualCbamMassTonnes": 30},
-    },
-    {
-        "import": {"date": "2026-06-01", "cnCode": "99999999", "netMassTonnes": 1},
-        "importer": {"annualCbamMassTonnes": 500},
-    },
+    {"shipment": {"date": "2026-03-01", "postcode": "IV27", "weightKg": 120}},
+    {"shipment": {"date": "2026-03-01", "postcode": "ZE2", "weightKg": 30}},
+    {"shipment": {"date": "2026-06-01", "postcode": "SW1A", "weightKg": 500}},
 ]
 
 
