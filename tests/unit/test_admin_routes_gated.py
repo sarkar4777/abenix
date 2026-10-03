@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.core.deps import get_current_user, get_db
@@ -71,17 +70,22 @@ def _app() -> FastAPI:
     return app
 
 
-def _admin_routes(app: FastAPI):
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or not route.path.startswith("/api/admin"):
-            continue
-        for method in route.methods:
-            if (method, route.path) not in PUBLIC_ADMIN_ROUTES:
-                yield method, route.path
+def _admin_routes():
+    # read the routers themselves, newer FastAPI versions wrap what app.routes returns
+    for name in ADMIN_ROUTER_MODULES:
+        router = importlib.import_module(f"app.routers.{name}").router
+        for route in router.routes:
+            path = getattr(route, "path", "")
+            if not path.startswith("/api/admin"):
+                continue
+            for method in getattr(route, "methods", None) or ():
+                if (method, path) not in PUBLIC_ADMIN_ROUTES:
+                    yield method, path
 
 
 APP = _app()
-ROUTES = sorted(set(_admin_routes(APP)))
+ROUTES = sorted(set(_admin_routes()))
+assert ROUTES, "no admin routes found, the sweep would test nothing"
 
 
 def test_sweep_covers_the_reported_routes():
