@@ -363,6 +363,13 @@ build_images() {
   # permanent ImagePullBackOff pod that also makes wait_for_pods burn its full
   # timeout on every deploy. The loop below falls back to apps/<svc>/Dockerfile.
   local services=("api" "web" "worker" "agent-runtime" "edge-runtime")
+  # the rust and c gateways only when this deploy installs them
+  if [[ "${EDGE_RUNTIME_ALL_VARIANTS:-false}" == "true" || "${EDGE_RUNTIME_VARIANT:-python}" == "rust" ]]; then
+    services+=("edge-runtime-rust")
+  fi
+  if [[ "${EDGE_RUNTIME_ALL_VARIANTS:-false}" == "true" || "${EDGE_RUNTIME_VARIANT:-python}" == "c" ]]; then
+    services+=("edge-runtime-c")
+  fi
   for svc in "${services[@]}"; do
     build_core_service "${svc}" "${registry}" "${push}" || return 1
   done
@@ -1425,34 +1432,76 @@ install_observability_stack() {
 }
 
 
-deploy_edge_runtime_rust() {
-  step "Installing edge runtime (rust, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
-  helm upgrade --install abenix-edge-rust "${ROOT_DIR}/infra/helm/edge-runtime-rust" \
+_api_pod() {
+  kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=api" \
+    --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp \
+    -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null
+}
+
+# Calls the platform's public API from inside the api pod, the forwards are not up yet mid-deploy
+_edge_api() { # _edge_api <python body that gets `c` (an httpx client) and `auth` headers>
+  local pod
+  pod=$(_api_pod)
+  [ -z "${pod}" ] && return 1
+  kubectl exec -n "${NAMESPACE}" "${pod}" -c api -- env ADMIN_EMAIL="${ADMIN_EMAIL:-admin@abenix.dev}" \
+    ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin123456}" python3 -c "
+import os, sys, httpx
+c = httpx.Client(base_url='http://localhost:8000', timeout=30)
+login = c.post('/api/auth/login', json={'email': os.environ['ADMIN_EMAIL'], 'password': os.environ['ADMIN_PASSWORD']})
+auth = {'Authorization': 'Bearer ' + login.json()['data']['access_token']} if login.status_code == 200 else {}
+$1
+" 2>/dev/null
+}
+
+# Writes the bundle verify key from GET /api/edge/signing-key to a file for --set-file
+_edge_pubkey_file() {
+  local f="${TMPDIR:-/tmp}/abenix-edge-signing-pub.pem"
+  _edge_api "sys.stdout.write(c.get('/api/edge/signing-key').json()['data']['public_key_pem'])" > "${f}" || : > "${f}"
+  printf '%s' "${f}"
+}
+
+# Mints the gateway token through POST /api/edge/tokens/mint, the same call as the /edge page button
+_edge_platform_token() { # _edge_platform_token <gateway release>
+  _edge_api "sys.stdout.write(c.post('/api/edge/tokens/mint', headers=auth, json={'name': 'gateway $1'}).json()['data']['platform_token'])"
+}
+
+# Without a token a gateway never registers, without the pubkey it cannot verify a bundle
+_install_edge_gateway() { # _install_edge_gateway <release> <chart> <image> <fullname> <id-suffix> [helm flags]
+  local release="$1" chart="$2" image="$3" fullname="$4" suffix="$5" token pubfile
+  shift 5
+  token=$(_edge_platform_token "${release}" || true)
+  [ -z "${token}" ] && warn "  ${release}: no platform token, the gateway will not register"
+  pubfile=$(_edge_pubkey_file)
+  [ -s "${pubfile}" ] || warn "  ${release}: no signing pubkey, the gateway cannot verify bundles"
+  helm upgrade --install "${release}" "${ROOT_DIR}/infra/helm/${chart}" \
     --namespace "${NAMESPACE}" \
+    --set image.repository="localhost:5000/abenix/${image}" \
     --set image.tag="${IMAGE_TAG}" \
-    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-rust" \
-    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-rust" \
+    --set image.pullPolicy=IfNotPresent \
+    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}${suffix}" \
+    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}${suffix}" \
     --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
+    --set platform_token="${token}" \
+    --set endpoint_url="http://${fullname}.${NAMESPACE}.svc.cluster.local:8080" \
     --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
     --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
+    --set-file signing_pubkey="${pubfile}" \
+    "$@" \
     --timeout 5m --wait=false 2>&1 | tail -3 \
-    || warn "edge-runtime-rust helm install failed (non-fatal)"
-  ok "edge-runtime-rust installed"
+    || warn "${release} helm install failed (non-fatal)"
+  # token and key are read at start, a changed secret alone does nothing
+  kubectl -n "${NAMESPACE}" rollout restart "statefulset/${fullname}" >/dev/null 2>&1 || true
+  ok "${release} installed"
+}
+
+deploy_edge_runtime_rust() {
+  step "Installing edge runtime (rust, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default}-rust)"
+  _install_edge_gateway abenix-edge-rust edge-runtime-rust edge-runtime-rust abenix-edge-rust -rust
 }
 
 deploy_edge_runtime_c() {
-  step "Installing edge runtime (c, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
-  helm upgrade --install abenix-edge-c "${ROOT_DIR}/infra/helm/edge-runtime-c" \
-    --namespace "${NAMESPACE}" \
-    --set image.tag="${IMAGE_TAG}" \
-    --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}-c" \
-    --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}-c" \
-    --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
-    --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
-    --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
-    --timeout 5m --wait=false 2>&1 | tail -3 \
-    || warn "edge-runtime-c helm install failed (non-fatal)"
-  ok "edge-runtime-c installed"
+  step "Installing edge runtime (c, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default}-c)"
+  _install_edge_gateway abenix-edge-c edge-runtime-c edge-runtime-c abenix-edge-c-edge-runtime-c -c
 }
 
 
@@ -1535,21 +1584,8 @@ deploy_local() {
   if [[ "${EDGE_RUNTIME_ENABLED:-true}" == "true" ]]; then
     if [[ "${EDGE_RUNTIME_VARIANT}" == "python" || "${EDGE_RUNTIME_ALL_VARIANTS}" == "true" ]]; then
       step "Installing edge runtime (python, gateway.id=${EDGE_GATEWAY_ID:-edge-cluster-default})"
-      helm upgrade --install abenix-edge "${ROOT_DIR}/infra/helm/edge-runtime" \
-        --namespace "${NAMESPACE}" \
-        --set image.tag="${IMAGE_TAG}" \
-        --set image.repository="localhost:5000/abenix/edge-runtime" \
-        --set image.pullPolicy=IfNotPresent \
-        --set gateway_id="${EDGE_GATEWAY_ID:-edge-cluster-default}" \
-        --set gateway_name="${EDGE_GATEWAY_NAME:-edge-cluster-default}" \
-        --set platform_url="http://${RELEASE_NAME}-api.${NAMESPACE}.svc.cluster.local:8000" \
-        --set mqtt_url="mqtt://abenix-mosquitto.${NAMESPACE}.svc.cluster.local:1883" \
-        --set anthropic_api_key="${ANTHROPIC_API_KEY:-}" \
-        --set allow_unsigned="${EDGE_ALLOW_UNSIGNED:-true}" \
-        ${EDGE_SIGNING_PUBKEY_FILE:+--set-file signing_pubkey=${EDGE_SIGNING_PUBKEY_FILE}} \
-        --timeout 5m --wait=false 2>&1 | tail -3 \
-        || warn "edge-runtime helm install failed (non-fatal)"
-      ok "edge-runtime installed"
+      _install_edge_gateway abenix-edge edge-runtime edge-runtime abenix-edge-edge-runtime "" \
+        --set allow_unsigned="${EDGE_ALLOW_UNSIGNED:-true}"
     fi
     if [[ "${EDGE_RUNTIME_VARIANT}" == "rust" || "${EDGE_RUNTIME_ALL_VARIANTS}" == "true" ]]; then
       deploy_edge_runtime_rust

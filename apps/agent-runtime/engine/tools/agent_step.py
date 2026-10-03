@@ -220,12 +220,14 @@ class AgentStepTool(BaseTool):
             from engine.sandbox import ExecutionSandbox, SandboxPolicy
 
             # Build a sub-agent with its own sandbox (reduced limits to prevent runaway)
-            sub_sandbox = ExecutionSandbox(
-                SandboxPolicy(
-                    max_tool_calls=20,
-                    max_output_chars=50_000,
-                )
+            # fixed limits cut off any agent that walks more steps than they allow, whatever its own max_iterations said
+            iters = int(max_iterations or 0)
+            sub_policy = dict(
+                max_tool_calls=max(20, 2 * iters), max_output_chars=50_000
             )
+            if iters > 10:
+                sub_policy.update(timeout_seconds=30 * iters, timeout_overridden=True)
+            sub_sandbox = ExecutionSandbox(SandboxPolicy(**sub_policy))
 
             # The pipeline passes the sub-agent's execution context under
             # dunder keys. Without them the registry silently drops

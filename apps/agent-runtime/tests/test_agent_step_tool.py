@@ -274,3 +274,35 @@ class TestAgentStepTool:
         assert result.metadata["output_tokens"] == 300
         assert result.metadata["cost"] == 0.0123
         assert result.metadata["tool_calls_count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("iterations, expected", [(None, 20), (5, 20), (45, 90)])
+async def test_tool_call_budget_follows_max_iterations(
+    tool: AgentStepTool, iterations, expected
+) -> None:
+    """A nested agent may make as many tool calls as its max_iterations allows."""
+    args = {"input_message": "plan", "system_prompt": "planner"}
+    if iterations is not None:
+        args["max_iterations"] = iterations
+    with patch("engine.agent_executor.AgentExecutor") as MockExecutor, patch(
+        "engine.agent_executor.build_tool_registry"
+    ) as mock_build, patch("engine.llm_router.LLMRouter"), patch(
+        "engine.sandbox.ExecutionSandbox"
+    ), patch(
+        "engine.sandbox.SandboxPolicy"
+    ) as MockPolicy:
+        mock_instance = AsyncMock()
+        mock_instance.invoke = AsyncMock(return_value=MockExecutionResult())
+        MockExecutor.return_value = mock_instance
+        mock_build.return_value = MagicMock()
+        await tool.execute(args)
+    kwargs = MockPolicy.call_args.kwargs
+    assert kwargs["max_tool_calls"] == expected
+    if iterations and iterations > 10:
+        assert (
+            kwargs["timeout_seconds"] == 30 * iterations
+            and kwargs["timeout_overridden"]
+        )
+    else:
+        assert "timeout_seconds" not in kwargs

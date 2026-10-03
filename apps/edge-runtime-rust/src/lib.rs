@@ -236,6 +236,34 @@ pub fn validate_manifest(m: &Manifest) -> Result<()> {
     Ok(())
 }
 
+// the received bytes with the signature.sig header and data blocks cut out
+pub fn strip_signature(bundle: &[u8]) -> Vec<u8> {
+    let mut off = 0usize;
+    while off + 512 <= bundle.len() {
+        let header = &bundle[off..off + 512];
+        if header.iter().all(|b| *b == 0) {
+            break;
+        }
+        let name_end = header[..100].iter().position(|b| *b == 0).unwrap_or(100);
+        let name = String::from_utf8_lossy(&header[..name_end]);
+        let size_txt: String = header[124..136]
+            .iter()
+            .map(|b| if *b == 0 { ' ' } else { *b as char })
+            .collect();
+        let size = usize::from_str_radix(size_txt.trim(), 8).unwrap_or(0);
+        let end = off + 512 + size.div_ceil(512) * 512;
+        if name == "signature.sig" {
+            let mut out = bundle[..off].to_vec();
+            if end < bundle.len() {
+                out.extend_from_slice(&bundle[end..]);
+            }
+            return out;
+        }
+        off = end;
+    }
+    bundle.to_vec()
+}
+
 pub fn verify_signature(bundle: &[u8], pubkey: Option<&RsaPublicKey>) -> Result<(Vec<u8>, Manifest)> {
     let (members, sig) = read_tar_members(bundle)?;
     let sig = sig.ok_or_else(|| anyhow!(BundleError::new("bundle missing signature.sig")))?;
@@ -244,8 +272,11 @@ pub fn verify_signature(bundle: &[u8], pubkey: Option<&RsaPublicKey>) -> Result<
         let verifying = VerifyingKey::<Sha256>::new(pk.clone());
         let signature = Signature::try_from(sig.as_slice())
             .map_err(|e| anyhow!(BundleError::new(format!("bundle_signature_invalid: {e}"))))?;
+        // platform bundles sign the stripped bytes, older ones a rebuilt tar
+        let stripped = strip_signature(bundle);
         verifying
-            .verify(&raw_tar, &signature)
+            .verify(&stripped, &signature)
+            .or_else(|_| verifying.verify(&raw_tar, &signature))
             .map_err(|e| anyhow!(BundleError::new(format!("bundle_signature_invalid: {e}"))))?;
     } else {
         warn!("no signing pubkey configured — accepting bundle UNVERIFIED");
@@ -400,6 +431,7 @@ pub async fn run_code_executor(code: &str) -> Value {
     let mut cmd = tokio::process::Command::new("python3");
     cmd.arg("-c")
         .arg(code)
+        .kill_on_drop(true)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -513,7 +545,17 @@ pub async fn execute_agent(
         }
     }
     let started = std::time::Instant::now();
-    let result = call_anthropic(cfg, &agent.manifest, &agent.system_prompt, user_message).await;
+    // same contract as the C runtime: params.code runs locally when code_executor is allowed
+    let code = params.get("code").and_then(|v| v.as_str()).unwrap_or("");
+    let result = if !code.is_empty() {
+        if agent.manifest.tools.iter().any(|t| t == "code_executor") {
+            run_code_executor(code).await
+        } else {
+            json!({"ok": false, "error": "code_executor not in tool whitelist"})
+        }
+    } else {
+        call_anthropic(cfg, &agent.manifest, &agent.system_prompt, user_message).await
+    };
     let duration_ms = started.elapsed().as_millis() as u64;
     json!({
         "slug": agent.slug,
@@ -675,6 +717,16 @@ pub async fn register_loop(cfg: Arc<Config>) {
 
 // ─── MQTT subscriber ──────────────────────────────────────────────────────
 
+// a bundle is a tar padded to 10240 bytes, past rumqttc's 10 KiB default, so every OTA push was dropped
+pub const MQTT_MAX_PACKET_BYTES: usize = 8 * 1024 * 1024;
+
+pub fn mqtt_options(gateway_id: &str, host: String, port: u16) -> MqttOptions {
+    let mut opts = MqttOptions::new(format!("edge-{gateway_id}"), host, port);
+    opts.set_keep_alive(Duration::from_secs(30));
+    opts.set_max_packet_size(MQTT_MAX_PACKET_BYTES, MQTT_MAX_PACKET_BYTES);
+    opts
+}
+
 pub async fn mqtt_loop(cfg: Arc<Config>, registry: Arc<Registry>) {
     if cfg.mqtt_url.is_empty() {
         info!("mqtt_disabled");
@@ -689,8 +741,7 @@ pub async fn mqtt_loop(cfg: Arc<Config>, registry: Arc<Registry>) {
         .and_then(|p| p.parse().ok())
         .unwrap_or(1883);
     let topic = format!("edge.{}.deploy", cfg.gateway_id);
-    let mut opts = MqttOptions::new(format!("edge-{}", cfg.gateway_id), host, port);
-    opts.set_keep_alive(Duration::from_secs(30));
+    let opts = mqtt_options(&cfg.gateway_id, host, port);
     let (client, mut eventloop) = AsyncClient::new(opts, 16);
     if let Err(e) = client.subscribe(&topic, QoS::AtLeastOnce).await {
         warn!(err = %e, "mqtt_subscribe_failed");

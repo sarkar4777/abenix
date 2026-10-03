@@ -148,6 +148,49 @@ def _append_signature(tar_bytes: bytes, signature: bytes) -> bytes:
     return out.getvalue()
 
 
+_TAR_BLOCK = 512
+
+
+def signature_span(bundle: bytes) -> tuple[int, int, int, int] | None:
+    """(header_start, entry_end, data_start, size) of signature.sig, or None."""
+    off = 0
+    while off + _TAR_BLOCK <= len(bundle):
+        header = bundle[off : off + _TAR_BLOCK]
+        if not any(header):
+            return None
+        name = header[:100].split(b"\0", 1)[0].decode("utf-8", "replace")
+        raw_size = header[124:136].replace(b"\0", b" ").strip() or b"0"
+        size = int(raw_size, 8)
+        end = off + _TAR_BLOCK + -(-size // _TAR_BLOCK) * _TAR_BLOCK
+        if name == "signature.sig":
+            return off, end, off + _TAR_BLOCK, size
+        off = end
+    return None
+
+
+def strip_signature(bundle: bytes) -> bytes:
+    """The bundle bytes with the signature.sig entry cut out, which is what gets signed."""
+    span = signature_span(bundle)
+    if span is None:
+        return bundle
+    start, end, _, _ = span
+    return bundle[:start] + bundle[end:]
+
+
+def sign_bundle(unsigned: bytes, signing_key: rsa.RSAPrivateKey) -> bytes:
+    """Append signature.sig, signing the final bytes minus that entry, the view every gateway verifies."""
+    placeholder = bytes(signing_key.key_size // 8)
+    framed = _append_signature(unsigned, placeholder)
+    span = signature_span(framed)
+    if span is None:
+        raise EdgeCompileError("signature entry missing from bundle")
+    _, _, data_start, size = span
+    signature = _sign(strip_signature(framed), signing_key)
+    if len(signature) != size:
+        raise EdgeCompileError("signature length does not match the key size")
+    return framed[:data_start] + signature + framed[data_start + size :]
+
+
 def load_signing_key(pem: str | bytes) -> rsa.RSAPrivateKey:
     """Load a PEM-encoded RSA private key for signing bundles."""
     if isinstance(pem, str):
@@ -194,8 +237,7 @@ async def compile_agent_bundle(
     system_prompt = agent.system_prompt or ""
 
     unsigned = _build_unsigned_tar(manifest, system_prompt)
-    signature = _sign(unsigned, signing_key)
-    bundle = _append_signature(unsigned, signature)
+    bundle = sign_bundle(unsigned, signing_key)
     digest = hashlib.sha256(bundle).hexdigest()
 
     logger.info(

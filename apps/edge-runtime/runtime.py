@@ -117,6 +117,22 @@ def check_startup(cfg: Config) -> None:
         LOG.info("tenant_binding tenant_id=%s", cfg.tenant_id)
 
 
+def _strip_signature(bundle: bytes) -> bytes:
+    """Bundle bytes with the signature.sig header and data blocks cut out."""
+    off = 0
+    while off + 512 <= len(bundle):
+        header = bundle[off : off + 512]
+        if not any(header):
+            break
+        name = header[:100].split(b"\0", 1)[0].decode("utf-8", "replace")
+        size = int(header[124:136].replace(b"\0", b" ").strip() or b"0", 8)
+        end = off + 512 + -(-size // 512) * 512
+        if name == "signature.sig":
+            return bundle[:off] + bundle[end:]
+        off = end
+    return bundle
+
+
 def _verify_signature(
     bundle_bytes: bytes, pubkey, allow_unsigned: bool = False
 ) -> tuple[bytes, dict]:
@@ -168,15 +184,22 @@ def _verify_signature(
             "development only"
         )
     else:
-        try:
-            pubkey.verify(
-                sig,
-                raw_tar,
-                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
-                hashes.SHA256(),
-            )
-        except InvalidSignature as e:
-            raise BundleError(f"bundle_signature_invalid: {e}") from e
+        # platform bundles sign the received bytes minus signature.sig, older ones a rebuilt tar
+        last: InvalidSignature | None = None
+        for view in (_strip_signature(bundle_bytes), raw_tar):
+            try:
+                pubkey.verify(
+                    sig,
+                    view,
+                    padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
+                    hashes.SHA256(),
+                )
+                last = None
+                break
+            except InvalidSignature as e:
+                last = e
+        if last is not None:
+            raise BundleError(f"bundle_signature_invalid: {last}") from last
 
     manifest = None
     for m, data in members:

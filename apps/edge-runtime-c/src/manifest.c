@@ -87,8 +87,8 @@ int manifest_parse_yaml(const char *yaml_text, size_t len, edge_agent_t *agent)
         while (*raw == ' ') raw++;
         if (!*raw) continue;
 
-        /* tools list item. */
-        if (state == IN_TOOLS && raw[0] == '-' && indent > 0) {
+        /* tools list item, PyYAML writes these at the key's own indent */
+        if (state == IN_TOOLS && raw[0] == '-') {
             char *v = raw + 1;
             while (*v == ' ') v++;
             unquote(v);

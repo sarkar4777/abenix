@@ -48,7 +48,7 @@ class SandboxPolicy:
 async def effective_timeout_seconds() -> int:
     """Admin-configurable sandbox budget, falling back to the module default."""
     try:
-        from app.core.platform_settings import get_int_setting
+        from engine.runtime_settings import get_int_setting
 
         return await get_int_setting("sandbox.timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     except Exception:

@@ -20,6 +20,7 @@ from app.core.execution_state import (
     get_execution_tree,
     get_live_state,
     get_tenant_live_executions,
+    node_statuses_from_log,
 )
 from app.core.responses import error, success
 
@@ -244,6 +245,9 @@ async def _assemble_dag_snapshot(
         (execution.node_results or {}) if hasattr(execution, "node_results") else {}
     )
     live_node_statuses = live.get("node_statuses") or {}
+    # queue-routed pipelines publish node events but no live node map, so the DAG sat at pending
+    if not live_node_statuses and not node_results:
+        live_node_statuses = await node_statuses_from_log(str(execution_id))
 
     nodes: list[dict] = []
     edges: list[dict] = []

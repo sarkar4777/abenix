@@ -499,7 +499,7 @@ async def _pipeline_timeout() -> int:
     from engine.pipeline import DEFAULT_PIPELINE_TIMEOUT_SECONDS
 
     try:
-        from app.core.platform_settings import get_int_setting
+        from engine.runtime_settings import get_int_setting
 
         return await get_int_setting(
             "pipeline.timeout_seconds", DEFAULT_PIPELINE_TIMEOUT_SECONDS

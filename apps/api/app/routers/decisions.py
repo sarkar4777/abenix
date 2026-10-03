@@ -78,6 +78,20 @@ async def _model(db: AsyncSession, user: User, key: str) -> DecisionModel | None
     ).scalar_one_or_none()
 
 
+async def _archived_model(
+    db: AsyncSession, user: User, key: str
+) -> DecisionModel | None:
+    return (
+        await db.execute(
+            select(DecisionModel).where(
+                DecisionModel.tenant_id == user.tenant_id,
+                DecisionModel.key == key,
+                DecisionModel.archived_at.is_not(None),
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def _version(
     db: AsyncSession, model: DecisionModel, n: int
 ) -> DecisionVersion | None:
@@ -232,6 +246,13 @@ async def create_model(
     if await _model(db, user, key) is not None:
         return error(
             f"A decision with the key {key} already exists. Pick another key.", 409
+        )
+    # an archived decision still holds its key, the insert below used to fail with a 500
+    if await _archived_model(db, user, key) is not None:
+        return error(
+            f"A decision with the key {key} was archived. Restore it or pick another key.",
+            409,
+            error_code="ARCHIVED",
         )
     doc = A.empty_document()
     if body.rules is not None:
@@ -424,6 +445,34 @@ async def archive_model(
     await db.commit()
     await S.announce(str(user.tenant_id), key)
     return success({"archived": True, "key": key})
+
+
+@router.post("/{key}/restore")
+async def restore_model(
+    key: str,
+    request: Request,
+    user: User = Depends(require_capability("decisions.publish")),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    if await _model(db, user, key) is not None:
+        return error(f"{key} is not archived.", 409)
+    m = await _archived_model(db, user, key)
+    if m is None:
+        return error(f"There is no archived decision called {key}.", 404)
+    m.archived_at = None
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "decision.restored",
+        {"key": key},
+        request,
+        resource_type="decision",
+        resource_id=key,
+    )
+    await db.commit()
+    await S.announce(str(user.tenant_id), key)
+    return success({"restored": True, "key": key})
 
 
 @router.get("/{key}/versions/{n}")

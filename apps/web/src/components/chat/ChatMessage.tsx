@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/atom-one-dark.css';
 import { ChevronDown, ChevronUp, User, Bot, Wrench, AlertCircle, GitBranch, Check, XCircle, SkipForward } from 'lucide-react';
 import type { ContentBlock, ToolBlock, PipelineNodeBlock } from '@/stores/chatStore';
@@ -165,8 +166,23 @@ export default function ChatMessage({ role, blocks, isStreaming, model, requeste
                 )}
                 {bodyText.trim() ? (
                 <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeHighlight]}
                   components={{
+                    // no typography plugin here, so tables, headings and lists need their own styles
+                    h1: ({ children }) => <h3 className="text-base font-semibold text-white mt-4 mb-2">{children}</h3>,
+                    h2: ({ children }) => <h3 className="text-base font-semibold text-white mt-4 mb-2">{children}</h3>,
+                    h3: ({ children }) => <h4 className="text-sm font-semibold text-cyan-200 mt-4 mb-2">{children}</h4>,
+                    p: ({ children }) => <p className="my-2 leading-relaxed">{children}</p>,
+                    ul: ({ children }) => <ul className="list-disc pl-5 my-2 space-y-1">{children}</ul>,
+                    ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1">{children}</ol>,
+                    table: ({ children }) => (
+                      <div className="my-3 overflow-x-auto rounded-lg border border-slate-700/60">
+                        <table className="w-full text-xs border-collapse">{children}</table>
+                      </div>
+                    ),
+                    th: ({ children }) => <th className="bg-slate-900/70 text-slate-300 font-medium text-left px-2.5 py-1.5 border-b border-slate-700/60">{children}</th>,
+                    td: ({ children }) => <td className="px-2.5 py-1.5 border-b border-slate-800/80 align-top">{children}</td>,
                     pre: ({ children }) => (
                       <pre className="bg-slate-950/50 border border-slate-700/50 rounded-lg p-3 my-2 overflow-x-auto">
                         {children}
