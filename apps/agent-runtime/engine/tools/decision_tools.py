@@ -57,7 +57,7 @@ class _DecisionTool(BaseTool):
             return self._fail(e.message, error_code=e.code)
 
 
-_FACTS_DOC = 'Facts as a nested object. Paths such as import.cnCode mean {"import": {"cnCode": ...}}.'
+_FACTS_DOC = 'Facts as a nested object. Paths such as shipment.postcode mean {"shipment": {"postcode": ...}}.'
 
 
 class DecisionListTool(_DecisionTool):
@@ -505,7 +505,7 @@ class DecisionProposeTool(_DecisionTool):
     risk_tier = "medium"
     description = (
         "Propose new or changed business rules for a decision, as typed JSON rules with ruleKey, requiresFacts, "
-        'when (all/any conditions such as {"gte": [{"fact": "import.date"}, "2026-01-01"]}), then and '
+        'when (all/any conditions such as {"gte": [{"fact": "shipment.date"}, "2026-01-01"]}), then and '
         "provenance with citations. The proposal is validated and golden tested, then waits for people to "
         "approve it. Agents cannot publish."
     )

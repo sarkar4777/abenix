@@ -161,16 +161,18 @@ def test_create_rejects_duplicate_names():
 def test_create_saves_and_schedules_the_first_check():
     resp, db = _create(
         {
-            "name": " EU guidance ",
+            "name": " Carrier tariff ",
             "url": "https://93.184.216.34/g",
-            "tags": ["cbam", "cbam", " eu "],
+            "tags": ["tariff", "tariff", " freight "],
             "cadence_minutes": 120,
         }
     )
     assert resp.status_code == 201
     s = db.added[0]
     assert (
-        s.name == "EU guidance" and s.tenant_id == TENANT and s.tags == ["cbam", "eu"]
+        s.name == "Carrier tariff"
+        and s.tenant_id == TENANT
+        and s.tags == ["tariff", "freight"]
     )
     assert s.next_check_at is not None and db.commits == 1
     data = _body(resp)["data"]

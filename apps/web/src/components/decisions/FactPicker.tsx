@@ -94,7 +94,7 @@ export default function FactPicker({
               }
               if (e.key === 'Escape') setOpen(false);
             }}
-            placeholder="Search or type a new path, e.g. import.cnCode"
+            placeholder="Search or type a new path, e.g. shipment.postcode"
             className="w-full bg-transparent border-b border-slate-800 px-3 py-2 text-sm text-white outline-none"
             aria-label="Search facts"
           />

@@ -26,22 +26,22 @@ TENANT = uuid.uuid4()
 
 # Normalisation
 
-PAGE = b"""<!doctype html><html><head><title>CBAM  guidance</title>
+PAGE = b"""<!doctype html><html><head><title>Carrier  tariff</title>
 <style>.a{color:red}</style><script>var nonce = "abc123";</script></head>
 <body><nav><a href="/">Home</a><a href="/news">News</a></nav>
 <header role="banner"><div>Site banner</div></header>
 <main id="content"><h1>Reporting</h1>
-<p>The declarant <b>shall</b> submit a report
+<p>The carrier <b>shall</b> publish a tariff
    every quarter.</p>
-<ul><li>Cement</li><li>Iron &amp; steel</li></ul>
-<table><tr><th>Good</th><th>Rate</th></tr><tr><td>Cement</td><td>12</td></tr></table>
+<ul><li>Shetland</li><li>Highlands &amp; Islands</li></ul>
+<table><tr><th>Zone</th><th>Rate</th></tr><tr><td>Shetland</td><td>12</td></tr></table>
 <div class="related" aria-hidden="true">Related links</div>
 </main><aside>Popular pages</aside><footer>Copyright</footer></body></html>"""
 
 
 def test_html_drops_noise_and_keeps_structure():
     n = N.normalize("html", PAGE, "text/html; charset=utf-8")
-    assert n.title == "CBAM guidance"
+    assert n.title == "Carrier tariff"
     for noise in (
         "nonce",
         "Home",
@@ -53,9 +53,9 @@ def test_html_drops_noise_and_keeps_structure():
     ):
         assert noise not in n.text
     assert "# Reporting" in n.text
-    assert "The declarant shall submit a report every quarter." in n.text
-    assert "- Cement\n- Iron & steel" in n.text
-    assert "Good | Rate\nCement | 12" in n.text
+    assert "The carrier shall publish a tariff every quarter." in n.text
+    assert "- Shetland\n- Highlands & Islands" in n.text
+    assert "Zone | Rate\nShetland | 12" in n.text
 
 
 def test_html_noise_change_gives_the_same_text():
@@ -65,7 +65,7 @@ def test_html_noise_change_gives_the_same_text():
 
 def test_html_selector_narrows_and_reports_misses():
     n = N.normalize("html", PAGE, selector="main#content ul")
-    assert n.text == "- Cement\n- Iron & steel"
+    assert n.text == "- Shetland\n- Highlands & Islands"
     miss = N.normalize("html", PAGE, selector=".nope")
     assert miss.text == "" and "matched nothing" in miss.notes[0]
     with pytest.raises(N.NormalizeError):
@@ -154,12 +154,12 @@ def _xlsx(rows: list[list[object]]) -> bytes:
 
 def test_xlsx_rows_are_read_without_optional_libraries():
     n = N.normalize(
-        "xlsx", _xlsx([["CN code", "Default"], ["2523", 0.89], ["7208", 2.0]])
+        "xlsx", _xlsx([["Postcode area", "Surcharge"], ["IV27", 0.89], ["ZE2", 2.0]])
     )
     assert n.tables == {
-        "Rates": [["CN code", "Default"], ["2523", "0.89"], ["7208", "2"]]
+        "Rates": [["Postcode area", "Surcharge"], ["IV27", "0.89"], ["ZE2", "2"]]
     }
-    assert "## Rates\nCN code | Default" in n.text
+    assert "## Rates\nPostcode area | Surcharge" in n.text
     with pytest.raises(N.NormalizeError):
         N.normalize("xlsx", _xlsx([["a"]]), selector="Other sheet")
 
@@ -408,13 +408,13 @@ def _source(kind="html"):
     return WatchSource(
         id=uuid.uuid4(),
         tenant_id=TENANT,
-        name="CBAM guidance",
-        url="https://example.test/cbam",
+        name="Carrier tariff page",
+        url="https://example.test/tariff",
         kind=kind,
         cadence_minutes=60,
         active=True,
         headers={},
-        tags=["cbam"],
+        tags=["tariff"],
         risk_tier="high",
         consecutive_failures=0,
         check_count=0,
@@ -428,7 +428,7 @@ def _prep(body: bytes, kind="html", ctype="text/html") -> SW.Prepared:
         status=200,
         body=body,
         content_type=ctype,
-        final_url="https://example.test/cbam",
+        final_url="https://example.test/tariff",
         headers={"etag": '"e"'},
     )
     return SW.Prepared(
@@ -469,7 +469,8 @@ def test_change_detection_is_idempotent_and_emits_once():
     _db, tenant, event, payload = emit.await_args.args
     assert event == "source.changed" and tenant == TENANT
     assert (
-        payload["change_id"] == out["change_id"] and payload["name"] == "CBAM guidance"
+        payload["change_id"] == out["change_id"]
+        and payload["name"] == "Carrier tariff page"
     )
     assert "every month" in json.dumps(db.changes[0].diff)
 
@@ -578,7 +579,7 @@ def test_kb_text_carries_the_citation():
     src = _source()
     snap = SourceSnapshot(
         id=uuid.uuid4(),
-        url="https://example.test/cbam",
+        url="https://example.test/tariff",
         content_sha256="ab" * 32,
         fetched_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
         title="T",
@@ -586,7 +587,7 @@ def test_kb_text_carries_the_citation():
     )
     t = SW.kb_text(src, snap)
     assert (
-        "URL: https://example.test/cbam" in t
+        "URL: https://example.test/tariff" in t
         and str(snap.id) in t
         and t.endswith("Body")
     )

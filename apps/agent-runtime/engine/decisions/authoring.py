@@ -523,7 +523,7 @@ def validate_document(
             out.append(
                 Problem(
                     f"/facts/{i}/path",
-                    "A fact needs a path such as import.cnCode.",
+                    "A fact needs a path such as shipment.postcode.",
                     code="bad_path",
                 )
             )

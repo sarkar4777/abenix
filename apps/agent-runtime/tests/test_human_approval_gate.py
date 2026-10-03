@@ -91,7 +91,10 @@ async def test_gate_ids_are_unique_across_gates(fake_redis):
     await approver
     assert not first.is_error and not second.is_error
     assert first.metadata["gate_id"] != second.metadata["gate_id"]
-    assert not first.metadata["gate_id"].startswith("gate-1")
+    # random ids, not a counter (a prefix check failed whenever the hex began with 1)
+    import re
+
+    assert re.fullmatch(r"gate-[0-9a-f]{32}", first.metadata["gate_id"])
 
 
 @pytest.mark.asyncio

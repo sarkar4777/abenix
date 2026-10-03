@@ -15,22 +15,26 @@ PASSWORD = os.environ.get("AF_PASSWORD", "Admin123456")
 
 RULES = [
     {
-        "ruleKey": "load.cbam.applicable",
+        "ruleKey": "load.freight.remote",
         "requiresFacts": [
-            "import.date",
-            "import.cnCode",
-            "importer.annualCbamMassTonnes",
+            "shipment.date",
+            "shipment.postcode",
+            "shipment.weightKg",
         ],
         "when": {
             "all": [
-                {"gte": [{"fact": "import.date"}, "2026-01-01"]},
-                {"inReferenceSet": [{"fact": "import.cnCode"}, "EU_CBAM_CN_CODES"]},
-                {"gt": [{"fact": "importer.annualCbamMassTonnes"}, 50]},
+                {"gte": [{"fact": "shipment.date"}, "2026-01-01"]},
+                {"inReferenceSet": [{"fact": "shipment.postcode"}, "REMOTE_POSTCODES"]},
+                {"gt": [{"fact": "shipment.weightKg"}, 50]},
             ]
         },
-        "then": {"obligation": "CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER"},
+        "then": {"surcharge": "REMOTE_AREA_SURCHARGE"},
     },
-    {"ruleKey": "load.cbam.none", "when": {"all": []}, "then": {"obligation": "NONE"}},
+    {
+        "ruleKey": "load.freight.none",
+        "when": {"all": []},
+        "then": {"surcharge": "NONE"},
+    },
 ]
 
 c = httpx.Client(base_url=BASE, timeout=60)
@@ -38,21 +42,21 @@ tok = c.post("/api/auth/login", json={"email": EMAIL, "password": PASSWORD}).jso
     "data"
 ]["access_token"]
 H = {"Authorization": f"Bearer {tok}"}
-if c.get("/api/decision-reference-sets/EU_CBAM_CN_CODES", headers=H).status_code == 404:
+if c.get("/api/decision-reference-sets/REMOTE_POSTCODES", headers=H).status_code == 404:
     c.post(
         "/api/decision-reference-sets",
         headers=H,
         json={
-            "key": "EU_CBAM_CN_CODES",
-            "name": "EU CBAM CN codes",
-            "values": ["31021000", "72011000", "76011000"],
+            "key": "REMOTE_POSTCODES",
+            "name": "Remote postcodes",
+            "values": ["HS2", "IV27", "ZE2"],
         },
     )
-key = f"load.cbam.{uuid.uuid4().hex[:6]}"
+key = f"load.freight.{uuid.uuid4().hex[:6]}"
 r = c.post(
     "/api/decisions",
     headers=H,
-    json={"name": "Load test CBAM", "key": key, "rules": RULES},
+    json={"name": "Load test surcharge", "key": key, "rules": RULES},
 )
 if r.status_code != 201:
     sys.exit(f"create failed: {r.text}")

@@ -37,7 +37,7 @@ function FormulaInput({ value, onChange, facts, invalid, testId }: { value: stri
         onFocus={() => setFocus(true)}
         onBlur={() => setTimeout(() => setFocus(false), 150)}
         onKeyDown={(e) => { if (e.key === 'Tab' && suggestions.length && focus) { e.preventDefault(); pick(suggestions[0]); } }}
-        placeholder="import.netMassTonnes * 2.1"
+        placeholder="shipment.parcelCount * 2.1"
         spellCheck={false}
         className={`w-72 bg-slate-950 border rounded-md px-2 py-1.5 text-sm text-white font-mono ${invalid ? 'border-rose-500/60' : 'border-slate-700'}`}
         aria-invalid={invalid}
@@ -91,7 +91,7 @@ export default function ThenEditor({
   return (
     <div>
       <div className="text-xs text-slate-400 mb-2">Then</div>
-      {doc.outputs.length === 0 && <p className="text-xs text-slate-500 mb-2">Name what this decision returns, for example obligation or duty_rate.</p>}
+      {doc.outputs.length === 0 && <p className="text-xs text-slate-500 mb-2">Name what this decision returns, for example surcharge or rate_per_kg.</p>}
       <div className="space-y-2">
         {doc.outputs.map((o) => {
           const cell = rule.then?.[o.field];
@@ -125,7 +125,7 @@ export default function ThenEditor({
                           const v = raw === 'true' ? true : raw === 'false' ? false : raw !== '' && !Number.isNaN(Number(raw)) && o.type === 'number' ? Number(raw) : raw;
                           setCell(o.field, { value: v });
                         }}
-                        placeholder="CBAM_DECLARATION_AND_CERTIFICATE_SURRENDER"
+                        placeholder="REMOTE_AREA_SURCHARGE"
                         className={`w-80 bg-slate-950 border rounded-md px-2 py-1.5 text-sm text-white ${p ? 'border-rose-500/60' : 'border-slate-700'}`}
                         data-testid={`${testPrefix}-then-${o.field}-value`}
                       />
@@ -144,7 +144,7 @@ export default function ThenEditor({
           value={newField}
           onChange={(e) => setNewField(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && fieldOk) { onAddOutcome({ field: newField.trim(), label: newField.trim(), type: 'string' }); setCell(newField.trim(), { value: '' }); setNewField(''); } }}
-          placeholder="New outcome, e.g. obligation"
+          placeholder="New outcome, e.g. surcharge"
           className="w-56 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-xs text-white"
           aria-label="New outcome name"
           data-testid={`${testPrefix}-new-outcome`}

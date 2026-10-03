@@ -215,7 +215,7 @@ function CreateDialog({ catalog, agents, onClose, onCreated }: { catalog: Catalo
               <div key={i} className="flex items-center gap-2 mb-1">
                 <input value={f.k} onChange={(e) => setFilters(filters.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)))} placeholder="decision_key" className="w-48 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono" aria-label="Field" />
                 <span className="text-xs text-slate-500">is</span>
-                <input value={f.v} onChange={(e) => setFilters(filters.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)))} placeholder="eu.cbam.import.applicability, or several with commas" className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" aria-label="Value" />
+                <input value={f.v} onChange={(e) => setFilters(filters.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)))} placeholder="freight.remote.surcharge, or several with commas" className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" aria-label="Value" />
                 <button type="button" onClick={() => setFilters(filters.filter((_, j) => j !== i))} aria-label="Remove filter"><X className="w-4 h-4 text-slate-500" /></button>
               </div>
             ))}

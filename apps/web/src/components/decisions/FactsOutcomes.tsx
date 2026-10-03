@@ -94,7 +94,7 @@ export default function FactsOutcomes({ doc, onChange, problems, readOnly }: { d
             </tbody>
           </table>
           <div className="flex items-center gap-2 border-t border-slate-800 p-2">
-            <input value={newPath} onChange={(e) => setNewPath(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && pathOk) { onChange({ ...doc, facts: [...doc.facts, { path: newPath.trim(), type: newType, label: newPath.trim(), required: true }] }); setNewPath(''); } }} placeholder="importer.annualCbamMassTonnes" className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono" aria-label="New fact path" data-testid="fact-new-path" />
+            <input value={newPath} onChange={(e) => setNewPath(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && pathOk) { onChange({ ...doc, facts: [...doc.facts, { path: newPath.trim(), type: newType, label: newPath.trim(), required: true }] }); setNewPath(''); } }} placeholder="shipment.weightKg" className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono" aria-label="New fact path" data-testid="fact-new-path" />
             <select value={newType} onChange={(e) => setNewType(e.target.value as FactType)} className="bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-xs text-white" aria-label="New fact type">
               {(Object.keys(TYPE_LABEL) as FactType[]).map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
             </select>
@@ -102,7 +102,7 @@ export default function FactsOutcomes({ doc, onChange, problems, readOnly }: { d
               <Plus className="w-3.5 h-3.5" /> Add fact
             </button>
           </div>
-          {newPath && !PATH_RE.test(newPath.trim()) && <p className="px-3 pb-2 text-xs text-rose-300">Use letters, digits and _ separated by dots, like import.cnCode.</p>}
+          {newPath && !PATH_RE.test(newPath.trim()) && <p className="px-3 pb-2 text-xs text-rose-300">Use letters, digits and _ separated by dots, like shipment.postcode.</p>}
         </div>
       </section>
 
@@ -133,7 +133,7 @@ export default function FactsOutcomes({ doc, onChange, problems, readOnly }: { d
             </tbody>
           </table>
           <div className="flex items-center gap-2 border-t border-slate-800 p-2">
-            <input value={newOut} onChange={(e) => setNewOut(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && outOk) { onChange({ ...doc, outputs: [...doc.outputs, { field: newOut.trim(), label: newOut.trim(), type: 'string' }] }); setNewOut(''); } }} placeholder="obligation" className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono" aria-label="New outcome name" />
+            <input value={newOut} onChange={(e) => setNewOut(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && outOk) { onChange({ ...doc, outputs: [...doc.outputs, { field: newOut.trim(), label: newOut.trim(), type: 'string' }] }); setNewOut(''); } }} placeholder="surcharge" className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono" aria-label="New outcome name" />
             <button type="button" disabled={!outOk} onClick={() => { onChange({ ...doc, outputs: [...doc.outputs, { field: newOut.trim(), label: newOut.trim(), type: 'string' }] }); setNewOut(''); }} className="inline-flex items-center gap-1 text-xs text-cyan-300 disabled:text-slate-600">
               <Plus className="w-3.5 h-3.5" /> Add outcome
             </button>

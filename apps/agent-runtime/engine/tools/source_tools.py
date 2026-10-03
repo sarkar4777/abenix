@@ -114,7 +114,7 @@ class SourceListTool(_SourceTool):
     name = "source_list"
     risk_tier = "low"
     description = (
-        "List the authoritative sources this tenant watches for changes, such as regulator pages, "
+        "List the authoritative sources this tenant watches for changes, such as policy and tariff pages, "
         "guidance PDFs, data files and feeds, with when each was last checked and last changed. "
         "Call this first to find a source id for source_snapshot_get, source_diff or source_check."
     )

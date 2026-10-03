@@ -7,7 +7,7 @@
 <h3 align="center">The open-source AI agent platform for problems chatbots can't solve.</h3>
 
 <p align="center">
-  <em>Graph-grounded knowledge · production-grade orchestration · cloud or edge.</em>
+  <em>Graph-grounded knowledge · governed decisions · production-grade orchestration · cloud or edge.</em>
 </p>
 
 <p align="center">
@@ -107,7 +107,10 @@ Connect agents to the systems enterprise ops actually run on, without burning a 
 |---|---|
 | **Connector framework + 8 presets** | Call SAP PM / ServiceNow / Maximo / Workday / Sensitech / Carrier Lynx / DTN Weather / BNEF with one tool node + secret-ref auth + `/test` button. |
 | **Self-describing tool configuration** | Every tool declares the keys it needs on its class. `/admin/tool-config` is generated from those declarations: one card per provider, save a key and agents use it within 30 seconds, no redeploy, encrypted at rest. A lint in CI fails any tool that reads the environment privately, so the screen is complete by construction. `/tools` and the builder show a badge per tool, and a missing key comes back to the user as one sentence naming the key and the screen. |
-| **Multi-signoff approval gates** | Block a $40k claim until N humans sign off, with a TTL enforced and a real inbox at `/approvals`. |
+| **Multi-signoff approval gates** | Block a $40k claim until N humans sign off, with a TTL enforced and a real inbox at `/approvals`. Return for changes, escalation, and a sign-off floor set by the run's risk tier. |
+| **Warm code runners over NATS** | Bring-your-own code assets run in a warm per-version runner called over NATS. A warm call adds about 3 ms over the code itself, idle runners scale to zero, and a cold call falls back to a one-off Job while the runner warms. |
+| **Source Watch** | Watch web pages, PDFs, spreadsheets, CSV, JSON and feeds on a schedule. Each change is an immutable snapshot with a text or row diff, a materiality hint and a `source.changed` event, and can feed a knowledge base with citations. |
+| **Outbound events** | A transactional outbox delivers platform events to signed webhooks with retries, a dead-letter state and replay, and to a NATS subject for internal consumers. |
 | **Time-series + MQTT** | TimescaleDB hypertable, mosquitto broker, plus `tsdb_query` · `mqtt_publish` · `subscribed_feed` · `windowed_state` palette tools. |
 | **Idempotency + DLQ + audit** | Replay-safe execute, dead-letter inbox, integrity-hashed audit log per tenant. |
 | **Bidirectional writes** | OPC-UA write, MQTT publish, CMMS create-work-order — agents can push setpoints, not just read sensors. |
@@ -133,6 +136,17 @@ Drop a PDF, image, audio, video, DOCX, DWG/DXF, GeoJSON, or text file anywhere A
 `helm install abenix ./infra/helm/abenix` deploys api + web + workers + per-agent-pool runtimes + Postgres + Redis + Neo4j + NATS + KEDA + mosquitto + TimescaleDB + Prometheus + Grafana + ingress. Every pod exposes `/metrics`. The `/alerts` page groups by `failure_code`. Slack + email fan-out via env var.
 
 Same chart on AKS, EKS, GKE, minikube, bare metal. MIT license. Self-host without vendor handcuffs.
+
+### 9. Governed decisions and change control
+
+Deterministic rules sit next to the agents, and every change to them is controlled:
+
+- **Decision service on GoRules ZEN.** Versioned, bitemporal decision models that agents and pipelines call as tools. A no-code rule builder, a decision table and the ZEN flow view edit the same model, with typed facts, field validation, live Try, golden tests, diff, merge and JSON import and export. One API pod evaluates about 1,300 decisions a second at 500 concurrent callers, and a publish mid-load switches versions with no mixed answers.
+- **Risk tiers.** Low, medium, high and critical attach to agents, pipelines, tools and decisions. A run starts at its agent's tier and rises when it touches a riskier tool. Each tier's policy sets sign-offs, separation of duties, allowed models, an output schema requirement, escalation time and an evaluation gate.
+- **Approvals with separation of duties.** The tier decides how many people sign and whether the author may. Reviewers can approve, deny or return a change with a note, and approvals left waiting escalate to admins.
+- **Evaluation suites.** Golden cases with deterministic and model-judged assertions, scored runs, run and model comparison, scheduled reruns, and a gate that blocks a high-tier publish until the suite passes on the exact config.
+- **Kill switches.** Stop a tool, agent, pipeline, model or trigger for a tenant, or everything at once. Running work stops at its next tool call.
+- **Tamper-evident audit and replay.** Audit rows form a hash chain verified nightly, and every run records the config it ran with so it can be replayed.
 
 ---
 
@@ -558,7 +572,10 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 | **Auth** | Email + bcrypt, JWT with refresh, per-key scopes (`execute`, `read`, `write`, `can_delegate`), API keys SHA-256-hashed at rest. |
 | **Moderation + DLP** | Pre-LLM gate on input + post-LLM gate on output. Actions: `block`, `redact`, `flag`, `allow`. Tenant-scoped, non-bypassable. |
 | **Quotas + budgets** | Per-tenant + per-user monthly USD cap, executions/day, tokens/day. Overage returns `BUDGET_EXCEEDED`. |
-| **Approvals** | Multi-signoff `approval_gate` with TTL — block any agent action behind N humans. Real inbox at `/approvals`. |
+| **Approvals** | Multi-signoff `approval_gate` with TTL — block any agent action behind N humans. Real inbox at `/approvals`. The risk tier sets the floor: how many sign, whether the author may, and which capability signs. Return for changes and escalation included. |
+| **Risk tiers + kill switches** | Four tiers on agents, pipelines, tools and decisions, each with a tenant policy. Kill switches per tool, agent, pipeline, model, trigger or tenant, enforced at the next tool call. |
+| **Capabilities** | Fine-grained capabilities on top of the three roles, granted through permission sets under Admin, Permissions. |
+| **Tamper-evident audit + provenance** | Audit rows are hash-chained with a salted PII digest and verified nightly, with an alert on a break. Every run stores its config snapshot and hash, and runs can be replayed and compared. |
 | **Audit log + GDPR** | Every execution, tool call, KB query, atlas mutation, role change — tenant-scoped, integrity-hashed. Per-tenant data export, soft delete + scheduled hard purge, configurable retention. v2.0 adds `POST /api/gdpr/users/{id}/purge` — one call, five stores (postgres / pinecone / neo4j / blob / trajectory), every attempt logged to `gdpr_purge_log` for regulator-provable receipts. |
 | **At-rest encryption** | Sensitive PersonaItem + AgentMemory fields wrap with AES-256-GCM (v2.0). Cluster-wide KEK lives in `ABENIX_DATA_KEY_KEK_BASE64` — sourced from Azure Key Vault / AWS KMS / Vault, never the DB. Per-tenant DEK derives deterministically as `HMAC-SHA256(KEK, tenant_id)` so every pod agrees without persisting key rows. Ciphertext is versioned (`key_version`) for rotation. **Missing KEK = encryption is a silent no-op** — set it in production. Setup: [`docs/08-howto/06-encryption-setup.md`](docs/08-howto/06-encryption-setup.md). |
 | **Observability** | Prometheus + Grafana bundled. Stable failure codes (`LLM_RATE_LIMIT`, `SANDBOX_TIMEOUT`, `MODERATION_BLOCKED`). `/alerts` page groups by code. Slack + email fan-out via env var. **v1.4 adds per-resource invocation log:** every `code_asset` pod run + `ml_model` prediction + `knowledge_search` query persists to dedicated tables with input/output/duration/cost/predicted-class — Invocations tab on `/code-runner` and `/ml-models` streams new rows live via SSE. Tempo-backed distributed traces (v1.5+) link agent → tool → LLM spans end-to-end. |
@@ -590,6 +607,7 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 
 ## 📚 Documentation
 
+- **Docs** — [`docs/`](docs/README.md) covers architecture, runtime, SDKs, data model, UI, deployment, how-tos and reference. New in 2.5: [governance](docs/01-architecture/07-governance.md), [decisions](docs/08-howto/09-decisions.md), [warm code runners](docs/02-runtime/16-warm-code-runners.md), [Source Watch](docs/02-runtime/17-source-watch.md), [evaluation suites](docs/02-runtime/18-evaluation-suites.md), [outbound events](docs/02-runtime/19-outbound-events.md), [tool configuration](docs/08-howto/08-tool-configuration.md)
 - **In-app help** — every running instance has a `/help` route with the full user guide
 - **API reference** — every running instance has `/docs` (FastAPI Swagger)
 - **Roadmap** — `NEXT_PLANS.md` in this repo (private mirror)

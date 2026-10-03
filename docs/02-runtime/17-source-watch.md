@@ -208,7 +208,7 @@ Agents read watched sources through four tools. Each reads only the current tena
 
 `source_check` sets the source's next check to now and polls every two seconds until the scheduler has run it. If the wait runs out it returns `queued`.
 
-Each citation holds the source, URL, title, retrieval time, SHA-256 and snapshot id, plus a `cite_as` line such as `EU CBAM guidance, https://..., retrieved 2026-03-01 (snapshot sha256 3f2a9c1b7d4e)`. Agents should quote from snapshots, which do not change, rather than the live page.
+Each citation holds the source, URL, title, retrieval time, SHA-256 and snapshot id, plus a `cite_as` line such as `Carrier tariff page, https://..., retrieved 2026-03-01 (snapshot sha256 3f2a9c1b7d4e)`. Agents should quote from snapshots, which do not change, rather than the live page.
 
 The tools open their own small database pool, sized by `SOURCE_DB_POOL` and `SOURCE_DB_OVERFLOW`.
 

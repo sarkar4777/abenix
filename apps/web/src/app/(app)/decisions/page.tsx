@@ -133,7 +133,7 @@ export default function DecisionsPage() {
 
 function EmptyState({ canAuthor, onStart }: { canAuthor: boolean; onStart: (s: 'blank' | 'import' | 'example') => void }) {
   const cards = [
-    { id: 'example' as const, icon: Sparkles, title: 'Start from an example', text: 'The CBAM import applicability rule, ready to test and change.' },
+    { id: 'example' as const, icon: Sparkles, title: 'Start from an example', text: 'The remote area surcharge rule, ready to test and change.' },
     { id: 'blank' as const, icon: Plus, title: 'Start blank', text: 'Name it, add facts and outcomes, then build rules row by row.' },
     { id: 'import' as const, icon: FileJson, title: 'Import JSON rules', text: 'Paste or upload rules with ruleKey, when, then and provenance.' },
   ];
@@ -141,8 +141,8 @@ function EmptyState({ canAuthor, onStart }: { canAuthor: boolean; onStart: (s: '
     <div className="rounded-2xl border border-dashed border-slate-700 p-8" data-testid="decision-empty">
       <h2 className="text-lg font-semibold text-white">No decisions yet</h2>
       <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-        A decision takes facts, such as an import date, a product code and a tonnage, and returns an outcome, such as an
-        obligation, using rules you can read. Every answer can be replayed later with the rules that applied then.
+        A decision takes facts, such as a shipment date, a postcode and a weight, and returns an outcome, such as a
+        surcharge, using rules you can read. Every answer can be replayed later with the rules that applied then.
       </p>
       {canAuthor ? (
         <div className="grid gap-3 md:grid-cols-3 mt-5">
@@ -168,8 +168,8 @@ function slugify(s: string) {
 function CreateDialog({ start, onClose }: { start: 'blank' | 'import' | 'example'; onClose: () => void }) {
   const router = useRouter();
   const [mode, setMode] = useState(start);
-  const [name, setName] = useState(start === 'example' ? 'CBAM import applicability' : '');
-  const [key, setKey] = useState(start === 'example' ? 'eu.cbam.import.applicability' : '');
+  const [name, setName] = useState(start === 'example' ? 'Remote area surcharge' : '');
+  const [key, setKey] = useState(start === 'example' ? 'freight.remote.surcharge' : '');
   const [keyTouched, setKeyTouched] = useState(start === 'example');
   const [tier, setTier] = useState<Tier>(start === 'example' ? 'high' : 'low');
   const [description, setDescription] = useState(start === 'example' ? 'Whether an import falls under the EU Carbon Border Adjustment Mechanism.' : '');
@@ -217,8 +217,8 @@ function CreateDialog({ start, onClose }: { start: 'blank' | 'import' | 'example
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           <div className="inline-flex rounded-lg border border-slate-700 p-0.5 bg-slate-950" role="radiogroup" aria-label="How to start">
-            {([['blank', 'Blank'], ['import', 'Import JSON'], ['example', 'CBAM example']] as const).map(([id, label]) => (
-              <button key={id} type="button" role="radio" aria-checked={mode === id} onClick={() => { setMode(id); if (id === 'example') { setJson(JSON.stringify(CLIENT_SAMPLE, null, 2)); if (!name) setName('CBAM import applicability'); } }} className={`px-3 py-1.5 text-xs rounded-md ${mode === id ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>
+            {([['blank', 'Blank'], ['import', 'Import JSON'], ['example', 'Surcharge example']] as const).map(([id, label]) => (
+              <button key={id} type="button" role="radio" aria-checked={mode === id} onClick={() => { setMode(id); if (id === 'example') { setJson(JSON.stringify(CLIENT_SAMPLE, null, 2)); if (!name) setName('Remote area surcharge'); } }} className={`px-3 py-1.5 text-xs rounded-md ${mode === id ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>
                 {label}
               </button>
             ))}
@@ -226,7 +226,7 @@ function CreateDialog({ start, onClose }: { start: 'blank' | 'import' | 'example
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label htmlFor="dn-name" className="block text-sm font-medium text-slate-200 mb-1.5">Name</label>
-              <input id="dn-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="CBAM import applicability" className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white" data-testid="decision-name" autoFocus />
+              <input id="dn-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Remote area surcharge" className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white" data-testid="decision-name" autoFocus />
             </div>
             <div>
               <label htmlFor="dn-key" className="block text-sm font-medium text-slate-200 mb-1.5">Key</label>
@@ -238,7 +238,7 @@ function CreateDialog({ start, onClose }: { start: 'blank' | 'import' | 'example
           </div>
           <div>
             <label htmlFor="dn-desc" className="block text-sm font-medium text-slate-200 mb-1.5">What it decides</label>
-            <input id="dn-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Whether an import falls under CBAM and what the importer must do" className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white" />
+            <input id="dn-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Whether a shipment carries a remote area surcharge" className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm text-white" />
           </div>
           <div>
             <div className="text-sm font-medium text-slate-200 mb-1.5">Risk tier</div>
