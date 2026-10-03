@@ -531,6 +531,22 @@ export function serializeConfig(
  * Convert a persisted `PipelineConfig` back into the runtime types used by
  * the pipeline builder.  Snake_case fields are mapped back to camelCase.
  */
+// the server runs type: agent nodes as agent_step, with input and context moved into the arguments
+function agentNodeTool(node: PipelineNodeConfig): string | null {
+  const raw = node as unknown as Record<string, unknown>;
+  const isAgent = String(raw.type || '').toLowerCase() === 'agent' && (raw.agent_slug || raw.agent_id);
+  return isAgent && !node.tool_name ? 'agent_step' : null;
+}
+
+function agentNodeArguments(node: PipelineNodeConfig): Record<string, unknown> {
+  const args: Record<string, unknown> = { ...(node.arguments || {}) };
+  if (!agentNodeTool(node)) return args;
+  const raw = node as unknown as Record<string, unknown>;
+  if (raw.input !== undefined && args.input_message === undefined) args.input_message = raw.input;
+  if (raw.context !== undefined && args.__context__ === undefined) args.__context__ = raw.context;
+  return args;
+}
+
 export function deserializeConfig(
   config: PipelineConfig,
 ): { steps: PipelineStep[]; edges: PipelineEdgeConfig[] } {
@@ -623,9 +639,9 @@ export function deserializeConfig(
 
   const steps: PipelineStep[] = config.nodes.map((node) => ({
     id: node.id,
-    toolName: node.tool_name || (node as unknown as Record<string, string>).toolName || 'unknown',
+    toolName: agentNodeTool(node) || node.tool_name || (node as unknown as Record<string, string>).toolName || 'unknown',
     label: node.label || node.id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-    arguments: { ...node.arguments },
+    arguments: agentNodeArguments(node),
     dependsOn: [...(node.depends_on || [])],
     condition: node.condition
       ? {

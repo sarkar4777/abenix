@@ -1327,5 +1327,16 @@
       "bug"
     ],
     "number": 179
+  },
+  {
+    "title": "Pipeline builder showed agent steps as unknown with false errors",
+    "area": "builder",
+    "problem": "Pipelines with type: agent nodes ran fine on the server, but the builder loaded them as tool steps with no tool name, labelled them unknown, counted them as validation errors, and a save would have written tool_name unknown and dropped the agent's input.",
+    "fix": "The builder loads type: agent nodes as agent_step with input and context moved into the arguments, the same way the server parses them, so they validate and round trip on save.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 180
   }
 ]
