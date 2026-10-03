@@ -58,6 +58,7 @@ _MMBTU_QUOTED = {"NG=F"}
 
 class RefinedProductsForwardsTool(BaseTool):
     name = "refined_products_forwards"
+    risk_tier = "low"
     description = (
         "Refined-products forward curves and crack spreads. Pulls "
         "continuous-front futures from Yahoo (RB=F gasoline, HO=F "

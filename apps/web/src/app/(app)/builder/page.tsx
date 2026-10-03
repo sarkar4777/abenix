@@ -114,6 +114,7 @@ interface AgentConfig {
   daily_budget_usd?: number;
   slug?: string;
   output_schema?: string;
+  risk_tier?: 'low' | 'medium' | 'high' | 'critical';
   knowledge_collection_ids?: string[];
   atlas_graphs?: string[];
   agent_type?: 'custom' | 'oob';
@@ -451,6 +452,7 @@ export default function BuilderPage() {
           rate_limit_qps: mc.rate_limit_qps ?? undefined,
           daily_budget_usd: mc.daily_budget_usd ?? undefined,
           slug: a.slug || undefined,
+          risk_tier: mc.risk_tier || undefined,
           output_schema: typeof mc.output_schema === 'string'
             ? mc.output_schema
             : mc.output_schema ? JSON.stringify(mc.output_schema, null, 2) : '',
@@ -780,6 +782,7 @@ export default function BuilderPage() {
     // the API turns this list into the agent's knowledge base grants
     modelConfig.knowledge_collection_ids = config.knowledge_collection_ids || [];
     if (config.max_iterations) modelConfig.max_iterations = config.max_iterations;
+    if (config.risk_tier) modelConfig.risk_tier = config.risk_tier;
 
     // Output schema — store as parsed JSON if valid, otherwise the raw
     // string so the user doesn't lose work. Post-process layer reads

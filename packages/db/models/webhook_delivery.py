@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
+    DateTime,
     ForeignKey,
     Integer,
     String,
@@ -32,3 +34,8 @@ class WebhookDelivery(UUIDMixin, TenantMixin, TimestampMixin, Base):
     attempts = Column(Integer, default=1)
     delivery_id = Column(String(100), nullable=True)
     error_message = Column(Text, nullable=True)
+    event_id = Column(BigInteger, nullable=True)
+    # pending | retrying | delivered | dead
+    status = Column(String(16), default="delivered", nullable=False)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    execution_id = Column(UUID(as_uuid=True), nullable=True)

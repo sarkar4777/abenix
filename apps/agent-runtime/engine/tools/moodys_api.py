@@ -23,6 +23,7 @@ USER_AGENT = "AgentForge issuer-rating-refresh contact@agentforge.local"
 
 class MoodysApiTool(BaseTool):
     name = "moodys_api"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "MOODYS_API_KEY",

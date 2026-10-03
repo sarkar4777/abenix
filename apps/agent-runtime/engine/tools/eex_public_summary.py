@@ -39,6 +39,7 @@ _UNAVAILABLE_NOTE = (
 
 class EexPublicSummaryTool(BaseTool):
     name = "eex_public_summary"
+    risk_tier = "low"
     description = (
         "Documented-degraded TTF data fetcher. Always returns "
         "status='unavailable' because no free machine-readable TTF settle "

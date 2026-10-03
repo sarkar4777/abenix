@@ -39,6 +39,8 @@ dependencies = [
     "prometheus-client>=0.20.0",
     "structlog>=24.1.0",
     "python-dotenv>=1.0.0",
+    "aiosmtplib>=3.0.0",
+    "zen-engine==2.1.2",
 ]
 
 [project.optional-dependencies]

@@ -28,6 +28,7 @@ _NLA_BASE = "https://nla.zapier.com/api/v1"
 
 class ZapierPassThroughTool(BaseTool):
     name = "zapier_pass_through"
+    risk_tier = "high"
     config_fields = (
         ConfigField(
             "ZAPIER_NLA_KEY",

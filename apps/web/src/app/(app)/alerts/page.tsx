@@ -82,6 +82,8 @@ const CODE_DESCRIPTIONS: Record<string, string> = {
   LLM_AUTH_ERROR: 'The LLM provider rejected the credential. A rotated Claude subscription token is the usual cause: run scripts/sync-claude-subscription.sh, or update the provider key under Admin -> Tool Configuration.',
   INFRA_AUTH_ERROR: '401/403 against an internal service (k8s API, S3, etc.). Check service-account RBAC.',
   MODERATION_BLOCKED: 'Tenant moderation policy blocked the request or response. Check /moderation for policy + recent events.',
+  KILL_SWITCH: 'A kill switch stopped the agent, pipeline, tool or model. Resume it under Admin, Risk and Controls.',
+  MODEL_NOT_ALLOWED: 'The model is not on the allowed list for the run\u2019s risk tier. Change the model or the tier policy under Admin, Risk and Controls.',
   UNKNOWN_ERROR: 'Couldn\u2019t classify this exception. Open the execution to see the raw error.',
 };
 
@@ -102,6 +104,8 @@ const CODE_SEVERITY: Record<string, 'high' | 'med' | 'low'> = {
   LLM_AUTH_ERROR: 'high',
   INFRA_AUTH_ERROR: 'high',
   MODERATION_BLOCKED: 'med',
+  KILL_SWITCH: 'med',
+  MODEL_NOT_ALLOWED: 'low',
   UNKNOWN_ERROR: 'med',
 };
 

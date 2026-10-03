@@ -294,6 +294,21 @@ def _patch_missing_columns_sync(conn) -> int:
     return added
 
 
+LEAKED_TXN_SQL = (
+    "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
+    "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+    "AND state LIKE 'idle in transaction%' "
+    "AND xact_start < now() - interval '5 minutes'"
+)
+
+
+def _report_leaked(n: int | None) -> None:
+    if n:
+        print(
+            f"[bootstrap] ended {n} session(s) idle in a transaction for over 5 minutes"
+        )
+
+
 def _run_alembic_stamp_heads() -> None:
     """Mark every alembic head as applied, without running migrations.
 
@@ -319,6 +334,8 @@ def _bootstrap_sync(url: str) -> int:
     engine = create_engine(url, future=True)
     with engine.begin() as conn:
         if _alembic_version_exists_sync(conn):
+            # an abandoned transaction would hold the locks the upgrade needs
+            _report_leaked(conn.exec_driver_sql(LEAKED_TXN_SQL).scalar())
             _heal_alembic_version_sync(conn)
             print(
                 "[bootstrap] alembic_version table present — "
@@ -360,6 +377,8 @@ async def _bootstrap_async(url: str) -> int:
                 )
             ).first()
             if row is not None:
+                # an abandoned transaction would hold the locks the upgrade needs
+                _report_leaked((await conn.execute(text(LEAKED_TXN_SQL))).scalar())
                 await conn.run_sync(_heal_alembic_version_sync)
                 print(
                     "[bootstrap] alembic_version table present — "
@@ -392,7 +411,45 @@ async def _bootstrap_async(url: str) -> int:
     return 2  # caller stamps once asyncio.run has returned
 
 
+def verify_heads() -> int:
+    """Fail when the database is not at every migration head, so a no-op upgrade cannot pass."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import create_engine, text
+
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "alembic"))
+    heads = set(ScriptDirectory.from_config(cfg).get_heads())
+    url, mode = _resolve_database_url()
+    query = text("SELECT version_num FROM alembic_version")
+    if mode == "sync":
+        with create_engine(url).connect() as conn:
+            current = {r[0] for r in conn.execute(query)}
+    else:
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        async def _rows() -> set[str]:
+            engine = create_async_engine(url)
+            try:
+                async with engine.connect() as conn:
+                    return {r[0] for r in await conn.execute(query)}
+            finally:
+                await engine.dispose()
+
+        current = asyncio.run(_rows())
+    missing = heads - current
+    if missing:
+        print(
+            f"[bootstrap] database is not at the migration heads, missing {sorted(missing)}, at {sorted(current)}"
+        )
+        return 1
+    print(f"[bootstrap] database is at every head: {sorted(heads)}")
+    return 0
+
+
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "verify":
+        return verify_heads()
     url, mode = _resolve_database_url()
     if mode == "sync":
         rc = _bootstrap_sync(url)

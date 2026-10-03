@@ -70,10 +70,12 @@ class ApprovalCreate(BaseModel):
     agent_execution_id: uuid.UUID | None = None
     gate_kind: str | None = Field(default=None, max_length=120)
     client_token: str | None = Field(default=None, max_length=120)
+    # the tier of the work being approved, the tenant's policy for it sets the floor
+    risk_tier: str | None = Field(default=None, pattern=r"^(low|medium|high|critical)$")
 
 
 class ApprovalSignoffRequest(BaseModel):
-    decision: str = Field(..., description="approve | deny")
+    decision: str = Field(..., description="approve | deny | return")
     reason: str | None = Field(default=None, max_length=1000)
     client_token: str | None = Field(default=None, max_length=120)
 

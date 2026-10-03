@@ -13,6 +13,7 @@ _ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 class AcademicSearchTool(BaseTool):
     name = "academic_search"
+    risk_tier = "low"
     description = (
         "Search academic papers and research publications. "
         "Uses Semantic Scholar and arXiv APIs."

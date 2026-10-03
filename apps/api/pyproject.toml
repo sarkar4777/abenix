@@ -48,6 +48,8 @@ dependencies = [
     # and queueBackend=nats. Kept optional in the selector so a missing
     # client falls back to Celery without breaking the request.
     "nats-py>=2.7.0",
+    "zen-engine==2.1.2",
+    "jsonschema>=4.21.0",
 ]
 
 [project.optional-dependencies]

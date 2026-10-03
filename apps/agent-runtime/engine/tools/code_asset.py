@@ -2,18 +2,70 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
 import shlex
+import time
 from pathlib import Path
 from typing import Any
 
+from engine import code_runners
 from engine.tools.base import BaseTool, ToolResult
 from engine.tools.sandboxed_job import SandboxedJobTool
 
 logger = logging.getLogger(__name__)
+
+_ENGINES: dict[str, tuple[Any, Any]] = {}
+
+# a burst of warm calls must not queue on the db pool for rows that change rarely
+_HOT: dict[tuple, tuple[float, Any]] = {}
+_HOT_LOCKS: dict[tuple, asyncio.Lock] = {}
+
+
+def _hot_ttl() -> float:
+    try:
+        return float(os.environ.get("CODE_ASSET_CACHE_SECONDS", "2"))
+    except ValueError:
+        return 2.0
+
+
+async def _hot(key: tuple, load: Any) -> Any:
+    ttl = _hot_ttl()
+    if ttl <= 0:
+        return await load()
+    hit = _HOT.get(key)
+    if hit and time.monotonic() - hit[0] < ttl:
+        return hit[1]
+    lock = _HOT_LOCKS.setdefault((id(asyncio.get_running_loop()), key), asyncio.Lock())
+    async with lock:
+        hit = _HOT.get(key)
+        if hit and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        val = await load()
+        if val is not None:
+            if len(_HOT) > 4096:
+                _HOT.clear()
+            _HOT[key] = (time.monotonic(), val)
+        return val
+
+
+def _engine(db_url: str) -> Any:
+    """One pooled engine per database and event loop instead of one per query."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    loop = asyncio.get_running_loop()
+    cached = _ENGINES.get(db_url)
+    if cached is not None and cached[0] is loop:
+        return cached[1]
+    eng = create_async_engine(
+        db_url, pool_pre_ping=True, pool_size=2, max_overflow=4, pool_recycle=300
+    )
+    _ENGINES[db_url] = (loop, eng)
+    return eng
+
 
 # Keyed by sha256(zip_content || build_command || image). The value is a
 # tar.gz of /tmp/app AFTER the build step completes. On cache hit we
@@ -75,6 +127,7 @@ def single_root_prefix(names: list[str]) -> str:
 
 class CodeAssetTool(BaseTool):
     name = "code_asset"
+    risk_tier = "medium"
     description = (
         "Execute a registered code asset (a user-uploaded zip/git repo) "
         "with a JSON input. Runs inside the sandboxed_job isolation layer "
@@ -185,7 +238,11 @@ class CodeAssetTool(BaseTool):
         if input_payload is None:
             input_payload = {}
 
-        asset = await _load_asset(self._db_url, self._tenant_id, asset_id)
+        asset = await _hot(
+            ("asset", self._tenant_id, asset_id),
+            lambda: _load_asset(self._db_url, self._tenant_id, asset_id),
+        )
+        asset = dict(asset) if asset else None
         if asset is None:
             return ToolResult(
                 content=f"Code asset {asset_id} not found (or not in your tenant).",
@@ -241,15 +298,63 @@ class CodeAssetTool(BaseTool):
         # Collect secrets (env vars) for the run. They're NOT passed on
         # the command line — they live as env, so `ps` + logs never show
         # them. See _collect_secrets for the revealing-at-runtime path.
-        run_env = await _collect_secrets(
-            self._db_url,
-            self._tenant_id,
-            asset_id,
+        run_env = dict(
+            await _hot(
+                ("secrets", self._tenant_id, asset_id),
+                lambda: _collect_secrets(self._db_url, self._tenant_id, asset_id),
+            )
+            or {}
         )
         # Mix in any caller-supplied env too (lowest priority — secrets win).
         for k, v in (arguments.get("env") or {}).items():
             if k not in run_env:
                 run_env[str(k)] = str(v)
+
+        runner_mode = code_runners.mode()
+        runner_note = "CODE_RUNNER_MODE=job"
+        if runner_mode != "job":
+            gate = (
+                await _hot(
+                    ("gate", self._tenant_id, image, want_network),
+                    lambda: self._warm_gate(image, want_network),
+                )
+                if code_runners.configured()
+                else "code runners are not configured"
+            )
+            outcome = None
+            if gate:
+                runner_note = gate
+            else:
+                outcome = await code_runners.call_warm(
+                    asset=asset,
+                    tenant_id=asset.get("tenant_id") or self._tenant_id or "",
+                    input_payload=input_payload,
+                    env=dict(run_env),
+                    timeout_s=int(arguments.get("timeout_seconds", 120)),
+                    memory_mb=int(arguments.get("memory_mb", 1024)),
+                    network=want_network,
+                    redis_url=self._redis_url,
+                )
+                if outcome.resp is not None:
+                    return await self._finish_warm(
+                        asset, asset_id, input_payload, outcome
+                    )
+                runner_note = outcome.reason
+            if runner_mode == "warm" or (outcome is not None and not outcome.fallback):
+                return ToolResult(
+                    content=f"Code asset execution failed:\nwarm runner: {runner_note}",
+                    is_error=True,
+                    metadata={
+                        "code_asset_id": asset_id,
+                        "sandbox_backend": "code-runner",
+                        "exit_code": None,
+                        "runner": "warm",
+                        "runner_reason": runner_note,
+                        "runner_name": outcome.name if outcome else "",
+                    },
+                )
+            logger.info("code_asset %s on the job path: %s", asset_id, runner_note)
+        job_t0 = time.monotonic()
 
         if use_inline:
             import io as _io
@@ -466,6 +571,11 @@ class CodeAssetTool(BaseTool):
                 }
             )
 
+        job_md = {
+            "runner": "job",
+            "runner_reason": runner_note,
+            "duration_ms": int((time.monotonic() - job_t0) * 1000),
+        }
         if sandbox_result.is_error:
             return ToolResult(
                 content=f"Code asset execution failed:\n{sandbox_result.content}",
@@ -474,6 +584,7 @@ class CodeAssetTool(BaseTool):
                     "code_asset_id": asset_id,
                     "sandbox_backend": sandbox_result.metadata.get("backend"),
                     "exit_code": sandbox_result.metadata.get("exit_code"),
+                    **job_md,
                 },
             )
 
@@ -507,6 +618,27 @@ class CodeAssetTool(BaseTool):
         if not asset_out:
             asset_out = stdout.strip()
 
+        return await self._shape_output(
+            asset,
+            asset_id,
+            input_payload,
+            asset_out,
+            exit_code=sandbox_result.metadata.get("exit_code"),
+            backend=sandbox_result.metadata.get("backend"),
+            extra=job_md,
+        )
+
+    async def _shape_output(
+        self,
+        asset: dict[str, Any],
+        asset_id: str,
+        input_payload: Any,
+        asset_out: str,
+        *,
+        exit_code: Any,
+        backend: Any,
+        extra: dict[str, Any],
+    ) -> ToolResult:
         parsed: Any
         try:
             parsed = json.loads(asset_out)
@@ -524,9 +656,7 @@ class CodeAssetTool(BaseTool):
                 schema_ok = False
                 schema_err = err
 
-        await _record_last_test(
-            self._db_url, asset_id, input_payload, parsed, schema_ok
-        )
+        _note_last_test(self._db_url, asset_id, input_payload, parsed, schema_ok)
 
         return ToolResult(
             content=json.dumps(
@@ -539,12 +669,71 @@ class CodeAssetTool(BaseTool):
             metadata={
                 "code_asset_id": asset_id,
                 "resolved_code_asset_id": asset.get("id") or asset_id,
-                "exit_code": sandbox_result.metadata.get("exit_code"),
-                "backend": sandbox_result.metadata.get("backend"),
-                "stdout": (asset_out or "")[:4000] if "asset_out" in dir() else None,
+                "exit_code": exit_code,
+                "backend": backend,
+                "stdout": (asset_out or "")[:4000],
                 "image": asset.get("suggested_image"),
                 "schema_ok": schema_ok,
+                **extra,
             },
+        )
+
+    async def _warm_gate(self, image: str, want_network: bool) -> str:
+        """The same switches the Job path honours, checked before going warm."""
+        cfg = await SandboxedJobTool(
+            tenant_id=self._tenant_id, redis_url=self._redis_url
+        )._resolve_settings()
+        if not cfg["enabled"]:
+            return "sandbox is disabled"
+        if image not in cfg["allowed_images"]:
+            return f"image {image} is not in the sandbox allow-list"
+        if want_network and not cfg["allow_network"]:
+            return "network is not allowed for this tenant"
+        return ""
+
+    async def _finish_warm(
+        self,
+        asset: dict[str, Any],
+        asset_id: str,
+        input_payload: Any,
+        outcome: Any,
+    ) -> ToolResult:
+        resp = outcome.resp
+        md = {
+            "runner": "warm",
+            "runner_name": outcome.name,
+            "runner_pod": resp.get("runner"),
+            "runner_mode": resp.get("mode"),
+            "cache": resp.get("cache"),
+            "duration_ms": outcome.duration_ms,
+            "run_ms": resp.get("duration_ms"),
+            "queue_ms": resp.get("queue_ms"),
+        }
+        if not resp.get("ok"):
+            detail = resp.get("error") or (
+                f"code runner exit_code={resp.get('exit_code')} "
+                f"timed_out={bool(resp.get('timed_out'))}\n"
+                f"--- stderr ---\n{resp.get('stderr_tail') or ''}\n"
+                f"--- stdout ---\n{(resp.get('stdout') or '')[:4000]}"
+            )
+            return ToolResult(
+                content=f"Code asset execution failed:\n{detail}",
+                is_error=True,
+                metadata={
+                    "code_asset_id": asset_id,
+                    "sandbox_backend": "code-runner",
+                    "exit_code": resp.get("exit_code"),
+                    **md,
+                },
+            )
+        return await self._shape_output(
+            asset,
+            asset_id,
+            input_payload,
+            (resp.get("stdout") or "").strip(),
+            exit_code=resp.get("exit_code"),
+            backend="code-runner",
+            extra=md,
         )
 
 
@@ -570,7 +759,6 @@ async def _load_asset(
     if not db_url:
         return None
     try:
-        from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text as sql_text
     except ImportError:
         return None
@@ -578,7 +766,7 @@ async def _load_asset(
 
     looks_like_uuid = bool(_re.fullmatch(r"[0-9a-fA-F-]{32,36}", asset_id or ""))
     try:
-        engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=1)
+        engine = _engine(db_url)
         async with engine.begin() as conn:
             params: dict[str, Any] = {"aid": asset_id}
             where = "id = CAST(:aid AS uuid)" if looks_like_uuid else "name = :aid"
@@ -589,14 +777,13 @@ async def _load_asset(
                 sql_text(
                     f"SELECT id, status, storage_uri, suggested_image, "
                     f"suggested_build_command, suggested_run_command, "
-                    f"input_schema, output_schema "
+                    f"input_schema, output_schema, tenant_id, version "
                     f"FROM code_assets WHERE {where} "
                     f"ORDER BY updated_at DESC LIMIT 1"
                 ),
                 params,
             )
             row = r.first()
-        await engine.dispose()
     except Exception as e:
         logger.debug("code_asset load failed: %s", e)
         return None
@@ -611,7 +798,28 @@ async def _load_asset(
         "suggested_run_command": row[5],
         "input_schema": row[6],
         "output_schema": row[7],
+        "tenant_id": str(row[8]) if row[8] else "",
+        "version": row[9] or 1,
     }
+
+
+_LAST_TEST_AT: dict[str, float] = {}
+_BG: set[asyncio.Task] = set()
+
+
+def _note_last_test(
+    db_url: str, asset_id: str, input_payload: Any, output: Any, ok: bool
+) -> None:
+    # one row every caller updates, so write it in the background and at most every few seconds
+    now = time.monotonic()
+    if now - _LAST_TEST_AT.get(asset_id, 0.0) < 5:
+        return
+    _LAST_TEST_AT[asset_id] = now
+    t = asyncio.ensure_future(
+        _record_last_test(db_url, asset_id, input_payload, output, ok)
+    )
+    _BG.add(t)
+    t.add_done_callback(_BG.discard)
 
 
 async def _record_last_test(
@@ -624,12 +832,11 @@ async def _record_last_test(
     if not db_url:
         return
     try:
-        from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text as sql_text
     except ImportError:
         return
     try:
-        engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=1)
+        engine = _engine(db_url)
         async with engine.begin() as conn:
             await conn.execute(
                 sql_text(
@@ -647,7 +854,6 @@ async def _record_last_test(
                     "ok": ok,
                 },
             )
-        await engine.dispose()
     except Exception as e:
         logger.debug("code_asset record_last_test failed: %s", e)
 
@@ -704,12 +910,11 @@ async def _collect_secrets(
     if not db_url:
         return {}
     try:
-        from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text as sql_text
     except ImportError:
         return {}
     try:
-        engine = create_async_engine(db_url, pool_pre_ping=True, pool_size=1)
+        engine = _engine(db_url)
         rows: list[tuple[str, bytes, bytes]] = []
         async with engine.begin() as conn:
             try:
@@ -724,7 +929,6 @@ async def _collect_secrets(
             except Exception:
                 # Table doesn't exist → no secrets configured on this cluster
                 rows = []
-        await engine.dispose()
     except Exception as e:
         logger.debug("code_asset secrets load failed: %s", e)
         return {}

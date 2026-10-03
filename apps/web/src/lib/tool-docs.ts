@@ -41,6 +41,8 @@ export const TOOL_CATEGORIES = [
   'ML Models',
   'Knowledge Graph',
   'Privacy & Safety',
+  'Decisions & Rules',
+  'Sources & Watch',
 ] as const;
 
 export const TOOL_DOCS: Record<string, ToolDoc> = {
@@ -419,6 +421,67 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
       { name: "contract_start", type: "string", required: false, description: "Contract start date for milestone calculation" },
       { name: "contract_years", type: "integer", required: false, description: "Contract duration in years" },
       { name: "timezone", type: "string", required: false, description: "Timezone for formatting (e.g. 'America/New_York')" },
+    ],
+  },
+  decision_compare: {
+    category: "Decisions & Rules",
+    name: "Decision Compare",
+    description: "Evaluate the same facts under several rule versions or dates and report what changes, for example this year's rules against next year's, or a planning version against the assured one.",
+    parameters: [
+      { name: "decision", type: "string", required: true, description: "" },
+      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as import.cnCode mean {\"import\": {\"cnCode\": ...}}." },
+      { name: "targets", type: "array", required: true, description: "", items: { type: "object" } },
+    ],
+  },
+  decision_evaluate: {
+    category: "Decisions & Rules",
+    name: "Decision Evaluate",
+    description: "Evaluate a published business rule decision against facts and get a deterministic result, the rules that applied, and a trace. If facts are missing or have the wrong type it says which, instead of guessing. Use as_of for a past or future date and known_at to see what was in force as known then.",
+    parameters: [
+      { name: "decision", type: "string", required: true, description: "The decision key, from decision_list" },
+      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as import.cnCode mean {\"import\": {\"cnCode\": ...}}." },
+      { name: "as_of", type: "string", required: false, description: "The date the activity happens, like 2026-03-01. Default today." },
+      { name: "known_at", type: "string", required: false, description: "Optional. Evaluate with the rules as they were known on this date." },
+      { name: "record", type: "boolean", required: false, description: "Keep an auditable record of this evaluation", default: false },
+    ],
+  },
+  decision_explain: {
+    category: "Decisions & Rules",
+    name: "Decision Explain",
+    description: "Explain in plain words why a decision came out the way it did for these facts: which rules applied, the values they looked at, and the sources cited for each rule.",
+    parameters: [
+      { name: "decision", type: "string", required: true, description: "The decision key, from decision_list" },
+      { name: "facts", type: "object", required: true, description: "Facts as a nested object. Paths such as import.cnCode mean {\"import\": {\"cnCode\": ...}}." },
+      { name: "as_of", type: "string", required: false, description: "The date the activity happens, like 2026-03-01. Default today." },
+      { name: "known_at", type: "string", required: false, description: "Optional. Evaluate with the rules as they were known on this date." },
+      { name: "record", type: "boolean", required: false, description: "Keep an auditable record of this evaluation", default: false },
+    ],
+  },
+  decision_list: {
+    category: "Decisions & Rules",
+    name: "Decision List",
+    description: "List the business rule decisions this tenant has published, with the facts each one needs and their types. Call this first to find the right decision key and the facts to gather.",
+    parameters: [
+      { name: "query", type: "string", required: false, description: "Optional words to filter by name or key" },
+    ],
+  },
+  decision_propose: {
+    category: "Decisions & Rules",
+    name: "Decision Propose",
+    description: "Propose new or changed business rules for a decision, as typed JSON rules with ruleKey, requiresFacts, when (all/any conditions such as {\"gte\": [{\"fact\": \"import.date\"}, \"2026-01-01\"]}), then and provenance with citations. The proposal is validated and golden tested, then waits for people to approve it. Agents cannot publish.",
+    parameters: [
+      { name: "decision", type: "string", required: true, description: "" },
+      { name: "rules", type: "any", required: true, description: "One rule or a list of rules in the typed JSON format" },
+      { name: "note", type: "string", required: true, description: "What changed and why, with the source" },
+    ],
+  },
+  decision_test: {
+    category: "Decisions & Rules",
+    name: "Decision Test",
+    description: "Run a decision's golden test cases against a version and report which pass.",
+    parameters: [
+      { name: "decision", type: "string", required: true, description: "" },
+      { name: "version", type: "integer", required: false, description: "Default is the latest version" },
     ],
   },
   defer_to_human: {
@@ -1385,6 +1448,48 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
       { name: "texts", type: "array", required: true, description: "News headlines, analyst reports, social media posts, or any text corpus to analyze", items: { type: "string" } },
       { name: "domain", type: "string", required: false, description: "Industry context for domain-specific scoring adjustments (e.g. 'energy', 'tech', 'healthcare', 'commodities', 'finance', 'agriculture', 'real_estate')" },
       { name: "aggregation", type: "string", required: false, description: "How to combine individual scores: simple_average, weighted_recent (recency-weighted), or momentum (emphasizes direction of change). Default: weighted_recent", enum: ["simple_average", "weighted_recent", "momentum"] },
+    ],
+  },
+  source_check: {
+    category: "Sources & Watch",
+    name: "Source Check",
+    description: "Ask for a watched source to be checked now instead of waiting for its schedule, and wait for the result: unchanged, changed (with a summary and change_id for source_diff) or an error. Paused sources are not checked, a person must resume them.",
+    parameters: [
+      { name: "source", type: "string", required: true, description: "The source id, or its exact name, from source_list" },
+      { name: "wait_seconds", type: "integer", required: false, description: "How long to wait for the result, up to 120", default: 60 },
+    ],
+  },
+  source_diff: {
+    category: "Sources & Watch",
+    name: "Source Diff",
+    description: "Show what changed in a watched source: lines added and removed for text, or rows added, removed and changed for tables, with a summary, a materiality hint and citations for both snapshots. Give change_id, or a source to get its latest change and a list of earlier ones.",
+    parameters: [
+      { name: "change_id", type: "string", required: false, description: "A change id, from a source.changed event or an earlier call" },
+      { name: "source", type: "string", required: false, description: "The source id, or its exact name, from source_list" },
+      { name: "max_lines", type: "integer", required: false, description: "How many changed lines or rows to return, up to 2000", default: 400 },
+    ],
+  },
+  source_list: {
+    category: "Sources & Watch",
+    name: "Source List",
+    description: "List the authoritative sources this tenant watches for changes, such as regulator pages, guidance PDFs, data files and feeds, with when each was last checked and last changed. Call this first to find a source id for source_snapshot_get, source_diff or source_check.",
+    parameters: [
+      { name: "query", type: "string", required: false, description: "Optional words to match in the name or URL" },
+      { name: "jurisdiction", type: "string", required: false, description: "Optional jurisdiction, such as EU" },
+      { name: "tag", type: "string", required: false, description: "Optional tag" },
+      { name: "changed_since", type: "string", required: false, description: "Optional ISO date. Only sources that changed on or after it." },
+    ],
+  },
+  source_snapshot_get: {
+    category: "Sources & Watch",
+    name: "Source Snapshot Get",
+    description: "Read the retained text of a watched source, the latest snapshot by default or a given one, with citation details (URL, retrieval time, SHA-256). Quote and cite from this rather than the live page, because snapshots never change. Long texts come in pages, use offset to continue.",
+    parameters: [
+      { name: "source", type: "string", required: false, description: "The source id, or its exact name, from source_list" },
+      { name: "snapshot_id", type: "string", required: false, description: "Optional snapshot id. Without it the latest snapshot is used." },
+      { name: "offset", type: "integer", required: false, description: "Character offset to start from", default: 0 },
+      { name: "max_chars", type: "integer", required: false, description: "How many characters to return, up to 60000", default: 20000 },
+      { name: "find", type: "string", required: false, description: "Optional words to look for. The page returned starts a little before the first match." },
     ],
   },
   speech_to_text: {

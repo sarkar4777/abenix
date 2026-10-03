@@ -65,6 +65,7 @@ def _add_business_days(start: date, days: int) -> date:
 
 class DateCalculatorTool(BaseTool):
     name = "date_calculator"
+    risk_tier = "low"
     description = (
         "Perform date calculations: add/subtract days/months/years, compute business "
         "days between dates (excluding weekends and US holidays), calculate contract "

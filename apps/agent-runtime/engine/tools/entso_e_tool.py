@@ -47,6 +47,7 @@ _DOC_TYPES: dict[str, str] = {
 
 class EntsoETool(BaseTool):
     name = "entso_e"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "ENTSOE_API_KEY",

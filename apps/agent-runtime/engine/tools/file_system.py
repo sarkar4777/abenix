@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class FileSystemTool(BaseTool):
     name = "file_system"
+    risk_tier = "medium"
     description = (
         "Traverse directories, list files recursively, read file contents, "
         "and match glob patterns. Works with local filesystem, mounted NFS/SMB shares, "

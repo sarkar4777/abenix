@@ -150,6 +150,7 @@ async def stream_code_asset_invocations(
             iter([b'event: error\ndata: {"reason":"forbidden"}\n\n']),
             media_type="text/event-stream",
         )
+    await db.close()
     return StreamingResponse(
         _invocation_sse("code_asset", str(asset_id)),
         media_type="text/event-stream",
@@ -341,6 +342,7 @@ async def stream_ml_model_invocations(
             iter([b'event: error\ndata: {"reason":"forbidden"}\n\n']),
             media_type="text/event-stream",
         )
+    await db.close()
     return StreamingResponse(
         _invocation_sse("ml_model", str(model_id)),
         media_type="text/event-stream",
@@ -464,7 +466,10 @@ async def list_kb_query_invocations(
 async def stream_kb_query_invocations(
     collection_id: uuid.UUID,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
+    # same session the auth lookup used, release it before streaming
+    await db.close()
     return StreamingResponse(
         _invocation_sse("kb_query", str(collection_id)),
         media_type="text/event-stream",

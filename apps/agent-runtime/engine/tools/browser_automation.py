@@ -27,6 +27,7 @@ def _domain_allowed(url: str) -> tuple[bool, str]:
 
 class BrowserAutomationTool(BaseTool):
     name = "browser_automation"
+    risk_tier = "medium"
     description = (
         "Headless Chromium via Playwright for sites that need JS rendering, "
         "login flows, or click-throughs. Operations: get_text (full visible "

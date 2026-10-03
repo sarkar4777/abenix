@@ -22,6 +22,7 @@ def _headers() -> dict[str, str]:
 
 class CryptoMarketTool(BaseTool):
     name = "crypto_market"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "COINGECKO_API_KEY",

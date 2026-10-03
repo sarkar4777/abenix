@@ -651,6 +651,7 @@ def _all_envelopes_empty(parsed: dict[str, Any]) -> bool:
 
 class KycMetPdfExtractorTool(BaseTool):
     name = "kyc_met_pdf_extractor"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "ANTHROPIC_API_KEY",

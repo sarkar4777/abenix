@@ -268,6 +268,7 @@ def _validate_code(
 
 class CodeExecutorTool(BaseTool):
     name = "code_executor"
+    risk_tier = "medium"
     description = (
         "Execute Python code safely in a sandboxed environment. Supports complex data "
         "transformations, statistical computations, file generation (Excel, PDF, charts, "

@@ -35,6 +35,8 @@ The big picture — what services exist, how they communicate, what guarantees t
 - [03 — Service inventory (api, web, worker, agent-runtime, edge, standalone apps)](01-architecture/03-services.md)
 - [04 — Data stores (Postgres, Neo4j, Redis, S3, Kafka, NATS)](01-architecture/04-data-stores.md)
 - [05 — Architectural patterns reference (45 patterns)](01-architecture/05-architectural-patterns.md)
+- [06 — Atlas + Knowledge Engine](01-architecture/06-atlas-knowledge-engine.md)
+- [07 — Governance: risk tiers, kill switches, capabilities, audit](01-architecture/07-governance.md)
 
 ### 2. Runtime
 How an agent runs end-to-end, what a tool is, how pipelines work, how agents talk to each other, how state machines move.
@@ -49,6 +51,16 @@ How an agent runs end-to-end, what a tool is, how pipelines work, how agents tal
 - [07 — Pipeline data flow + template scoping](02-runtime/07-pipeline-data-flow.md)
 - [08 — Queues, pools, and KEDA autoscaling](02-runtime/08-queue-scaling.md)
 - [09 — State machines (executions, approvals, pipelines, idempotency)](02-runtime/09-state-machines.md)
+- [10 — Pipeline self-healing + drift detection](02-runtime/10-pipeline-healing-drift.md)
+- [11 — Sandboxed code execution (Code Assets)](02-runtime/11-sandboxed-code-execution.md)
+- [12 — ML models: upload, deploy, invoke](02-runtime/12-ml-models.md)
+- [13 — Moderation gate](02-runtime/13-moderation-gate.md)
+- [14 — Connectors + triggers](02-runtime/14-connectors-and-triggers.md)
+- [15 — v2.0 enterprise knowledge stack](02-runtime/15-v2-knowledge-enterprise.md)
+- [16 — Warm code runners](02-runtime/16-warm-code-runners.md)
+- [17 — Source Watch](02-runtime/17-source-watch.md)
+- [18 — Evaluation suites](02-runtime/18-evaluation-suites.md)
+- [19 — Outbound events + webhooks](02-runtime/19-outbound-events.md)
 
 ### 3. SDK
 The polyglot client surface — how external apps and standalone verticals talk to the platform.
@@ -83,6 +95,7 @@ From `git clone` to a running cluster.
 - [02 — Helm chart structure](06-deployment/02-helm.md)
 - [03 — Autoscaling with KEDA](06-deployment/03-keda.md)
 - [04 — Observability stack (Prometheus, Grafana, Tempo)](06-deployment/04-observability.md)
+- [Load test baseline](06-deployment/load-test-baseline.md)
 
 ### 7. Building apps on Abenix
 How a third party builds a vertical app that uses Abenix as a remote platform. Includes references for the six example apps in this monorepo.
@@ -105,6 +118,7 @@ Concrete step-by-step guides for the most common developer tasks.
 - [06 — Set up at-rest encryption (KEK)](08-howto/06-encryption-setup.md)
 - [07 — Finding your way around](08-howto/07-finding-your-way-around.md)
 - [08 — Tool configuration (credentials, the admin screen, the lint)](08-howto/08-tool-configuration.md)
+- [09 — Decisions: business rules without code](08-howto/09-decisions.md)
 
 ### 9. Reference
 Catalogues and tables you'll look up rather than read end-to-end.

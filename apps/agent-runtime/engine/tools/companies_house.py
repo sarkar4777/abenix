@@ -30,6 +30,7 @@ REQUEST_TIMEOUT = 30.0
 
 class CompaniesHouseTool(BaseTool):
     name = "companies_house"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "COMPANIES_HOUSE_API_KEY",

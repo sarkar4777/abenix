@@ -431,6 +431,16 @@ class ApprovalsClient:
                         continue
                     yield {"event": current_event, "data": payload}
 
+    async def return_for_changes(
+        self, approval_id: str, reason: str, *, client_token: str | None = None
+    ) -> dict[str, Any]:
+        """Send it back to the requester with what needs to change. A decision version returns to draft."""
+        if not (reason or "").strip():
+            raise ValueError("Say what needs to change, so the requester can correct it.")
+        return await self.signoff(
+            approval_id, "return", reason=reason, client_token=client_token
+        )
+
     async def configure_webhook(
         self, *, url: str | None, secret: str | None = None
     ) -> dict[str, Any]:
@@ -462,6 +472,371 @@ class AgentsClient:
             if a.get("slug") == slug:
                 return a
         return None
+
+    async def by_slug(self, slug: str) -> dict[str, Any] | None:
+        """Exact lookup by slug, None when there is no such agent."""
+        try:
+            return await _call(self._client, AbenixError, "GET", f"/api/agents/by-slug/{slug}")
+        except AbenixError as e:
+            if e.status == 404:
+                return None
+            raise
+
+    async def create(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Create an agent or pipeline. Takes the same fields as POST /api/agents, including model_config."""
+        return await _call(self._client, AbenixError, "POST", "/api/agents", json=body)
+
+    async def update(self, agent_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Change an agent. A name in the body also renames its slug, so leave it out to keep the slug."""
+        return await _call(self._client, AbenixError, "PUT", f"/api/agents/{agent_id}", json=body)
+
+
+class AbenixError(Exception):
+    """A call the platform refused, with its message, status and code."""
+
+    def __init__(self, status: int, message: str, code: str | None = None, details: Any = None):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.details = details
+
+
+class AbenixDecisionError(AbenixError):
+    """A decision call the platform refused, with its message and code."""
+
+
+async def _call(client: "Abenix", exc: type[AbenixError], method: str, path: str, **kw: Any) -> Any:
+    res = await client._http.request(method, path, **kw)
+    body: dict[str, Any] = {}
+    try:
+        body = res.json() or {}
+    except ValueError:
+        pass
+    if not isinstance(body, dict):
+        body = {"data": body}
+    if res.status_code >= 400:
+        err = body.get("error") or body.get("detail") or {}
+        if isinstance(err, list):
+            err = {"message": "; ".join(str(x.get("msg", x)) if isinstance(x, dict) else str(x) for x in err)}
+        if not isinstance(err, dict):
+            err = {"message": str(err)}
+        raise exc(
+            res.status_code, err.get("message") or f"HTTP {res.status_code}", err.get("error_code"), err.get("details")
+        )
+    return body.get("data")
+
+
+class DecisionsClient:
+    """Versioned business rules: evaluate, compare, test and propose changes."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixDecisionError, method, path, **kw)
+
+    async def list(self, q: str = "") -> list[dict[str, Any]]:
+        return await self._call("GET", "/api/decisions", params={"q": q} if q else None) or []
+
+    async def get(self, key: str) -> dict[str, Any]:
+        return await self._call("GET", f"/api/decisions/{key}")
+
+    async def create(self, name: str, *, key: str | None = None, rules: Any = None, risk_tier: str = "low", description: str = "") -> dict[str, Any]:
+        return await self._call("POST", "/api/decisions", json={"name": name, "key": key, "rules": rules, "risk_tier": risk_tier, "description": description})
+
+    async def evaluate(
+        self,
+        key: str,
+        facts: dict[str, Any],
+        *,
+        as_of: str | None = None,
+        known_at: str | None = None,
+        version: int | None = None,
+        trace: bool = True,
+        persist: bool = False,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """outcome is decided, no_match, missing_facts or invalid_facts. Missing facts are never guessed."""
+        return await self._call(
+            "POST",
+            f"/api/decisions/{key}/evaluate",
+            json={"facts": facts, "as_of": as_of, "known_at": known_at, "version": version, "trace": trace,
+                  "persist": persist, "idempotency_key": idempotency_key},
+        )
+
+    async def evaluate_batch(self, key: str, items: list[dict[str, Any]], *, as_of: str | None = None, version: int | None = None) -> dict[str, Any]:
+        return await self._call("POST", f"/api/decisions/{key}/evaluate-batch", json={"items": items, "as_of": as_of, "version": version})
+
+    async def compare(self, key: str, facts: dict[str, Any], targets: list[dict[str, Any]]) -> dict[str, Any]:
+        """targets: [{"label", "version"} or {"as_of", "known_at"}], at least two."""
+        return await self._call("POST", f"/api/decisions/{key}/compare", json={"facts": facts, "targets": targets})
+
+    async def versions(self, key: str) -> list[dict[str, Any]]:
+        return (await self.get(key)).get("versions") or []
+
+    async def version(self, key: str, n: int) -> dict[str, Any]:
+        return await self._call("GET", f"/api/decisions/{key}/versions/{n}")
+
+    async def export(self, key: str, version: int | None = None) -> dict[str, Any]:
+        return await self._call("GET", f"/api/decisions/{key}/export", params={"version": version} if version else None)
+
+    async def propose_rules(self, key: str, rules: Any, *, note: str, mode: str = "merge") -> dict[str, Any]:
+        """New draft from the version in force, the rules imported into it, then proposed for sign-off."""
+        draft = await self._call("POST", f"/api/decisions/{key}/versions", json={"note": note})
+        n = draft["version"]
+        await self._call(
+            "POST", f"/api/decisions/{key}/import", json={"payload": rules, "mode": mode, "version": n},
+            headers={"If-Match": draft["etag"]},
+        )
+        return await self._call("POST", f"/api/decisions/{key}/versions/{n}/propose", json={"note": note})
+
+    async def validate(self, key: str, version: int) -> dict[str, Any]:
+        return await self._call("POST", f"/api/decisions/{key}/versions/{version}/validate")
+
+    async def publish(self, key: str, version: int, *, expected_current: int | None = None) -> dict[str, Any]:
+        return await self._call("POST", f"/api/decisions/{key}/versions/{version}/publish", json={"expected_current": expected_current})
+
+    async def update(
+        self,
+        key: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        risk_tier: str | None = None,
+        tags: list[str] | None = None,
+        log_mode: str | None = None,
+    ) -> dict[str, Any]:
+        body = {k: v for k, v in {"name": name, "description": description, "risk_tier": risk_tier, "tags": tags, "log_mode": log_mode}.items() if v is not None}
+        return await self._call("PATCH", f"/api/decisions/{key}", json=body)
+
+    async def new_draft(self, key: str, *, note: str = "", from_version: int | None = None) -> dict[str, Any]:
+        """A draft copied from from_version, or from the version in force. Carries an etag for saves."""
+        return await self._call("POST", f"/api/decisions/{key}/versions", json={"note": note, "from_version": from_version})
+
+    async def save_draft(
+        self,
+        key: str,
+        version: int,
+        *,
+        etag: str | None = None,
+        authoring: dict[str, Any] | None = None,
+        content: dict[str, Any] | None = None,
+        valid_from: str | None = None,
+        valid_to: str | None = None,
+        clear_valid_from: bool = False,
+        clear_valid_to: bool = False,
+        change_note: str | None = None,
+        provenance: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Save a draft. With an etag a stale save is refused with STALE_DRAFT. Problems found come back in problems."""
+        body: dict[str, Any] = {"clear_valid_from": clear_valid_from, "clear_valid_to": clear_valid_to}
+        for k, v in (("authoring", authoring), ("content", content), ("valid_from", valid_from), ("valid_to", valid_to),
+                     ("change_note", change_note), ("provenance", provenance)):
+            if v is not None:
+                body[k] = v
+        headers = {"If-Match": etag} if etag else None
+        return await self._call("PUT", f"/api/decisions/{key}/versions/{version}", json=body, headers=headers)
+
+    async def import_rules(self, key: str, version: int, rules: Any, *, mode: str = "merge", etag: str | None = None) -> dict[str, Any]:
+        """Typed JSON rules into a draft. merge replaces rules by ruleKey and adds new ones, replace starts over."""
+        if mode not in ("merge", "replace"):
+            raise ValueError("mode must be merge or replace")
+        headers = {"If-Match": etag} if etag else None
+        return await self._call("POST", f"/api/decisions/{key}/import", json={"payload": rules, "mode": mode, "version": version}, headers=headers)
+
+    async def propose(self, key: str, version: int, *, note: str = "") -> dict[str, Any]:
+        """Validate and send a draft for sign-off under the decision's risk tier. Refused with VALIDATION_FAILED when not ready."""
+        return await self._call("POST", f"/api/decisions/{key}/versions/{version}/propose", json={"note": note})
+
+    async def withdraw(self, key: str, version: int) -> dict[str, Any]:
+        return await self._call("POST", f"/api/decisions/{key}/versions/{version}/withdraw")
+
+    async def publish_plan(self, key: str, version: int) -> dict[str, Any]:
+        """What publishing would supersede or close, and why it would be refused, before anyone publishes."""
+        return await self._call("GET", f"/api/decisions/{key}/versions/{version}/publish-plan")
+
+    async def retire(self, key: str, version: int) -> dict[str, Any]:
+        return await self._call("POST", f"/api/decisions/{key}/versions/{version}/retire")
+
+    async def diff(self, key: str, a: int, b: int) -> dict[str, Any]:
+        """Rules added, removed and changed between two versions, and how the valid period moved."""
+        return await self._call("GET", f"/api/decisions/{key}/diff", params={"a": a, "b": b})
+
+    async def tests(self, key: str) -> list[dict[str, Any]]:
+        return await self._call("GET", f"/api/decisions/{key}/tests") or []
+
+    async def add_test(self, key: str, name: str, facts: dict[str, Any], *, expected: Any = None, expected_outcome: str = "decided", as_of: str | None = None) -> dict[str, Any]:
+        return await self._call("POST", f"/api/decisions/{key}/tests", json={"name": name, "facts": facts, "expected": expected, "expected_outcome": expected_outcome, "as_of": as_of})
+
+    async def evaluations(self, key: str, limit: int = 50) -> list[dict[str, Any]]:
+        return await self._call("GET", f"/api/decisions/{key}/evaluations", params={"limit": limit}) or []
+
+    async def reference_sets(self) -> list[dict[str, Any]]:
+        return await self._call("GET", "/api/decision-reference-sets") or []
+
+    async def reference_set(self, key: str) -> dict[str, Any]:
+        return await self._call("GET", f"/api/decision-reference-sets/{key}")
+
+    async def put_reference_set(self, key: str, name: str, values: list[Any], description: str = "") -> dict[str, Any]:
+        """Create the set, or save its values as a new version."""
+        try:
+            await self.reference_set(key)
+        except AbenixDecisionError as e:
+            if e.status != 404:
+                raise
+            return await self._call("POST", "/api/decision-reference-sets", json={"key": key, "name": name, "values": values, "description": description})
+        return await self._call("PUT", f"/api/decision-reference-sets/{key}", json={"name": name, "values": values, "description": description})
+
+
+class SourcesClient:
+    """Source Watch: watched pages and feeds, their immutable snapshots and the changes found between them."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def list(self, q: str = "") -> list[dict[str, Any]]:
+        return await self._call("GET", "/api/sources", params={"q": q} if q else None) or []
+
+    async def get(self, source_id: str) -> dict[str, Any]:
+        return await self._call("GET", f"/api/sources/{source_id}")
+
+    async def create(
+        self,
+        name: str,
+        url: str,
+        *,
+        kind: str = "html",
+        description: str = "",
+        cadence_minutes: int | None = None,
+        selector: str | None = None,
+        jurisdiction: str | None = None,
+        tags: list[str] | None = None,
+        risk_tier: str = "low",
+        active: bool = True,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"name": name, "url": url, "kind": kind, "description": description, "tags": tags or [],
+                                "risk_tier": risk_tier, "active": active, **extra}
+        if cadence_minutes is not None:
+            body["cadence_minutes"] = cadence_minutes
+        if selector:
+            body["selector"] = selector
+        if jurisdiction:
+            body["jurisdiction"] = jurisdiction
+        return await self._call("POST", "/api/sources", json=body)
+
+    async def update(self, source_id: str, **fields: Any) -> dict[str, Any]:
+        return await self._call("PATCH", f"/api/sources/{source_id}", json=fields)
+
+    async def delete(self, source_id: str) -> dict[str, Any]:
+        return await self._call("DELETE", f"/api/sources/{source_id}")
+
+    async def pause(self, source_id: str, reason: str = "") -> dict[str, Any]:
+        return await self._call("POST", f"/api/sources/{source_id}/pause", json={"reason": reason})
+
+    async def resume(self, source_id: str) -> dict[str, Any]:
+        return await self._call("POST", f"/api/sources/{source_id}/resume")
+
+    async def check_now(self, source_id: str) -> dict[str, Any]:
+        """Fetch now. Returns {outcome, source}, where outcome says whether anything changed."""
+        return await self._call("POST", f"/api/sources/{source_id}/check-now")
+
+    async def snapshots(self, source_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        return await self._call("GET", f"/api/sources/{source_id}/snapshots", params={"limit": limit}) or []
+
+    async def snapshot(self, snapshot_id: str, *, full: bool = False) -> dict[str, Any]:
+        return await self._call("GET", f"/api/sources/snapshots/{snapshot_id}", params={"full": "true"} if full else None)
+
+    async def source_changes(self, source_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        return await self._call("GET", f"/api/sources/{source_id}/changes", params={"limit": limit}) or []
+
+    async def changes(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Recent changes across every source in the tenant, newest first."""
+        return await self._call("GET", "/api/sources/changes", params={"limit": limit}) or []
+
+    async def change(self, change_id: str) -> dict[str, Any]:
+        """One change with its diff and both snapshots."""
+        return await self._call("GET", f"/api/sources/changes/{change_id}")
+
+    async def validate_url(self, url: str) -> dict[str, Any]:
+        return await self._call("POST", "/api/sources/validate-url", json={"url": url})
+
+    async def preview(self, url: str, *, kind: str | None = None, selector: str | None = None) -> dict[str, Any]:
+        return await self._call("POST", "/api/sources/preview", json={"url": url, "kind": kind, "selector": selector})
+
+    async def settings(self) -> dict[str, Any]:
+        return await self._call("GET", "/api/sources/settings")
+
+
+class EventsClient:
+    """Platform events delivered to a webhook, or used to start an agent or pipeline."""
+
+    def __init__(self, client: "Abenix"):
+        self._client = client
+
+    async def _call(self, method: str, path: str, **kw: Any) -> Any:
+        return await _call(self._client, AbenixError, method, path, **kw)
+
+    async def catalog(self) -> list[dict[str, Any]]:
+        return await self._call("GET", "/api/webhooks/catalog") or []
+
+    async def list(self) -> list[dict[str, Any]]:
+        return await self._call("GET", "/api/webhooks") or []
+
+    async def subscribe(
+        self,
+        events: list[str],
+        *,
+        url: str | None = None,
+        name: str = "",
+        filter: dict[str, Any] | None = None,
+        target_type: str = "webhook",
+        target: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """A webhook subscription returns its signing_secret once. Keep it to verify deliveries."""
+        if not events:
+            raise ValueError("Pick at least one event")
+        body: dict[str, Any] = {"events": events, "name": name, "target_type": target_type}
+        if url:
+            body["url"] = url
+        if filter:
+            body["filter"] = filter
+        if target:
+            body["target"] = target
+        return await self._call("POST", "/api/webhooks", json=body)
+
+    async def update(self, subscription_id: str, **fields: Any) -> dict[str, Any]:
+        return await self._call("PUT", f"/api/webhooks/{subscription_id}", json=fields)
+
+    async def delete(self, subscription_id: str) -> dict[str, Any]:
+        return await self._call("DELETE", f"/api/webhooks/{subscription_id}")
+
+    async def test(self, subscription_id: str) -> dict[str, Any]:
+        return await self._call("POST", f"/api/webhooks/{subscription_id}/test")
+
+    async def deliveries(self, subscription_id: str, *, limit: int = 20, status: str | None = None) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        return await self._call("GET", f"/api/webhooks/{subscription_id}/deliveries", params=params) or []
+
+    async def redeliver(self, delivery_id: str) -> dict[str, Any]:
+        return await self._call("POST", f"/api/webhooks/deliveries/{delivery_id}/redeliver")
+
+    @staticmethod
+    def verify_signature(secret: str, body: bytes | str, signature: str | None) -> bool:
+        """True when the X-Abenix-Signature header matches the raw request body."""
+        import hashlib
+        import hmac
+
+        if not secret or not signature:
+            return False
+        raw = body if isinstance(body, bytes) else body.encode("utf-8")
+        want = "sha256=" + hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(want, signature.strip())
 
 
 class MLModelsClient:
@@ -761,6 +1136,9 @@ class Abenix:
         self.tools = ToolsClient(self)
         self.presets = PresetsClient(self)
         self.ml_models = MLModelsClient(self)
+        self.decisions = DecisionsClient(self)
+        self.sources = SourcesClient(self)
+        self.events = EventsClient(self)
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
@@ -783,6 +1161,14 @@ class Abenix:
     def set_act_as(self, act_as: ActingSubject | None) -> None:
         """Update the default acting subject for all subsequent calls."""
         self.default_act_as = act_as
+
+    async def me(self) -> dict[str, Any]:
+        """The user this API key acts as."""
+        return await _call(self, AbenixError, "GET", "/api/me")
+
+    async def permissions(self) -> dict[str, Any]:
+        """The key's user, role and capabilities, such as approvals.sign or decisions.publish."""
+        return await _call(self, AbenixError, "GET", "/api/me/permissions")
 
     async def execute(
         self,

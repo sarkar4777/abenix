@@ -12,6 +12,7 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 class ImageAnalyzerTool(BaseTool):
     name = "image_analyzer"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "ANTHROPIC_API_KEY",

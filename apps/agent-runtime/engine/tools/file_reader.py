@@ -13,6 +13,7 @@ MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
 
 class FileReaderTool(BaseTool):
     name = "file_reader"
+    risk_tier = "low"
     description = (
         "Read and extract text content from a file. Pass either `file_path` "
         "(an on-disk file the agent has access to) OR `text` (inline content "

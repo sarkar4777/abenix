@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class GraphBuilderTool(BaseTool):
     name = "graph_builder"
+    risk_tier = "low"
     description = (
         "Build a structured graph (DAG) from nodes and edges. Returns a "
         "visualization-ready JSON with layout hints, cycle detection, and "

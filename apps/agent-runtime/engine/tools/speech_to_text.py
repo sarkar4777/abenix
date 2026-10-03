@@ -13,6 +13,7 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 class SpeechToTextTool(BaseTool):
     name = "speech_to_text"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "OPENAI_API_KEY",

@@ -270,14 +270,53 @@ build_core_service() {
   esac
 
   log "Building ${svc}..."
-  docker build -t "${image}" -t "${registry}/${svc}:latest" \
-    -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -3
+  # heavy images build on the host daemon, so the build does not starve the cluster inside minikube
+  local host_build=false
+  case " ${MINIKUBE_HOST_BUILD:-web} " in *" ${svc} "*) [ -n "${MINIKUBE_ACTIVE_DOCKERD:-}" ] && host_build=true ;; esac
+  local hostenv=(env -u DOCKER_HOST -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH -u MINIKUBE_ACTIVE_DOCKERD)
+  if [ "${host_build}" = "true" ]; then
+    log "${svc}: building on the host, then loading into minikube"
+    if ! (set -o pipefail; "${hostenv[@]}" docker build -t "${image}" -t "${registry}/${svc}:latest" \
+        -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -5); then
+      err "${svc}: image build failed, the running image was left as it is"
+      return 1
+    fi
+    if ! "${hostenv[@]}" minikube image load "${image}" || ! "${hostenv[@]}" minikube image load "${registry}/${svc}:latest"; then
+      err "${svc}: could not load the image into minikube"
+      return 1
+    fi
+  elif ! (set -o pipefail; docker build -t "${image}" -t "${registry}/${svc}:latest" \
+      -f "${ROOT_DIR}/${dockerfile}" "${ctx}" 2>&1 | tail -3); then
+    err "${svc}: image build failed, the running image was left as it is"
+    return 1
+  fi
   ok "${svc}: built"
 
   if [ "${push}" = "true" ]; then
     docker push "${image}" 2>&1 | tail -1
     ok "${svc}: pushed"
   fi
+  return 0
+}
+
+# Warm code runner images, one per apps/code-runner/Dockerfile.<lang>
+build_code_runner_images() {
+  local registry="${1:-localhost:5000/abenix}"
+  local push="${2:-false}"
+  local df lang img
+  for df in "${ROOT_DIR}"/apps/code-runner/Dockerfile.*; do
+    [ -f "${df}" ] || continue
+    lang="${df##*.}"
+    img="${registry}/code-runner-${lang}"
+    log "Building code-runner-${lang}..."
+    docker build -t "${img}:${IMAGE_TAG}" -t "${img}:latest" \
+      -f "${df}" "${ROOT_DIR}/apps/code-runner" 2>&1 | tail -3
+    ok "code-runner-${lang}: built"
+    if [ "${push}" = "true" ]; then
+      docker push "${img}:${IMAGE_TAG}" 2>&1 | tail -1
+      ok "code-runner-${lang}: pushed"
+    fi
+  done
   return 0
 }
 
@@ -313,6 +352,7 @@ build_images() {
   for svc in "${services[@]}"; do
     build_core_service "${svc}" "${registry}" "${push}" || return 1
   done
+  build_code_runner_images "${registry}" "${push}" || return 1
 
   # Build ContractIQ standalone images (api + web)
   if _should_build_app contractiq && [ -d "${ROOT_DIR}/contractiq" ]; then
@@ -377,6 +417,7 @@ build_images() {
       if [ "${push}" = "true" ]; then docker push "${pv_img}" 2>&1 | tail -1; fi
     done
   fi
+
 
   # Build Mideast Tourism + Wingman standalone images. Both ship k8s
   # manifests already pointing at localhost:5000/abenix/*, and
@@ -563,6 +604,7 @@ deploy_pharmavigil() {
   kubectl wait --for=condition=ready pod -l app=pharmavigil-web \
     --namespace="${NAMESPACE}" --timeout=120s 2>&1 | tail -3 || warn "PharmaVigil Web not ready in 120s"
 }
+
 
 # ── Deploy Mideast Tourism standalone ────────────────────────────────────────
 deploy_mideasttourism() {
@@ -839,6 +881,14 @@ run_migrations() {
   log "Running alembic upgrade heads..."
   kubectl exec -n "${NAMESPACE}" "${api_pod}" -- \
     bash -c 'cd /app/packages/db && python -m alembic upgrade heads' 2>&1 | tail -5 || true
+  local verify_out verify_rc
+  verify_out=$(kubectl exec -n "${NAMESPACE}" "${api_pod}" --     bash -c 'cd /app/packages/db && python -m bootstrap verify' 2>&1)
+  verify_rc=$?
+  echo "${verify_out}" | tail -2
+  if [ "${verify_rc}" -ne 0 ]; then
+    err "Migrations did not reach every head, see the lines above"
+    return 1
+  fi
 
   # Don't trust the swallowed exit code above — assert the catalogue landed.
   # Counted straight from Postgres so no Python quoting is involved.
@@ -1190,6 +1240,8 @@ port_squatter() {
 start_persistent_forward() {
   local svc="$1" local_port="$2" remote_port="$3"
   local ns="${NAMESPACE}"
+  # observability re-requests forwards that setup_port_forwards already started
+  case " ${_FORWARDED:-} " in *" ${svc}:${local_port} "*) return 0 ;; esac
   # A busy port makes kubectl exit immediately and the wrapper spin for ever,
   # while something else answers on the port. That looked healthy to the
   # verifier and served a different app's 404s to every test.
@@ -1199,6 +1251,7 @@ start_persistent_forward() {
     return 1
   fi
   nohup bash -c "echo \$\$ >> '${FORWARD_PIDFILE}'; while true; do kubectl port-forward -n ${ns} svc/${svc} ${local_port}:${remote_port} 2>/dev/null; sleep 2; done" &>/dev/null &
+  _FORWARDED="${_FORWARDED:-} ${svc}:${local_port}"
 }
 
 setup_port_forwards() {
@@ -1207,6 +1260,7 @@ setup_port_forwards() {
 
   # Kill any existing port forwards from previous runs, wrappers included.
   kill_port_forwards
+  _FORWARDED=""
 
   # Start persistent (auto-reconnecting) port forwards
   start_persistent_forward "${RELEASE_NAME}-web" "${WEB_PORT}" 3000 || true
@@ -1288,9 +1342,9 @@ setup_port_forwards() {
   else
     warn "Some services may not be reachable yet — port forwards are running in background"
     if [ "${with_runtime}" = "true" ]; then
-      warn "Ports: 3000 (web), 8000 (api), 8001 (runtime), 7474 (neo4j)"
+      warn "Ports: ${WEB_PORT} (web), ${API_PORT} (api), 8001 (runtime), 7474 (neo4j)"
     else
-      warn "Ports: 3000 (web), 8000 (api), 7474 (neo4j)"
+      warn "Ports: ${WEB_PORT} (web), ${API_PORT} (api), 7474 (neo4j)"
     fi
   fi
 }
@@ -1437,6 +1491,7 @@ deploy_local() {
     --set "web.image.tag=${IMAGE_TAG}" \
     --set "api.image.tag=${IMAGE_TAG}" \
     --set "agent-runtime.image.tag=${IMAGE_TAG}" \
+    --set "codeRunners.imageTag=${IMAGE_TAG}" \
     --set "worker.image.tag=${IMAGE_TAG}" \
     --set "cognifyWorker.image.tag=${IMAGE_TAG}" \
     --set "postgresql.image.pullPolicy=IfNotPresent" \
@@ -1587,6 +1642,7 @@ deploy_local_runtime() {
     --set "web.image.tag=${IMAGE_TAG}" \
     --set "api.image.tag=${IMAGE_TAG}" \
     --set "agent-runtime.image.tag=${IMAGE_TAG}" \
+    --set "codeRunners.imageTag=${IMAGE_TAG}" \
     --set "worker.image.tag=${IMAGE_TAG}" \
     --set "cognifyWorker.image.tag=${IMAGE_TAG}" \
     --set "postgresql.image.pullPolicy=IfNotPresent" \
@@ -1662,6 +1718,7 @@ deploy_cloud() {
     --set "web.image.tag=${IMAGE_TAG}" \
     --set "api.image.tag=${IMAGE_TAG}" \
     --set "agent-runtime.image.tag=${IMAGE_TAG}" \
+    --set "codeRunners.imageTag=${IMAGE_TAG}" \
     --set "worker.image.tag=${IMAGE_TAG}" \
     --set "cognifyWorker.image.tag=${IMAGE_TAG}" \
     $(_build_secrets_flags) \
@@ -1814,6 +1871,15 @@ deploy_forwards() {
         continue
       fi
     fi
+    # browsers try ::1 first, a native process there hides the forward on 127.0.0.1
+    local v4 v6
+    v4="$(curl -s --max-time 6 "http://127.0.0.1:${port}/" 2>/dev/null | grep -o '<title>[^<]*' | head -1 || true)"
+    v6="$(curl -s -g --max-time 6 "http://[::1]:${port}/" 2>/dev/null | grep -o '<title>[^<]*' | head -1 || true)"
+    if [ -n "$(curl -s -g -o /dev/null -w '%{http_code}' --max-time 3 "http://[::1]:${port}/" 2>/dev/null | grep -v '^000$')" ]        && [ "${v4}" != "${v6}" ]; then
+      err "${label} :${port} serves something else on [::1] than on 127.0.0.1, $(port_squatter "${port}") holds the IPv6 side"
+      bad=$((bad + 1))
+      continue
+    fi
     ok "${label} :${port} -> HTTP ${code}"
   done
   if [ "${bad}" -eq 0 ]; then
@@ -1829,6 +1895,28 @@ deploy_forwards() {
 # git SHA and pulled with pullPolicy: Never, so re-running helm would rewrite
 # the tag on every pod for no gain. Use this to pick up a code edit without
 # a full deploy.
+# Wait for a rollout and, when it does not finish, say why instead of reporting success.
+rollout_or_explain() {
+  local what="$1"; shift
+  if kubectl -n "${NAMESPACE}" rollout status "$@" --timeout=240s; then
+    return 0
+  fi
+  err "${what}: rollout did not finish in 240s"
+  local pod
+  pod=$(kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/name=${what}"     --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null | tr -d '
+')
+  if [ -n "${pod}" ]; then
+    kubectl -n "${NAMESPACE}" get pod "${pod}" 2>&1 | sed 's/^/  /'
+    local c
+    for c in $(kubectl -n "${NAMESPACE}" get pod "${pod}"         -o jsonpath='{range .status.initContainerStatuses[?(@.ready==false)]}{.name}{" "}{end}' 2>/dev/null); do
+      err "  init container ${c} has not finished, its last lines:"
+      kubectl -n "${NAMESPACE}" logs "${pod}" -c "${c}" --tail=15 2>&1 | sed 's/^/    /'
+    done
+    kubectl -n "${NAMESPACE}" logs "${pod}" --tail=15 2>/dev/null | sed 's/^/    /'
+  fi
+  return 1
+}
+
 deploy_reload() {
   local svc="${1:-}"
   # Core services are built from the repo root; each standalone app ships its
@@ -1850,6 +1938,14 @@ deploy_reload() {
       exit 1
       ;;
   esac
+  # a type error fails the image build ten minutes in, catch it in seconds instead
+  if [ "${svc}" = "web" ] && [ -d "${ROOT_DIR}/node_modules" ] && command -v npx >/dev/null 2>&1; then
+    log "Type-checking web before the build..."
+    if ! (set -o pipefail; cd "${ROOT_DIR}/apps/web" && npx tsc --noEmit -p . 2>&1 | tail -20); then
+      err "web has type errors, fix them and reload again"
+      return 1
+    fi
+  fi
 
   check_prereqs
   wait_for_docker
@@ -1861,7 +1957,7 @@ deploy_reload() {
 
   local registry="localhost:5000/abenix"
   if [ "${kind}" = "core" ]; then
-    build_core_service "${svc}" "${registry}" "false"
+    build_core_service "${svc}" "${registry}" "false" || return 1
     step "Restarting ${svc}"
     # The helm release pins the image to the SHA it was deployed at, so a
     # rebuild under the current SHA produces a tag the Deployment does not
@@ -1890,7 +1986,7 @@ deploy_reload() {
       log "${dep}: image -> ${registry}/${svc}:${IMAGE_TAG}"
     fi
     kubectl -n "${NAMESPACE}" rollout restart deployment -l "app.kubernetes.io/name=${svc}"
-    kubectl -n "${NAMESPACE}" rollout status deployment -l "app.kubernetes.io/name=${svc}" --timeout=240s
+    rollout_or_explain "${svc}" deployment -l "app.kubernetes.io/name=${svc}" || return 1
     # the new API image may carry migrations the database has not seen yet
     if [ "${svc}" = "api" ]; then
       run_migrations || warn "migrations did not complete, check the API pod"
@@ -1918,7 +2014,7 @@ deploy_reload() {
     ok "${svc}: built"
     step "Restarting ${svc}"
     kubectl -n "${NAMESPACE}" rollout restart "deploy/${svc}"
-    kubectl -n "${NAMESPACE}" rollout status "deploy/${svc}" --timeout=240s
+    rollout_or_explain "${svc}" "deploy/${svc}" || return 1
   fi
   ok "${svc} reloaded at tag ${IMAGE_TAG}"
 

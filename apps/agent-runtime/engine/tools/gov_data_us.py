@@ -20,6 +20,7 @@ _HEADERS = {
 
 class GovDataUSTool(BaseTool):
     name = "gov_data_us"
+    risk_tier = "low"
     description = (
         "US government data: SEC EDGAR company filings lookup. Free, no key. "
         "Operations: lookup_company (CIK + recent filings by name/ticker), "

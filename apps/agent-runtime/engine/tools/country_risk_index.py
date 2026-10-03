@@ -756,6 +756,7 @@ def _met_indicator_i_score(cpi_rank: float | None) -> tuple[int, str]:
 
 class CountryRiskIndexTool(BaseTool):
     name = "country_risk_index"
+    risk_tier = "low"
     description = (
         "Aggregate every major public country-risk signal into a single "
         "structured view. Fused indices: Transparency International CPI "

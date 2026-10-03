@@ -36,6 +36,7 @@ OPERATOR_ID_RE = re.compile(r"OperatorId=(\d+)", re.IGNORECASE)
 
 class PhmsaLookupTool(BaseTool):
     name = "phmsa_lookup"
+    risk_tier = "low"
     description = (
         "Search PHMSA for a US pipeline operator by name. Returns the "
         "operator ID(s) + a link to the public operator profile. "

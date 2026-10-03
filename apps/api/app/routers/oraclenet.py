@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import async_session, get_current_user, get_db
 from app.core.responses import error, success
 from app.schemas.oraclenet import AnalyzeRequest
 
@@ -91,19 +91,27 @@ async def analyze_decision(
     # Reuse the pipeline streaming helper from the agents router
     from app.routers.agents import _stream_pipeline_execution
 
+    stream_kwargs = dict(
+        execution_id=execution.id,
+        message=body.decision_prompt,
+        tool_names=tool_names,
+        pipeline_config=pipeline_config,
+        context=context,
+        tenant_id=str(user.tenant_id),
+        agent_id=str(agent.id),
+        agent_name=agent.name,
+        timeout_seconds=600,  # OracleNet: 7 agents with web research need up to 10 min
+    )
+    await db.close()
+
+    async def _stream():
+        # idle until the final write, so no transaction spans the run
+        async with async_session() as s:
+            async for chunk in _stream_pipeline_execution(db=s, **stream_kwargs):
+                yield chunk
+
     return StreamingResponse(
-        _stream_pipeline_execution(
-            execution_id=execution.id,
-            message=body.decision_prompt,
-            tool_names=tool_names,
-            pipeline_config=pipeline_config,
-            db=db,
-            context=context,
-            tenant_id=str(user.tenant_id),
-            agent_id=str(agent.id),
-            agent_name=agent.name,
-            timeout_seconds=600,  # OracleNet: 7 agents with web research need up to 10 min
-        ),
+        _stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

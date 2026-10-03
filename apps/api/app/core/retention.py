@@ -44,7 +44,6 @@ async def enforce_retention(
     import uuid as _uuid
     from models.execution import Execution
     from models.conversation import Conversation
-    from models.activity_log import ActivityLog
     from models.user import User
 
     tid = (
@@ -75,15 +74,11 @@ async def enforce_retention(
     )
     counts["conversations_deleted"] = result.rowcount
 
-    # Delete old audit logs (keep minimum 1 year)
+    # audit logs go as a chained prefix with an anchor, keep minimum 1 year
+    from app.services.audit_chain import prune_before
+
     cutoff = now - timedelta(days=policy.audit_log_retention_days)
-    result = await db.execute(
-        delete(ActivityLog).where(
-            ActivityLog.tenant_id == tid,
-            ActivityLog.created_at < cutoff,
-        )
-    )
-    counts["audit_logs_deleted"] = result.rowcount
+    counts["audit_logs_deleted"] = await prune_before(db, tid, cutoff, "retention")
 
     await db.commit()
     logger.info("Retention enforcement for tenant %s: %s", tenant_id, counts)

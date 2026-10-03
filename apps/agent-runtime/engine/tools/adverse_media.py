@@ -483,6 +483,7 @@ async def _gather(name: str, depth: str) -> tuple[list[dict[str, Any]], list[str
 
 class AdverseMediaTool(BaseTool):
     name = "adverse_media"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "TAVILY_API_KEY",

@@ -22,6 +22,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class MqttPublishTool(BaseTool):
     name = "mqtt_publish"
+    risk_tier = "medium"
     description = (
         "Publish a JSON payload to an MQTT topic on the platform broker. "
         "Use for write-back to PLC bridges, SCADA gateways, or downstream "

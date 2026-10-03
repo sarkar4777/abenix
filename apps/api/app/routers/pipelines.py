@@ -37,6 +37,14 @@ from models.user import User
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 
 
+async def _save_detached(row: Any) -> None:
+    from app.core.deps import async_session
+
+    async with async_session() as s:
+        await s.merge(row)
+        await s.commit()
+
+
 @router.post("/{agent_id}/execute")
 async def execute_pipeline(
     agent_id: str,
@@ -204,6 +212,10 @@ async def execute_pipeline(
         if pipeline_result.final_output
         else None
     )
+    execution.risk_tier = pipeline_result.risk_tier or execution.risk_tier
+    execution.risk_reasons = pipeline_result.risk_reasons or None
+    if pipeline_result.failure_code:
+        execution.failure_code = pipeline_result.failure_code
     execution.node_results = serialized.get("node_results")
     if pipeline_result.status == "failed":
         # Surface the first node error so the UI doesn't have to dig through
@@ -386,6 +398,10 @@ async def execute_saved_pipeline(
         if pipeline_result.final_output
         else None
     )
+    execution.risk_tier = pipeline_result.risk_tier or execution.risk_tier
+    execution.risk_reasons = pipeline_result.risk_reasons or None
+    if pipeline_result.failure_code:
+        execution.failure_code = pipeline_result.failure_code
     execution.node_results = serialized.get("node_results")
     if pipeline_result.status == "failed":
         first_err = next(iter(pipeline_result.node_errors.values()), None)
@@ -531,7 +547,11 @@ async def execute_pipeline_stream(
                 if pipeline_result.final_output
                 else None
             )
-            await db.commit()
+            execution.risk_tier = pipeline_result.risk_tier or execution.risk_tier
+            execution.risk_reasons = pipeline_result.risk_reasons or None
+            if pipeline_result.failure_code:
+                execution.failure_code = pipeline_result.failure_code
+            await _save_detached(execution)
 
             serialized = serialize_pipeline_result(pipeline_result)
             serialized["execution_id"] = str(execution.id)
@@ -542,7 +562,7 @@ async def execute_pipeline_stream(
             execution.status = ExecutionStatus.FAILED
             execution.error_message = str(e)
             execution.completed_at = datetime.now(timezone.utc)
-            await db.commit()
+            await _save_detached(execution)
             event_data = json_module.dumps({"error": str(e)})
             await event_queue.put(f"event: pipeline_error\ndata: {event_data}\n\n")
         finally:
@@ -560,6 +580,8 @@ async def execute_pipeline_stream(
             if not task.done():
                 task.cancel()
 
+    # the run outlives the request, its final write goes through a session of its own
+    await db.close()
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",

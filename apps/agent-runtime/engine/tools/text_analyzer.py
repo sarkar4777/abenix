@@ -124,6 +124,7 @@ STOP_WORDS = frozenset(
 
 class TextAnalyzerTool(BaseTool):
     name = "text_analyzer"
+    risk_tier = "low"
     description = (
         "Analyze text content: extract keywords and phrases, compute readability metrics, "
         "compare two texts for similarity, extract named entities (names, organizations, "

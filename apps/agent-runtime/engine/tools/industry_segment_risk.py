@@ -322,6 +322,7 @@ def _match_industry(label: str) -> tuple[str, dict[str, Any]]:
 
 class IndustrySegmentRiskTool(BaseTool):
     name = "industry_segment_risk"
+    risk_tier = "low"
     description = (
         "Look up the AML/KYC risk weight for any industry segment string. "
         "Accepts free-text labels (e.g. 'Wood, Furniture & Paper Manufacturing'), "

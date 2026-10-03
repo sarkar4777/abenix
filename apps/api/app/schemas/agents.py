@@ -37,6 +37,7 @@ class ModelConfigSchema(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     tools: list[str] = []
     max_tokens: int = Field(default=4096, ge=1, le=64000)
+    risk_tier: str | None = Field(default=None, pattern=r"^(low|medium|high|critical)$")
 
     model_config = {"extra": "allow"}
 

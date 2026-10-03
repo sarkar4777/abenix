@@ -38,6 +38,7 @@ SERVICES = {
 
 class IntegrationHubTool(BaseTool):
     name = "integration_hub"
+    risk_tier = "medium"
     # One secret per service in SERVICES, plus the Jira and Salesforce
     # addresses read by name below. Several services share a key with
     # another tool, which is fine, storage is per key.

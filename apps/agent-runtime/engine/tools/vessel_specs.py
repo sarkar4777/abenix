@@ -273,6 +273,7 @@ def _product_density(product: str) -> tuple[float | None, str | None]:
 
 class VesselSpecsTool(BaseTool):
     name = "vessel_specs"
+    risk_tier = "low"
     description = (
         "Vessel-class registry + product density table + volume/mass "
         "converter. Single source of truth for the arithmetic every "

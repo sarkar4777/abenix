@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import ipaddress
 import os
-from typing import Any
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+_EXEMPT_PATHS = frozenset({"/api/health", "/api/health/ready", "/api/metrics"})
 
 
-class IPWhitelistMiddleware(BaseHTTPMiddleware):
+class IPWhitelistMiddleware:
     """Block requests from IPs not in the whitelist."""
 
-    def __init__(self, app: Any, **kwargs: Any) -> None:
-        super().__init__(app, **kwargs)
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
         raw = os.environ.get("IP_WHITELIST", "").strip()
         self.networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
         if raw:
@@ -29,27 +30,30 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
                     pass  # Skip invalid entries
         self.enabled = len(self.networks) > 0
 
-    async def dispatch(self, request: Request, call_next: Any) -> Any:
-        if not self.enabled:
-            return await call_next(request)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or not self.enabled
+            or scope["path"] in _EXEMPT_PATHS
+        ):
+            await self.app(scope, receive, send)
+            return
 
-        # Allow health checks from anywhere
-        if request.url.path in ("/api/health", "/api/health/ready", "/api/metrics"):
-            return await call_next(request)
-
-        client_ip = self._get_client_ip(request)
+        client_ip = self._get_client_ip(scope)
         if not client_ip:
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         try:
             addr = ipaddress.ip_address(client_ip)
             for network in self.networks:
                 if addr in network:
-                    return await call_next(request)
+                    await self.app(scope, receive, send)
+                    return
         except ValueError:
             pass
 
-        return JSONResponse(
+        response = JSONResponse(
             status_code=403,
             content={
                 "data": None,
@@ -57,12 +61,14 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
                 "meta": None,
             },
         )
+        await response(scope, receive, send)
 
     @staticmethod
-    def _get_client_ip(request: Request) -> str | None:
-        forwarded = request.headers.get("x-forwarded-for")
+    def _get_client_ip(scope: Scope) -> str | None:
+        forwarded = Headers(scope=scope).get("x-forwarded-for")
         if forwarded:
             return forwarded.split(",")[0].strip()
-        if request.client:
-            return request.client.host
+        client = scope.get("client")
+        if client:
+            return client[0]
         return None

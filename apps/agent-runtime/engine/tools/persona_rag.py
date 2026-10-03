@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 class PersonaRagTool(BaseTool):
     name = "persona_rag"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "OPENAI_API_KEY",

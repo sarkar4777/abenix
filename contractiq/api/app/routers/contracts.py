@@ -525,6 +525,7 @@ async def extract_contract(
     user_id = user.id
     user_email = user.email
     user_full_name = user.full_name
+    await db.close()
 
     import asyncio
     progress_queue: asyncio.Queue = asyncio.Queue()
@@ -902,6 +903,8 @@ async def deep_extract_contract(
         return JSONResponse(content={"data": None, "error": {"message": "No text available"}}, status_code=400)
 
     contract_text = raw_text[:100000]
+    ctype = contract.contract_type.value if contract.contract_type else "ppa"
+    await db.close()
 
     from app.core.extraction_schemas import get_schema_for_type, get_total_fields
     from app.routers.insights import _call_abenix
@@ -911,7 +914,6 @@ async def deep_extract_contract(
             yield f"data: {json.dumps({'event': 'error', 'message': 'CONTRACTIQ_ABENIX_API_KEY not configured on contractiq-api'})}\n\n"
             return
 
-        ctype = contract.contract_type.value if contract.contract_type else "ppa"
         schema = get_schema_for_type(ctype)
         total_fields = get_total_fields(ctype)
 
@@ -980,6 +982,7 @@ Rules:
 
                 # Save extracted fields
                 saved = 0
+                rows = []
                 for item in extracted:
                     if not isinstance(item, dict):
                         continue
@@ -998,10 +1001,12 @@ Rules:
                         confidence_score=float(item.get("confidence", 0.8)),
                         extraction_pass=pass_num + 10,  # Offset to distinguish from initial extraction
                     )
-                    db.add(ed)
+                    rows.append(ed)
                     saved += 1
 
-                await db.commit()
+                async with SessionLocal() as s:
+                    s.add_all(rows)
+                    await s.commit()
                 all_fields_count += saved
 
                 yield f"data: {json.dumps({'event': 'pass_complete', 'pass': pass_num, 'name': pass_key, 'fields_extracted': saved, 'total': all_fields_count})}\n\n"

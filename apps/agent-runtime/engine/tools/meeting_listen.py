@@ -78,6 +78,7 @@ def _is_likely_hallucination(text: str) -> bool:
 
 class MeetingListenTool(BaseTool):
     name = "meeting_listen"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "OPENAI_API_KEY",

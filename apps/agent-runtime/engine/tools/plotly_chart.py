@@ -95,6 +95,7 @@ def _heatmap(args: dict[str, Any]) -> dict[str, Any]:
 
 class PlotlyChartTool(BaseTool):
     name = "plotly_chart"
+    risk_tier = "low"
     description = (
         "Build a Plotly figure spec (JSON) from structured data — line, "
         "bar, scatter, pie/donut, heatmap. Returns the spec; the UI / "

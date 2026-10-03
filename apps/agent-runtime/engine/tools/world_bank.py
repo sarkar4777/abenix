@@ -27,6 +27,7 @@ _INDICATOR_ALIASES = {
 
 class WorldBankTool(BaseTool):
     name = "world_bank"
+    risk_tier = "low"
     description = (
         "Country-level macro/development indicators from the World Bank "
         "(GDP, population, inflation, CO2, renewables share, etc.). "

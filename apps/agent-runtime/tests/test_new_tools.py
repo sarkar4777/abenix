@@ -266,7 +266,8 @@ class TestGracefulSkip:
             SandboxedJobTool().execute({"image": "alpine", "command": "echo hi"})
         )
         assert r.is_error
-        assert "SANDBOXED_JOB_ENABLED" in r.metadata.get("reason", "")
+        assert r.metadata == {"skipped": True, "reason": "disabled"}
+        assert "SANDBOXED_JOB_ENABLED=true" in r.content
 
     def test_sandboxed_job_image_allowlist_enforced(self, monkeypatch):
         monkeypatch.setenv("SANDBOXED_JOB_ENABLED", "true")
@@ -282,7 +283,8 @@ class TestGracefulSkip:
             )
         )
         assert r.is_error
-        assert "not in SANDBOXED_JOB_ALLOWED_IMAGES" in r.content
+        assert "Image 'ubuntu:latest' not in the allow-list" in r.content
+        assert "alpine:3.20" in r.content and "python:3.12-slim" in r.content
 
     def test_sandboxed_job_network_requires_host_opt_in(self, monkeypatch):
         monkeypatch.setenv("SANDBOXED_JOB_ENABLED", "true")

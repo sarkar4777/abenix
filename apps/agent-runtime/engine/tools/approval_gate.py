@@ -51,6 +51,7 @@ def _api_base_url() -> str:
 
 class ApprovalGateTool(BaseTool):
     name = "approval_gate"
+    risk_tier = "low"
     description = (
         "Pause the agent until a human (or N humans) sign off on a payload. "
         "Returns {status: approved|denied|expired, signoffs: [...]}. The "
@@ -130,6 +131,12 @@ class ApprovalGateTool(BaseTool):
         gate_kind = arguments.get("kind") or arguments.get("gate_kind")
         if gate_kind:
             body["gate_kind"] = gate_kind
+        from engine import governance
+
+        run = governance.current()
+        if run is not None and run.tier != "low":
+            # the API raises the sign-off count to what the tenant requires at this tier
+            body["risk_tier"] = run.tier
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 created = await client.post(

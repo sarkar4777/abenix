@@ -974,10 +974,21 @@ async def download_asset(
     )
 
 
+def _archive_for_version(a: Any, version: int | None) -> str | None:
+    """The live archive, or the one an earlier version kept."""
+    if version is None or version == (a.version or 1):
+        return a.storage_uri
+    for h in a.version_history or []:
+        if h.get("version") == version and h.get("storage_uri"):
+            return h["storage_uri"]
+    return None
+
+
 @router.get("/{asset_id}/fetch")
 async def fetch_asset_for_sandbox(
     asset_id: uuid.UUID,
     request: Request,
+    version: int | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Archive for a sandbox pod, authorised by a token scoped to this asset."""
@@ -1000,7 +1011,10 @@ async def fetch_asset_for_sandbox(
         return error("not found", 404)
     from app.core.artifact_store import ensure_local
 
-    path = Path(a.storage_uri)
+    storage_uri = _archive_for_version(a, version)
+    if storage_uri is None:
+        return error(f"version {version} not found", 404)
+    path = Path(storage_uri)
     if not await ensure_local(path):
         return error("stored file missing on disk", 404)
     return FileResponse(

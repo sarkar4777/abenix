@@ -39,6 +39,14 @@ data:
               summary: "Abenix API error rate > 5%"
               description: "{{ "{{" }} $value | humanizePercentage {{ "}}" }} of requests are failing"
 
+          - alert: AuditChainBroken
+            expr: increase(abenix_audit_chain_breaks_total[1d]) > 0
+            labels:
+              severity: critical
+            annotations:
+              summary: "An activity log failed its integrity check"
+              description: "Tenant {{ "{{" }} $labels.tenant {{ "}}" }}: an entry was changed or removed. See Admin, Risk and Controls, Audit integrity."
+
           - alert: HighLatency
             expr: |
               histogram_quantile(0.95, rate(abenix_http_request_duration_seconds_bucket[5m])) > 2

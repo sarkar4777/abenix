@@ -689,5 +689,203 @@
       "bug"
     ],
     "number": 121
+  },
+  {
+    "title": "GDPR erasure fails for any user with audit history",
+    "area": "privacy",
+    "problem": "gdpr_purge sets activity_logs.user_id to NULL but the column is NOT NULL, so the purge transaction aborts and nothing about the user is erased.",
+    "fix": "Erasure replaces the actor with the nil id and clears ip and user agent under the audit maintenance flag. The audit chain commits to a salted digest of those fields so erasure keeps the chain verifiable.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 122
+  },
+  {
+    "title": "Twelve agent-runtime tests fail and CI never runs them",
+    "area": "ci",
+    "problem": "CI runs tests/unit only. apps/agent-runtime/tests has 12 failing tests across email sender SMTP, llm router default, MCP token encryption, sandboxed job gating, the token counter and pipeline node-complete callbacks, plus a stale cache key assertion.",
+    "fix": "Triage each failure as a product bug or a stale test, fix it, and add the runtime suite to CI.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 123
+  },
+  {
+    "title": "Live DAG watch stream holds a database transaction open for its whole life",
+    "area": "reliability",
+    "problem": "GET /api/executions/{id}/watch reads through the request session and then streams for as long as the tab is open. Each viewer pins a pooled connection idle in transaction. Two such sessions sat open for three hours and blocked a schema migration, which then deadlocked the rollout because the old pod stays until the new one is ready.",
+    "fix": "Snapshots use a short session each and the request session is released before streaming. API and runtime connections set idle_in_transaction_session_timeout so a leak clears itself. The migrate step ends transactions idle for over five minutes and migrations run with a lock timeout so a blocked upgrade fails and retries instead of hanging.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 124
+  },
+  {
+    "title": "Nothing stops two migrations from sharing a revision id",
+    "area": "ci",
+    "problem": "A new migration reused an existing revision id. Alembic reported a cycle and the migrate init container failed on every restart. Only the rollout timeout showed it, and CI had no check.",
+    "fix": "A unit test parses every migration, fails on a duplicate revision id, a missing parent or a cycle, and runs in CI.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 125
+  },
+  {
+    "title": "Decision drafts never save from the browser",
+    "area": "decisions",
+    "problem": "The API's CORS preflight did not allow If-Match, so every draft save from the rule builder was blocked by the browser and the page showed Not saved.",
+    "fix": "If-Match and If-None-Match added to allow_headers, ETag exposed, and a unit test checks that every header the web app sends is allowed.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 126
+  },
+  {
+    "title": "Platform events never reached the NATS bus",
+    "area": "events",
+    "problem": "The event dispatcher connected to NATS without credentials, so every publish failed with Authorization Violation and opened a new connection per batch.",
+    "fix": "It now connects with NATS_USER and NATS_PASSWORD, keeps one connection per event loop and logs a failed publish as a warning.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 127
+  },
+  {
+    "title": "Code runner reaper crashed on a lower case LOG_LEVEL",
+    "area": "code-runners",
+    "problem": "With LOG_LEVEL=debug the reaper CronJob and the runner exited at start with Unknown level, so idle runners were never scaled down.",
+    "fix": "Both upper-case the level before handing it to logging.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 128
+  },
+  {
+    "title": "deploy.sh called its own Grafana forward an unknown process",
+    "area": "deploy",
+    "problem": "The observability step asked for the Grafana forward again after setup_port_forwards had started it, found the port busy and printed an error.",
+    "fix": "start_persistent_forward remembers what it started in the run and skips a repeat.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 129
+  },
+  {
+    "title": "Eval cases saved from a run failed on the next run",
+    "area": "evals",
+    "problem": "Save as eval case suggested max duration and cost at twice the captured run, with a 1 second floor. A 948 ms run gave a 1.9 s limit and reruns at 1.9 to 2 s failed with the right answer.",
+    "fix": "Duration is now the largest of three times the run, the run plus 10 s, or 5 s. Cost is three times the run with a 0.01 floor. A unit test replays the case.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 130
+  },
+  {
+    "title": "Every code asset, ML model and KB call opened a new database login",
+    "area": "runtime",
+    "problem": "invocation_log built a new engine for each logged call and disposed it, so every call paid a TCP connect plus a SCRAM login and a new Redis client. Under a 200 call burst the agent runtime spent most of its CPU on HMAC.",
+    "fix": "One pooled engine and one Redis client per event loop. Warm code asset overhead fell from 27 ms to 3 ms p50.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 131
+  },
+  {
+    "title": "Knowledge search and memory tools built an engine per call",
+    "area": "runtime",
+    "problem": "knowledge_search, hybrid_search, connector_call, meeting_speak and the memory tools created and disposed an engine on each call, three logins per KB search, and the memory tools leaked the pool on errors.",
+    "fix": "They share engine.db_pool.shared_engine, and a runtime test fails if per-call engines come back.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 132
+  },
+  {
+    "title": "Warm code calls queued on the database under load",
+    "area": "code-runners",
+    "problem": "Each warm call read the asset row, its secrets and the sandbox settings, opened Redis, and updated the asset's last test row inline, so concurrent calls serialised on a six connection pool and one row lock.",
+    "fix": "Asset, secrets and gate results are cached for 2 s with single flight (CODE_ASSET_CACHE_SECONDS), and the last test write runs in the background at most every 5 s. Burst throughput went from 22 to 57 calls a second on one runner.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 133
+  },
+  {
+    "title": "The cluster API image still closed idle connections after 5 seconds",
+    "area": "deploy",
+    "problem": "The keep-alive fix went into apps/api/Dockerfile, but deploy.sh and deploy-azure.sh build docker/Dockerfile.api, which ran uvicorn with its 5 second default. Clients that reuse sockets saw resets, which showed up as socket hang up in specs and ReadError under load.",
+    "fix": "docker/Dockerfile.api now runs with --timeout-keep-alive 75 and takes API_WORKERS. The code runner images upgrade OS packages and pip so the hardening check passes, and decision_load.py spreads connections over enough processes to measure the server rather than the client.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 134
+  },
+  {
+    "title": "Under heavy load valid callers got 401 and 500",
+    "area": "api",
+    "problem": "At 2000 concurrent callers the capability and principal caches expired together, every request queried the db at once, the pool ran dry, and pool timeouts surfaced as 401 from the auth dependency and 500 elsewhere. The HTTP error handler also dropped Retry-After.",
+    "fix": "Principal and capability loads are single flight per user, infrastructure errors in auth return 503 with Retry-After, a pool timeout anywhere returns 503 BUSY, and exception headers are kept.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 135
+  },
+  {
+    "title": "NATS passwords were fixed strings in every cluster",
+    "area": "deploy",
+    "problem": "The chart shipped abenix-dev, coderun-dev and sys as NATS passwords, the application password sat in a ConfigMap, and queue_backend fell back to abenix-dev when NATS_PASSWORD was unset, so every Azure install had the same known credentials.",
+    "fix": "NATS_PASSWORD, NATS_SYS_PASSWORD and the code runner password are generated on install into Secrets and kept across upgrades, nats.conf reads them from the environment, and the runtime no longer has a default password.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 136
+  },
+  {
+    "title": "Expired approvals never emitted approval.resolved",
+    "area": "events",
+    "problem": "The expiry sweep updated rows in bulk without emitting the event, and an expired decision publish approval left its version in proposed.",
+    "fix": "The sweep returns the rows it expired, emits approval.resolved with status expired in the same transaction, and runs the decision hook for decision_publish approvals.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 137
+  },
+  {
+    "title": "Redelivering a dead webhook allowed one try",
+    "area": "events",
+    "problem": "Redeliver reset the status but not the attempt counter, so a replayed dead delivery failed straight back to dead after one attempt.",
+    "fix": "Redeliver resets attempts so a replay gets the full retry budget.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 138
+  },
+  {
+    "title": "Switching a subscription to webhook hid its signing secret",
+    "area": "events",
+    "problem": "Changing the target to webhook through PUT minted a signing secret that was never returned, so the receiver could not verify signatures.",
+    "fix": "PUT returns the new secret once, the same as create.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 139
   }
 ]

@@ -44,3 +44,6 @@ opentelemetry-sdk>=1.27.0
 opentelemetry-exporter-otlp-proto-grpc>=1.27.0
 # Tool credentials saved from the admin screen are AES-GCM under the cluster KEK
 cryptography>=42.0.0
+# email_sender tool, SMTP delivery
+aiosmtplib>=3.0.0
+zen-engine==2.1.2

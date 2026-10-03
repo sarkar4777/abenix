@@ -21,6 +21,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class SubscribedFeedTool(BaseTool):
     name = "subscribed_feed"
+    risk_tier = "low"
     description = (
         "Read the latest cached sample of a live feed (MQTT topic, Kafka "
         "stream, or HTTP poller). The feed itself is refreshed by a "

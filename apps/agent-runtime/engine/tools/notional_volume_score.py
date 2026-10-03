@@ -59,6 +59,7 @@ def _commodity_factor(label: str) -> tuple[float, str]:
 
 class NotionalVolumeScoreTool(BaseTool):
     name = "notional_volume_score"
+    risk_tier = "low"
     description = (
         "Pure-function KYC Indicator II tool. Takes annual contracted volume "
         "or notional in USD plus an optional commodity label and returns an "

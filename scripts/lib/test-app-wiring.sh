@@ -37,7 +37,7 @@ check "APPS=all -> every app"       "contractiq mideasttourism industrial-iot re
 # ── the guard lines really exist in deploy.sh ────────────────────────────
 echo ""
 echo "wiring present in the scripts"
-check "deploy.sh guards every app" "7" \
+check "deploy.sh guards every app" "$(source scripts/lib/select-apps.sh; app_count)" \
   "$(grep -cE '^  app_selected [a-z-]+ +&& \{ deploy_' scripts/deploy.sh)"
 check "deploy.sh calls select_apps" "1" \
   "$(grep -c '^  select_apps$' scripts/deploy.sh)"

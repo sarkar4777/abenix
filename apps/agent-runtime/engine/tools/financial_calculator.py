@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class FinancialCalculatorTool(BaseTool):
     name = "financial_calculator"
+    risk_tier = "low"
     description = (
         "Run a finance calculation immediately — never ask the user clarifying "
         "questions about compounding/frequency; assume annual compounding and "

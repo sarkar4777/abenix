@@ -105,6 +105,7 @@ async def list_pending_approvals(tenant_id: str) -> list[dict[str, Any]]:
 
 class HumanApprovalTool(BaseTool):
     name = "human_approval"
+    risk_tier = "low"
     description = (
         "Pauses execution and requests human approval before proceeding. "
         "Use this for high-risk operations like production deployments, "

@@ -13,6 +13,7 @@ class LLMCallTool(BaseTool):
     # The LLM provider keys, declared here so they sit on the admin screen.
     config_fields = PROVIDER_CONFIG_FIELDS
     name = "llm_call"
+    risk_tier = "low"
 
     @classmethod
     async def config_test(

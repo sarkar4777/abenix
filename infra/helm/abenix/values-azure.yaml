@@ -317,6 +317,22 @@ nats:
     fileStorage:
       size: 5Gi
 
+# ── Warm code runners ──────────────────────────────────────────────────────
+# deploy-azure.sh sets registry and imageTag to the ACR build. KEDA scales
+# each runner on its own load, idle runners go to zero.
+codeRunners:
+  enabled: true
+  mode: auto
+  pullPolicy: Always
+  pools:
+    - name: python-3.12
+      image: code-runner-python
+  maxReplicas: 5
+  idleSeconds: 900
+  keda:
+    enabled: true
+    prometheusUrl: "http://abenix-prometheus.abenix.svc.cluster.local:9090"
+
 # ── Shared /data PVC for multi-node AKS ────────────────────────────────────
 # Without this, api / worker / agent-runtime pods land on different nodes
 # and each see their OWN /data hostPath. Uploads / exports / code-assets

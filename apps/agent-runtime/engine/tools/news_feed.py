@@ -9,6 +9,7 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 class NewsFeedTool(BaseTool):
     name = "news_feed"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "MEDIASTACK_API_KEY",

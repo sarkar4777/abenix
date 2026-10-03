@@ -243,7 +243,20 @@ See [`02-runtime/15-v2-knowledge-enterprise.md`](../02-runtime/15-v2-knowledge-e
 |---|---|---|
 | `POST` | `/api/webhooks/inbound/{slug}` | Tenant-configurable webhook receiver |
 
-The platform also exposes outbound webhooks — see `/api/webhook-config` for the configuration surface.
+## Webhooks (outbound events)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/webhooks/catalog` | Event types a subscription can match |
+| `GET` | `/api/webhooks` | List subscriptions |
+| `POST` | `/api/webhooks` | Create a subscription |
+| `PUT` | `/api/webhooks/{webhook_id}` | Change a subscription |
+| `DELETE` | `/api/webhooks/{webhook_id}` | Delete a subscription |
+| `POST` | `/api/webhooks/{webhook_id}/test` | Send a test event |
+| `GET` | `/api/webhooks/{webhook_id}/deliveries` | Recent deliveries |
+| `POST` | `/api/webhooks/deliveries/{delivery_id}/redeliver` | Send a delivery again |
+
+Signing, retries and the event catalogue are in [02-runtime/19-outbound-events](../02-runtime/19-outbound-events.md).
 
 ---
 

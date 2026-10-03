@@ -22,6 +22,7 @@ USER_AGENT = "AgentForge issuer-rating-refresh contact@agentforge.local"
 
 class FitchConnectTool(BaseTool):
     name = "fitch_connect"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "FITCH_CONNECT_API_KEY",

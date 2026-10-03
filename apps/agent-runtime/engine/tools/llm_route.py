@@ -13,6 +13,7 @@ class LLMRouteTool(BaseTool):
     # The LLM provider keys, declared here so they sit on the admin screen.
     config_fields = PROVIDER_CONFIG_FIELDS
     name = "llm_route"
+    risk_tier = "low"
     description = (
         "Use an LLM to analyze input and route to one of N named branches. "
         "Provide a classification prompt, a list of branch names, and optional context. "

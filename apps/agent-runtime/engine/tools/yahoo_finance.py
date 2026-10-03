@@ -188,6 +188,7 @@ COMMODITY_ALIASES: dict[str, str] = {
 
 class YahooFinanceTool(BaseTool):
     name = "yahoo_finance"
+    risk_tier = "low"
     config_fields = (
         ConfigField(
             "FRED_API_KEY",

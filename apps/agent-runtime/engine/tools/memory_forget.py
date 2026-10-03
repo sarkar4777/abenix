@@ -9,6 +9,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class MemoryForgetTool(BaseTool):
     name = "memory_forget"
+    risk_tier = "medium"
     description = (
         "Delete a stored memory by key. Use this to remove outdated or "
         "incorrect information from the agent's persistent memory."
@@ -60,9 +61,11 @@ class MemoryForgetTool(BaseTool):
             import uuid as uuid_mod
 
             from sqlalchemy import delete
-            from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+            from sqlalchemy.ext.asyncio import AsyncSession
 
-            engine = create_async_engine(db_url, echo=False)
+            from engine.db_pool import shared_engine
+
+            engine = shared_engine(db_url)
 
             import sys
             from pathlib import Path
@@ -100,8 +103,6 @@ class MemoryForgetTool(BaseTool):
                     pass  # MemPalace is optional enhancement
 
                 await db.commit()
-
-            await engine.dispose()
 
             if deleted:
                 return ToolResult(content=f"Forgotten memory '{key}'.")

@@ -21,6 +21,7 @@ def _tokens(s: str) -> set[str]:
 
 class RecallTrajectoryTool(BaseTool):
     name = "recall_trajectory"
+    risk_tier = "low"
     description = (
         "Retrieve up to K past trajectories whose stored intent text overlaps the new query. "
         "Use it before planning a multi-step fan-out: if a near-identical question was "

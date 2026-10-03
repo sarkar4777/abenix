@@ -84,6 +84,7 @@ def test_list_all_serializes_each_tool():
                 "required": ["who"],
             },
             "config_fields": [],
+            "risk_tier": "low",
         }
     ]
 

@@ -44,9 +44,12 @@ async def list_live_executions(
 @router.get("/live/stream")
 async def stream_live_executions(
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """SSE stream that emits execution state changes every 2 seconds."""
     tenant_id = str(user.tenant_id)
+    # the auth lookup ran on this session, release it before an endless stream
+    await db.close()
 
     async def _generate():
         prev_snapshot = ""
@@ -181,6 +184,9 @@ async def stream_execution_events(
         return error("Execution not found", 404)
 
     from app.core.execution_bus import subscribe_events
+
+    # the stream can run for hours, it must not keep a pooled connection in a transaction
+    await db.close()
 
     async def _gen():
         async for evt in subscribe_events(str(execution_id)):
@@ -418,14 +424,22 @@ async def watch_execution(
     if result.scalar_one_or_none() is None:
         return error("Execution not found", 404)
 
+    from app.core.deps import async_session
     from app.core.execution_bus import subscribe_events
+
+    # the stream can run for hours, so each snapshot takes a short session of its own
+    await db.close()
+
+    async def _snapshot() -> dict:
+        async with async_session() as s:
+            return await _assemble_dag_snapshot(execution_id, s)
 
     async def _gen():
         # Always emit an initial snapshot so a client that connects
         # AFTER the pipeline finishes still gets the full graph and
         # can close cleanly.
         try:
-            initial = await _assemble_dag_snapshot(execution_id, db)
+            initial = await _snapshot()
             yield f"event: snapshot\ndata: {json.dumps(initial, default=str)}\n\n".encode()
             if initial.get("status") in ("completed", "failed"):
                 yield b"event: end\ndata: {}\n\n"
@@ -443,7 +457,7 @@ async def watch_execution(
                 if now - last_emit < debounce and ev not in ("done", "error"):
                     continue
                 last_emit = now
-                snap = await _assemble_dag_snapshot(execution_id, db)
+                snap = await _snapshot()
                 yield f"event: snapshot\ndata: {json.dumps(snap, default=str)}\n\n".encode()
                 if ev in ("done", "error") or snap.get("status") in (
                     "completed",

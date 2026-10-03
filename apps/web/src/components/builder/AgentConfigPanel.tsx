@@ -1,5 +1,6 @@
 'use client';
 
+import RiskTierPicker from '@/components/governance/RiskTierPicker';
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import {
   Wrench, Database, Plug, ArrowLeft, Plus, Star, Unplug,
@@ -78,6 +79,8 @@ interface AgentConfig {
   agent_type?: 'custom' | 'oob';
   // Structured-output JSON Schema enforced by post-process.
   output_schema?: string;
+  // Governance tier, see /admin/risk.
+  risk_tier?: 'low' | 'medium' | 'high' | 'critical';
   // Knowledge bindings — collection IDs the agent can read.
   knowledge_collection_ids?: string[];
   // Atlas graph ids the atlas_* tools are pinned to (model_config.atlas_graphs).
@@ -785,6 +788,13 @@ export default function AgentConfigPanel({
                 name (preferred) or a full https:// image URL.
               </p>
             </div>
+            <RiskTierPicker
+              value={config.risk_tier}
+              onChange={(risk_tier) => onChange({ risk_tier })}
+              selectedTools={selectedTools}
+              hasOutputSchema={!!(config.output_schema || '').trim()}
+              model={config.model}
+            />
           </>
         )}
 

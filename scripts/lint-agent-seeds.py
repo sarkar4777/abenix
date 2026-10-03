@@ -17,6 +17,15 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS_DIR = ROOT / "packages" / "db" / "seeds" / "agents"
+# a standalone app that loads its own agents through the SDK opts in with <app>/seeds/manifest.yaml
+APP_MANIFEST_GLOB = "*/seeds/manifest.yaml"
+
+
+def app_seed_files() -> list[Path]:
+    out: list[Path] = []
+    for manifest in sorted(ROOT.glob(APP_MANIFEST_GLOB)):
+        out.extend(sorted((manifest.parent / "agents").glob("*.yaml")))
+    return out
 
 sys.path.insert(0, str(ROOT / "packages" / "db" / "seeds"))
 
@@ -144,7 +153,7 @@ def main() -> int:
         print(f"[lint-agent-seeds] no seed dir at {SEEDS_DIR}")
         return 1
 
-    yaml_files = sorted(SEEDS_DIR.glob("*.yaml"))
+    yaml_files = sorted(SEEDS_DIR.glob("*.yaml")) + app_seed_files()
     failures: list[tuple[str, str]] = []
     for f in yaml_files:
         try:

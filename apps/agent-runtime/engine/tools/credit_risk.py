@@ -37,6 +37,7 @@ def _fmt(value: float | None, decimals: int = 4) -> float | None:
 
 class CreditRiskTool(BaseTool):
     name = "credit_risk"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "FMP_API_KEY",

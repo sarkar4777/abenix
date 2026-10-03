@@ -11,6 +11,7 @@ from engine.tools.base import BaseTool, ToolResult
 
 class JsonTransformerTool(BaseTool):
     name = "json_transformer"
+    risk_tier = "low"
     description = (
         "Transform, query, and manipulate structured JSON data. Always specify "
         "`operation` — one of: query (extract by path), filter (predicate), "

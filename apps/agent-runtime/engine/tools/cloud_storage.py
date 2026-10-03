@@ -10,6 +10,7 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 
 class CloudStorageTool(BaseTool):
     name = "cloud_storage"
+    risk_tier = "medium"
     config_fields = (
         ConfigField(
             "AWS_ACCESS_KEY_ID",

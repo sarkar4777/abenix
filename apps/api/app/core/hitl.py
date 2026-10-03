@@ -186,14 +186,27 @@ def can_approve(user: Any) -> bool:
 
 
 async def approver_denial(
-    db: AsyncSession, user: Any, requester_id: uuid.UUID | str | None
+    db: AsyncSession,
+    user: Any,
+    requester_id: uuid.UUID | str | None,
+    policy: dict[str, Any] | None = None,
 ) -> str | None:
     """Reason the caller may not sign off, or None when allowed.
 
-    Admins and creators sign off. A requester approving their own request is
-    allowed and recorded as self_approved so the audit trail shows it. Most
-    tenants here have one admin, a hard four-eyes rule would block them.
+    Without a policy, admins and creators sign off and a requester approving
+    their own request is recorded as self_approved. A policy, set from the
+    risk tier, adds separation of duties: a signing capability and, when
+    asked, no approving your own change.
     """
+    if policy:
+        from app.core.capabilities import has_capability
+
+        cap = str(policy.get("capability") or "approvals.sign")
+        if not await has_capability(db, user, cap):
+            return f"This approval needs the {cap} capability. An admin can grant it under Admin, Permissions."
+        if policy.get("exclude_requester") and is_self_approval(user, requester_id):
+            return "You requested this change, so someone else has to approve it."
+        return None
     if not can_approve(user):
         return "Only admins and creators can sign off on approvals"
     return None
