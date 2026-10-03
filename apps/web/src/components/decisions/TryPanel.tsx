@@ -15,16 +15,18 @@ const OUTCOME = {
 
 function FactField({ f, value, onChange, highlight }: { f: Fact; value: any; onChange: (v: any) => void; highlight?: boolean }) {
   const cls = `w-full bg-slate-950 border rounded-md px-2 py-1 text-sm text-white ${highlight ? 'border-amber-500/70' : 'border-slate-700'}`;
+  const a11y = { 'aria-label': f.label || f.path, 'data-testid': `try-fact-${f.path}` };
   if (f.type === 'boolean') {
     return (
-      <select value={value === undefined ? '' : String(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value === 'true')} className={cls}>
+      <select {...a11y} value={value === undefined ? '' : String(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value === 'true')} className={cls}>
         <option value="">not given</option><option value="true">true</option><option value="false">false</option>
       </select>
     );
   }
-  if (f.type === 'date') return <input type="date" value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} className={`${cls} [color-scheme:dark]`} />;
+  if (f.type === 'date') return <input {...a11y} type="date" value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} className={`${cls} [color-scheme:dark]`} />;
   return (
     <input
+      {...a11y}
       value={value === undefined ? '' : Array.isArray(value) ? value.join(', ') : String(value)}
       inputMode={f.type === 'number' ? 'decimal' : undefined}
       onChange={(e) => {

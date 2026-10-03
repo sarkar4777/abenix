@@ -887,5 +887,82 @@
       "bug"
     ],
     "number": 139
+  },
+  {
+    "title": "Reference sets could not be deleted",
+    "area": "decisions",
+    "problem": "There was no way to remove a reference set from the UI or API, so old sets piled up.",
+    "fix": "DELETE refuses with 409 naming the decisions while an active version uses the set, and the Reference sets page has Delete set with an inline confirm.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 140
+  },
+  {
+    "title": "Pipelines could not declare input parameters",
+    "area": "builder",
+    "problem": "Pipeline mode had no input editor, yet chat and the SDK playground read declared inputs, so typed pipeline inputs were impossible to set up in the UI.",
+    "fix": "A shared input variables editor appears on the pipeline overview and the agent config panel, and removing every parameter now clears them on save.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 141
+  },
+  {
+    "title": "Pipeline step JSON fields dropped keystrokes",
+    "area": "builder",
+    "problem": "Any keystroke that left a step's JSON field invalid was thrown away, so facts and arguments could not be typed.",
+    "fix": "The field keeps the typed text and shows an inline error until it parses.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 142
+  },
+  {
+    "title": "Decision keys in pipeline steps were free text",
+    "area": "builder",
+    "problem": "A decision step needed the key typed by hand with no hint of what exists, whether it is published, or which facts it needs.",
+    "fix": "The step offers a dropdown of the tenant's decisions, warns when one is not published and lists its required facts, which the decision list now returns.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 143
+  },
+  {
+    "title": "SDK playground missed agents and mishandled inputs",
+    "area": "sdk-playground",
+    "problem": "It loaded only the first 100 agents, sent the first declared input as the message and left it out of the context, and generated code always used a placeholder message.",
+    "fix": "It loads every page of agents, sends all inputs as context with a separate message box, and the Python, TypeScript and Java snippets carry exactly what was run.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 144
+  },
+  {
+    "title": "Decision risk tier could not be changed",
+    "area": "decisions",
+    "problem": "The create dialog said the tier could be changed later but no control existed.",
+    "fix": "The tier badge on a decision is a picker for users who can publish.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 145
+  },
+  {
+    "title": "web reloads after the first deployed stale code",
+    "area": "deploy",
+    "problem": "minikube image load keeps a tag it already has, so rebuilding at the same commit never reached the pod.",
+    "fix": "deploy.sh streams the image with docker save and docker load.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 146
   }
 ]

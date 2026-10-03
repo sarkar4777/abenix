@@ -115,3 +115,25 @@ def test_playground_api_url_defaults_to_local_api():
         assert playground_api_url() == "http://localhost:8000"
     with patch.dict(os.environ, {"PLAYGROUND_INTERNAL_API_URL": "http://api:8000"}):
         assert playground_api_url() == "http://api:8000"
+
+
+def test_one_shot_snippets_carry_what_was_run() -> None:
+    from app.routers.sdk_playground import AssetRef, _build_template_code
+
+    kw = {"id": "x", "slug": "freight-agent"}
+    for k, f in AssetRef.model_fields.items():
+        if k not in kw and f.is_required():
+            kw[k] = "agent"
+    asset = AssetRef(**kw)
+    ctx = {"postcode": "IV27", "weight_kg": 51, "fragile": True}
+    py = _build_template_code("python", "one_shot", asset, "Check it", ctx)
+    ts = _build_template_code("typescript", "one_shot", asset, "Check it", ctx)
+    java = _build_template_code("java", "one_shot", asset, "Check it", ctx)
+    for code in (py, ts, java):
+        assert "Check it" in code and "IV27" in code
+    assert "'weight_kg': 51" in py
+    assert '"weight_kg":51' in ts.replace(" ", "")
+    assert 'java.util.Map.entry("weight_kg", 51)' in java
+    assert 'java.util.Map.entry("fragile", true)' in java
+    bare = _build_template_code("java", "one_shot", asset, "", None)
+    assert "withContext" not in bare

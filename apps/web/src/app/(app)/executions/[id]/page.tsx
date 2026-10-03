@@ -762,7 +762,7 @@ export default function ExecutionDetailPage() {
           </h3>
           <div className="space-y-2">
             {toolCalls.map((tc, i) => (
-              <div key={i} className="space-y-1">
+              <div key={i} className="space-y-1" data-testid="tool-call" data-tool={tc.name}>
                 <div className="flex items-center gap-2 text-xs">
                   <span className="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] text-slate-400 font-mono">{i + 1}</span>
                   <span className={`font-medium ${tc.is_error ? 'text-red-400' : 'text-cyan-400'}`}>{tc.name}</span>
@@ -898,7 +898,7 @@ export default function ExecutionDetailPage() {
               const failed = st.is_error || st.status === 'failed';
               const label = st.label || st.tool || st.name || st.node_id || st.node_type || st.type || 'step';
               return (
-                <li key={i} className="flex items-start gap-3 text-xs">
+                <li key={i} className="flex items-start gap-3 text-xs" data-testid="execution-step" data-step={label}>
                   <span className="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">{i + 1}</span>
                   <div className="flex-1 min-w-0 space-y-1">
                     <div className="flex items-center gap-2">

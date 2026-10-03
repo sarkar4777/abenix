@@ -10,7 +10,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -155,6 +155,9 @@ class GenerateRequest(BaseModel):
         "custom",
     ]
     user_prompt: str = Field("", max_length=2000)
+    # what the user ran live, so the snippet reproduces it
+    message: str = Field("", max_length=4000)
+    context: dict[str, Any] = Field(default_factory=dict)
     include_comments: bool = True
     include_error_handling: bool = True
 
@@ -272,7 +275,7 @@ async def main():
     ) as forge:
         result = await forge.execute(
             "{slug}",
-            "{example_message}",
+            "{example_message}",{py_context}
         )
         print("Output:", result.output)
         print(f"Tokens: in={{result.input_tokens}}, out={{result.output_tokens}}")
@@ -489,7 +492,7 @@ const forge = new Abenix({{
 }});
 
 async function main() {{
-  const result = await forge.execute('{slug}', '{example_message}');
+  const result = await forge.execute('{slug}', '{ts_message}'{ts_context});
   console.log('Output:', result.output);
   console.log(`Cost: $${{result.cost.toFixed(4)}}`);
 }}
@@ -582,7 +585,7 @@ public class App {{
         .baseUrl(System.getenv().getOrDefault("ABENIX_BASE_URL", "http://localhost:8000"))
         .build();
 
-    ExecutionResult result = forge.execute("{slug}", "{example_message}");
+    ExecutionResult result = forge.execute("{slug}", "{example_message}"{java_context});
     System.out.println("Output: " + result.output());
     System.out.printf("Cost: $%.4f%n", result.cost());
   }}
@@ -650,7 +653,38 @@ public class App {{
 }
 
 
-def _build_template_code(sdk: str, use_case: str, asset: AssetRef) -> str:
+DEFAULT_EXAMPLE_MESSAGE = "Analyze the latest data and provide insights"
+
+
+def _java_literal(v: Any) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return f"{v}L" if abs(v) > 2**31 - 1 else str(v)
+    if isinstance(v, float):
+        return repr(v)
+    if isinstance(v, dict):
+        if not v:
+            return "java.util.Map.of()"
+        items = ", ".join(
+            f"java.util.Map.entry({_java_literal(str(k))}, {_java_literal(x)})"
+            for k, x in v.items()
+        )
+        return f"java.util.Map.ofEntries({items})"
+    if isinstance(v, (list, tuple)):
+        return f"java.util.List.of({', '.join(_java_literal(x) for x in v)})"
+    return json.dumps(str(v), ensure_ascii=True)
+
+
+def _build_template_code(
+    sdk: str,
+    use_case: str,
+    asset: AssetRef,
+    message: str = "",
+    context: dict[str, Any] | None = None,
+) -> str:
     if sdk == "python":
         templates = PYTHON_TEMPLATES
     elif sdk == "java":
@@ -658,18 +692,34 @@ def _build_template_code(sdk: str, use_case: str, asset: AssetRef) -> str:
     else:
         templates = TYPESCRIPT_TEMPLATES
     template = templates.get(use_case, templates["one_shot"])
+    msg = (message or "").strip() or DEFAULT_EXAMPLE_MESSAGE
+    quoted = json.dumps(msg, ensure_ascii=True)[1:-1]
+    ctx = context or {}
     return template.format(
         slug=asset.slug or asset.id,
         kb_id=asset.id,
-        example_message="Analyze the latest data and provide insights",
+        example_message=quoted,
+        ts_message=quoted.replace("'", "\\'"),
+        py_context=f"\n            context={ctx!r}," if ctx else "",
+        ts_context=f", {{ context: {json.dumps(ctx)} }}" if ctx else "",
+        java_context=(
+            f",\n        Abenix.ExecuteOptions.withContext({_java_literal(ctx)})"
+            if ctx
+            else ""
+        ),
     )
 
 
 def _build_system_prompt(
-    sdk: str, asset: AssetRef, asset_context: dict, use_case: str
+    sdk: str,
+    asset: AssetRef,
+    asset_context: dict,
+    use_case: str,
+    message: str = "",
+    context: dict[str, Any] | None = None,
 ) -> str:
     sdk_source = _load_sdk_source(sdk)
-    template = _build_template_code(sdk, use_case, asset)
+    template = _build_template_code(sdk, use_case, asset, message, context)
     lang = sdk
 
     return f"""You are a code generator for the Abenix SDK.
@@ -825,7 +875,9 @@ async def generate_code(
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             # Fallback: return template directly
-            code = _build_template_code(body.sdk, body.use_case, body.asset)
+            code = _build_template_code(
+                body.sdk, body.use_case, body.asset, body.message, body.context
+            )
             return success(
                 {
                     "code": code,
@@ -843,7 +895,12 @@ async def generate_code(
 
         client = _anthropic_client(api_key, sync=True)
         system_prompt = _build_system_prompt(
-            body.sdk, body.asset, asset_context, body.use_case
+            body.sdk,
+            body.asset,
+            asset_context,
+            body.use_case,
+            body.message,
+            body.context,
         )
 
         user_msg = f"Generate the code. {body.user_prompt or 'Make it production-ready with good error handling.'}"
@@ -901,7 +958,9 @@ async def generate_code(
     except Exception as e:
         logger.error("SDK code generation failed: %s", e)
         # Fallback to template
-        code = _build_template_code(body.sdk, body.use_case, body.asset)
+        code = _build_template_code(
+            body.sdk, body.use_case, body.asset, body.message, body.context
+        )
         return success(
             {
                 "code": code,

@@ -166,6 +166,9 @@ def _model_json(
             _version_summary(v) for v in vs if v.state in ("proposed", "approved")
         ],
         "latest_version": max((v.version for v in vs), default=0),
+        "required_facts": (
+            max(live, key=lambda v: v.version).required_facts or [] if live else []
+        ),
     }
 
 
@@ -1920,3 +1923,50 @@ async def update_refset(
             "note": "Published decisions keep the values they were compiled with. Save a new draft to pick up this version.",
         }
     )
+
+
+@refs_router.delete("/{key}")
+async def delete_refset(
+    key: str,
+    request: Request,
+    user: User = Depends(require_capability("decisions.author")),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    r = (
+        await db.execute(
+            select(ReferenceSet).where(
+                ReferenceSet.tenant_id == user.tenant_id, ReferenceSet.key == key
+            )
+        )
+    ).scalar_one_or_none()
+    if r is None:
+        return error(f"There is no reference set called {key}.", 404)
+    rows = (
+        await db.execute(
+            select(DecisionModel.key, DecisionVersion.reference_versions)
+            .join(DecisionVersion, DecisionVersion.model_id == DecisionModel.id)
+            .where(
+                DecisionModel.tenant_id == user.tenant_id,
+                DecisionModel.archived_at.is_(None),
+                DecisionVersion.superseded_at.is_(None),
+                DecisionVersion.state != "retired",
+            )
+        )
+    ).all()
+    users = sorted({k for k, refs in rows if key in (refs or {})})
+    if users:
+        return error(
+            f"{key} is used by {', '.join(users)}. Remove it from those rules or archive the decisions first.",
+            409,
+        )
+    await db.delete(r)
+    await log_action(
+        db,
+        user.tenant_id,
+        user.id,
+        "reference_set.deleted",
+        {"key": key},
+        request,
+    )
+    await db.commit()
+    return success({"deleted": True, "key": key})
