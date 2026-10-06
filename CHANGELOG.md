@@ -22,6 +22,7 @@
 - The builder's model chip is labelled as the model AI Validate and Build with AI use, so it is not mistaken for the agent's model.
 - The SDK playground explains a busy or unavailable AI service in plain words when it falls back to the code template, instead of showing the provider error, and no longer reports a made-up generation cost.
 - The last python-jose import, in tests/unit/test_security.py, now uses PyJWT, and the ecdsa entry in `.trivyignore` is gone since nothing installs ecdsa any more.
+- Dependabot alerts cleared in every web app: source-map-js 1.2.2 (GHSA-68fv-2mgg-jv7q), postcss-selector-parser 7.1.6 (GHSA-rj75-hqrm-r3gf) and katex 0.18 (GHSA-238p-pmpm-9mq7) through npm overrides. Tailwind's compiled CSS is byte-for-byte the same before and after in all seven apps. braces has no fixed release (GHSA-vfj7-8cjw-p6xm), is reached only through Tailwind 3's build-time globbing of our own config, and is dismissed with that reason until upstream ships a fix.
 
 ## v2.5.2 — 2026-10-03
 
