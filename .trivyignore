@@ -1,20 +1,3 @@
 # Findings Trivy should stop reporting, each with the reason it is safe here.
 # Anything in this file has been read and judged rather than waved through, and
 # a finding with an available fix does not belong in it. Prefer upgrading.
-
-# CVE-2024-23342 — python-ecdsa, the Minerva timing attack.
-#
-# No fixed version exists. The maintainers have said the pure-Python library
-# cannot be made constant-time and will not carry a fix, so there is nothing to
-# upgrade to.
-#
-# It reaches the image as a hard dependency of python-jose and is never
-# exercised. The attack is a timing side channel on ECDSA signing, and this
-# platform signs nothing with ECDSA. Access tokens use RS256
-# (`jwt_algorithm` in apps/api/app/core/config.py) and the SSO state token
-# uses HS256 (apps/api/app/routers/sso.py). Neither touches the ecdsa code
-# path.
-#
-# Revisit if `jwt_algorithm` is ever set to ES256, ES384 or ES512, at which
-# point this entry must come out and the dependency has to go.
-CVE-2024-23342
