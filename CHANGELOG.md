@@ -13,6 +13,7 @@
 - JWTs are signed and checked with PyJWT instead of python-jose, which has an unfixed advisory (CVE-2026-85394). Token format and claims are unchanged, existing sessions stay valid. The ecdsa ignore in `.pip-audit-ignore` is gone with it.
 - The pipeline engine turns text into the types a tool declares before it runs, so a string input like "33.8, 34.6" reaches a list of numbers and "36" reaches a number. Text that does not convert is passed to the tool unchanged.
 - Public commits from `publish-public.sh` are authored as sarkar4777.
+- The README quick start lists what a fresh laptop needs, gives the one minikube command with an honest first-run time, and says how to give agents a model with or without a `.env`.
 
 ### Fixed
 

@@ -261,21 +261,38 @@ flowchart LR
 <a id="quick-start"></a>
 ## ⚡ Quick start
 
-| Goal | Command | Time |
-|---|---|---|
-| **Localhost** — docker-compose for infra, then npm dev for api + web + 5 standalone apps | `bash scripts/dev-local.sh` | ~5 min first run |
-| **Production-shape on your laptop** — full Helm chart on minikube | `bash scripts/deploy.sh local` | ~10 min |
-| **Minikube + auto-port-forward** | `bash scripts/dev-minikube.sh` | ~10 min |
-| **Azure AKS** — provisions RG + ACR + AKS, builds + pushes images, helm-installs the stack, runs migrations + seeds | `bash scripts/deploy-azure.sh deploy` | ~25 min |
+### What you need first
+
+| Tool | Notes |
+|---|---|
+| Docker Desktop (or Docker Engine) | Running, with at least 12 GB of memory and 4 CPUs for it |
+| minikube | Any recent version, the script starts the cluster for you |
+| kubectl and Helm 3 | On your PATH |
+| Git and bash | On Windows use Git Bash, on macOS and Linux any terminal |
+| Disk | About 40 GB free for the images and the cluster |
+
+### One command on minikube
 
 ```bash
 git clone https://github.com/sarkar4777/abenix.git
 cd abenix
-cp .env.example .env       # fill in at least one of ANTHROPIC / OPENAI / GOOGLE
-bash scripts/dev-local.sh
+bash scripts/deploy.sh local
 ```
 
-Open http://localhost:3000 and sign in with `admin@abenix.dev` / `Admin123456`.
+That starts minikube, builds every image, installs the Helm chart, runs the migrations and seeds, and forwards the ports. The first run takes 30 to 60 minutes, mostly image builds. It asks which use-case apps to include and starts all of them if you do not answer.
+
+You do not need a `.env` to start. To give agents a model, either put at least one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_API_KEY` in `.env` (copy it from `.env.example`) before you run the command, or add a key afterwards under Admin, Tool Configuration.
+
+Then open http://localhost:3000 and sign in with `admin@abenix.dev` / `Admin123456`.
+
+### Other ways to run it
+
+| Goal | Command | Time |
+|---|---|---|
+| **Production-shape on your laptop**, full Helm chart on minikube | `bash scripts/deploy.sh local` | 30 to 60 min first run |
+| **Localhost**, docker-compose for infra, then npm dev for api, web and the standalone apps | `bash scripts/dev-local.sh` | ~5 min first run |
+| **Minikube with auto port forward** | `bash scripts/dev-minikube.sh` | 30 to 60 min first run |
+| **Azure AKS**, provisions the resource group, registry and cluster, builds and pushes images, installs the chart, runs migrations and seeds | `bash scripts/deploy-azure.sh deploy` | ~25 min |
 
 **No API key?** If you have a Claude Pro or Max subscription and are signed in
 with Claude Code on the same machine, run `bash scripts/sync-claude-subscription.sh`
