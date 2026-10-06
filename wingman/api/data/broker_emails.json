@@ -1,0 +1,37 @@
+[
+  {
+    "id": "broker-001",
+    "received_at": "2026-05-07T08:14:00Z",
+    "from": "trader@acme-energy-brokers.com",
+    "subject": "Indication: 25kt propane FOB Houston Aug-15",
+    "body": "Dear team,\n\n25kt propane FOB Houston for Aug-15 lifting, indication $610/mt vs USGC mean - 2 with quality discount. Firm by today EOD if tight. Counterparty rated A by major credit agency. Vessel TBN, owner accepts BIMCO LPG-VOY 2024.\n\nThanks,\nMartin / Acme Energy"
+  },
+  {
+    "id": "broker-002",
+    "received_at": "2026-05-07T09:02:00Z",
+    "from": "desk@hellenic-shipping-brokers.com",
+    "subject": "Bid wanted — 22kt CFR Chiba Sep-01",
+    "body": "Looking for a bid: 22kt propane CFR Chiba, Sep-01 to Sep-10 narrow window. Floating price (Saudi CP - 5). Buyer is a major Japanese utility with 30-day open credit. Subject vessel approval, would expect VLGC 84+ kcbm. Validity 24h.\n\nBest,\nDesk Hellenic"
+  },
+  {
+    "id": "broker-003",
+    "received_at": "2026-05-07T10:31:00Z",
+    "from": "ops@nordic-bunker.com",
+    "subject": "Re: Q4 quarterly slate — propane",
+    "body": "Following our call, here's the indication on the Q4 slate:\n\n  Oct lifting: 30kt USGC propane, fixed $605/mt FOB\n  Nov lifting: 30kt USGC propane, fixed $612/mt FOB\n  Dec lifting: 30kt USGC propane, formula (Mont Belvieu monthly avg + 4)\n\nFirm to next-Tuesday EOD. Same buyer for all three, need a single yes/no.\n\nKind regards,\nNordic"
+  },
+  {
+    "id": "broker-004",
+    "received_at": "2026-05-07T11:12:00Z",
+    "from": "spot@continental-petrochem.com",
+    "subject": "Spot offer — 12kt cargo Antwerp Jun-22",
+    "body": "Distressed spot offer (vessel in port, must lift):\n\n  12kt mixed C3/C4 (60/40 split) FOB Antwerp\n  Window: Jun-22 to Jun-26\n  Price: $565/mt fixed\n  Quality: C3 95.5% min, sulphur < 50ppm\n\nWe need a firm by 14:00 GMT today or we discharge to terminal storage. CIF terms negotiable for trusted counterparty.\n\nThanks,\nContinental"
+  },
+  {
+    "id": "broker-005",
+    "received_at": "2026-05-07T11:45:00Z",
+    "from": "ny@global-energy-brokers.net",
+    "subject": "URGENT: counter on USGC->FE arb",
+    "body": "Counter to your last:\n\n50kt USGC propane FOB, Sep-01 lifting, target Chiba Sep-25. Buyer offers $640/mt CFR Chiba final, freight on their account at owner-confirmed rate of $63/mt USGC->Chiba. Net to you ~$577/mt FOB equivalent. Subject Saudi CP holding above $620/mt benchmark month.\n\nFirm 30 minutes. Standby for confirmation.\n\nGEB NY"
+  }
+]

@@ -63,6 +63,8 @@ credentials.json
 
 # Uploads
 data/
+# wingman ships its demo corridors and broker emails in the image
+!wingman/api/data/
 
 # OS
 .DS_Store

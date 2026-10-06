@@ -29,6 +29,8 @@
 - `publish-public.sh` refuses to publish when any credential value from the private `.env` appears in the public copy, or when a credential variable in an example file holds something that is not an obvious placeholder.
 - The builder's runtime and scaling fields were saved but never enforced. Daily budget, rate limit, runtime pool, replicas and concurrency now reach the agent columns that routing, rate limiting and the budget gate read, with the Scaling page's checks. Pool, replicas and concurrency apply only for admins and show read only to others. Clearing the budget removes the cap, and the builder shows the stored values.
 - A decision returned for changes now shows the reviewer's reason on the decision page. The note was saved but never displayed, and an edit or Check erased it. It now stays until the version is proposed again.
+- A fresh clone could not finish `bash scripts/deploy.sh local`: the wingman-api image copies `wingman/api/data/`, which a blanket `data/` rule in `.gitignore` kept out of the repo. The demo corridors and broker emails are now tracked, and CI runs `scripts/check-docker-context.py`, which fails when any Dockerfile copies a file git does not track.
+- `deploy.sh` stops with the build's own error when an image fails to build. Most app images, the code runners, pgvector and `reload` piped the build into `tail`, which hid the failure and printed "built".
 
 ## v2.5.2 — 2026-10-03
 

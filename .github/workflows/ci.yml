@@ -91,6 +91,9 @@ jobs:
       # so the CVE patches went to one set and the images actually serving
       # traffic kept every finding. Nothing compared them until this ran.
       - run: python scripts/check-dockerfile-hardening.py
+      # A COPY of a gitignored path builds on the author's machine and fails on
+      # every fresh clone, which is how wingman/api/data broke a first install.
+      - run: python scripts/check-docker-context.py
       # Every value a tool needs is declared on the tool, so the admin screen,
       # the catalogue badges and the Integrations page can be generated from it.
       # A tool that reads the environment directly is invisible to all three.

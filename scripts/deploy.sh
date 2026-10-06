@@ -230,9 +230,9 @@ ensure_infra_images() {
       # Every COPY in that Dockerfile is --from another stage, so the build
       # context is unused — point it at the small infra/docker dir rather
       # than shipping the whole repo to the daemon.
-      if docker build -t "${pgv}" \
+      if (set -o pipefail; docker build -t "${pgv}" \
           -f "${ROOT_DIR}/infra/docker/Dockerfile.postgres-pgvector" \
-          "${ROOT_DIR}/infra/docker" 2>&1 | tail -3; then
+          "${ROOT_DIR}/infra/docker" 2>&1 | tail -3); then
         ok "postgresql-pgvector built"
       else
         warn "postgresql-pgvector build failed — KB collections cannot use pgvector locally"
@@ -323,9 +323,8 @@ build_code_runner_images() {
     lang="${df##*.}"
     img="${registry}/code-runner-${lang}"
     log "Building code-runner-${lang}..."
-    docker build -t "${img}:${IMAGE_TAG}" -t "${img}:latest" \
-      -f "${df}" "${ROOT_DIR}/apps/code-runner" 2>&1 | tail -3
-    ok "code-runner-${lang}: built"
+    _build_app_image "code-runner-${lang}" "${df}" "${ROOT_DIR}/apps/code-runner" \
+      "${img}:${IMAGE_TAG}" "${img}:latest" || return 1
     if [ "${push}" = "true" ]; then
       docker push "${img}:${IMAGE_TAG}" 2>&1 | tail -1
       ok "code-runner-${lang}: pushed"
@@ -341,6 +340,24 @@ build_code_runner_images() {
 _should_build_app() { # _should_build_app <registry-key>
   [ -n "${APP_SELECTION_DONE:-}" ] || return 0
   app_selected "$1"
+}
+
+# Builds one app image and stops the deploy with the build's own error when it
+# fails. A pipe into tail used to swallow the failure and print "built" anyway.
+_build_app_image() { # _build_app_image <name> <dockerfile> <context> <tag> [<tag> ...]
+  local name="$1" df="$2" ctx="$3"
+  shift 3
+  local tags=() t log
+  for t in "$@"; do tags+=(-t "${t}"); done
+  log="$(mktemp)"
+  if ! docker build "${tags[@]}" -f "${df}" "${ctx}" >"${log}" 2>&1; then
+    err "${name}: build FAILED — last 25 lines:"
+    tail -25 "${log}" | sed 's/^/      /'
+    rm -f "${log}"
+    return 1
+  fi
+  rm -f "${log}"
+  ok "${name}: built"
 }
 
 build_images() {
@@ -384,9 +401,8 @@ build_images() {
       [ ! -f "${ciq_dockerfile}" ] && { warn "No Dockerfile for contractiq/${ciq}"; continue; }
 
       log "Building contractiq-${ciq}..."
-      docker build -t "${ciq_image}" -t "${registry}/contractiq-${ciq}:latest" \
-        -f "${ciq_dockerfile}" "${ROOT_DIR}/contractiq/${ciq}" 2>&1 | tail -3
-      ok "contractiq-${ciq}: built"
+      _build_app_image "contractiq-${ciq}" "${ciq_dockerfile}" "${ROOT_DIR}/contractiq/${ciq}" \
+        "${ciq_image}" "${registry}/contractiq-${ciq}:latest" || return 1
 
       if [ "${push}" = "true" ]; then
         docker push "${ciq_image}" 2>&1 | tail -1
@@ -402,9 +418,8 @@ build_images() {
       local df="${ROOT_DIR}/industrial-iot/${part}/Dockerfile"
       [ ! -f "${df}" ] && { warn "No Dockerfile for industrial-iot/${part}"; continue; }
       log "Building industrial-iot-${part}..."
-      docker build -t "${img}" -t "${registry}/industrial-iot-${part}:latest" \
-        -f "${df}" "${ROOT_DIR}/industrial-iot/${part}" 2>&1 | tail -3
-      ok "industrial-iot-${part}: built"
+      _build_app_image "industrial-iot-${part}" "${df}" "${ROOT_DIR}/industrial-iot/${part}" \
+        "${img}" "${registry}/industrial-iot-${part}:latest" || return 1
       if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
     done
   fi
@@ -417,9 +432,8 @@ build_images() {
       local df="${ROOT_DIR}/resolveai/${part}/Dockerfile"
       [ ! -f "${df}" ] && { warn "No Dockerfile for resolveai/${part}"; continue; }
       log "Building resolveai-${part}..."
-      docker build -t "${img}" -t "${registry}/resolveai-${part}:latest" \
-        -f "${df}" "${ROOT_DIR}/resolveai/${part}" 2>&1 | tail -3
-      ok "resolveai-${part}: built"
+      _build_app_image "resolveai-${part}" "${df}" "${ROOT_DIR}/resolveai/${part}" \
+        "${img}" "${registry}/resolveai-${part}:latest" || return 1
       if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
     done
   fi
@@ -432,9 +446,8 @@ build_images() {
       local pv_df="${ROOT_DIR}/pharmavigil/${part}/Dockerfile"
       [ ! -f "${pv_df}" ] && { warn "No Dockerfile for pharmavigil/${part}"; continue; }
       log "Building pharmavigil-${part}..."
-      docker build -t "${pv_img}" -t "${registry}/pharmavigil-${part}:latest" \
-        -f "${pv_df}" "${ROOT_DIR}/pharmavigil/${part}" 2>&1 | tail -3
-      ok "pharmavigil-${part}: built"
+      _build_app_image "pharmavigil-${part}" "${pv_df}" "${ROOT_DIR}/pharmavigil/${part}" \
+        "${pv_img}" "${registry}/pharmavigil-${part}:latest" || return 1
       if [ "${push}" = "true" ]; then docker push "${pv_img}" 2>&1 | tail -1; fi
     done
   fi
@@ -487,9 +500,8 @@ build_images() {
       warn "No Dockerfile for claimsiq"
     else
       log "Building claimsiq..."
-      docker build -t "${img}" -t "${registry}/claimsiq:latest" \
-        -f "${df}" "${ROOT_DIR}/claimsiq" 2>&1 | tail -3
-      ok "claimsiq: built"
+      _build_app_image "claimsiq" "${df}" "${ROOT_DIR}/claimsiq" \
+        "${img}" "${registry}/claimsiq:latest" || return 1
       if [ "${push}" = "true" ]; then docker push "${img}" 2>&1 | tail -1; fi
     fi
   fi
@@ -2059,9 +2071,8 @@ deploy_reload() {
       exit 1
     fi
     log "Building ${svc}..."
-    docker build -t "${registry}/${svc}:${IMAGE_TAG}" -t "${registry}/${svc}:latest" \
-      -f "${dockerfile}" "${ctx}" 2>&1 | tail -3
-    ok "${svc}: built"
+    _build_app_image "${svc}" "${dockerfile}" "${ctx}" \
+      "${registry}/${svc}:${IMAGE_TAG}" "${registry}/${svc}:latest" || exit 1
     step "Restarting ${svc}"
     kubectl -n "${NAMESPACE}" rollout restart "deploy/${svc}"
     rollout_or_explain "${svc}" "deploy/${svc}" || return 1
