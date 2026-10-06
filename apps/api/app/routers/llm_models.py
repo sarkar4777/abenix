@@ -121,6 +121,18 @@ async def _probe_providers(db: AsyncSession) -> dict[str, dict[str, Any]]:
     # The subscription token lives under its own settings key, not the
     # `provider.<name>.api_key` convention the API-key providers use.
     sub_token = ""
+    sub_enabled: str | None = None
+    try:
+        sub_enabled = (
+            await db.execute(
+                text(
+                    "SELECT value FROM platform_settings "
+                    "WHERE key = 'llm.subscription.enabled'"
+                )
+            )
+        ).scalar_one_or_none()
+    except Exception as exc:
+        logger.debug("subscription switch probe skipped: %s", exc)
     try:
         sub_token = str(
             (
@@ -160,7 +172,15 @@ async def _probe_providers(db: AsyncSession) -> dict[str, dict[str, Any]]:
                 "",
             )
             missing_reason = f"{chosen_env} not set"
-        if _is_real_key(env_val) or _is_real_key(db_val):
+        usable = _is_real_key(env_val) or _is_real_key(db_val)
+        # same rule as the runtime: a stored switch wins, with none a token means on
+        if provider == "claude_subscription" and usable and sub_enabled is not None:
+            if str(sub_enabled).strip().lower() not in _TRUTHY:
+                usable = False
+                missing_reason = (
+                    "subscription mode is switched off in Admin → LLM Settings"
+                )
+        if usable:
             result[provider] = {"configured": True, "reason": None}
         else:
             result[provider] = {

@@ -45,6 +45,7 @@
 - `deploy.sh forwards` warns when the web port it forwards is not one the API accepts, and gives the command that fixes it. Moving the web forward to another port left sign in failing with only "Connection failed".
 - The status bar at the bottom of every page showed made-up numbers: a git branch, "2 workers", "0 processing" and "247 completed" were fixed text. It now shows whether the API answers, runs in progress and runs today from the platform, and failures today when there are any.
 - The no-model banner clears within about 40 seconds of a key or subscription being added, and at once when the user comes back to the tab. The provider check was cached for a minute and the banner rechecked once a minute.
+- A Claude subscription token with subscription mode switched off no longer counts as a connected model. The provider check now follows the runtime's rule, so the no-model banner and the model picker match what a run can actually use.
 
 ## v2.5.2 — 2026-10-03
 
