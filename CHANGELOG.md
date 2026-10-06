@@ -34,6 +34,9 @@
 - `deploy.sh` stops with the build's own error when an image fails to build. Most app images, the code runners, pgvector and `reload` piped the build into `tail`, which hid the failure and printed "built".
 - Installs from the public repo never started: the publish step excluded `secrets.*`, which also dropped the Helm chart's `templates/secrets.yaml`, so `abenix-secrets` was never created and Postgres, Redis, NATS and Neo4j waited for it forever. The template is published again, and the publish now fails when any tracked file is missing from the public copy without being on an explicit private list.
 - `templates/secrets.yaml` is tracked in the public repo. A `secrets.*` rule in `.gitignore` kept `git add` from committing it even once it was copied, and the publish completeness check now also fails on files the public `.gitignore` would hide.
+- `deploy.sh local` exits with an error and says what is wrong when Postgres never answers or no API pod is ready to seed. It used to warn, skip creating the tables and the admin account, and still report success.
+- The deploy summary shows how to sign in and how to give agents a model.
+- `FRESH=true` and `destroy` delete only the current minikube profile. They ran `minikube delete --purge`, which removes every profile and the minikube cache on the machine.
 
 ## v2.5.2 — 2026-10-03
 

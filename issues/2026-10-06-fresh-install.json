@@ -1,0 +1,13 @@
+[
+  {
+    "title": "Installs from the public repo never started: the chart's secrets.yaml was missing",
+    "area": "Install",
+    "problem": "On a fresh clone, bash scripts/deploy.sh local deployed the Helm release, but Postgres, Redis, NATS, Neo4j and the agent runtime stayed in CreateContainerConfigError with 'secret abenix-secrets not found'. The publish step excluded secrets.* and a secrets.* rule in .gitignore kept git from committing it, so infra/helm/abenix/templates/secrets.yaml never reached the public repo. The deploy then skipped the schema and seeding with only warnings.",
+    "fix": "templates/secrets.yaml is published and tracked again (it holds no values, only the template). The publish now fails when any tracked file is missing from the public copy or hidden by its .gitignore, unless it is on an explicit private list. Fixed in ffd770b.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 196
+  }
+]

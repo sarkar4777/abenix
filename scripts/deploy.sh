@@ -735,6 +735,10 @@ helm_deps() {
   ok "Helm dependencies ready"
 }
 
+# Problems that leave no usable install. Recorded as they happen so the rest of
+# the deploy still runs, then reported and turned into a failed exit at the end.
+CORE_FAILURES=()
+
 # ── Wait for pods ────────────────────────────────────────────────────────────
 wait_for_pods() {
   local timeout="${1:-300}"
@@ -874,10 +878,12 @@ run_migrations() {
       ok "Database ready"
     else
       warn "Could not reach Postgres in ${pg_pod} — schema steps below will be skipped"
+      CORE_FAILURES+=("Postgres in ${pg_pod} did not answer, so no tables were created")
       return 0
     fi
   else
     warn "No Postgres pod found — skipping schema steps"
+    CORE_FAILURES+=("No Postgres pod was found, so no tables were created")
     return 0
   fi
 
@@ -960,6 +966,7 @@ seed_agents() {
 
   if [ -z "${api_pod}" ]; then
     warn "No ready API pod found — skipping seeding"
+    CORE_FAILURES+=("No API pod became ready, so the admin account and agents were not seeded")
     return
   fi
 
@@ -1530,7 +1537,7 @@ deploy_local() {
   # Force fresh if requested
   if [ "${FRESH}" = "true" ]; then
     log "FRESH=true — destroying existing minikube..."
-    minikube delete --purge 2>/dev/null || true
+    minikube delete 2>/dev/null || true
     log "Waiting for Docker to recover after minikube purge..."
     sleep 5
     wait_for_docker
@@ -1639,12 +1646,26 @@ deploy_local() {
   fi
 
 
+  if [ "${#CORE_FAILURES[@]}" -gt 0 ]; then
+    echo ""
+    err "The deploy finished but Abenix is not usable:"
+    local f
+    for f in "${CORE_FAILURES[@]}"; do err "  - ${f}"; done
+    err "See what is not running with:  kubectl get pods -n ${NAMESPACE}"
+    err "and why with:                  kubectl describe pod -n ${NAMESPACE} <pod>"
+    err "Then run the same command again: bash scripts/deploy.sh local"
+    exit 1
+  fi
+
+
   echo ""
   echo -e "${GREEN}================================================================${NC}"
   echo -e "${GREEN}  Abenix + ContractIQ on minikube${NC}"
   echo -e "${GREEN}================================================================${NC}"
   echo ""
   echo -e "  ${CYAN}Abenix Web${NC}    http://localhost:${WEB_PORT}"
+  echo -e "  ${CYAN}Sign in${NC}           admin@abenix.dev / Admin123456"
+  echo -e "  ${CYAN}AI model${NC}          set a key under Admin, Tool Configuration, or run bash scripts/sync-claude-subscription.sh"
   echo -e "  ${CYAN}ContractIQ Web${NC}    http://localhost:3001"
   echo -e "  ${CYAN}Mideast Tourism${NC}  http://localhost:3002"
   echo -e "  ${CYAN}Industrial IoT${NC}   http://localhost:3003"
@@ -1682,7 +1703,7 @@ deploy_local_runtime() {
 
   if [ "${FRESH}" = "true" ]; then
     log "FRESH=true — destroying existing minikube..."
-    minikube delete --purge 2>/dev/null || true
+    minikube delete 2>/dev/null || true
     log "Waiting for Docker to recover after minikube purge..."
     sleep 5
     wait_for_docker
@@ -1856,7 +1877,7 @@ deploy_destroy() {
   echo ""
   read -p "  Also delete minikube cluster? (y/N): " -r
   if [[ $REPLY =~ ^[Yy]$ ]]; then
-    minikube delete --purge 2>/dev/null || true
+    minikube delete 2>/dev/null || true
     ok "Minikube deleted"
   fi
 
