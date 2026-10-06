@@ -81,6 +81,8 @@ The whole-value vs embedded distinction matters. **`arguments.payload: "{{plan.a
 
 A step can be named by its id or by its label. The builder gives steps generated ids like `step_1790931980212_b8m3`, so a step labelled `score` is reached with `{{score.response}}`. Labels are lowercased and anything that is not a letter, digit or underscore becomes `_`, so `Exposure Check` is `{{exposure_check.response}}`. A label only works when it is unique in the pipeline, and an id always wins over a label with the same text. The validator applies the same rule, so an unknown name is still an error.
 
+Before a tool runs, the engine turns text into the types the tool declares, one level deep. Pipeline inputs and many step outputs arrive as text, so `"36"` reaching a `number` argument becomes `36`, `"6"` reaching an `integer` becomes `6`, `"true"` becomes `true`, a JSON object in text becomes an object, and `"33.8, 34.6, 35.1"` or `"[33.8, 34.6]"` reaching a list of numbers becomes `[33.8, 34.6, 35.1]`. Text that does not convert cleanly, like `"front month"` for a number or `"6.5"` for an integer, is passed through unchanged so the tool reports it. This is what lets a string input such as `gas_closes` feed `realized_vol_calc.prices` directly.
+
 If a template references a node that has not run (skipped by a condition, or upstream failed), the value resolves to the literal string `[not available]`. Downstream tools see a string, not `None`. This is intentional — it surfaces the gap as a visible value the LLM can reason about rather than failing silently with a null.
 
 ---

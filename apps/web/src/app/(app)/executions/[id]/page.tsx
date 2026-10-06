@@ -925,7 +925,12 @@ export default function ExecutionDetailPage() {
                       <DecisionRunCard record={st.metadata.decision_record} args={st.input && typeof st.input === 'object' ? (st.input as Record<string, unknown>) : undefined} />
                     )}
                     {st.input !== undefined && <DataPanel title="Input" data={st.input} isJson />}
-                    {(st.output_preview || st.output !== undefined) && <DataPanel title="Output" data={st.output_preview ?? st.output} isJson={st.output_preview === undefined} />}
+                    {(() => {
+                      // the step keeps a 500 character preview, the node result keeps the whole output
+                      const full = st.node_id ? nodeResults.find((n) => n?.node_id === st.node_id)?.output : undefined;
+                      if (full !== undefined && full !== null) return <DataPanel title="Output" data={full} isJson />;
+                      return (st.output_preview || st.output !== undefined) && <DataPanel title="Output" data={st.output_preview ?? st.output} isJson={st.output_preview === undefined} />;
+                    })()}
                     {st.error && <p className="text-[10px] text-red-300">{st.error}</p>}
                   </div>
                 </li>

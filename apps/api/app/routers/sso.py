@@ -38,7 +38,7 @@ from app.core.security import (
     create_refresh_token,
     verify_token,
 )
-from jose import jwt
+import jwt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
 

@@ -10,7 +10,7 @@ import httpx
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwt
+import jwt
 
 from engine.tools import invoke_agent as ia
 from engine.tools.invoke_agent import InvokeAgentTool, mint_user_token

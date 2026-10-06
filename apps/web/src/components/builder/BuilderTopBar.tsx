@@ -302,6 +302,7 @@ export default function BuilderTopBar({
           title="Model used by AI Validate + AI Builder previews. Change it in Admin → Models."
         >
           <Cpu className="w-3 h-3 text-cyan-400" />
+          <span className="font-sans text-slate-500">AI checks</span>
           {validationModel}
         </span>
         <input

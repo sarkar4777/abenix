@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.5.3 — 2026-10-06
+
+### Added
+- A pipeline's `code_asset` step picks the asset from a list of ready assets and shows the fields the code reads, the same assets the agent builder offers.
+- Pipelines get a description under Pipeline Settings, shown on their chat page and in the agent list.
+
+### Changed
+- JWTs are signed and checked with PyJWT instead of python-jose, which has an unfixed advisory (CVE-2026-85394). Token format and claims are unchanged, existing sessions stay valid. The ecdsa ignore in `.pip-audit-ignore` is gone with it.
+- The pipeline engine turns text into the types a tool declares before it runs, so a string input like "33.8, 34.6" reaches a list of numbers and "36" reaches a number. Text that does not convert is passed to the tool unchanged.
+- Public commits from `publish-public.sh` are authored as sarkar4777.
+
+### Fixed
+- Number fields in a pipeline step take a reference like {{input.gas_price}} and list fields take one reference to a whole upstream list. Before, references could not be typed into numbers and lists were always split into text.
+- The builder's live check and Run pipeline now send step labels, so `{{desk.result}}` is known before the pipeline is saved. It was flagged as an unknown node until the first save. The Available from upstream hint inserts the step's label when it is unique.
+- The Flight Recorder shows a pipeline step's whole output, not a 500 character preview.
+- The agent card on the builder canvas counts every tool added or removed. It used to stay at the count from when the agent was loaded.
+- The builder's model chip is labelled as the model AI Validate and Build with AI use, so it is not mistaken for the agent's model.
+- The SDK playground explains a busy or unavailable AI service in plain words when it falls back to the code template, instead of showing the provider error, and no longer reports a made-up generation cost.
+
 ## v2.5.2 — 2026-10-03
 
 ### Added

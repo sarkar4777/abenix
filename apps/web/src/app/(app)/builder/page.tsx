@@ -576,6 +576,17 @@ export default function BuilderPage() {
     [setNodes, setEdges, deleteNode],
   );
 
+  // the agent card counts what is on the canvas, so it follows every add and remove
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === 'agent' && n.data?.toolCount !== selectedTools.length
+          ? { ...n, data: { ...n.data, toolCount: selectedTools.length } }
+          : n,
+      ),
+    );
+  }, [selectedTools, setNodes]);
+
   const addTools = useCallback(
     (toolIds: string[]) => {
       toolIds.filter((id) => !selectedTools.includes(id)).forEach((id) => toggleTool(id));
@@ -1245,6 +1256,8 @@ export default function BuilderPage() {
             setShowExecutionViewer={setShowExecutionViewer}
             inputVariables={(config.input_variables || []) as PipelineInputVariable[]}
             onInputVariablesChange={(vars) => updateConfig({ input_variables: vars })}
+            description={config.description || ''}
+            onDescriptionChange={(v) => updateConfig({ description: v })}
           />
         )}
       </div>
@@ -1259,11 +1272,15 @@ function PipelineModeContent({
   setShowExecutionViewer,
   inputVariables,
   onInputVariablesChange,
+  description,
+  onDescriptionChange,
 }: {
   showExecutionViewer: boolean;
   setShowExecutionViewer: (v: boolean) => void;
   inputVariables: PipelineInputVariable[];
   onInputVariablesChange: (vars: PipelineInputVariable[]) => void;
+  description: string;
+  onDescriptionChange: (v: string) => void;
 }) {
   const pipelineStore = usePipelineStore();
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
@@ -1522,6 +1539,8 @@ B: {{${b}.response}}`);
         onClose={() => pipelineStore.setSelectedStep(null)}
         inputVariables={inputVariables}
         onInputVariablesChange={onInputVariablesChange}
+        description={description}
+        onDescriptionChange={onDescriptionChange}
       />
     </>
   );

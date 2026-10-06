@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deserializeConfig, serializeConfig, validatePipeline } from '@/components/builder/pipeline/pipelineUtils';
+import { deserializeConfig, serializeConfig, serializeForExecution, stepRefName, validatePipeline } from '@/components/builder/pipeline/pipelineUtils';
 
 const config: any = {
   nodes: [
@@ -32,5 +32,25 @@ describe('agent nodes in the pipeline builder', () => {
     const { steps } = deserializeConfig(config) as any;
     const result: any = validatePipeline(steps, []);
     expect((result.errors || []).filter((e: any) => e.node_id === 'planner')).toEqual([]);
+  });
+});
+
+describe('step labels in templates', () => {
+  const step = (id: string, label: string) =>
+    ({ id, toolName: 'llm_call', label, arguments: {}, dependsOn: [], inputMappings: {}, maxRetries: 0, retryDelayMs: 0, onError: 'stop' }) as any;
+
+  it('sends each label so the validator knows {{label.field}}', () => {
+    const nodes = serializeForExecution([step('step_1_ab', 'desk'), step('step_2_cd', '')]);
+    expect(nodes[0].label).toBe('desk');
+    expect(nodes[1].label).toBeUndefined();
+  });
+
+  it('names a step by its label when unique, by its id otherwise', () => {
+    const a = step('step_1_ab', 'Exposure Check');
+    const b = step('step_2_cd', 'desk');
+    const c = step('step_3_ef', 'desk');
+    expect(stepRefName(a, [a, b])).toBe('exposure_check');
+    expect(stepRefName(b, [a, b, c])).toBe('step_2_cd');
+    expect(stepRefName(step('step_4', ''), [a])).toBe('step_4');
   });
 });

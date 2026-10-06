@@ -14,7 +14,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import type { PipelineStep, PipelineCondition, SwitchConfig } from './pipelineUtils';
-import { validatePipeline, isValidConnection } from './pipelineUtils';
+import { validatePipeline, isValidConnection, stepRefName } from './pipelineUtils';
 import { apiFetch } from '@/lib/api-client';
 import { usePipelineStore, type ValidationError } from './usePipelineStore';
 import { TOOL_DOCS, type ToolParam } from '@/lib/tool-docs';
@@ -31,6 +31,8 @@ interface StepConfigPanelProps {
   onClose: () => void;
   inputVariables?: InputVariable[];
   onInputVariablesChange?: (vars: InputVariable[]) => void;
+  description?: string;
+  onDescriptionChange?: (v: string) => void;
 }
 
 // Constants
@@ -195,11 +197,15 @@ function PipelineOverview({
   allSteps,
   inputVariables,
   onInputVariablesChange,
+  description,
+  onDescriptionChange,
 }: {
   allSteps: PipelineStep[];
   onClose: () => void;
   inputVariables?: InputVariable[];
   onInputVariablesChange?: (vars: InputVariable[]) => void;
+  description?: string;
+  onDescriptionChange?: (v: string) => void;
 }) {
   const validation = validatePipeline(allSteps);
 
@@ -220,6 +226,22 @@ function PipelineOverview({
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {onDescriptionChange && (
+          <div>
+            <label htmlFor="pipeline-description" className="block text-xs text-slate-400 mb-1.5">Description</label>
+            <textarea
+              id="pipeline-description"
+              data-testid="pipeline-description"
+              value={description || ''}
+              onChange={(e) => onDescriptionChange(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="What this pipeline does and who it is for. Shown on its chat page and in the agent list."
+              className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white resize-y focus:border-cyan-500 focus:outline-none"
+            />
+          </div>
+        )}
+
         {/* Summary */}
         <div>
           <label className="block text-xs text-slate-400 mb-1.5">Total Steps</label>
@@ -480,6 +502,137 @@ function isLongTextField(param: ToolParam): boolean {
   return longNames.some((n) => param.name.toLowerCase().includes(n));
 }
 
+const WHOLE_REF = /^\{\{\s*[\w.]+\s*\}\}$/;
+
+function NumberOrRefField({
+  id,
+  integer,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  integer: boolean;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(() => (value === undefined || value === null ? '' : String(value)));
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <>
+      <input
+        id={id}
+        type="text"
+        inputMode="decimal"
+        value={text}
+        placeholder={placeholder}
+        aria-invalid={!!err}
+        onChange={(e) => {
+          const t = e.target.value;
+          setText(t);
+          const v = t.trim();
+          if (!v) {
+            setErr(null);
+            onChange(undefined);
+          } else if (v.includes('{{')) {
+            setErr(null);
+            onChange(v);
+          } else if (/^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(v) && (!integer || Number.isInteger(Number(v)))) {
+            setErr(null);
+            onChange(Number(v));
+          } else {
+            setErr(integer ? 'Enter a whole number, or a reference like {{input.months}}.' : 'Enter a number, or a reference like {{input.price}}.');
+          }
+        }}
+        className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-sm text-white font-mono focus:border-cyan-500 focus:outline-none ${err ? 'border-red-500/60' : 'border-slate-700'}`}
+      />
+      {err ? (
+        <p className="text-[10px] text-red-400 mt-1" role="alert" data-testid={`${id}-error`}>{err}</p>
+      ) : (
+        <TemplatePreview value={text} />
+      )}
+    </>
+  );
+}
+
+function ArrayOrRefField({
+  id,
+  itemType,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  itemType?: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  placeholder?: string;
+}) {
+  const numeric = itemType === 'number' || itemType === 'integer';
+  const [text, setText] = useState(() =>
+    Array.isArray(value) ? value.join(', ') : value === undefined || value === null ? '' : String(value),
+  );
+  const [err, setErr] = useState<string | null>(null);
+  const items = Array.isArray(value) ? value : [];
+  return (
+    <div>
+      <input
+        id={id}
+        type="text"
+        value={text}
+        placeholder={placeholder}
+        aria-invalid={!!err}
+        onChange={(e) => {
+          const t = e.target.value;
+          setText(t);
+          const v = t.trim();
+          if (!v) {
+            setErr(null);
+            onChange(undefined);
+            return;
+          }
+          // a single reference passes the whole upstream list through
+          if (WHOLE_REF.test(v)) {
+            setErr(null);
+            onChange(v);
+            return;
+          }
+          const parts = v.split(',').map((x) => x.trim()).filter(Boolean);
+          if (!numeric) {
+            setErr(null);
+            onChange(parts);
+            return;
+          }
+          const bad = parts.filter((x) => !x.includes('{{') && Number.isNaN(Number(x)));
+          if (bad.length) {
+            setErr(`These are not numbers: ${bad.slice(0, 3).join(', ')}. Use numbers separated by commas, or one reference like {{input.prices}}.`);
+            return;
+          }
+          setErr(null);
+          onChange(parts.map((x) => (x.includes('{{') ? x : Number(x))));
+        }}
+        className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-sm text-white font-mono focus:border-cyan-500 focus:outline-none ${err ? 'border-red-500/60' : 'border-slate-700'}`}
+      />
+      {err ? (
+        <p className="text-[10px] text-red-400 mt-1" role="alert" data-testid={`${id}-error`}>{err}</p>
+      ) : typeof value === 'string' ? (
+        <TemplatePreview value={value} />
+      ) : (
+        items.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {items.map((item, i) => (
+              <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400 border border-slate-700/50 font-mono">
+                {String(item)}
+              </span>
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 function JsonObjectField({
   id,
   value,
@@ -606,6 +759,78 @@ function DecisionKeyField({
   );
 }
 
+interface StepCodeAsset {
+  id: string;
+  name: string;
+  status: string;
+  detected_language?: string;
+  input_schema?: { properties?: Record<string, unknown>; required?: string[] } | null;
+}
+
+function CodeAssetField({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  const [rows, setRows] = useState<StepCodeAsset[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<StepCodeAsset[]>('/api/code-assets', { silent: true, throwOnError: false }).then((r) => {
+      if (cancelled) return;
+      if (r.data) setRows(r.data);
+      else setFailed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const picked = (rows || []).find((a) => a.id === value || a.name === value);
+  if (failed || value.includes('{{')) {
+    return (
+      <input
+        id={id}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="asset id or name"
+        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:border-cyan-500 focus:outline-none"
+      />
+    );
+  }
+  const props = Object.keys(picked?.input_schema?.properties || {});
+  const required = new Set(picked?.input_schema?.required || []);
+  return (
+    <>
+      <select
+        id={id}
+        value={picked ? picked.id : value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={rows === null}
+        data-testid="step-code-asset-select"
+        className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none"
+      >
+        <option value="">{rows === null ? 'Loading code assets…' : rows.length ? 'Pick a code asset…' : 'No code assets yet'}</option>
+        {value && !picked && rows !== null && <option value={value}>{value} (not found)</option>}
+        {(rows || []).map((a) => (
+          <option key={a.id} value={a.id} disabled={a.status !== 'ready' && a.id !== value}>
+            {a.name}
+            {a.detected_language ? ` · ${a.detected_language}` : ''}
+            {a.status !== 'ready' ? ` · ${a.status}` : ''}
+          </option>
+        ))}
+      </select>
+      {rows !== null && rows.length === 0 && (
+        <p className="text-[10px] text-slate-500 mt-1">Upload one on the <a href="/code-runner" className="text-cyan-400 hover:underline">Code Runner</a> page.</p>
+      )}
+      {picked && picked.status !== 'ready' && (
+        <p className="text-[10px] text-amber-400 mt-1">This asset is {picked.status}, so the step will fail until it is ready.</p>
+      )}
+      {props.length > 0 && (
+        <p className="text-[10px] text-slate-500 mt-1" data-testid="step-code-asset-fields">
+          Input fields: {props.map((k) => (required.has(k) ? `${k}*` : k)).join(', ')}
+        </p>
+      )}
+    </>
+  );
+}
+
 function SchemaArgumentsForm({
   toolName,
   args,
@@ -670,6 +895,9 @@ function SchemaArgumentsForm({
             {/* decision key -> pick from the tenant's decisions */}
             {toolName.startsWith('decision_') && param.name === 'decision' ? (
               <DecisionKeyField id={fieldId} value={String(value ?? '')} onChange={(v) => updateField(param.name, v)} />
+            ) : /* code asset -> pick from the tenant's assets */
+            toolName === 'code_asset' && param.name === 'code_asset_id' ? (
+              <CodeAssetField id={fieldId} value={String(value ?? '')} onChange={(v) => updateField(param.name, v)} />
             ) : /* ENUM -> Dropdown */
             param.enum ? (
               <select
@@ -729,24 +957,20 @@ function SchemaArgumentsForm({
                   {String(value ?? param.default ?? param.minimum)}
                 </span>
               </div>
-            ) : /* INTEGER/NUMBER without range -> Number input */
+            ) : /* INTEGER/NUMBER without range -> a number, or a reference to an input or step */
             param.type === 'integer' || param.type === 'number' ? (
-              <input
+              <NumberOrRefField
                 id={fieldId}
-                type="number"
-                value={String(value ?? param.default ?? '')}
-                onChange={(e) =>
-                  updateField(
-                    param.name,
-                    param.type === 'integer'
-                      ? parseInt(e.target.value)
-                      : parseFloat(e.target.value),
-                  )
-                }
-                placeholder={
-                  param.default !== undefined ? String(param.default) : ''
-                }
-                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:border-cyan-500 focus:outline-none"
+                integer={param.type === 'integer'}
+                value={value}
+                placeholder={param.default !== undefined ? String(param.default) : ''}
+                onChange={(v) => {
+                  if (v === undefined) {
+                    const next = { ...args };
+                    delete next[param.name];
+                    onArgsChange(next);
+                  } else updateField(param.name, v);
+                }}
               />
             ) : /* STRING (long / prompt-like) -> Textarea */
             param.type === 'string' && isLongTextField(param) ? (
@@ -782,42 +1006,21 @@ function SchemaArgumentsForm({
                 />
                 <TemplatePreview value={String(value || '')} />
               </>
-            ) : /* ARRAY of strings -> Comma-separated input with chips */
+            ) : /* ARRAY -> comma-separated values, or one reference to a list */
             param.type === 'array' ? (
-              <div>
-                <input
-                  id={fieldId}
-                  type="text"
-                  value={
-                    Array.isArray(value)
-                      ? (value as string[]).join(', ')
-                      : String(value || '')
-                  }
-                  onChange={(e) =>
-                    updateField(
-                      param.name,
-                      e.target.value
-                        .split(',')
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    )
-                  }
-                  placeholder={param.description}
-                  className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:border-cyan-500 focus:outline-none"
-                />
-                {Array.isArray(value) && (value as string[]).length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {(value as string[]).map((item, i) => (
-                      <span
-                        key={i}
-                        className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400 border border-slate-700/50 font-mono"
-                      >
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <ArrayOrRefField
+                id={fieldId}
+                itemType={param.items?.type}
+                value={value}
+                placeholder={param.description}
+                onChange={(v) => {
+                  if (v === undefined) {
+                    const next = { ...args };
+                    delete next[param.name];
+                    onArgsChange(next);
+                  } else updateField(param.name, v);
+                }}
+              />
             ) : /* OBJECT -> JSON textarea that keeps what is typed */
             param.type === 'object' ? (
               <JsonObjectField
@@ -1869,6 +2072,8 @@ export default function StepConfigPanel({
   onClose,
   inputVariables,
   onInputVariablesChange,
+  description,
+  onDescriptionChange,
 }: StepConfigPanelProps) {
   const [tab, setTab] = useState<Tab>('general');
 
@@ -1886,7 +2091,7 @@ export default function StepConfigPanel({
 
   // Show pipeline overview when no step is selected
   if (!step) {
-    return <PipelineOverview allSteps={allSteps} onClose={onClose} inputVariables={inputVariables} onInputVariablesChange={onInputVariablesChange} />;
+    return <PipelineOverview allSteps={allSteps} onClose={onClose} inputVariables={inputVariables} onInputVariablesChange={onInputVariablesChange} description={description} onDescriptionChange={onDescriptionChange} />;
   }
 
   const stepIcon = getStepIcon(step.toolName);
@@ -2162,13 +2367,14 @@ export default function StepConfigPanel({
                   {step.dependsOn.filter(Boolean).map((depId: string) => {
                     const upstream = allSteps?.find((s: PipelineStep) => s.id === depId);
                     const label = upstream?.label || depId;
+                    const refName = upstream ? stepRefName(upstream, allSteps || []) : depId;
                     return (
                       <div key={depId} className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => {
                             // Insert at cursor or append
-                            const ref = `{{${depId}.response}}`;
+                            const ref = `{{${refName}.response}}`;
                             const field = 'input_message' in (step.arguments || {}) ? 'input_message' : 'prompt';
                             const current = (step.arguments?.[field] as string) || '';
                             onUpdate(step.id, {
@@ -2180,7 +2386,7 @@ export default function StepConfigPanel({
                           }}
                           className="text-[10px] px-2 py-1 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 font-mono transition-colors"
                         >
-                          {`{{${depId}.response}}`}
+                          {`{{${refName}.response}}`}
                         </button>
                         <span className="text-[9px] text-slate-600">{'\u2190'} {label}</span>
                       </div>

@@ -125,6 +125,7 @@ export interface PipelineNodeConfig {
 export interface PipelineNodeSchema {
   id: string;
   tool_name: string;
+  label?: string;
   arguments: Record<string, unknown>;
   depends_on: string[];
   condition?: {
@@ -264,6 +265,14 @@ export function isValidConnection(
  * Strip frontend-only fields (position, label) and produce the backend
  * execution schema.  All camelCase keys are converted to snake_case.
  */
+/** The name a template uses for a step: its label when that is unique, else its id. */
+export function stepRefName(step: PipelineStep, allSteps: PipelineStep[]): string {
+  const norm = (l: string) => l.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  const name = step.label ? norm(step.label) : '';
+  if (!name || allSteps.some((s) => s.id === name && s.id !== step.id)) return step.id;
+  return allSteps.filter((s) => s.label && norm(s.label) === name).length === 1 ? name : step.id;
+}
+
 export function serializeForExecution(
   steps: PipelineStep[],
 ): PipelineNodeSchema[] {
@@ -274,6 +283,8 @@ export function serializeForExecution(
       arguments: { ...step.arguments },
       depends_on: [...step.dependsOn],
     };
+    // templates may name a step by its label, so the validator and the engine need it
+    if (step.label) node.label = step.label;
 
     if (step.condition) {
       node.condition = {
