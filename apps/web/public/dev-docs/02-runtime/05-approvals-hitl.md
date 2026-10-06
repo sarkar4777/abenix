@@ -180,7 +180,7 @@ Expiry is applied when the row is read. `GET /api/approvals` sweeps the tenant's
 A signer can send an approval back instead of denying it. `POST /api/approvals/{id}/signoff` takes `decision: "return"` alongside `approve` and `deny`. A return needs a `reason`, otherwise the call fails with 400 and "Say what needs to change, so the requester can correct it."
 
 - The approval moves to `returned` and `approval.resolved` is emitted with that status.
-- For a decision version (`gate_kind: decision_publish`) the version goes back to `draft` with the reviewer's note under `validation.returned` as `{note, at}`. See [Decision service](20-decision-service.md) and [the decisions how-to](../08-howto/09-decisions.md).
+- For a decision version (`gate_kind: decision_publish`) the version goes back to `draft` with the reviewer's note under `validation.returned` as `{note, at}`. The note survives the author's edits and Check runs and is shown on the decision page as **Returned for changes** with the reason. Proposing the version again clears it. See [Decision service](20-decision-service.md) and [the decisions how-to](../08-howto/09-decisions.md).
 - On `/approvals` the button is **Return for changes**. It is not offered on `human_approval` gates. A return sent to one through the API ends the gate as rejected.
 
 ## Who may sign

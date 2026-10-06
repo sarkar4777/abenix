@@ -239,7 +239,7 @@ def _serialize_agent(a: Agent) -> dict[str, Any]:
         "category": a.category,
         "mode": getattr(a, "mode", None),
         "example_prompts": getattr(a, "example_prompts", None),
-        "model_config": a.model_config_,
+        "model_config": _scaling_view(a, a.model_config_),
         "is_published": a.is_published,
         "creator_id": str(a.creator_id),
         "creator_email": creator_email,
@@ -264,6 +264,65 @@ def _serialize_agent(a: Agent) -> dict[str, Any]:
             float(a.daily_cost_limit) if a.daily_cost_limit else None
         )
     return data
+
+
+# scaling knobs live in columns, the builder edits them through model_config
+SCALING_KEYS = (
+    "runtime_pool",
+    "min_replicas",
+    "max_replicas",
+    "concurrency_per_replica",
+    "rate_limit_qps",
+    "daily_budget_usd",
+)
+# these cost money, so only an admin sets them, as on /admin/scaling
+ADMIN_SCALING_KEYS = {
+    "runtime_pool",
+    "min_replicas",
+    "max_replicas",
+    "concurrency_per_replica",
+}
+
+
+def _apply_scaling(agent: Agent, cfg: dict[str, Any] | None, user: User) -> str | None:
+    """Copy the scaling knobs from model_config onto the agent's columns. Returns an error message."""
+    from app.routers.admin_scaling import scaling_updates
+
+    cfg = cfg or {}
+    admin = getattr(user.role, "value", user.role) == "admin"
+    body = {
+        k: cfg[k]
+        for k in SCALING_KEYS
+        if k in cfg and (admin or k not in ADMIN_SCALING_KEYS)
+    }
+    if not body:
+        return None
+    updates, problem = scaling_updates(body)
+    if problem:
+        return problem
+    lo = updates.get("min_replicas", getattr(agent, "min_replicas", None))
+    hi = updates.get("max_replicas", getattr(agent, "max_replicas", None))
+    if lo is not None and hi is not None and lo > hi:
+        return "min_replicas cannot exceed max_replicas"
+    for k, v in updates.items():
+        if v is None and k in ADMIN_SCALING_KEYS:
+            continue  # these columns always hold a value, a blank field keeps it
+        setattr(agent, k, v)
+    return None
+
+
+def _scaling_view(a: Agent, cfg: dict[str, Any] | None) -> dict[str, Any]:
+    """model_config with the scaling knobs as the columns hold them, so editors show what is enforced."""
+    out = dict(cfg or {})
+    for k in SCALING_KEYS:
+        if not hasattr(a, k):
+            continue
+        v = getattr(a, k)
+        if v is None:
+            out.pop(k, None)
+        else:
+            out[k] = float(v) if k == "daily_budget_usd" else v
+    return out
 
 
 def _serialize_agent_summary(a: Agent) -> dict[str, Any]:
@@ -1095,6 +1154,9 @@ async def create_agent(
         category=sanitize_input(body.category) if body.category else body.category,
         icon_url=body.icon_url,
     )
+    problem = _apply_scaling(agent, nested_cfg_dump, user)
+    if problem:
+        return error(problem, 400)
     db.add(agent)
     await db.commit()
     await db.refresh(agent)
@@ -1195,6 +1257,10 @@ async def update_agent(
         agent.system_prompt = body.system_prompt
     if body.agent_model_config is not None:
         agent.model_config_ = body.agent_model_config.model_dump()
+        problem = _apply_scaling(agent, agent.model_config_, user)
+        if problem:
+            await db.rollback()
+            return error(problem, 400)
     if body.category is not None:
         agent.category = sanitize_input(body.category)
     if body.icon_url is not None:

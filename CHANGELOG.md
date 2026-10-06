@@ -6,6 +6,7 @@
 
 - A pipeline's `code_asset` step picks the asset from a list of ready assets and shows the fields the code reads, the same assets the agent builder offers.
 - Pipelines get a description under Pipeline Settings, shown on their chat page and in the agent list.
+- `e2e/uat_platform_journeys_ui.spec.ts` runs seven end user journeys through the screens only: self sign-up, two person approval of a high tier decision, grounded knowledge base answers, human approval of agent actions, webhook and scheduled triggers, a moderation block, and the builder's daily budget.
 
 ### Changed
 
@@ -25,6 +26,8 @@
 - Dependabot alerts cleared in every web app: source-map-js 1.2.2 (GHSA-68fv-2mgg-jv7q), postcss-selector-parser 7.1.6 (GHSA-rj75-hqrm-r3gf) and katex 0.18 (GHSA-238p-pmpm-9mq7) through npm overrides. Tailwind's compiled CSS is byte-for-byte the same before and after in all seven apps. braces has no fixed release (GHSA-vfj7-8cjw-p6xm), is reached only through Tailwind 3's build-time globbing of our own config, and is dismissed with that reason until upstream ships a fix.
 - `.env.example` no longer ships provider API keys. The search, news, energy and sanctions keys are blank, each comment says where to get one, and Admin -> Tool Configuration takes them at runtime.
 - `publish-public.sh` refuses to publish when any credential value from the private `.env` appears in the public copy, or when a credential variable in an example file holds something that is not an obvious placeholder.
+- The builder's runtime and scaling fields were saved but never enforced. Daily budget, rate limit, runtime pool, replicas and concurrency now reach the agent columns that routing, rate limiting and the budget gate read, with the Scaling page's checks. Pool, replicas and concurrency apply only for admins and show read only to others. Clearing the budget removes the cap, and the builder shows the stored values.
+- A decision returned for changes now shows the reviewer's reason on the decision page. The note was saved but never displayed, and an edit or Check erased it. It now stays until the version is proposed again.
 
 ## v2.5.2 — 2026-10-03
 

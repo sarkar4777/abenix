@@ -870,12 +870,18 @@ export default function AgentConfigPanel({
             <div className="border-b border-slate-700/50 pb-4">
               <h4 className="text-xs font-semibold text-white mb-2">Runtime &amp; scaling</h4>
               <p className="text-[10px] text-slate-500 mb-3">KEDA pool routing + per-agent caps. Most agents leave these on default.</p>
+              {!isAdmin && (
+                <p className="text-[10px] text-amber-400/80 mb-3" data-testid="scaling-admin-note">
+                  Pool, replicas and concurrency cost money, so an admin sets them, here or under Admin, Scaling. The rate limit and daily budget are yours to set.
+                </p>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-slate-400 mb-1.5">Runtime pool</label>
                   <select
                     value={config.runtime_pool || 'default'}
+                    disabled={!isAdmin}
                     onChange={(e) => onChange({ runtime_pool: e.target.value as AgentConfig['runtime_pool'] })}
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500"
                   >
@@ -909,6 +915,7 @@ export default function AgentConfigPanel({
                   <input
                     type="number" min={0} max={200}
                     value={config.min_replicas ?? ''}
+                    disabled={!isAdmin}
                     placeholder="auto"
                     onChange={(e) => onChange({ min_replicas: e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value)) })}
                     className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
@@ -919,6 +926,7 @@ export default function AgentConfigPanel({
                   <input
                     type="number" min={0} max={500}
                     value={config.max_replicas ?? ''}
+                    disabled={!isAdmin}
                     placeholder="auto"
                     onChange={(e) => onChange({ max_replicas: e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value)) })}
                     className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
@@ -929,6 +937,7 @@ export default function AgentConfigPanel({
                   <input
                     type="number" min={1} max={200}
                     value={config.concurrency_per_replica ?? ''}
+                    disabled={!isAdmin}
                     placeholder="auto"
                     onChange={(e) => onChange({ concurrency_per_replica: e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value)) })}
                     className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
@@ -940,10 +949,11 @@ export default function AgentConfigPanel({
                 <div>
                   <label className="block text-[10px] text-slate-500 mb-1">Rate limit (qps)</label>
                   <input
-                    type="number" min={0} step="0.1"
+                    type="number" min={1} step="1"
                     value={config.rate_limit_qps ?? ''}
                     placeholder="off"
-                    onChange={(e) => onChange({ rate_limit_qps: e.target.value === '' ? undefined : Math.max(0, parseFloat(e.target.value)) })}
+                    data-testid="builder-rate-limit"
+                    onChange={(e) => onChange({ rate_limit_qps: e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value) || 1) })}
                     className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
                   />
                 </div>
@@ -953,6 +963,7 @@ export default function AgentConfigPanel({
                     type="number" min={0} step="0.01"
                     value={config.daily_budget_usd ?? ''}
                     placeholder="no cap"
+                    data-testid="builder-daily-budget"
                     onChange={(e) => onChange({ daily_budget_usd: e.target.value === '' ? undefined : Math.max(0, parseFloat(e.target.value)) })}
                     className="w-full px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-white focus:outline-none focus:border-cyan-500"
                   />

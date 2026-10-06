@@ -61,6 +61,8 @@ export interface Validation {
   ok: boolean;
   summary: string;
   problems: Problem[];
+  // set when a reviewer sent the version back, kept until it is proposed again
+  returned?: { note: string; at: string };
   overlaps: { rule: string; other: string; kind: 'shadowed' | 'conflict'; message: string; example: any; fields?: string[] }[];
   tests: TestResult[];
   tests_failed: number;

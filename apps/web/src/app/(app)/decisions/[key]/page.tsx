@@ -515,7 +515,12 @@ function LifecycleBar(props: {
         </>
       )}
       <button type="button" onClick={props.onExport} className={`${btn} text-slate-300 hover:bg-slate-800`} data-testid="export"><Download className="w-4 h-4" /> Export</button>
-      {props.validation && v.state === 'draft' && (
+      {props.validation?.returned && v.state === 'draft' && (
+        <div className="basis-full rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200" role="status" data-testid="returned-note">
+          <span className="font-semibold">Returned for changes.</span> {props.validation.returned.note || 'The reviewer left no reason.'} Make the changes, run Check, then propose it again.
+        </div>
+      )}
+      {props.validation && v.state === 'draft' && props.validation.summary && (
         <span className={`basis-full text-xs ${props.validation.ok ? 'text-emerald-300' : 'text-rose-300'}`} data-testid="validation-summary">{props.validation.summary}</span>
       )}
     </div>

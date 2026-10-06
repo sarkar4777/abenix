@@ -1,0 +1,24 @@
+[
+  {
+    "title": "The builder's runtime and scaling fields were saved but never enforced",
+    "area": "Agent builder",
+    "problem": "Daily budget, rate limit, runtime pool, replicas and concurrency set in the builder went into model_config only, while routing, rate limiting and the budget gate read the agent columns, which only the seeder and Admin Scaling wrote. A budget set in the builder never capped anything.",
+    "fix": "Create and update copy these fields onto the columns with the Scaling page's checks. Pool, replicas and concurrency apply only for admins and show read only to others, an empty budget sends null and removes the cap, and the builder shows the stored values. Unit tests in tests/unit/test_builder_scaling_sync.py, journey 7 in e2e/uat_platform_journeys_ui.spec.ts.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 194
+  },
+  {
+    "title": "A decision returned for changes never showed the reviewer's reason to the author",
+    "area": "Decisions",
+    "problem": "Return for changes saved the reviewer's note on the version, but the decision page never displayed it, and the author's next edit or Check erased it.",
+    "fix": "The note survives edits and Check and is shown as Returned for changes on the decision page until the version is proposed again. Unit tests in tests/unit/test_decision_return_note.py, journey 2 in e2e/uat_platform_journeys_ui.spec.ts.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 195
+  }
+]

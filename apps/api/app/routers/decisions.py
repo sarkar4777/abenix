@@ -104,6 +104,14 @@ async def _version(
     ).scalar_one_or_none()
 
 
+def _keep_returned(old: Any, new: Any) -> Any:
+    """Carry a reviewer's return note across edits and checks until the version is proposed again."""
+    note = (old or {}).get("returned") if isinstance(old, dict) else None
+    if not note:
+        return new
+    return {**(new or {}), "returned": note}
+
+
 def _version_summary(v: DecisionVersion) -> dict[str, Any]:
     return {
         "id": str(v.id),
@@ -647,7 +655,7 @@ async def save_draft(
     if body.provenance is not None:
         v.provenance = body.provenance
     v.lock_version = (v.lock_version or 1) + 1
-    v.validation = None
+    v.validation = _keep_returned(v.validation, None)
     eds = dict(v.editing_by or {})
     eds[str(user.id)] = {
         "email": user.email,
@@ -919,6 +927,7 @@ async def validate_version(
         return error(f"{key} has no version {n}.", 404)
     result = await _validate(db, user, m, v)
     if v.state == "draft":
+        result = _keep_returned(v.validation, result)
         v.validation = result
         await db.commit()
     return success(result)

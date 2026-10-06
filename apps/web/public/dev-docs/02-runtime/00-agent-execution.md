@@ -266,6 +266,12 @@ Two daily caps on the agent row are checked before a run starts, in [`engine/age
 | `daily_cost_limit` | What the agent spends per UTC day, across every caller and tenant |
 | `daily_budget_usd` | What one tenant spends on that agent per UTC day |
 
+Who sets them:
+
+- `daily_budget_usd`: the agent's author in the builder (Advanced, Daily budget), or an admin under Admin, Scaling. The builder sends the value with the agent and the API writes it to the column with the same checks as the Scaling page. An empty field sends `null`, which removes the cap.
+- The builder's other runtime fields reach their columns the same way. Rate limit (whole requests per second, 1 to 10,000) is open to the author. Runtime pool, replicas and concurrency per replica cost money, so the API applies them only for admins, and the builder shows them read only to everyone else.
+- Opening an agent in the builder shows the column values, so an edit made on the Scaling page is what the author sees.
+
 A value of 0 or less means no cap. Spend is the sum of `executions.cost` for the agent since midnight UTC, plus the cost of steps where a pipeline ran this agent through `agent_step` (read from the pipeline row's `node_results` by `metadata.billed_agent_id`).
 
 The daily caps apply before any run starts, on every path: the agent page and `POST /api/agents/{id}/execute`, triggers, the `/api/pipelines/{id}/execute*` routes, pipeline steps, meetings, OracleNet, governance replays, `POST /api/a2a/agents/{id}/invoke` and `POST /api/batch/execute`. A refused API call gets HTTP 429 with `error_code: BUDGET_EXCEEDED`, a plain message with today's spend (UTC) and who can raise the cap (the agent's owner for `daily_cost_limit`, an admin under Admin, Scaling for `daily_budget_usd`), and `details` holding `limit`, `cap_usd` and `spent_today_usd`. A triggered run (webhook, schedule, Run now) is written as `failed` with that code and message, and the trigger owner is notified. An `agent_step` whose saved agent is over its cap returns an error result with `failure_code: BUDGET_EXCEEDED`. A meeting bot over its cap does not join and the meeting log says why. A batch checks once before it is queued and again before each input, so inputs after the cap is reached come back failed with `BUDGET_EXCEEDED`.

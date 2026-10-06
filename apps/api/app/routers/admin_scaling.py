@@ -192,28 +192,15 @@ async def list_agents_with_scale(
     return success({"agents": [_serialize_agent_scale(a) for a in rows]})
 
 
-@router.patch("/agents/{agent_id}")
-async def update_agent_scale(
-    agent_id: str,
-    body: dict = Body(...),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Update scaling knobs on an agent."""
-    _ensure_admin(user)
-    a = (
-        await db.execute(select(Agent).where(Agent.id == agent_id))
-    ).scalar_one_or_none()
-    if not a:
-        return error("Agent not found", 404)
-
+def scaling_updates(body: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    """Validated column updates for the scaling knobs present in body, or an error message."""
     updates: dict[str, Any] = {}
 
     if "runtime_pool" in body:
         pool = str(body["runtime_pool"]).strip().lower()
         valid = {p["key"] for p in POOLS}
         if pool not in valid:
-            return error(f"Invalid pool; choose one of {sorted(valid)}", 400)
+            return {}, f"Invalid pool; choose one of {sorted(valid)}"
         updates["runtime_pool"] = pool
         if pool == "inline":
             updates.setdefault("min_replicas", 0)
@@ -237,9 +224,9 @@ async def update_agent_scale(
                 try:
                     iv = int(v)
                 except (TypeError, ValueError):
-                    return error(f"{field} must be an integer", 400)
+                    return {}, f"{field} must be an integer"
                 if iv < lo or iv > hi:
-                    return error(f"{field} must be between {lo} and {hi}", 400)
+                    return {}, f"{field} must be between {lo} and {hi}"
                 updates[field] = iv
 
     if "daily_budget_usd" in body:
@@ -250,10 +237,32 @@ async def update_agent_scale(
             try:
                 fv = float(v)
             except (TypeError, ValueError):
-                return error("daily_budget_usd must be numeric", 400)
+                return {}, "daily_budget_usd must be numeric"
             if fv < 0 or fv > 100_000:
-                return error("daily_budget_usd must be between 0 and 100000", 400)
+                return {}, "daily_budget_usd must be between 0 and 100000"
             updates["daily_budget_usd"] = fv
+
+    return updates, None
+
+
+@router.patch("/agents/{agent_id}")
+async def update_agent_scale(
+    agent_id: str,
+    body: dict = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Update scaling knobs on an agent."""
+    _ensure_admin(user)
+    a = (
+        await db.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if not a:
+        return error("Agent not found", 404)
+
+    updates, problem = scaling_updates(body)
+    if problem:
+        return error(problem, 400)
 
     if "status" in body:
         s = str(body["status"]).strip().lower()

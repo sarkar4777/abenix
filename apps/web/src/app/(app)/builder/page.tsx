@@ -794,8 +794,9 @@ export default function BuilderPage() {
     if (Number.isFinite(config.min_replicas as number)) modelConfig.min_replicas = config.min_replicas;
     if (Number.isFinite(config.max_replicas as number)) modelConfig.max_replicas = config.max_replicas;
     if (Number.isFinite(config.concurrency_per_replica as number)) modelConfig.concurrency_per_replica = config.concurrency_per_replica;
-    if (Number.isFinite(config.rate_limit_qps as number)) modelConfig.rate_limit_qps = config.rate_limit_qps;
-    if (Number.isFinite(config.daily_budget_usd as number)) modelConfig.daily_budget_usd = config.daily_budget_usd;
+    // null clears the cap, a missing key would leave the old one in force
+    modelConfig.rate_limit_qps = Number.isFinite(config.rate_limit_qps as number) ? config.rate_limit_qps : null;
+    modelConfig.daily_budget_usd = Number.isFinite(config.daily_budget_usd as number) ? config.daily_budget_usd : null;
     if (config.timeout) modelConfig.timeout = config.timeout;
     if (config.atlas_graphs && config.atlas_graphs.length > 0) modelConfig.atlas_graphs = config.atlas_graphs;
     // the API turns this list into the agent's knowledge base grants

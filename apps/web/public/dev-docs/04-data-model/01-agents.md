@@ -99,7 +99,7 @@ them on every run and a join would be on the hot path.
 
 | Column | Effect |
 |---|---|
-| `per_execution_cost_limit` / `daily_cost_limit` / `daily_budget_usd` | Spend caps, 0 or less means none. `daily_cost_limit` caps the agent's spend across all callers per UTC day, `daily_budget_usd` caps one tenant's spend on it per UTC day. A run over either is refused with 429 `BUDGET_EXCEEDED`. `per_execution_cost_limit` caps one run: an agent stops with `BUDGET_EXCEEDED` when it wants another step after reaching it, a pipeline fails its next node. `/admin/scaling` edits `daily_budget_usd`. See [Spend caps](../02-runtime/00-agent-execution.md#spend-caps). Pausing an agent from `/admin/scaling` sets `status = archived`. |
+| `per_execution_cost_limit` / `daily_cost_limit` / `daily_budget_usd` | Spend caps, 0 or less means none. `daily_cost_limit` caps the agent's spend across all callers per UTC day, `daily_budget_usd` caps one tenant's spend on it per UTC day. A run over either is refused with 429 `BUDGET_EXCEEDED`. `per_execution_cost_limit` caps one run: an agent stops with `BUDGET_EXCEEDED` when it wants another step after reaching it, a pipeline fails its next node. The builder and `/admin/scaling` both edit `daily_budget_usd`. See [Spend caps](../02-runtime/00-agent-execution.md#spend-caps). Pausing an agent from `/admin/scaling` sets `status = archived`. |
 | `runtime_pool` | Which agent-runtime pool executes it, default `default`. `inline` keeps the run on the API pod. |
 | `min_replicas` / `max_replicas` / `concurrency_per_replica` | Per-pool KEDA bounds. |
 | `rate_limit_qps` | Per-agent throttle. |

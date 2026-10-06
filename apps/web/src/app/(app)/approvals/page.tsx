@@ -180,7 +180,7 @@ function ApprovalCard({ row, onDecide, busy }: { row: ApprovalRow; onDecide: (id
   const now = useLiveClock(isPending && row.expires_at ? 1000 : 60_000);
 
   return (
-    <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 mb-3">
+    <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 mb-3" data-testid="approval-card" data-approval-id={row.id} data-status={row.status}>
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex-1 min-w-[240px]">
           <div className="flex items-center gap-2 mb-1.5">
