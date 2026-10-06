@@ -37,6 +37,7 @@
 - `deploy.sh local` exits with an error and says what is wrong when Postgres never answers or no API pod is ready to seed. It used to warn, skip creating the tables and the admin account, and still report success.
 - The deploy summary shows how to sign in and how to give agents a model.
 - `FRESH=true` and `destroy` delete only the current minikube profile. They ran `minikube delete --purge`, which removes every profile and the minikube cache on the machine.
+- A brand new database could not be created: `activity_logs.audit_seq` defaults to `nextval('activity_logs_audit_seq')`, but the sequence only came from a migration, so building the tables from the models failed and the API never started on a fresh install. The model now declares the sequence.
 
 ## v2.5.2 — 2026-10-03
 
