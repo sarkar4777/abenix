@@ -9,5 +9,16 @@
       "bug"
     ],
     "number": 196
+  },
+  {
+    "title": "A brand new database could not be created: activity_logs_audit_seq was missing",
+    "area": "Install",
+    "problem": "On a fresh install the API's db-migrate step failed with 'relation activity_logs_audit_seq does not exist'. activity_logs.audit_seq defaults to nextval('activity_logs_audit_seq'), but the sequence was only created by a migration, and a fresh database is built from the models first, so the API never started and nothing was seeded.",
+    "fix": "The model declares Sequence('activity_logs_audit_seq'), so building the tables creates it first. Checked on an empty pgvector Postgres: the old model fails exactly this way, the fixed one creates all 94 tables. Fixed in public commit 0073991.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 197
   }
 ]

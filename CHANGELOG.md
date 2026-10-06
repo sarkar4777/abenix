@@ -7,6 +7,7 @@
 - A pipeline's `code_asset` step picks the asset from a list of ready assets and shows the fields the code reads, the same assets the agent builder offers.
 - Pipelines get a description under Pipeline Settings, shown on their chat page and in the agent list.
 - `e2e/uat_platform_journeys_ui.spec.ts` runs seven end user journeys through the screens only: self sign-up, two person approval of a high tier decision, grounded knowledge base answers, human approval of agent actions, webhook and scheduled triggers, a moderation block, and the builder's daily budget.
+- Every page shows a banner while no AI model provider is connected, so a fresh install says what to do before the first agent run fails. Admins get links to add an Anthropic, OpenAI, Google or Azure key or to use a Claude subscription, everyone else is told to ask an admin. It goes away within a couple of minutes of a key being added.
 
 ### Changed
 
@@ -38,6 +39,7 @@
 - The deploy summary shows how to sign in and how to give agents a model.
 - `FRESH=true` and `destroy` delete only the current minikube profile. They ran `minikube delete --purge`, which removes every profile and the minikube cache on the machine.
 - A brand new database could not be created: `activity_logs.audit_seq` defaults to `nextval('activity_logs_audit_seq')`, but the sequence only came from a migration, so building the tables from the models failed and the API never started on a fresh install. The model now declares the sequence.
+- Provider keys saved under Admin, Tool Configuration now count as configured for the model picker and provider checks. Only environment variables and `provider.<name>.api_key` rows did before.
 
 ## v2.5.2 — 2026-10-03
 

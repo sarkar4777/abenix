@@ -12,6 +12,7 @@ import OfflineBanner from '@/components/ui/OfflineBanner';
 import { useSidebar } from '@/stores/sidebar';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { currentPath, signInUrl } from '@/lib/auth-redirect';
+import ModelSetupBanner from '@/components/layout/ModelSetupBanner';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -55,6 +56,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
         className="flex-1 flex flex-col min-h-0"
       >
         <TopBar />
+        <ModelSetupBanner />
         <main className="flex-1 overflow-y-auto p-3 md:p-6">
           {children}
         </main>

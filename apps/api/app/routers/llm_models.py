@@ -107,7 +107,8 @@ async def _probe_providers(db: AsyncSession) -> dict[str, dict[str, Any]]:
             await db.execute(
                 text(
                     "SELECT key, value FROM platform_settings "
-                    "WHERE key LIKE 'provider.%.api_key' OR category = 'secrets'"
+                    "WHERE key LIKE 'provider.%.api_key' OR key LIKE 'tool.credential.%' "
+                    "OR category = 'secrets'"
                 )
             )
         ).all()
@@ -148,7 +149,15 @@ async def _probe_providers(db: AsyncSession) -> dict[str, dict[str, Any]]:
             db_val = sub_token
             missing_reason = "no subscription token — paste one in Admin → LLM Settings"
         else:
-            db_val = db_keys.get(f"provider.{provider}.api_key", "")
+            # a key saved under Admin, Tool Configuration counts too
+            db_val = db_keys.get(f"provider.{provider}.api_key", "") or next(
+                (
+                    db_keys[f"tool.credential.{n}"]
+                    for n in env_names
+                    if _is_real_key(db_keys.get(f"tool.credential.{n}", ""))
+                ),
+                "",
+            )
             missing_reason = f"{chosen_env} not set"
         if _is_real_key(env_val) or _is_real_key(db_val):
             result[provider] = {"configured": True, "reason": None}
