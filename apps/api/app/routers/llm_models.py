@@ -80,7 +80,8 @@ async def _subscription_state(db: AsyncSession) -> dict[str, Any]:
 
 _PROVIDER_CACHE: dict[str, dict[str, Any]] = {}
 _PROVIDER_CACHE_AT: float = 0.0
-_PROVIDER_TTL = 60.0
+# short, so a key added in the admin screens clears the no-model banner quickly
+_PROVIDER_TTL = 10.0
 
 
 def _is_real_key(val: str | None) -> bool:
@@ -93,7 +94,7 @@ def _is_real_key(val: str | None) -> bool:
 
 
 async def _probe_providers(db: AsyncSession) -> dict[str, dict[str, Any]]:
-    """Return the configured/reason map for each provider. 60s cached."""
+    """Return the configured/reason map for each provider. 10s cached."""
     global _PROVIDER_CACHE, _PROVIDER_CACHE_AT
     now = time.monotonic()
     if _PROVIDER_CACHE and (now - _PROVIDER_CACHE_AT) < _PROVIDER_TTL:

@@ -43,6 +43,8 @@
 - Provider keys saved under Admin, Tool Configuration now count as configured for the model picker and provider checks. Only environment variables and `provider.<name>.api_key` rows did before.
 - An agent run is refused before it starts, with 503 `NO_MODEL_CONFIGURED` and a plain message on where to add a key, when no model provider has a credential. It used to start, fail on the provider SDK's auth error as `UNKNOWN_ERROR`, and a standalone app refreshing its cache filled a fresh install with a hundred failed runs in minutes. Pipelines are not refused, since tool-only pipelines need no model.
 - `deploy.sh forwards` warns when the web port it forwards is not one the API accepts, and gives the command that fixes it. Moving the web forward to another port left sign in failing with only "Connection failed".
+- The status bar at the bottom of every page showed made-up numbers: a git branch, "2 workers", "0 processing" and "247 completed" were fixed text. It now shows whether the API answers, runs in progress and runs today from the platform, and failures today when there are any.
+- The no-model banner clears within about 40 seconds of a key or subscription being added, and at once when the user comes back to the tab. The provider check was cached for a minute and the banner rechecked once a minute.
 
 ## v2.5.2 — 2026-10-03
 

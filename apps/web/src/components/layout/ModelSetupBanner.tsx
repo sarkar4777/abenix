@@ -22,10 +22,16 @@ export default function ModelSetupBanner() {
       setReady(Object.values(r.data).some((p) => p?.configured));
     };
     check();
-    const t = setInterval(check, 60_000);
+    const t = setInterval(check, 30_000);
+    // coming back from the settings tab rechecks at once
+    const onFocus = () => document.visibilityState === 'visible' && check();
+    document.addEventListener('visibilitychange', onFocus);
+    window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
       clearInterval(t);
+      document.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 
