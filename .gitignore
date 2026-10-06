@@ -53,6 +53,8 @@ kubeconfig
 *.key
 *.crt
 secrets.*
+# the chart's Secret template holds no values and every install needs it
+!infra/helm/abenix/templates/secrets.yaml
 credentials.json
 
 # IDE

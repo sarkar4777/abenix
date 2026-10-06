@@ -33,6 +33,7 @@
 - A fresh clone could not finish `bash scripts/deploy.sh local`: the wingman-api image copies `wingman/api/data/`, which a blanket `data/` rule in `.gitignore` kept out of the repo. The demo corridors and broker emails are now tracked, and CI runs `scripts/check-docker-context.py`, which fails when any Dockerfile copies a file git does not track.
 - `deploy.sh` stops with the build's own error when an image fails to build. Most app images, the code runners, pgvector and `reload` piped the build into `tail`, which hid the failure and printed "built".
 - Installs from the public repo never started: the publish step excluded `secrets.*`, which also dropped the Helm chart's `templates/secrets.yaml`, so `abenix-secrets` was never created and Postgres, Redis, NATS and Neo4j waited for it forever. The template is published again, and the publish now fails when any tracked file is missing from the public copy without being on an explicit private list.
+- `templates/secrets.yaml` is tracked in the public repo. A `secrets.*` rule in `.gitignore` kept `git add` from committing it even once it was copied, and the publish completeness check now also fails on files the public `.gitignore` would hide.
 
 ## v2.5.2 — 2026-10-03
 
