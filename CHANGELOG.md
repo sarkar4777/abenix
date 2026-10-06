@@ -14,6 +14,7 @@
 - The pipeline engine turns text into the types a tool declares before it runs, so a string input like "33.8, 34.6" reaches a list of numbers and "36" reaches a number. Text that does not convert is passed to the tool unchanged.
 - Public commits from `publish-public.sh` are authored as sarkar4777.
 - The README quick start lists what a fresh laptop needs, gives the one minikube command with an honest first-run time, and says how to give agents a model with or without a `.env`.
+- The README opens with a one-command install and a table of contents, and every section has a stable anchor. The nav links at the top pointed at `#quick-start` and similar while GitHub named the emoji headings `#-quick-start`, so they went nowhere.
 
 ### Fixed
 

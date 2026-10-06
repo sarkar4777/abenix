@@ -29,6 +29,47 @@
 
 ---
 
+> **Run it now** on a laptop with Docker, minikube, kubectl and Helm. One command builds and starts everything, see [Quick start](#quick-start) for what you need first.
+>
+> ```bash
+> git clone https://github.com/sarkar4777/abenix.git && cd abenix && bash scripts/deploy.sh local
+> ```
+
+## 🧭 Contents
+
+- [Why Abenix](#why-abenix)
+- [Architecture](#architecture)
+- [Quick start](#quick-start)
+  - [What you need first](#what-you-need-first)
+  - [One command on minikube](#one-command-on-minikube)
+  - [Other ways to run it](#other-ways-to-run-it)
+  - [Where everything lives](#where-everything-lives)
+  - [Required env vars](#required-env-vars)
+- [Showcase apps](#showcase-apps)
+  - [OracleNet — strategic decision-analysis](#oraclenet-strategic-decision-analysis)
+  - [Mideast Tourism — Vision-2030 analytics](#mideast-tourism-vision-2030-analytics)
+  - [ClaimsIQ — insurance claim adjudication (Java)](#claimsiq-insurance-claim-adjudication-java)
+  - [Industrial-IoT — predictive maintenance + cold chain + edge](#industrial-iot-predictive-maintenance-cold-chain-edge)
+  - [ResolveAI — customer-resolution case management](#resolveai-customer-resolution-case-management)
+  - [ContractIQ — energy contract intelligence](#contractiq-energy-contract-intelligence)
+  - [PharmaVigil — drug-safety intelligence](#pharmavigil-drug-safety-intelligence)
+  - [Wingman — commodities trading desk](#wingman-commodities-trading-desk)
+- [Edge runtimes](#edge-runtimes)
+  - [How a cloud agent reaches the edge](#how-a-cloud-agent-reaches-the-edge)
+  - [Pick a variant](#pick-a-variant)
+  - [Signing keys, fail closed](#signing-keys-fail-closed)
+  - [Lifecycle](#lifecycle)
+- [Deploy anywhere](#deploy-anywhere)
+- [Build on top of Abenix](#build-on-top-of-abenix)
+- [Enterprise readiness](#enterprise-readiness)
+- [Tech stack](#tech-stack)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+<a id="the-story"></a>
 ## The story
 
 Most AI agent platforms give your agents amnesia — they retrieve documents, forget context, and re-derive the world model on every turn. Most also assume "agent" means "a chatbot in the cloud talking to OpenAI." That's fine for support tickets. It's not fine for a wind turbine, a refrigerated trailer, a contract worth seven figures, or a control room with a 50 ms hard limit.
@@ -261,6 +302,7 @@ flowchart LR
 <a id="quick-start"></a>
 ## ⚡ Quick start
 
+<a id="what-you-need-first"></a>
 ### What you need first
 
 | Tool | Notes |
@@ -271,6 +313,7 @@ flowchart LR
 | Git and bash | On Windows use Git Bash, on macOS and Linux any terminal |
 | Disk | About 40 GB free for the images and the cluster |
 
+<a id="one-command-on-minikube"></a>
 ### One command on minikube
 
 ```bash
@@ -285,6 +328,7 @@ You do not need a `.env` to start. To give agents a model, either put at least o
 
 Then open http://localhost:3000 and sign in with `admin@abenix.dev` / `Admin123456`.
 
+<a id="other-ways-to-run-it"></a>
 ### Other ways to run it
 
 | Goal | Command | Time |
@@ -308,6 +352,7 @@ to re-establish every port forward after a pod restart, and
 `bash scripts/deploy.sh reload <service>` to rebuild and restart a single
 service without a full redeploy.
 
+<a id="where-everything-lives"></a>
 ### Where everything lives
 
 Local runs have no ingress, so every surface is a port forward. On AKS each one
@@ -333,6 +378,7 @@ deploy caches the hostname in `.azure-endpoint`.
 
 Same accounts work on both.
 
+<a id="required-env-vars"></a>
 ### Required env vars
 
 At least one LLM key — Anthropic (recommended), OpenAI, or Google. The full list lives in `.env.example`. For Kubernetes, set the same keys in `infra/helm/abenix/values-*.yaml`.
@@ -346,6 +392,7 @@ Every other key a tool needs can be added later, at run time, by an admin under 
 
 Seven standalone apps ship in this repo, plus OracleNet which lives inside the core UI. Each one is a real product surface — every line of business logic flows through the platform via the SDK + actAs pattern. They all auto-start with `dev-local.sh` and auto-deploy with `deploy-azure.sh`.
 
+<a id="oraclenet-strategic-decision-analysis"></a>
 ### OracleNet — strategic decision-analysis
 
 A 7-agent pipeline inside the main web app. Type a strategic decision in plain English, get back a **Decision Brief** with 6 tabs (Summary · Stakeholders · Scenarios · Risks · Cascade · Provenance) plus a recommendation card and a confidence score. A `depth_router` Python node prunes the DAG to 3 / 5 / 7 agents based on `context.depth`. Exports as PDF / DOCX / Markdown.
@@ -357,6 +404,7 @@ A 7-agent pipeline inside the main web app. Type a strategic decision in plain E
   <br/><em>OracleNet Decision Brief — confidence + recommendation card, 6 tabs</em>
 </p>
 
+<a id="mideast-tourism-vision-2030-analytics"></a>
 ### Mideast Tourism — Vision-2030 analytics
 
 A standalone analytics app for the Gulf Ministry of Tourism. 5 agents, 7 pages (Dashboard · Regional · Analytics · Chat NLQ · Reports · Simulations · Upload), 5 report templates, 5 simulator presets. Test data is baked into the API image — no manual seed.
@@ -368,6 +416,7 @@ A standalone analytics app for the Gulf Ministry of Tourism. 5 agents, 7 pages (
   <br/><em>Mideast Tourism dashboard — KPIs computed live from baked test data</em>
 </p>
 
+<a id="claimsiq-insurance-claim-adjudication-java"></a>
 ### ClaimsIQ — insurance claim adjudication (Java)
 
 A Java/Vaadin showcase that proves the **Java SDK is feature-complete**. 6-stage `claimsiq-adjudicate` pipeline (FNOL Intake → Policy Match → Damage Assess → Fraud Screen → Valuator → Claim Decider) with photo upload routed to vision models and a live DAG view streaming over SSE.
@@ -379,6 +428,7 @@ A Java/Vaadin showcase that proves the **Java SDK is feature-complete**. 6-stage
   <br/><em>ClaimsIQ — final adjudication with cited clauses, fraud score, live DAG</em>
 </p>
 
+<a id="industrial-iot-predictive-maintenance-cold-chain-edge"></a>
 ### Industrial-IoT — predictive maintenance + cold chain + edge
 
 Six tabs covering the highest-frequency industrial use cases:
@@ -397,6 +447,7 @@ Six tabs covering the highest-frequency industrial use cases:
   <br/><em>Industrial-IoT — pump tab after both code assets deployed, with edge runtime panel</em>
 </p>
 
+<a id="resolveai-customer-resolution-case-management"></a>
 ### ResolveAI — customer-resolution case management
 
 Four pipelines on the same case data: Inbound Resolution (6-agent), SLA Sweep (cron), Post-QA (on case close), Trend Mining (weekly). Refund tiers + escalation paths + tone guidelines live in a seeded KB.
@@ -410,6 +461,7 @@ Four pipelines on the same case data: Inbound Resolution (6-agent), SLA Sweep (c
 
 ---
 
+<a id="contractiq-energy-contract-intelligence"></a>
 ### ContractIQ — energy contract intelligence
 
 Ingests LNG and power contracts, extracts the terms that matter (volumes,
@@ -423,6 +475,7 @@ user who triggered it rather than a shared service account.
   <br/><em>ContractIQ — the Insights Hub, nine agentic workflows over the contract portfolio</em>
 </p>
 
+<a id="pharmavigil-drug-safety-intelligence"></a>
 ### PharmaVigil — drug-safety intelligence
 
 Adverse-event intake through to a regulatory narrative: MedDRA coding, CIOMS
@@ -442,6 +495,7 @@ over the same features by 7.6 points of accuracy and 0.20 of AUC.
   <br/><em>PharmaVigil case detail — coded terms, seriousness criteria, causality, disproportionality and the review gate</em>
 </p>
 
+<a id="wingman-commodities-trading-desk"></a>
 ### Wingman — commodities trading desk
 
 A trader workbench over freight arbitrage. Encodes a strategy in plain English,
@@ -457,10 +511,12 @@ unavailable rather than showing a number nobody produced.
   <br/><em>Wingman — the Price at Risk Lens, Bayesian Ridge fair value beside the Isolation Forest regime-break detector</em>
 </p>
 
+<a id="edge-runtimes"></a>
 ## 🛰 Edge runtimes
 
 The edge story in three lines: download a runtime → mint an `af_` token → helm-install on the gateway. The pod registers within 60 seconds and shows up on the platform's `/edge` page.
 
+<a id="how-a-cloud-agent-reaches-the-edge"></a>
 ### How a cloud agent reaches the edge
 
 ```mermaid
@@ -509,6 +565,7 @@ sequenceDiagram
 
 **The cohesive story.** Cloud authoring, signed delivery, edge execution. The `.agent` bundle is the *only* mutable artefact crossing the trust boundary — it's RSA-PSS signed at compile time, verified at every load, and constrained by a tool whitelist that's enforced twice (once by the compiler, once by the runtime). MQTT is the default transport because plants already have a broker, and HTTP is the fallback when MQTT publish fails. Tool budget on edge is deliberately small — `mqtt_publish, mqtt_subscribe, current_time, windowed_state, connector_call, code_executor` — so an agent that needs `knowledge_search` or `atlas_*` can't accidentally be edge-deployed and stall on a missing dependency. Every gateway re-registers on a 60-second loop, so a network blip just delays the next OTA update — nothing is permanently broken by an offline window.
 
+<a id="pick-a-variant"></a>
 ### Pick a variant
 
 The `/edge` page renders three colour-coded cards with copy-to-clipboard install commands, or hit the unauthenticated `GET /api/edge/runtime/download` for the JSON manifest.
@@ -542,6 +599,7 @@ docker run -d --name abenix-edge \
   agentforge/edge-runtime:latest          # or :rust, :c — variant in the image name
 ```
 
+<a id="signing-keys-fail-closed"></a>
 ### Signing keys, fail closed
 
 Bundles are RSA-PSS signed and the chain refuses rather than degrades. Outside dev the API returns `503` on compile, deploy and token mint until `EDGE_SIGNING_KEY_PEM` is set, it never mints a key into `/tmp`. A gateway refuses to start without the matching public key and refuses any unsigned, tampered or foreign-tenant bundle, keeping the previous bundle running. `EDGE_ALLOW_UNSIGNED=true` is the only bypass and it is logged on every load.
@@ -556,6 +614,7 @@ curl -s $PLATFORM_URL/api/edge/signing-key | jq -r .data.public_key_pem > /etc/e
 
 Local dev keeps working without any of this. The API mints one dev key under the data dir and warns once, and `values-local.yaml` allows unsigned bundles. Details in [`docs/06-deployment/05-edge-runtime.md`](docs/06-deployment/05-edge-runtime.md).
 
+<a id="lifecycle"></a>
 ### Lifecycle
 
 | Step | Where | What happens |
@@ -609,6 +668,7 @@ Every `deploy-azure.sh deploy` / `redeploy` ends with a **Phase 6 reconcile** st
 
 ---
 
+<a id="build-on-top-of-abenix"></a>
 ## 🔌 Build on top of Abenix
 
 Three SDKs ship in the box — Python, TypeScript, and Java. Same wire format (`X-Abenix-Subject` for actAs delegation) so a SaaS app holding one platform key can serve N end-users with full quota and audit isolation.
@@ -658,6 +718,7 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 
 ---
 
+<a id="tech-stack"></a>
 ## 🛠 Tech stack
 
 | Layer | Stack |
@@ -672,6 +733,7 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 
 ---
 
+<a id="documentation"></a>
 ## 📚 Documentation
 
 - **Docs** — [`docs/`](docs/README.md) covers architecture, runtime, SDKs, data model, UI, deployment, how-tos and reference. New in 2.5: [governance](docs/01-architecture/07-governance.md), [decisions](docs/08-howto/09-decisions.md), [warm code runners](docs/02-runtime/16-warm-code-runners.md), [Source Watch](docs/02-runtime/17-source-watch.md), [evaluation suites](docs/02-runtime/18-evaluation-suites.md), [outbound events](docs/02-runtime/19-outbound-events.md), [tool configuration](docs/08-howto/08-tool-configuration.md)
@@ -681,6 +743,7 @@ The Java SDK's public surface is stdlib-only (JDK 21 `HttpClient`, Jackson, SLF4
 
 ---
 
+<a id="contributing"></a>
 ## 🤝 Contributing
 
 We welcome contributions. See `CONTRIBUTING.md` for the quick start, and `CODE_OF_CONDUCT.md` for community guidelines. Good first issues: new tools, new Atlas starter ontologies, new connectors, new edge runtime tool shims.
@@ -689,6 +752,7 @@ Found a vulnerability? See `SECURITY.md`. Please don't open a public issue.
 
 ---
 
+<a id="license"></a>
 ## 📄 License
 
 [MIT](LICENSE) — use it, fork it, ship products on top.
