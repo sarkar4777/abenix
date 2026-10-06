@@ -404,6 +404,70 @@ def _resolve_templates(
     return {key: _resolve(value) for key, value in arguments.items()}
 
 
+_NUM_RE = __import__("re").compile(r"^-?\d+(\.\d+)?([eE][-+]?\d+)?$")
+
+
+def _coerce_scalar(v: str, kind: str) -> Any:
+    t = v.strip()
+    if kind in ("number", "integer") and _NUM_RE.match(t):
+        n = float(t)
+        if kind == "integer":
+            return int(n) if n.is_integer() else v
+        return n
+    if kind == "boolean" and t.lower() in ("true", "false"):
+        return t.lower() == "true"
+    return v
+
+
+def _coerce_to_schema(args: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
+    """Turn text that templates produced into the types the tool declares.
+
+    Pipeline inputs and step outputs often arrive as text, so "36" reaches a
+    number field and "33.8, 34.6" reaches a list of numbers. Only top-level
+    string values whose declared type differs are touched, anything that does
+    not convert cleanly is passed through for the tool to report.
+    """
+    props = (schema or {}).get("properties") or {}
+    out = dict(args)
+    for key, value in args.items():
+        spec = props.get(key)
+        if not isinstance(spec, dict) or not isinstance(value, str):
+            continue
+        kind = spec.get("type")
+        if isinstance(kind, list):
+            kind = next((k for k in kind if k != "null"), None)
+        if kind in ("number", "integer", "boolean"):
+            out[key] = _coerce_scalar(value, kind)
+        elif kind == "array":
+            text = value.strip()
+            items: Any = None
+            if text.startswith("["):
+                try:
+                    items = json.loads(text)
+                except (json.JSONDecodeError, TypeError):
+                    items = None
+            elif text and "{{" not in text:
+                items = [p.strip() for p in text.split(",") if p.strip()]
+            if isinstance(items, list):
+                item_kind = (spec.get("items") or {}).get("type")
+                if item_kind in ("number", "integer", "boolean"):
+                    items = [
+                        _coerce_scalar(i, item_kind) if isinstance(i, str) else i
+                        for i in items
+                    ]
+                out[key] = items
+        elif kind == "object":
+            text = value.strip()
+            if text.startswith("{"):
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        out[key] = parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    return out
+
+
 def _resolve_from_node_args(
     arguments: dict[str, Any],
     node_outputs: dict[str, Any],
@@ -1226,6 +1290,10 @@ class PipelineExecutor:
                 resolved_arguments=resolved_args,
                 duration_ms=int((time.monotonic() - node_start) * 1000),
             )
+
+        resolved_args = _coerce_to_schema(
+            resolved_args, getattr(tool, "input_schema", None) or {}
+        )
 
         # Inject pipeline context for code_executor nodes
         if node.tool_name == "code_executor":

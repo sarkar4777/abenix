@@ -950,13 +950,21 @@ async def generate_code(
                 or (["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"]),
                 "env_vars": env_vars,
                 "model_used": "claude-sonnet-4-5-20250929",
-                "generation_cost": 0.02,
+                "generation_cost": None,
+                "input_tokens": getattr(response.usage, "input_tokens", None),
+                "output_tokens": getattr(response.usage, "output_tokens", None),
                 "template_source": body.use_case,
             }
         )
 
     except Exception as e:
         logger.error("SDK code generation failed: %s", e)
+        busy = getattr(e, "status_code", None) in (429, 529) or "rate_limit" in str(e)
+        reason = (
+            "The AI service is busy right now"
+            if busy
+            else "AI generation is unavailable right now"
+        )
         # Fallback to template
         code = _build_template_code(
             body.sdk, body.use_case, body.asset, body.message, body.context
@@ -965,7 +973,7 @@ async def generate_code(
             {
                 "code": code,
                 "language": body.sdk,
-                "explanation": f"LLM generation failed ({e}). Returning template.",
+                "explanation": f"{reason}, so this is the standard template for {body.use_case}. It runs as is. Generate again in a minute for a tailored version.",
                 "imports": ["abenix_sdk"] if body.sdk == "python" else ["@abenix/sdk"],
                 "env_vars": ["ABENIX_API_KEY"],
                 "model_used": "template",

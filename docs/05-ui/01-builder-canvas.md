@@ -28,7 +28,7 @@ If the API says `can_edit: false`, the page shows a read-only banner with a link
 - the validation chip (Validating, N errors, N warnings, or Valid). Clicking errors or warnings jumps to the first bad node
 - Run pipeline (Pipeline mode, saved agents only)
 - Test, which opens `/agents/{id}/chat`
-- the model used for AI previews (read only, set under Admin)
+- the AI checks chip, the model AI Validate and Build with AI use (read only, set under Admin)
 - AI Validate and Build with AI
 - Save Draft and Publish. Publish needs a saved draft
 
@@ -70,8 +70,8 @@ flowchart LR
 
 - **PipelineToolbar** ([`PipelineToolbar.tsx`](../../apps/web/src/components/builder/pipeline/PipelineToolbar.tsx)) lists every tool from `GET /api/tools` grouped by category, with a short built-in list if that call fails. `agent_step` runs a whole agent as a step. Below the tools sit the logic nodes Condition, Switch, Merge, Output and For Each, and two Quick Templates, Parallel compare and Sequential chain. Click or drag to add.
 - **Canvas** registers `pipelineNodeTypes` from [`PipelineNodes.tsx`](../../apps/web/src/components/builder/pipeline/PipelineNodes.tsx): `pipelineStep`, `agentStep`, `condition`, `switchNode`, `mergeNode`, `forEachStep` and `output`. Connecting two handles goes through `isValidConnection`, which refuses an edge that would make a cycle.
-- **StepConfigPanel** ([`StepConfigPanel.tsx`](../../apps/web/src/components/builder/pipeline/StepConfigPanel.tsx)) edits the selected step in the tabs General, Arguments, Inputs, Condition and Retry. Arguments is a form built from the tool's parameter docs, with `{{node.field}}` and `{{context.x}}` templating. `llm_call`, `agent_step` and `github_tool` get their own forms. A dependency editor mirrors dragging an edge. Inputs maps fields from upstream steps. Condition gates the step on an upstream field. Retry sets max retries with backoff. Switch steps get a cases editor.
-- **Pipeline Settings** is what the right rail shows when no step is selected. It lists client-side validation problems and holds the pipeline's input parameters.
+- **StepConfigPanel** ([`StepConfigPanel.tsx`](../../apps/web/src/components/builder/pipeline/StepConfigPanel.tsx)) edits the selected step in the tabs General, Arguments, Inputs, Condition and Retry. Arguments is a form built from the tool's parameter docs, with `{{node.field}}` and `{{context.x}}` templating. A number field takes a number or a reference such as `{{input.gas_price}}`, and says which when the text is neither. A list field takes values separated by commas, or one reference that passes a whole upstream list such as `{{curve.points}}`. Numeric lists are saved as numbers. `llm_call`, `agent_step` and `github_tool` get their own forms. A dependency editor mirrors dragging an edge. Inputs maps fields from upstream steps. Condition gates the step on an upstream field. Retry sets max retries with backoff. Switch steps get a cases editor.
+- **Pipeline Settings** is what the right rail shows when no step is selected. It holds the pipeline's description, shown on its chat page and in the agent list, lists client-side validation problems and holds the pipeline's input parameters.
 - **PipelineExecutionViewer** shows the result after Run pipeline.
 
 ### Declared inputs
@@ -83,6 +83,10 @@ They save to `model_config.input_variables`, with blank names dropped. The page 
 ### Decisions in a pipeline
 
 There is no decision node. A decision is called through the decision tools (`decision_evaluate`, `decision_explain`, `decision_compare`, `decision_test`, `decision_list`, `decision_propose`) as an ordinary tool step. For any `decision_*` tool, the `decision` argument is a picker fed by `GET /api/decisions`. It warns when the chosen decision has no published version yet, since the step fails until one is, and links to `/decisions`.
+
+### Code assets in a pipeline
+
+A `code_asset` step picks the asset from a list fed by `GET /api/code-assets`, the same assets the agent builder offers. Only ready assets can be picked, an asset still building or failed shows its status, and when the asset declares an input schema the picker lists the fields it reads, required ones marked `*`. The step saves the asset id. A reference in the field is kept as text, so a step can still take the asset from an upstream value.
 
 ### The store
 

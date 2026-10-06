@@ -1,0 +1,101 @@
+[
+  {
+    "title": "Numeric and list arguments could not take a reference to an input or step",
+    "area": "Pipeline builder",
+    "problem": "Number fields in a pipeline step were plain number inputs, so a value like {{input.gas_price}} could not be typed. List fields always split on commas into strings, so a whole list such as {{curve.points}} could not be passed and numeric lists arrived as text.",
+    "fix": "Number fields take a number or a {{...}} reference and say which when the text is neither. List fields keep a single reference whole and turn numeric items into numbers. Covered by e2e/uat_energy_trading_ui.spec.ts.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 182
+  },
+  {
+    "title": "Pipeline step output was cut at 500 characters",
+    "area": "Flight Recorder",
+    "problem": "The step replay showed the 500 character preview kept on each step, so a long result such as a 6 month forward curve ended mid-list with no way to see the rest.",
+    "fix": "The Output panel shows the node's full result, which the run already keeps, and falls back to the preview for older runs.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 183
+  },
+  {
+    "title": "A code_asset step had no asset picker",
+    "area": "Pipeline builder",
+    "problem": "In a pipeline the code_asset step asked for a raw asset UUID in a text box, while the agent builder offered a list. A user had to dig the id out of the API.",
+    "fix": "The step picks from the ready assets, shows a building or failed asset's status, and lists the fields the code reads with required ones marked. The id is saved. Covered by e2e/uat_energy_trading_ui.spec.ts.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 184
+  },
+  {
+    "title": "Text from templates reached typed tool arguments as text",
+    "area": "Pipeline engine",
+    "problem": "Pipeline inputs and many step outputs are text, so a string input like 33.8, 34.6 reached realized_vol_calc.prices as one string and the tool refused it.",
+    "fix": "Before a tool runs the engine turns text into the declared type one level deep: numbers, integers, booleans, objects and lists of numbers. Text that does not convert is passed through for the tool to report. Unit tests in tests/test_pipeline_coerce.py.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 185
+  },
+  {
+    "title": "Step labels were unknown to the live check and Run pipeline until the first save",
+    "area": "Pipeline builder",
+    "problem": "The builder sent steps without their labels to /api/pipelines/validate and to Run pipeline, so {{desk.result}} was flagged as an unknown node while building, and the upstream hint offered generated ids.",
+    "fix": "Labels are sent with every step, and the Available from upstream hint inserts the label when it is unique. Unit tests in pipelineAgentNodes.test.ts.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 186
+  },
+  {
+    "title": "Pipelines had no description field",
+    "area": "Pipeline builder",
+    "problem": "Pipeline Settings had nowhere to describe a pipeline, so every pipeline built in the UI showed No description provided on its chat page.",
+    "fix": "Pipeline Settings has a Description field, saved with the pipeline.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 187
+  },
+  {
+    "title": "The agent card kept the tool count from load time",
+    "area": "Agent builder",
+    "problem": "Adding tools on the canvas left the agent card at 1 tools when six were attached.",
+    "fix": "The card counts the selected tools on every add and remove.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 188
+  },
+  {
+    "title": "The model chip in the builder looked like the agent's model",
+    "area": "Agent builder",
+    "problem": "The top bar showed claude-haiku-4-5 next to an agent running Sonnet, with nothing saying it was the AI Validate model.",
+    "fix": "The chip reads AI checks followed by the model.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 189
+  },
+  {
+    "title": "Code generation showed raw provider errors and a made-up cost",
+    "area": "SDK playground",
+    "problem": "When generation fell back to the template the page printed the provider's 429 error dict, and a successful generation always reported a cost of 0.02.",
+    "fix": "The fallback says the AI service is busy or unavailable and that the template runs as is. Real token counts are returned and the invented cost is gone.",
+    "fixed_in": "PENDING",
+    "labels": [
+      "bug"
+    ],
+    "number": 190
+  }
+]

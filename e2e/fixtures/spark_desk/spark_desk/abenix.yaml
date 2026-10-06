@@ -1,0 +1,23 @@
+input_schema:
+  type: object
+  properties:
+    power_price: {type: number, description: "Baseload power forward, EUR/MWh"}
+    gas_price: {type: number, description: "Flat gas price, EUR/MWh, used when no curve is given"}
+    gas_curve: {description: "Monthly gas points with expected and p90, or the monte_carlo_curve output"}
+    carbon_price: {type: number, description: "EUA price, EUR/t"}
+    heat_rate: {type: number, description: "MWh of gas per MWh of power"}
+    emission_factor: {type: number, description: "tCO2 per MWh of power"}
+    volume_mw: {type: number}
+    gas_vol: {type: number}
+    power_vol: {type: number}
+    correlation: {type: number}
+    months: {type: integer}
+  required: [power_price]
+example_input:
+  power_price: 112
+  gas_price: 36
+  carbon_price: 68
+  heat_rate: 2.0
+  volume_mw: 200
+  gas_vol: 0.55
+  months: 3

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
 
 from app.core.config import settings
 
@@ -75,7 +75,7 @@ def verify_token(token: str) -> dict:
     _, public_key = _get_keys()
     try:
         return jwt.decode(token, public_key, algorithms=[settings.jwt_algorithm])
-    except JWTError:
+    except jwt.PyJWTError:
         return {}
 
 

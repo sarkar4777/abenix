@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import APIRouter, Depends, Header, HTTPException
-from jose import JWTError, jwt
+import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,7 +55,7 @@ def _verify_token(token: str) -> dict:
         if payload.get("iss") != "mideasttourism":
             return {}
         return payload
-    except JWTError:
+    except jwt.PyJWTError:
         return {}
 
 
