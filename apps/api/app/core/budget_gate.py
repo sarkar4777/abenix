@@ -37,5 +37,11 @@ def breach_response(breach: Any) -> JSONResponse:
 
 
 async def budget_error(db: Any, agent: Any, tenant_id: Any) -> JSONResponse | None:
+    # every route that starts an agent run outside /execute comes through here
+    from app.core.model_gate import model_unavailable_error
+
+    no_model = await model_unavailable_error(db, agent)
+    if no_model is not None:
+        return no_model
     breach = await budget_breach(db, agent, tenant_id)
     return breach_response(breach) if breach is not None else None

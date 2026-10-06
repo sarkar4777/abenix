@@ -16,6 +16,7 @@
 - Public commits from `publish-public.sh` are authored as sarkar4777.
 - The README quick start lists what a fresh laptop needs, gives the one minikube command with an honest first-run time, and says how to give agents a model with or without a `.env`.
 - The README opens with a one-command install and a table of contents, and every section has a stable anchor. The nav links at the top pointed at `#quick-start` and similar while GitHub named the emoji headings `#-quick-start`, so they went nowhere.
+- The README's dashboard image is a real fresh install at first sign in, with the getting-started checklist and the connect-a-model prompt.
 
 ### Fixed
 
@@ -40,6 +41,8 @@
 - `FRESH=true` and `destroy` delete only the current minikube profile. They ran `minikube delete --purge`, which removes every profile and the minikube cache on the machine.
 - A brand new database could not be created: `activity_logs.audit_seq` defaults to `nextval('activity_logs_audit_seq')`, but the sequence only came from a migration, so building the tables from the models failed and the API never started on a fresh install. The model now declares the sequence.
 - Provider keys saved under Admin, Tool Configuration now count as configured for the model picker and provider checks. Only environment variables and `provider.<name>.api_key` rows did before.
+- An agent run is refused before it starts, with 503 `NO_MODEL_CONFIGURED` and a plain message on where to add a key, when no model provider has a credential. It used to start, fail on the provider SDK's auth error as `UNKNOWN_ERROR`, and a standalone app refreshing its cache filled a fresh install with a hundred failed runs in minutes. Pipelines are not refused, since tool-only pipelines need no model.
+- `deploy.sh forwards` warns when the web port it forwards is not one the API accepts, and gives the command that fixes it. Moving the web forward to another port left sign in failing with only "Connection failed".
 
 ## v2.5.2 — 2026-10-03
 

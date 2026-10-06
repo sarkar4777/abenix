@@ -80,7 +80,7 @@ Same agent. Same definition. Cloud or edge. Built for the long-running, knowledg
 
 <p align="center">
   <img src="docs/screenshots/01-dashboard.png" alt="Abenix Dashboard" width="100%" />
-  <br/><em>The Abenix Dashboard — agents, executions, cost, and observability in one place</em>
+  <br/><em>A fresh install, first sign in: the getting-started checklist, live activity, and a prompt to connect a model before the first run</em>
 </p>
 
 ---

@@ -2211,6 +2211,12 @@ async def execute_agent(
     if agent.status not in (AgentStatus.ACTIVE, AgentStatus.DRAFT):
         return error("Agent is not in an executable state", 400)
 
+    from app.core.model_gate import model_unavailable_error
+
+    no_model = await model_unavailable_error(db, agent)
+    if no_model is not None:
+        return no_model
+
     from engine.agent_budget import BUDGET_EXCEEDED, check_agent_budget
 
     breach = await check_agent_budget(

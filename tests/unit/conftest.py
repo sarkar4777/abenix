@@ -38,3 +38,23 @@ os.environ.setdefault("JWT_ALGORITHM", "RS256")
 os.environ.setdefault("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
 os.environ.setdefault("REFRESH_TOKEN_EXPIRE_DAYS", "7")
 os.environ.setdefault("APP_NAME", "abenix-test")
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _a_model_is_configured(monkeypatch):
+    # mocked databases answer in a fixed order, the no-model check must not take a turn
+    # test_model_gate.py swaps the probe itself
+    try:
+        import app.routers.llm_models as lm
+    except Exception:
+        yield
+        return
+
+    async def configured(db):
+        return {"anthropic": {"configured": True, "reason": None}}
+
+    monkeypatch.setattr(lm, "_probe_providers", configured)
+    yield

@@ -1970,6 +1970,15 @@ deploy_forwards() {
   else
     warn "${bad} forward(s) down"
   fi
+  # The API only accepts the browser from the web port it was deployed with, so
+  # moving the web forward to another port leaves sign in failing with CORS.
+  local cors
+  cors="$(kubectl -n "${NAMESPACE}" get cm abenix-config -o jsonpath='{.data.CORS_ORIGINS}' 2>/dev/null || true)"
+  if [ -n "${cors}" ] && ! printf '%s' "${cors}" | grep -q "localhost:${WEB_PORT}\"" \
+     && ! printf '%s' "${cors}" | grep -q '"\*"'; then
+    warn "the API accepts the browser only from ${cors}, not http://localhost:${WEB_PORT}"
+    warn "  sign in will fail with a connection error, run: WEB_PORT=${WEB_PORT} bash scripts/deploy.sh local"
+  fi
   return 0
 }
 
