@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Search, Bot, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import { getToolDoc } from '@/lib/tool-docs';
+import ToolDetails from '@/components/tools-catalogue/ToolDetails';
+import { fullDescription, tidyDescription } from '@/components/tools-catalogue/toolSchema';
 import { CredentialBadge, CredentialHint, adminConfigHref, type ToolConfigInfo } from '@/components/CredentialBadge';
 import { useIsAdmin } from '@/hooks/useToolConfig';
 
@@ -51,6 +54,7 @@ export default function ToolsCataloguePage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [openCats, setOpenCats] = useState<Record<string, boolean>>({});
+  const [openTool, setOpenTool] = useState<string | null>(null);
   const isAdmin = useIsAdmin();
 
   useEffect(() => {
@@ -66,10 +70,16 @@ export default function ToolsCataloguePage() {
         if (!cancelled) {
           setTools(data);
           setLoading(false);
+          // a #tool_id link opens that tool
+          const hash = decodeURIComponent(window.location.hash.slice(1));
+          if (hash && data.some((t) => t.id === hash)) {
+            setOpenTool(hash);
+            setTimeout(() => document.getElementById(hash)?.scrollIntoView({ block: 'start' }), 50);
+          }
         }
       } catch (e: any) {
         if (!cancelled) {
-          setError(e?.message || String(e));
+          setError(e?.message ? `${e.message}. Reload the page to try again.` : 'The tools list could not be loaded. Reload the page to try again.');
           setLoading(false);
         }
       }
@@ -113,19 +123,19 @@ export default function ToolsCataloguePage() {
     setOpenCats(prev => ({ ...prev, [c]: prev[c] === undefined ? false : !prev[c] }));
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
       <header className="mb-8">
-        <h1 className="text-3xl font-semibold text-white mb-2">Tools catalogue</h1>
+        <h1 className="text-2xl sm:text-3xl font-semibold text-white mb-2">Tools catalogue</h1>
         <p className="text-slate-400 max-w-3xl">
           Browse the {tools.length || 'available'} built-in tools your agents
-          can call. Click into any tool for its argument schema and example
-          usage. To wire a tool into an agent, head to{' '}
+          can call. Click any tool to see its arguments, an example call and a
+          shortcut to add it to an agent. You can also wire tools in{' '}
           <Link href="/agents/new" className="text-cyan-400 hover:underline">
-            /agents/new
+            New agent
           </Link>{' '}
           or the visual{' '}
           <Link href="/builder" className="text-cyan-400 hover:underline">
-            /builder
+            Builder
           </Link>
           .
         </p>
@@ -161,7 +171,9 @@ export default function ToolsCataloguePage() {
         <div className="space-y-4">
           {orderedCategories.length === 0 && (
             <div className="text-slate-500 py-12 text-center">
-              No tools match &ldquo;{query}&rdquo;.
+              {query.trim()
+                ? <>No tools match &ldquo;{query}&rdquo;. Try a shorter word or a category such as &ldquo;finance&rdquo;.</>
+                : 'No tools are available on this platform yet.'}
             </div>
           )}
           {orderedCategories.map(cat => {
@@ -175,7 +187,8 @@ export default function ToolsCataloguePage() {
                 <button
                   onClick={() => toggle(cat)}
                   aria-expanded={isOpen}
-                  className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-800/40"
+                  type="button"
+                  className="w-full flex items-center gap-3 px-4 sm:px-5 py-4 hover:bg-slate-800/40"
                 >
                   {isOpen ? (
                     <ChevronDown className="w-4 h-4 text-slate-400" />
@@ -190,58 +203,77 @@ export default function ToolsCataloguePage() {
                 {isOpen && (
                   <div>
                     {CATEGORY_BLURB[cat] && (
-                      <p className="px-5 pb-2 text-sm text-slate-400 border-b border-slate-800/50">
+                      <p className="px-4 sm:px-5 pb-2 text-sm text-slate-400 border-b border-slate-800/50">
                         {CATEGORY_BLURB[cat]}
                       </p>
                     )}
                     <ul className="divide-y divide-slate-800/50">
-                      {items.map(t => (
-                        <li
-                          key={t.id}
-                          id={t.id}
-                          className="px-5 py-4 hover:bg-slate-800/30 transition-colors"
-                          data-testid={`tool-row-${t.id}`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <Bot className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-baseline gap-3 flex-wrap">
-                                <span className="font-mono text-sm text-cyan-300">
-                                  {t.id}
-                                </span>
-                                {t.name && t.name !== t.id && (
-                                  <span className="text-sm text-slate-300">
-                                    {t.name}
-                                  </span>
-                                )}
-                                <CredentialBadge config={t.config} />
-                                {isAdmin && t.config && t.config.status !== 'none' && (
-                                  <Link
-                                    href={adminConfigHref(t.config)}
-                                    className="text-[11px] text-cyan-400 hover:underline"
-                                    data-testid={`tool-configure-${t.id}`}
+                      {items.map(t => {
+                        const expanded = openTool === t.id;
+                        const doc = getToolDoc(t.id);
+                        return (
+                          <li
+                            key={t.id}
+                            id={t.id}
+                            className={`px-4 sm:px-5 py-4 transition-colors scroll-mt-4 ${expanded ? 'bg-slate-800/30' : 'hover:bg-slate-800/30'}`}
+                            data-testid={`tool-row-${t.id}`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <Bot className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setOpenTool(expanded ? null : t.id)}
+                                    aria-expanded={expanded}
+                                    aria-controls={`tool-details-${t.id}`}
+                                    className="inline-flex items-baseline gap-1.5 text-left min-w-0"
+                                    data-testid={`tool-toggle-${t.id}`}
                                   >
-                                    Configure
-                                  </Link>
+                                    {expanded
+                                      ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 self-center shrink-0" />
+                                      : <ChevronRight className="w-3.5 h-3.5 text-slate-400 self-center shrink-0" />}
+                                    <span className="font-mono text-sm text-cyan-300 break-all hover:underline">{t.id}</span>
+                                  </button>
+                                  {t.name && t.name !== t.id && (
+                                    <span className="text-sm text-slate-300">{t.name}</span>
+                                  )}
+                                  <CredentialBadge config={t.config} />
+                                  {isAdmin && t.config && t.config.status !== 'none' && (
+                                    <Link
+                                      href={adminConfigHref(t.config)}
+                                      className="text-[11px] text-cyan-400 hover:underline"
+                                      data-testid={`tool-configure-${t.id}`}
+                                    >
+                                      Configure
+                                    </Link>
+                                  )}
+                                </div>
+                                {expanded ? (
+                                  <div id={`tool-details-${t.id}`}>
+                                    <ToolDetails
+                                      id={t.id}
+                                      description={fullDescription(t.description, doc?.description)}
+                                      inputSchema={t.input_schema}
+                                    />
+                                  </div>
+                                ) : (
+                                  t.description && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setOpenTool(t.id)}
+                                      className="block text-left text-sm text-slate-400 mt-1 leading-relaxed line-clamp-2 hover:text-slate-300"
+                                    >
+                                      {tidyDescription(t.description)}
+                                    </button>
+                                  )
                                 )}
+                                <CredentialHint config={t.config} isAdmin={isAdmin} />
                               </div>
-                              {t.description && (
-                                <p className="text-sm text-slate-400 mt-1 leading-relaxed">
-                                  {t.description}
-                                </p>
-                              )}
-                              <CredentialHint config={t.config} isAdmin={isAdmin} />
-                              {!t.input_schema && (
-                                <p className="text-[11px] text-amber-300/80 mt-2">
-                                  ⚠ No schema published — the agent will have
-                                  to guess argument names. Tracked in
-                                  BUGS_TOOLS_DEEP &lsquo;B-META-1&rsquo;.
-                                </p>
-                              )}
                             </div>
-                          </div>
-                        </li>
-                      ))}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 )}

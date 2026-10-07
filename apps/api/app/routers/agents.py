@@ -2306,6 +2306,18 @@ async def execute_agent(
         elif blocked is not None:
             return blocked
 
+    history: list[dict[str, str]] = []
+    if body.conversation_id:
+        from app.core.chat_history import ThreadNotFound, load_thread_history
+
+        try:
+            history = await load_thread_history(db, body.conversation_id, user)
+        except ThreadNotFound:
+            return error(
+                "This conversation was not found or belongs to someone else. Start a new chat.",
+                404,
+            )
+
     mcp_connections = await _fetch_mcp_connections(db, agent.id, user.tenant_id)
 
     # actAs delegation: stamp the end-user identity onto the execution row so
@@ -2376,6 +2388,7 @@ async def execute_agent(
                 "role": _user_role,
                 "api_key_id": str(api_key_id) if api_key_id else None,
                 "message": sanitized_message,
+                "history": history,
                 "context": user_context,
                 "is_pipeline": is_pipeline,
                 "parent_execution_id": (
@@ -2799,6 +2812,7 @@ async def execute_agent(
                 max_iterations=agent_max_iterations,
                 max_tokens=agent_max_tokens,
                 cache_enabled=agent_cache_enabled,
+                history=history,
             ),
             media_type="text/event-stream",
             headers={
@@ -2826,6 +2840,7 @@ async def execute_agent(
         tool_config=model_cfg.get("tool_config") or {},
         require_knowledge_search=bool(model_cfg.get("require_knowledge_search", False)),
         require_tools=list(model_cfg.get("require_tools") or []),
+        history=history,
     )
 
 
@@ -3466,6 +3481,7 @@ async def _stream_execution(
     max_iterations: int | None = None,
     max_tokens: int = 4096,
     cache_enabled: bool = True,
+    history: list[dict[str, str]] | None = None,
 ) -> Any:
     import os as _os
     from app.core.config import settings
@@ -3540,6 +3556,7 @@ async def _stream_execution(
             require_tools=list(agent_model_config.get("require_tools") or []),
             user_id=str(enterprise_ctx.get("user_id") or ""),
             cost_limit=enterprise_ctx.get("per_execution_cost_limit"),
+            history=history or [],
         )
         event_source = stream_agent(exec_config)
     else:
@@ -3629,6 +3646,7 @@ async def _stream_execution(
             ),
             require_tools=list(agent_model_config.get("require_tools") or []),
             cost_limit=enterprise_ctx.get("per_execution_cost_limit"),
+            history=history or [],
         )
         if max_iterations:
             _exec_kwargs["max_iterations"] = int(max_iterations)
@@ -4066,6 +4084,8 @@ async def _non_stream_execution(
     cache_enabled: bool = True,
     tool_config: dict[str, dict[str, Any]] | None = None,
     require_knowledge_search: bool = False,
+    require_tools: list[str] | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> JSONResponse:
     from engine.llm_router import LLMRouter
     from app.core.config import settings
@@ -4148,7 +4168,9 @@ async def _non_stream_execution(
         # failure_code=GROUNDING_REQUIRED_VIOLATION on the execution
         # row when the run finishes without invoking knowledge_search.
         require_knowledge_search=bool(require_knowledge_search),
+        require_tools=list(require_tools or []),
         cost_limit=enterprise_ctx.get("per_execution_cost_limit"),
+        history=history or [],
     )
     if max_iterations:
         _exec_kwargs2["max_iterations"] = int(max_iterations)

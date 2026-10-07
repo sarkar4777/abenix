@@ -155,6 +155,8 @@ async def execute(request: Request):
             ),
             moderation_gate=_gate,
             cost_limit=body.get("cost_limit"),
+            require_tools=list(body.get("require_tools") or []),
+            history=body.get("history") or [],
         )
 
         result = await executor.invoke(body.get("message", ""))
@@ -223,6 +225,8 @@ async def execute_stream(request: Request):
                 ),
                 moderation_gate=_gate,
                 cost_limit=body.get("cost_limit"),
+                require_tools=list(body.get("require_tools") or []),
+                history=body.get("history") or [],
             )
 
             async for event in executor.stream(body.get("message", "")):

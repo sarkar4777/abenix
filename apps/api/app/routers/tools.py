@@ -82,7 +82,7 @@ def _runtime_tool_slugs() -> list[str]:
 
 
 def _runtime_tool_description(slug: str) -> str | None:
-    """First line of the tool class's own description/docstring, if any."""
+    """The tool class description in full, or the first line of its docstring."""
     try:
         from engine.agent_executor import get_tool_class  # type: ignore
 
@@ -91,9 +91,10 @@ def _runtime_tool_description(slug: str) -> str | None:
             return None
         desc = getattr(cls, "description", None)
         if isinstance(desc, str) and desc.strip():
-            return desc.strip().split("\n")[0][:400]
+            # whole text, the catalogue clamps it for display
+            return " ".join(desc.split())
         doc = (cls.__doc__ or "").strip()
-        return doc.split("\n")[0][:400] or None
+        return doc.split("\n")[0] or None
     except Exception:
         return None
 
@@ -992,6 +993,7 @@ TOOL_CATALOG = [
 @router.get("")
 async def list_tools(
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Return metadata for all available built-in tools."""
     runtime_schemas = _load_runtime_schemas()
@@ -1035,7 +1037,70 @@ async def list_tools(
                 "config": _tc.tool_config_for(slug, tenant_id=user.tenant_id),
             }
         )
+    out = [e for e in out if e["id"] != "schema_portfolio_tool"]
+    out.extend(await _portfolio_tool_entries(db, user.tenant_id))
     return success(out, meta={"count": len(out)})
+
+
+async def _portfolio_tool_entries(db: AsyncSession, tenant_id: Any) -> list[dict]:
+    """One palette entry per active portfolio schema, the generic tool has no schema to read."""
+    try:
+        from sqlalchemy import select
+
+        from models.portfolio_schema import PortfolioSchema
+
+        rows = (
+            (
+                await db.execute(
+                    select(PortfolioSchema).where(
+                        PortfolioSchema.tenant_id == tenant_id,
+                        PortfolioSchema.is_active.is_(True),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    except Exception as exc:
+        logger.debug("portfolio schemas not listed: %s", exc)
+        return []
+    out = []
+    for s in rows:
+        nouns = s.record_noun_plural or "records"
+        out.append(
+            {
+                "id": f"portfolio_{s.domain_name}",
+                "name": f"Portfolio: {s.label}",
+                "description": (
+                    s.description
+                    or f"Query the {s.label} portfolio: list, search, summarise and compare {nouns}."
+                ),
+                "category": "data",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": [
+                                "list_records",
+                                "get_record",
+                                "search",
+                                "get_summary",
+                                "get_related",
+                                "compare_field",
+                            ],
+                        },
+                        "record_id": {"type": "string"},
+                        "query": {"type": "string"},
+                        "table_name": {"type": "string"},
+                        "limit": {"type": "integer", "default": 20},
+                    },
+                    "required": ["operation"],
+                },
+                "portfolio_schema_id": str(s.id),
+            }
+        )
+    return out
 
 
 @router.post("/{tool_slug}/execute")

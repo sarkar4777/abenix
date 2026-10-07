@@ -391,7 +391,7 @@ export default function IntegrationsPage() {
   const orderedCats = Object.keys(CATEGORY_LABEL).filter(c => grouped[c]);
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8">
+    <div className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8">
       <header className="mb-6">
         <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
           <h1 className="text-3xl font-semibold text-white">Integrations</h1>

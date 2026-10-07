@@ -824,13 +824,13 @@ bash scripts/deploy-azure.sh all       # AKS + ACR + helm`}</pre>
         icon: <UserCircle2 className="w-4 h-4" />,
         body: (
           <div className="space-y-3 text-[13.5px] text-slate-300 leading-relaxed">
-            <p>A private knowledge collection that follows <em>you</em>. Notes, files, meeting context. Lives in a dedicated namespace <code className="text-cyan-300">persona:&lt;tenant_id&gt;</code> so generic <code>knowledge_search</code> can&apos;t touch it.</p>
+            <p>A private knowledge collection that follows <em>you</em>. Notes, files, meeting context. It is stored in its own table in the platform database, apart from shared knowledge bases, so generic <code>knowledge_search</code> can&apos;t touch it.</p>
             <Hero src={SS('14-persona-kb.png')} alt="Persona KB" />
-            <p><strong className="text-white">Three defenses prevent persona leakage:</strong></p>
+            <p><strong className="text-white">How persona stays private:</strong></p>
             <ol className="list-decimal pl-5 space-y-1 text-[13px]">
-              <li>Generic <code>knowledge_search</code> applies a Pinecone filter that excludes any chunk with a <code>persona_scope</code> field.</li>
-              <li><code>persona_rag</code> (the only tool that reads persona) requires the scope to be pre-authorised on the meeting (or be the implicit <code>self</code>).</li>
-              <li>A defense-in-depth in-memory re-filter, in case the vector backend silently ignores the filter argument.</li>
+              <li>Persona items live in their own table, which generic <code>knowledge_search</code> never reads.</li>
+              <li><code>persona_rag</code>, the only tool that reads persona, always searches the running user&apos;s own items only, filtered by tenant, owner and scope in every query.</li>
+              <li>In a meeting it only allows the scopes authorised for that meeting.</li>
             </ol>
             <p>Persona is also where you upload a voice sample for opt-in voice cloning (used by meeting bots — see the Meeting Primitives topic).</p>
 

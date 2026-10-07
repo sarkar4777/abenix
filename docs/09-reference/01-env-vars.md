@@ -274,7 +274,7 @@ to the API over HTTP.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ABENIX_PLATFORM_API_KEY` | empty | Platform key the BPM analyzer and conversation endpoints use with the SDK. `ABENIX_API_KEY` is the fallback |
+| `ABENIX_PLATFORM_API_KEY` | empty | Platform key the conversation endpoints use with the SDK. `ABENIX_API_KEY` is the fallback. The BPM analyzer no longer needs it, its smoke test runs in process |
 | `ABENIX_INTERNAL_URL` | `http://localhost:8000` | API base for those SDK calls |
 | `PLAYGROUND_INTERNAL_API_URL` | `http://localhost:8000` | API base the SDK Playground runs snippets against |
 | `CODE_ASSET_DOWNLOAD_TOKEN` | set by the API at run time | Bearer the `code_asset` tool sends when it downloads an archive. Not for operators |
@@ -428,8 +428,8 @@ A tool listed under *Required by* returns a standard "not configured" answer wit
 | `OPENCORPORATES_API_KEY` | OpenCorporates | `legal_existence_verifier`, `ubo_discovery` | nobody, optional |
 | `OPENSANCTIONS_API_KEY` | OpenSanctions | `pep_screening` | nobody, optional |
 | `PAGERDUTY_TOKEN` | Pagerduty | `integration_hub` | nobody, optional |
-| `PINECONE_API_KEY` | Pinecone | `knowledge_store`, `persona_rag`, `vector_search` | nobody, optional |
-| `PINECONE_INDEX_NAME` | Pinecone | `knowledge_store`, `persona_rag`, `vector_search` | nobody, optional |
+| `PINECONE_API_KEY` | Pinecone | `knowledge_store`, `vector_search` | nobody, optional |
+| `PINECONE_INDEX_NAME` | Pinecone | `knowledge_store`, `vector_search` | nobody, optional |
 | `SPG_RATINGS_API_KEY` | S&P Global Ratings | `spg_ratings_api` | `spg_ratings_api` |
 | `SPG_RATINGS_API_URL` | S&P Global Ratings | `spg_ratings_api` | nobody, optional |
 | `SALESFORCE_INSTANCE_URL` | Salesforce | `integration_hub` | nobody, optional |

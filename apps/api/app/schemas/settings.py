@@ -34,10 +34,15 @@ class UpdateMemberRoleRequest(BaseModel):
     role: str
 
 
+class NotificationChannels(BaseModel):
+    slack: bool | None = None
+    email: bool | None = None
+
+
 class NotificationSettingsRequest(BaseModel):
-    execution_complete: bool = True
-    execution_failed: bool = True
-    weekly_report: bool = False
-    billing_alerts: bool = True
-    team_updates: bool = True
-    marketing: bool = False
+    # Partial update, keys left out keep their saved value
+    execution_complete: bool | None = None
+    execution_failed: bool | None = None
+    billing_alerts: bool | None = None
+    team_updates: bool | None = None
+    channels: NotificationChannels | None = None

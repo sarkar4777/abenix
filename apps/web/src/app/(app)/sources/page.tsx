@@ -16,6 +16,7 @@ import {
 import SourceForm from '@/components/sources/SourceForm';
 import SourceSettingsDialog from '@/components/sources/SourceSettingsDialog';
 import PauseDialog from '@/components/sources/PauseDialog';
+import { refreshSourceList } from '@/components/sources/refreshSourceList';
 
 type Filter = 'all' | Health;
 
@@ -287,8 +288,10 @@ export default function SourcesPage() {
       {adding && (
         <SourceForm
           onClose={() => setAdding(false)}
-          onSaved={(s) => {
+          onSaved={async (s) => {
             setAdding(false);
+            // refresh the cached list now so going back shows the new source
+            await refreshSourceList();
             router.push(`/sources/${s.id}`);
           }}
         />

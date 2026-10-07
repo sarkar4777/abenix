@@ -44,6 +44,9 @@ class ExecutionConfig:
     user_id: str = ""
     # the agent's per_execution_cost_limit, None for no cap
     cost_limit: float | None = None
+    require_tools: list[str] = field(default_factory=list)
+    # earlier chat turns as [{"role", "content"}], oldest first
+    history: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -136,6 +139,8 @@ async def _execute_embedded(config: ExecutionConfig) -> ExecutionResult:
             require_knowledge_search=bool(config.require_knowledge_search),
             moderation_gate=config.moderation_gate,
             cost_limit=config.cost_limit,
+            require_tools=list(config.require_tools or []),
+            history=list(config.history or []),
         )
 
         result = await executor.invoke(config.message)
@@ -214,6 +219,8 @@ async def _stream_embedded(
             require_knowledge_search=bool(config.require_knowledge_search),
             moderation_gate=config.moderation_gate,
             cost_limit=config.cost_limit,
+            require_tools=list(config.require_tools or []),
+            history=list(config.history or []),
         )
 
         async for event in executor.stream(config.message):
@@ -252,6 +259,8 @@ async def _execute_remote(config: ExecutionConfig) -> ExecutionResult:
         "require_knowledge_search": bool(config.require_knowledge_search),
         "model_config": config.model_config or {},
         "cost_limit": config.cost_limit,
+        "require_tools": list(config.require_tools or []),
+        "history": list(config.history or []),
     }
 
     try:
@@ -310,6 +319,8 @@ async def _stream_remote(
         "require_knowledge_search": bool(config.require_knowledge_search),
         "model_config": config.model_config or {},
         "cost_limit": config.cost_limit,
+        "require_tools": list(config.require_tools or []),
+        "history": list(config.history or []),
     }
 
     try:

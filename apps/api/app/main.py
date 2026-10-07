@@ -167,7 +167,14 @@ app.add_middleware(
         "If-Match",
         "If-None-Match",
     ],
-    expose_headers=["Retry-After", "X-RateLimit-Remaining", "X-Request-ID", "ETag"],
+    expose_headers=[
+        "Retry-After",
+        "X-RateLimit-Remaining",
+        "X-Request-ID",
+        "ETag",
+        # file downloads keep their real name
+        "Content-Disposition",
+    ],
     max_age=600,
 )
 

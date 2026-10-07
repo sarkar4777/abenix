@@ -172,7 +172,7 @@ export default function SecurityPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Security</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Monitor account activity and recent sign-ins.
+          Recent sign-ins to your account and a log of changes made in this workspace.
         </p>
       </div>
 

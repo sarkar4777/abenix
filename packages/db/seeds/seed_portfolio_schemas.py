@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
@@ -22,51 +23,27 @@ DATABASE_URL = os.environ.get(
 )
 
 
-def _load_energy_contracts_template() -> dict | None:
-    """Pull the `energy_contracts` template from the ContractIQ router."""
-    try:
-        # Import by file path so we don't drag FastAPI dependencies.
+TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "apps"
+    / "api"
+    / "app"
+    / "core"
+    / "portfolio_templates"
+    / "energy_contracts.json"
+)
 
-        # __file__ = .../packages/db/seeds/seed_portfolio_schemas.py
-        # parents: [0]=seeds, [1]=db, [2]=packages, [3]=abenix root
-        router_path = (
-            Path(__file__).resolve().parents[3]
-            / "contractiq"
-            / "api"
-            / "app"
-            / "routers"
-            / "portfolio_schema_templates.py"
+
+def _load_energy_contracts_template() -> dict:
+    """Read the template that ships with the API, raise when it is missing or broken."""
+    if not TEMPLATE_PATH.exists():
+        raise FileNotFoundError(
+            f"energy_contracts template not found at {TEMPLATE_PATH}"
         )
-        if not router_path.exists():
-            return None
-        import ast
-
-        source = router_path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-        # Find the async function `list_templates`, then walk its AST for
-        # the first dict literal that has an "id": "energy_contracts" key.
-        def _find_energy_dict(node: ast.AST) -> dict | None:
-            if isinstance(node, ast.Dict):
-                for k, v in zip(node.keys, node.values):
-                    if (
-                        isinstance(k, ast.Constant)
-                        and k.value == "id"
-                        and isinstance(v, ast.Constant)
-                        and v.value == "energy_contracts"
-                    ):
-                        # Yes, this is the right dict — evaluate it.
-                        return ast.literal_eval(node)
-            for child in ast.iter_child_nodes(node):
-                result = _find_energy_dict(child)
-                if result is not None:
-                    return result
-            return None
-
-        return _find_energy_dict(tree)
-    except Exception as e:
-        print(f"  ! Could not load template: {e}")
-        return None
+    template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
+    if not isinstance(template.get("schema_json"), dict):
+        raise ValueError(f"{TEMPLATE_PATH} has no schema_json object")
+    return template
 
 
 async def _ensure_for_tenant(
@@ -102,9 +79,6 @@ async def _ensure_for_tenant(
 
 async def seed_portfolio_schemas() -> None:
     template = _load_energy_contracts_template()
-    if not template:
-        print("No energy_contracts template found — skipping portfolio schema seed.")
-        return
 
     engine = create_async_engine(DATABASE_URL, echo=False)
     session_factory = async_sessionmaker(
@@ -132,4 +106,8 @@ async def seed_portfolio_schemas() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(seed_portfolio_schemas())
+    try:
+        asyncio.run(seed_portfolio_schemas())
+    except (OSError, ValueError) as e:
+        print(f"Portfolio schema seed FAILED: {e}", file=sys.stderr)
+        sys.exit(1)

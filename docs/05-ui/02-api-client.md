@@ -214,7 +214,7 @@ If the refresh fails, both tokens are removed from `localStorage`, the browser i
 
 | Stream | How |
 |---|---|
-| Agent chat | `connectToAgentStream()` in `lib/chat.ts`. `fetch` with a Bearer header and a body reader |
+| Agent chat | `connectToAgentStream()` in `lib/chat.ts`. `fetch` with a Bearer header and a body reader. An optional `conversationId` goes out as `conversation_id` so the server adds the thread's earlier turns. A stream that closes without `done` or `error` reports an error |
 | Pipeline run in the builder | Not a stream. Run pipeline calls `executeAndTrack()` in `usePipelineStore`, which POSTs `/api/pipelines/{id}/execute` and shows the result. `executeWithStreaming()` (`execute-stream`) exists in the store but nothing calls it |
 | Live DAG on a run | `LiveDagView` in `components/shared/`. `EventSource` on `/api/executions/{id}/watch` |
 | Meetings | `EventSource` on `/api/meetings/{id}/stream?token=` |

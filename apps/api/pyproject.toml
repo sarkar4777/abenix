@@ -50,6 +50,8 @@ dependencies = [
     "nats-py>=2.7.0",
     "zen-engine==2.1.2",
     "jsonschema>=4.21.0",
+    # Excel uploads on the Portfolio Schemas page
+    "openpyxl>=3.1.0",
 ]
 
 [project.optional-dependencies]

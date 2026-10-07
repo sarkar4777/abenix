@@ -200,7 +200,7 @@ export default function TeamPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">Team</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Manage workspace members and permissions
+            Who is in this workspace, the role each person has, and invitations still waiting to be accepted.
           </p>
         </div>
         <button

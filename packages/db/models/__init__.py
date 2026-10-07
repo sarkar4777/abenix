@@ -67,6 +67,7 @@ from models.meeting import (
     MeetingStatus,
     PersonaItem,
 )
+from models.persona_chunk import PersonaChunk
 from models.code_asset import CodeAsset, CodeAssetSource, CodeAssetStatus
 from models.resource_share import (
     ResourceShare,
@@ -196,6 +197,7 @@ __all__ = [
     "MeetingProvider",
     "MeetingStatus",
     "PersonaItem",
+    "PersonaChunk",
     "CodeAsset",
     "CodeAssetSource",
     "CodeAssetStatus",

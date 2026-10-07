@@ -57,7 +57,7 @@ Warm code runners are Kubernetes Deployments keyed by tenant and asset version. 
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `ml_models` | `name`, `version`, `framework`, `file_uri`, `original_filename`, `input_schema`, `output_schema`, `status`, `training_metrics`, `tags`, `is_active`, `created_by` | The registry |
+| `ml_models` | `name`, `version`, `framework`, `file_uri`, `original_filename`, `input_schema`, `output_schema`, `status`, `training_metrics`, `tags`, `is_active`, `created_by` | The registry. A model that failed its load check has `status=error`, `is_active=false` and the reason in `training_metrics.validation_error` |
 | `ml_model_deployments` | `model_id`, `deployment_type`, `endpoint_url`, `replicas`, `status`, `pod_name`, `service_name`, `k8s_namespace`, `config` | In-process or a Kubernetes pod |
 
 See [02-runtime/12-ml-models](../02-runtime/12-ml-models.md).
@@ -91,6 +91,38 @@ See [02-runtime/12-ml-models](../02-runtime/12-ml-models.md).
 ## Portfolio schemas
 
 `portfolio_schemas` holds tenant-defined record schemas for the portfolio tool: `domain_name`, `label`, `record_noun`, `record_noun_plural`, `schema_json`, `is_active`.
+
+Create and update run `schema_json` through [`portfolio_schema_check.py`](../../apps/api/app/core/portfolio_schema_check.py) before saving:
+
+- `domain` needs `label`, `record_noun` and `record_noun_plural`. Missing ones are filled from the request fields. `domain.name` is always set to `domain_name`.
+- `main_table` needs `name`, `user_scope_column`, `title_column`, a non-empty `list_columns` and a non-empty `columns` object. `created_at_column`, `search_columns`, `type_column` and `summary_aggregations` are optional.
+- Each entry in `related_tables` needs `name`, a unique `label`, `foreign_key` and `columns`. `order_by` is a column with an optional `ASC` or `DESC`. A key-value table (`is_kv_store`) also needs `key_column` and `value_column`.
+- Every table and column name must match `^[a-z_][a-z0-9_]*$` and must not be a reserved SQL word such as `order` or `user`, because the tool puts names into queries unquoted. Aggregation `sql` must be one `count`, `sum`, `avg`, `min` or `max` over a single column, or `count(*)`.
+- Every referenced table and column must exist in the platform database (checked against `information_schema`). The main table also needs `id`, and `created_at` unless `created_at_column` names another column.
+
+Problems come back as a 422 with `error.details.problems`, one line each.
+
+### Spreadsheet import (`pf_` tables)
+
+A schema only works against a table that exists, so the page can also make the table. [`portfolio_import.py`](../../apps/api/app/core/portfolio_import.py) reads an uploaded CSV (and `.xlsx` when `openpyxl` is installed, which the API image does not do today, so the cluster takes CSV only and says so), and the router creates:
+
+- a table `pf_<first 8 hex of tenant id>_<domain>`, at most 63 characters (a long domain is cut and gets an 8 character hash)
+- columns `id uuid` primary key with `gen_random_uuid()`, `owner_id uuid not null`, `created_at timestamptz default now()`, then one column per kept spreadsheet column
+- an index on `owner_id` and the table comment `abenix:portfolio-import:<tenant id>`, which marks it as made by this feature for that tenant
+
+Column names are snake_case of the header. `id`, `owner_id` and `created_at` become `source_<name>`, reserved SQL words get `_value`, duplicates get `_2`, `_3`. Types are inferred from every non-empty value: number (`double precision`, thousands commas allowed, leading zeros stay text), date (`date`, or `timestamptz` when any value has a time, ISO or day/month/year or month/day/year when the values settle it), boolean (yes/no, true/false, y/n) and otherwise text. A row whose value does not fit its column is skipped and reported with the row number and the reason. Limits are 50,000 rows, 20 MB and 100 columns.
+
+The generated `schema_json` uses `owner_id` as `user_scope_column`, lists every column, searches the text columns, and adds `count(*)` plus `sum` and `avg` for up to ten number columns. It carries `"source": {"kind": "spreadsheet", "table": ...}` and goes through the same validator as a hand-written schema. Rows belong to the uploader, so each person and the agents acting for them see only their own rows.
+
+Uploading again to the same domain either replaces the uploader's rows or appends. Other people's rows are never touched. New columns are added to the table and to the schema, existing columns keep their stored type.
+
+Deleting a schema keeps its table unless `drop_table=true`. The table is dropped only when its name is the `pf_` name for that tenant and domain, it carries the marker comment and no other schema in the tenant reads it.
+
+"Try with a sample" imports [`energy_trades_sample.csv`](../../apps/api/app/core/portfolio_templates/energy_trades_sample.csv) (40 power and gas trades) as `energy_trading_book`, owned by the person who clicked. Clicking again refreshes that person's sample rows.
+
+These tables are made at runtime, so they are not in the SQLAlchemy models or alembic. Leave `pf_*` alone if you ever autogenerate a migration.
+
+The starter templates (`real_estate`, `ma_documents`, `energy_contracts`) are examples. Their tables do not ship with the platform, so they save only once pointed at real tables. The energy contracts template lives in [`apps/api/app/core/portfolio_templates/energy_contracts.json`](../../apps/api/app/core/portfolio_templates/energy_contracts.json) and `seed_portfolio_schemas.py` reads it from there.
 
 ---
 

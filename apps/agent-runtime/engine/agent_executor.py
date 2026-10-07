@@ -336,8 +336,18 @@ class AgentExecutor:
         risk_tier: str = "",
         agent_name: str = "",
         cost_limit: float | None = None,
+        history: list[dict[str, Any]] | None = None,
     ) -> None:
         self.llm_router = llm_router
+        # earlier turns of a chat thread, sent ahead of the new user message
+        self.history: list[dict[str, Any]] = [
+            {"role": m["role"], "content": m["content"]}
+            for m in (history or [])
+            if isinstance(m, dict)
+            and m.get("role") in ("user", "assistant")
+            and isinstance(m.get("content"), str)
+            and m["content"]
+        ]
         self.cost_limit = run_cost_limit(cost_limit)
         self.risk_tier = risk.normalize(risk_tier)
         if agent_name:
@@ -576,7 +586,10 @@ class AgentExecutor:
                     moderation_block_source="pre_llm",
                 )
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": input_message}]
+        messages: list[dict[str, Any]] = [
+            *self.history,
+            {"role": "user", "content": input_message},
+        ]
         tools = self.tool_registry.list_all()
         all_tool_calls: list[dict[str, Any]] = []
         node_traces: list[NodeTrace] = []
@@ -606,7 +619,8 @@ class AgentExecutor:
         )
         node_counter += 1
 
-        if self.cache:
+        # replies that depend on earlier turns stay out of the shared cache
+        if self.cache and not self.history:
             cache_result = await self.cache.check(
                 model=self.model,
                 messages=messages,
@@ -831,7 +845,7 @@ class AgentExecutor:
                             moderation_block_source="post_llm",
                         )
 
-                if self.cache and output_text == resp.content:
+                if self.cache and not self.history and output_text == resp.content:
                     # Only cache un-redacted responses — redacted output
                     # depends on tenant policy and would leak to other
                     # tenants sharing the same cache key.
@@ -1228,7 +1242,10 @@ class AgentExecutor:
                 )
                 return
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": input_message}]
+        messages: list[dict[str, Any]] = [
+            *self.history,
+            {"role": "user", "content": input_message},
+        ]
         tools = self.tool_registry.list_all()
         all_tool_calls: list[dict[str, Any]] = []
         self._node_traces = []
@@ -1238,7 +1255,8 @@ class AgentExecutor:
         effective_model: str | None = None
         effective_fallback_reason: str | None = None
 
-        if self.cache:
+        # replies that depend on earlier turns stay out of the shared cache
+        if self.cache and not self.history:
             cache_result = await self.cache.check(
                 model=self.model,
                 messages=messages,
@@ -1401,7 +1419,7 @@ class AgentExecutor:
                         )
                         return
 
-                if self.cache and not _post_redacted:
+                if self.cache and not self.history and not _post_redacted:
                     response_data = {
                         "content": full_text,
                         "model": self.model,
@@ -2217,8 +2235,8 @@ def build_tool_registry(
     # ── Meeting + persona + safety tools — all need execution context.
     # Extract user_id from acting_subject if available so persona_rag's
     # "self" scope + defer_to_human's notifications land on the right user.
-    _user_id = ""
-    if acting_subject and isinstance(acting_subject, dict):
+    _user_id = str(user_id or "")
+    if not _user_id and acting_subject and isinstance(acting_subject, dict):
         _user_id = str(acting_subject.get("user_id") or acting_subject.get("sub") or "")
     for _tool_name in (
         "meeting_join",
@@ -2299,6 +2317,8 @@ def build_tool_registry(
             registry.register(context_tools[name]())
         elif name in available:
             registry.register(available[name]())
+        elif name.startswith("portfolio_") and registry.get(name) is not None:
+            continue  # registered above from the tenant's schemas
         else:
             unknown_tools.append(name)
 
@@ -2399,32 +2419,37 @@ def build_tool_registry(
         acting_subject,
         tool_names,
     )
+    # portfolio_<domain> reads rows scoped to the actAs subject, or to the user running the agent
+    _portfolio_scope = str(
+        (
+            (acting_subject or {}).get("subject_id")
+            if isinstance(acting_subject, dict)
+            else ""
+        )
+        or user_id
+        or ""
+    )
+    for tname in tool_names:
+        if tname.startswith("portfolio_") and _portfolio_scope:
+            domain = tname[len("portfolio_") :]
+            try:
+                from engine.tools.schema_portfolio_tool import SchemaPortfolioTool
+
+                registry.register(
+                    SchemaPortfolioTool(
+                        domain_name=domain,
+                        user_id=_portfolio_scope,
+                        tenant_id=str(tenant_id),
+                        db_url=db_url,
+                    )
+                )
+            except Exception as e:
+                logger.error("Failed to register %s tool: %s", tname, e)
+
     if acting_subject:
         subject_id = acting_subject.get("subject_id")
         subject_type = acting_subject.get("subject_type") or "subject"
         kb_namespace = f"{subject_type}-{subject_id}" if subject_id else None
-
-        # Register any `portfolio_<domain>` tool dynamically (deferred schema load)
-        for tname in tool_names:
-            if tname.startswith("portfolio_") and subject_id:
-                domain = tname[len("portfolio_") :]
-                try:
-                    from engine.tools.schema_portfolio_tool import SchemaPortfolioTool
-
-                    tool = SchemaPortfolioTool(
-                        domain_name=domain,
-                        user_id=subject_id,
-                        tenant_id=str(tenant_id),
-                        db_url=db_url,
-                    )
-                    registry.register(tool)
-                    logger.info(
-                        "Registered subject-scoped tool: %s for subject %s",
-                        tname,
-                        subject_id,
-                    )
-                except Exception as e:
-                    logger.error("Failed to register %s tool: %s", tname, e)
 
         if "graph_explorer" in tool_names and kb_namespace:
             try:

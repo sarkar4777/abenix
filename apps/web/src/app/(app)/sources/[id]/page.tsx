@@ -16,12 +16,19 @@ import DiffView from '@/components/sources/DiffView';
 import SourceForm from '@/components/sources/SourceForm';
 import PauseDialog from '@/components/sources/PauseDialog';
 import SnapshotViewer from '@/components/sources/SnapshotViewer';
+import { refreshSourceList } from '@/components/sources/refreshSourceList';
 import {
   HEALTH_STYLE, HINT_STYLE, KIND_LABEL, STATUS_TEXT, ago, bytes, cadenceLabel, describeOutcome, downloadRaw, when,
   type ChangeDetail, type ChangeSummary, type CheckOutcome, type Snapshot, type Source,
 } from '@/lib/sources';
 
 type Tab = 'changes' | 'snapshots';
+
+function pausedText(reason: string | null | undefined): string {
+  const r = (reason || '').trim();
+  if (!r) return 'Paused.';
+  return /[.!?]$/.test(r) ? `Paused: ${r}` : `Paused: ${r}.`;
+}
 
 function Stat({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
   return (
@@ -111,6 +118,7 @@ export default function SourceDetailPage() {
 
   function refreshAll() {
     mutate();
+    void refreshSourceList();
     refreshChanges();
     refreshSnaps();
   }
@@ -145,6 +153,7 @@ export default function SourceDetailPage() {
     if (r.error) setNotice({ tone: 'bad', text: r.error });
     else setNotice({ tone: 'ok', text: active ? 'Resumed. The next check runs within a minute.' : 'Paused. Scheduled checks are off until you resume.' });
     mutate();
+    void refreshSourceList();
   }
 
   async function remove() {
@@ -154,7 +163,10 @@ export default function SourceDetailPage() {
     if (r.error) {
       setDeleting(false);
       setNotice({ tone: 'bad', text: r.error });
-    } else router.push('/sources');
+    } else {
+      await refreshSourceList();
+      router.push('/sources');
+    }
   }
 
   if (error) {
@@ -243,7 +255,7 @@ export default function SourceDetailPage() {
       {!source.active && source.health !== 'stopped' && (
         <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 text-sm text-slate-300 flex items-start gap-2">
           <PauseCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" />
-          <span>Paused{source.paused_reason ? `: ${source.paused_reason}` : '.'} Scheduled checks are off. {canManage ? 'Resume it when the source is reachable again.' : ''}</span>
+          <span>{pausedText(source.paused_reason)} Scheduled checks are off.{canManage ? ' Resume it when the source is ready to be checked again.' : ''}</span>
         </div>
       )}
       {source.active && source.consecutive_failures > 0 && (

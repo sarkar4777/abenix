@@ -122,13 +122,15 @@ if settings.scaling_exec_remote and agent_pool != "inline":
     task_id = await backend.submit(agent_pool, payload)
 ```
 
-`payload` carries `execution_id`, `agent_id`, `tenant_id`, `user_id`, `role`, `api_key_id`, `message`, `context`, `is_pipeline`, `parent_execution_id`, `delegation_depth` and `model_override`. The NATS backend ([`apps/agent-runtime/engine/queue_backend.py`](../../apps/agent-runtime/engine/queue_backend.py)) publishes it to `agents.<pool>` on the JetStream stream `agents`, with the W3C `traceparent` in the envelope's `trace` field so the runtime continues the API's trace. Queued runs need NATS. The Celery backend refuses to enqueue agents. If the enqueue fails for any reason the API falls back to running the agent inline.
+`payload` carries `execution_id`, `agent_id`, `tenant_id`, `user_id`, `role`, `api_key_id`, `message`, `history`, `context`, `is_pipeline`, `parent_execution_id`, `delegation_depth` and `model_override`. The NATS backend ([`apps/agent-runtime/engine/queue_backend.py`](../../apps/agent-runtime/engine/queue_backend.py)) publishes it to `agents.<pool>` on the JetStream stream `agents`, with the W3C `traceparent` in the envelope's `trace` field so the runtime continues the API's trace. Queued runs need NATS. The Celery backend refuses to enqueue agents. If the enqueue fails for any reason the API falls back to running the agent inline.
 
 KEDA scales each pool on the lag of its consumer, see [06-deployment/03-keda](../06-deployment/03-keda.md).
 
 ### 6-7. Response negotiation
 
 `ExecuteRequest` ([`apps/api/app/schemas/agents.py`](../../apps/api/app/schemas/agents.py)) has `stream` (default `true`), `wait` (tri-state) and `wait_mode`.
+
+An optional `conversation_id` names a chat thread the caller owns. The API loads that thread's earlier messages ([`apps/api/app/core/chat_history.py`](../../apps/api/app/core/chat_history.py)), keeps the newest that fit in about 8,000 tokens and drops the oldest first, then hands them to the agent as prior turns ahead of the new message. Inline, queued and runtime-pod runs all receive the same list. A thread that does not exist or belongs to someone else answers 404. Pipeline agents ignore it. Runs with history skip the response cache, since the answer depends on the thread.
 
 | Request | Behaviour |
 |---|---|

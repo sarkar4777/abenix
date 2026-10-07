@@ -38,6 +38,68 @@ function ago(iso: string | null) {
   return new Date(iso).toLocaleDateString();
 }
 
+const STATUS_MEANING: Record<number, string> = {
+  400: 'rejected the request',
+  401: 'refused access, check any auth the receiver expects',
+  403: 'refused access, check any auth the receiver expects',
+  404: 'has no page at that address, check the URL',
+  405: 'does not accept POST at that address',
+  408: 'timed out',
+  410: 'says that address is gone',
+  413: 'said the event was too large',
+  429: 'asked us to slow down',
+  502: 'could not reach its own backend',
+  503: 'is unavailable right now',
+  504: 'timed out reaching its own backend',
+};
+
+const RAW_LIMIT = 2000;
+
+// receivers often answer with a full HTML error page, keep the log readable
+function summarizeDeliveryError(msg: string | null, code: number | null): { summary: string; raw: string | null } {
+  const text = (msg || '').trim();
+  const looksHtml = /<\s*(!doctype|html|head|body|title|div|p|h1)\b/i.test(text);
+  const meaning = code ? STATUS_MEANING[code] || (code >= 500 ? 'had an internal error' : code >= 400 ? 'rejected the request' : '') : '';
+  const lead = code ? `The receiver answered HTTP ${code}${meaning ? ` and ${meaning}` : ''}.` : '';
+  if (!text) return { summary: lead || 'The delivery failed without a message.', raw: null };
+  if (looksHtml) {
+    const title = text.match(/<title[^>]*>([^<]{1,160})<\/title>/i)?.[1]?.trim();
+    const plain = text.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const gist = title || plain.slice(0, 120);
+    return {
+      summary: [lead || 'The receiver answered with a web page instead of a success code.', gist ? `It said: ${gist}` : ''].filter(Boolean).join(' '),
+      raw: text.slice(0, RAW_LIMIT),
+    };
+  }
+  if (text.length > 200) {
+    return { summary: [lead, `${text.slice(0, 160)}…`].filter(Boolean).join(' '), raw: text.slice(0, RAW_LIMIT) };
+  }
+  return { summary: lead && !text.includes(String(code)) ? `${lead} ${text}` : text, raw: null };
+}
+
+function DeliveryError({ d }: { d: Delivery }) {
+  const { summary, raw } = summarizeDeliveryError(d.error_message, d.response_status_code);
+  const [show, setShow] = useState(false);
+  return (
+    <div>
+      <p className="text-rose-300">{summary}</p>
+      {raw && (
+        <>
+          <button type="button" onClick={() => setShow((v) => !v)} aria-expanded={show} className="text-slate-400 hover:text-white underline-offset-2 hover:underline">
+            {show ? 'Hide response' : 'View response'}
+          </button>
+          {show && (
+            <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-slate-950 p-2 text-[11px] text-slate-400" data-testid={`delivery-raw-${d.id}`}>
+              {raw}
+              {(d.error_message || '').length > RAW_LIMIT ? '\n… cut off' : ''}
+            </pre>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function Deliveries({ sub, canManage }: { sub: Sub; canManage: boolean }) {
   const { data, mutate, isLoading } = useApi<Delivery[]>(`/api/webhooks/${sub.id}/deliveries?limit=25`, { refreshInterval: 4000 });
   const [open, setOpen] = useState<string | null>(null);
@@ -62,7 +124,7 @@ function Deliveries({ sub, canManage }: { sub: Sub; canManage: boolean }) {
           </button>
           {open === d.id && (
             <div className="mt-1.5 ml-5 space-y-1 text-xs">
-              {d.error_message && <p className="text-rose-300">{d.error_message}</p>}
+              {(d.error_message || (d.status !== 'delivered' && d.response_status_code && d.response_status_code >= 400)) && <DeliveryError d={d} />}
               {d.execution_id && <a href={`/executions/${d.execution_id}`} className="text-cyan-300 hover:underline">Open the run it started</a>}
               {canManage && (d.status === 'dead' || d.status === 'retrying' || d.status === 'delivered') && (
                 <button type="button" onClick={() => redeliver(d.id)} className="inline-flex items-center gap-1 text-cyan-300 hover:text-cyan-200" data-testid={`redeliver-${d.id}`}>
@@ -283,7 +345,7 @@ export default function EventsSettingsPage() {
 
   if (permsLoading && !perms) {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-8" aria-busy="true">
+      <div className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8" aria-busy="true">
         <div className="h-24 rounded-xl bg-slate-800/40 animate-pulse" />
       </div>
     );
@@ -300,7 +362,7 @@ export default function EventsSettingsPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8">
+    <div className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-2"><Bell className="w-6 h-6 text-cyan-400" /><h1 className="text-3xl font-semibold text-white">Events</h1></div>
@@ -313,7 +375,7 @@ export default function EventsSettingsPage() {
 
       {secret && (
         <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4" role="status" data-testid="sub-secret">
-          <p className="text-sm text-amber-100">Your signing secret. It is shown only now. Use it to check X-Abenix-Signature on each call.</p>
+          <p className="text-sm text-amber-100">Your signing secret. Copy it now, it is shown only this once and cannot be shown again. Your receiver uses it to check the X-Abenix-Signature header on each call. If you lose it, delete the subscription and create a new one.</p>
           <div className="mt-2 flex items-center gap-2">
             <code className="flex-1 truncate rounded bg-slate-950 px-2 py-1 text-xs text-white">{secret}</code>
             <button type="button" onClick={() => { navigator.clipboard.writeText(secret); setCopied(true); }} className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-slate-800 text-white">{copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Copied' : 'Copy'}</button>

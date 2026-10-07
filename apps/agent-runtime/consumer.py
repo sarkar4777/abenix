@@ -1136,6 +1136,7 @@ async def _run_one(payload: dict) -> None:
                 require_tools=list(loaded["model_cfg"].get("require_tools") or []),
                 moderation_gate=_moderation_gate,
                 cost_limit=_run_cost_cap(loaded, payload),
+                history=payload.get("history") or [],
             )
             # Stream so per-iteration events reach Redis pub/sub live; invoke() only emits start+done.
             from types import SimpleNamespace
@@ -1378,6 +1379,8 @@ async def _run_one(payload: dict) -> None:
                 "input_tokens": getattr(result, "input_tokens", None),
                 "output_tokens": getattr(result, "output_tokens", None),
                 "cost": getattr(result, "cost", None),
+                "duration_ms": getattr(result, "duration_ms", None),
+                "model": _last_done.get("effective_model") or _last_done.get("model"),
             }
             if _validation_warnings:
                 _done_evt["validation_warnings"] = _validation_warnings[:20]

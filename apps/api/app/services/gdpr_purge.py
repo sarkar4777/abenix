@@ -129,6 +129,25 @@ async def _purge_postgres(db: AsyncSession, subject: Subject) -> int:
         .values(deleted_at=now, deleted_by=subject.requested_by)
     )
     affected += result.rowcount or 0
+    # erasure means the text itself, not a flag, so chunks go and stored content is blanked
+    from sqlalchemy import text as _text
+
+    params = {"uid": str(subject.user_id), "tid": str(subject.tenant_id)}
+    result = await db.execute(
+        _text(
+            "DELETE FROM persona_chunks WHERE user_id = CAST(:uid AS uuid) "
+            "AND tenant_id = CAST(:tid AS uuid)"
+        ),
+        params,
+    )
+    affected += result.rowcount or 0
+    await db.execute(
+        _text(
+            "UPDATE persona_items SET content = NULL WHERE user_id = CAST(:uid AS uuid) "
+            "AND tenant_id = CAST(:tid AS uuid)"
+        ),
+        params,
+    )
     own_agents = select(Agent.id).where(
         Agent.creator_id == subject.user_id,
         Agent.tenant_id == subject.tenant_id,

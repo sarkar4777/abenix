@@ -175,7 +175,7 @@ export default function BillingPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Billing & Usage</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Manage your subscription and monitor usage
+          Your workspace plan, what it includes, and how much of it has been used.
         </p>
       </div>
 

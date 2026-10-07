@@ -100,20 +100,23 @@ export default function SandboxSettingsPage() {
       <div className="rounded-xl bg-slate-900/50 border border-slate-800/50 p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
-            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <h2 id="sandbox-enabled-label" className="text-sm font-semibold text-white flex items-center gap-2">
               <Power className={`w-4 h-4 ${cfg?.effective.enabled ? 'text-emerald-400' : 'text-slate-500'}`} />
               Sandbox enabled
             </h2>
             <p className="text-xs text-slate-500 mt-1">
               When OFF, every <code className="bg-slate-800 px-1 rounded">sandboxed_job</code> call returns a friendly "disabled" error before launching anything.
-              {' '}Env default: <strong className={cfg?.env_defaults.enabled ? 'text-emerald-300' : 'text-slate-400'}>{String(cfg?.env_defaults.enabled)}</strong>.
-              {' '}Tenant override: <strong className="text-cyan-300">{cfg?.tenant_overrides.enabled === null ? 'inherit' : String(cfg?.tenant_overrides.enabled)}</strong>.
+              {' '}Platform default: <strong className={cfg?.env_defaults.enabled ? 'text-emerald-300' : 'text-slate-400'}>{cfg?.env_defaults.enabled ? 'on' : 'off'}</strong>.
+              {' '}This workspace: <strong className="text-cyan-300">{cfg?.tenant_overrides.enabled == null ? 'follows the default' : cfg.tenant_overrides.enabled ? 'on' : 'off'}</strong>.
             </p>
           </div>
           <div className="flex flex-col items-end gap-2">
             <button
               onClick={flipEnabled}
               disabled={saving}
+              role="switch"
+              aria-checked={!!cfg?.effective.enabled}
+              aria-labelledby="sandbox-enabled-label"
               className={`px-3 py-1.5 rounded-lg border text-xs font-medium ${
                 cfg?.effective.enabled
                   ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20'
@@ -135,7 +138,7 @@ export default function SandboxSettingsPage() {
       <div className="rounded-xl bg-slate-900/50 border border-slate-800/50 p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
-            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <h2 id="sandbox-network-label" className="text-sm font-semibold text-white flex items-center gap-2">
               {cfg?.effective.allow_network
                 ? <Wifi className="w-4 h-4 text-amber-400" />
                 : <WifiOff className="w-4 h-4 text-emerald-400" />}
@@ -143,8 +146,8 @@ export default function SandboxSettingsPage() {
             </h2>
             <p className="text-xs text-slate-500 mt-1">
               When OFF (recommended), every container launches with <code className="bg-slate-800 px-1 rounded">--network none</code> regardless of what the agent asks. Turn ON only when you have a job that genuinely needs to call the internet from inside the sandbox.
-              {' '}Env default: <strong className={cfg?.env_defaults.allow_network ? 'text-amber-300' : 'text-emerald-300'}>{String(cfg?.env_defaults.allow_network)}</strong>.
-              {' '}Tenant override: <strong className="text-cyan-300">{cfg?.tenant_overrides.allow_network === null ? 'inherit' : String(cfg?.tenant_overrides.allow_network)}</strong>.
+              {' '}Platform default: <strong className={cfg?.env_defaults.allow_network ? 'text-amber-300' : 'text-emerald-300'}>{cfg?.env_defaults.allow_network ? 'on' : 'off'}</strong>.
+              {' '}This workspace: <strong className="text-cyan-300">{cfg?.tenant_overrides.allow_network == null ? 'follows the default' : cfg.tenant_overrides.allow_network ? 'on' : 'off'}</strong>.
             </p>
             <p className="text-[11px] text-slate-500 mt-2">
               Two-lock model: even with this ON, individual jobs still default to network-off and must pass <code className="bg-slate-800 px-1 rounded">network: true</code> per call.
@@ -154,6 +157,9 @@ export default function SandboxSettingsPage() {
             <button
               onClick={flipNetwork}
               disabled={saving}
+              role="switch"
+              aria-checked={!!cfg?.effective.allow_network}
+              aria-labelledby="sandbox-network-label"
               className={`px-3 py-1.5 rounded-lg border text-xs font-medium ${
                 cfg?.effective.allow_network
                   ? 'bg-amber-500/10 border-amber-500/40 text-amber-300 hover:bg-amber-500/20'

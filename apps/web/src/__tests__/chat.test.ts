@@ -131,6 +131,44 @@ describe('connectToAgentStream', () => {
     );
   });
 
+  it('sends the conversation id so the server can load earlier turns', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(createMockSSEResponse([
+      'event: done\ndata: {"total_tokens":0,"input_tokens":0,"output_tokens":0,"cost":0,"duration_ms":0,"model":"test"}\n\n',
+    ]));
+    globalThis.fetch = mockFetch;
+
+    await new Promise<void>((resolve) => {
+      connectToAgentStream('agent-1', 'Hi', {
+        onToken: () => {},
+        onToolCall: () => {},
+        onToolResult: () => {},
+        onDone: () => resolve(),
+        onError: () => {},
+      }, undefined, 'conv-9');
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body).toEqual({ message: 'Hi', stream: true, conversation_id: 'conv-9' });
+  });
+
+  it('reports a stream that closes before done', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(createMockSSEResponse([
+      'event: token\ndata: {"text":"partial"}\n\n',
+    ]));
+
+    const msg = await new Promise<string>((resolve) => {
+      connectToAgentStream('agent-1', 'Hi', {
+        onToken: () => {},
+        onToolCall: () => {},
+        onToolResult: () => {},
+        onDone: () => resolve('done'),
+        onError: resolve,
+      });
+    });
+
+    expect(msg).toMatch(/closed before the reply finished/);
+  });
+
   it('returns AbortController', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,

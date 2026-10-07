@@ -21,6 +21,8 @@
 #      deploy aborts before traffic flips.
 SCHEMA_CANONICAL_COLUMNS=(
   "executions.node_results"
+  "persona_items.last_error"
+  "persona_chunks.embedding"
   "executions.execution_trace"
   "executions.failure_code"
   "dead_letter_executions.replay_execution_id"

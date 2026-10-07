@@ -138,7 +138,7 @@ export default function PrivacyPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Privacy & Data</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Manage your data, retention policies, and GDPR rights
+          Download a copy of your data, see how long it is kept, or delete your account.
         </p>
       </div>
 

@@ -1,0 +1,41 @@
+Trade ref,Trade date,Commodity,Hub,Direction,Volume (MWh),Price (EUR/MWh),Counterparty,Delivery month,Status
+TRD-1001,2026-08-01,Power,EPEX FR,Buy,2000,98.45,Iberia Renewables SL,2026-10,Confirmed
+TRD-1002,2026-08-04,Natural gas,TTF,Sell,3600,29.04,Nordwind Energie GmbH,2026-11,Confirmed
+TRD-1003,2026-08-07,Power,EEX DE,Sell,2000,65.91,Iberia Renewables SL,2026-12,Confirmed
+TRD-1004,2026-08-10,Natural gas,THE,Buy,3600,30.23,Helvetic Flow AG,2026-10,Confirmed
+TRD-1005,2026-08-13,Power,Nord Pool,Buy,3600,94.79,Atlantic Gas Trading Ltd,2026-11,Confirmed
+TRD-1006,2026-08-16,Natural gas,TTF,Buy,1200,35.54,Iberia Renewables SL,2026-12,Confirmed
+TRD-1007,2026-08-19,Power,EPEX FR,Buy,500,94.57,Rhone Power SAS,2026-10,Confirmed
+TRD-1008,2026-08-22,Natural gas,TTF,Buy,3600,29.07,Baltic Utilities AB,2026-11,Confirmed
+TRD-1009,2026-08-25,Power,Nord Pool,Sell,1500,88.07,Rhone Power SAS,2026-12,Pending
+TRD-1010,2026-08-28,Natural gas,THE,Buy,750,40.58,Nordwind Energie GmbH,2026-10,Confirmed
+TRD-1011,2026-08-03,Power,Nord Pool,Sell,3000,89.73,Helvetic Flow AG,2026-11,Settled
+TRD-1012,2026-08-06,Natural gas,THE,Sell,3600,45.64,Iberia Renewables SL,2026-12,Confirmed
+TRD-1013,2026-08-09,Power,EPEX FR,Buy,1500,70.51,Baltic Utilities AB,2026-10,Pending
+TRD-1014,2026-08-12,Natural gas,TTF,Buy,3000,38.31,Rhone Power SAS,2026-11,Settled
+TRD-1015,2026-09-15,Power,Nord Pool,Sell,3600,89.81,Nordwind Energie GmbH,2026-12,Pending
+TRD-1016,2026-09-18,Natural gas,TTF,Sell,2400,40.55,Nordwind Energie GmbH,2026-10,Confirmed
+TRD-1017,2026-09-21,Power,Nord Pool,Sell,3600,117.61,Rhone Power SAS,2026-11,Pending
+TRD-1018,2026-09-24,Natural gas,NBP,Sell,1500,28.41,Rhone Power SAS,2026-12,Pending
+TRD-1019,2026-09-27,Power,EEX DE,Buy,2400,65.30,Atlantic Gas Trading Ltd,2026-10,Settled
+TRD-1020,2026-09-02,Natural gas,NBP,Buy,2000,35.04,Nordwind Energie GmbH,2026-11,Pending
+TRD-1021,2026-09-05,Power,EEX DE,Sell,2000,92.77,Baltic Utilities AB,2026-12,Confirmed
+TRD-1022,2026-09-08,Natural gas,NBP,Sell,2000,45.76,Atlantic Gas Trading Ltd,2026-10,Pending
+TRD-1023,2026-09-11,Power,EEX DE,Buy,750,70.47,Nordwind Energie GmbH,2026-11,Confirmed
+TRD-1024,2026-09-14,Natural gas,THE,Buy,1200,33.07,Baltic Utilities AB,2026-12,Confirmed
+TRD-1025,2026-09-17,Power,Nord Pool,Sell,3600,93.72,Helvetic Flow AG,2026-10,Confirmed
+TRD-1026,2026-09-20,Natural gas,NBP,Buy,2400,44.19,Baltic Utilities AB,2026-11,Pending
+TRD-1027,2026-09-23,Power,EPEX FR,Sell,500,88.97,Nordwind Energie GmbH,2026-12,Pending
+TRD-1028,2026-09-26,Natural gas,TTF,Buy,1000,35.93,Rhone Power SAS,2026-10,Confirmed
+TRD-1029,2026-10-01,Power,Nord Pool,Buy,500,62.01,Iberia Renewables SL,2026-11,Confirmed
+TRD-1030,2026-10-04,Natural gas,TTF,Sell,3600,28.46,Iberia Renewables SL,2026-12,Confirmed
+TRD-1031,2026-10-07,Power,EPEX FR,Buy,1200,115.51,Baltic Utilities AB,2026-10,Settled
+TRD-1032,2026-10-10,Natural gas,TTF,Buy,2400,45.88,Baltic Utilities AB,2026-11,Pending
+TRD-1033,2026-10-13,Power,EPEX FR,Sell,500,70.07,Helvetic Flow AG,2026-12,Settled
+TRD-1034,2026-10-16,Natural gas,THE,Sell,750,37.29,Iberia Renewables SL,2026-10,Confirmed
+TRD-1035,2026-10-19,Power,EPEX FR,Buy,3000,113.19,Helvetic Flow AG,2026-11,Settled
+TRD-1036,2026-10-22,Natural gas,TTF,Sell,3000,34.60,Rhone Power SAS,2026-12,Confirmed
+TRD-1037,2026-10-25,Power,EEX DE,Sell,1000,96.34,Atlantic Gas Trading Ltd,2026-10,Confirmed
+TRD-1038,2026-10-28,Natural gas,THE,Buy,1000,37.32,Helvetic Flow AG,2026-11,Settled
+TRD-1039,2026-10-03,Power,EEX DE,Buy,1200,88.45,Helvetic Flow AG,2026-12,Confirmed
+TRD-1040,2026-10-06,Natural gas,NBP,Sell,2400,42.55,Rhone Power SAS,2026-10,Settled

@@ -239,3 +239,7 @@ contractiq/e2e/fixtures/uat_run_*.pdf
 
 # TypeScript incremental build cache — regenerated on every build
 *.tsbuildinfo
+
+# exploratory UI runs and journey screenshots
+e2e/explore_*/
+e2e/uat_core_features_ui/shots/

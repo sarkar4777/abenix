@@ -28,32 +28,41 @@ from models.user import User  # type: ignore
 logger = logging.getLogger(__name__)
 
 
-def _anthropic_client(api_key: str | None = None, sync: bool = False):
-    """Anthropic client honouring a Claude subscription before API keys.
+SUBSCRIPTION = "claude_subscription"
 
-    Keeps this router working on a subscription-only install, where there is
-    no ANTHROPIC_API_KEY to construct a client from.
-    """
-    import sys as _sys
-    from pathlib import Path as _Path
 
+def _subscription():
+    """The runtime's Claude subscription helper, or None when it cannot be imported."""
     try:
-        _sys.path.insert(
-            0, str(_Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
-        )
+        rt = str(Path(__file__).resolve().parents[4] / "apps" / "agent-runtime")
+        if rt not in sys.path:
+            sys.path.insert(0, rt)
         from engine import claude_subscription  # type: ignore
 
-        builder = (
-            claude_subscription.build_sync_client
-            if sync
-            else claude_subscription.build_async_client
-        )
-        return builder(api_key)[0]
-    except Exception:
-        import anthropic
+        return claude_subscription
+    except Exception as exc:  # pragma: no cover - import-environment dependent
+        logger.debug("claude_subscription helper unavailable: %s", exc)
+        return None
 
-        cls = anthropic.Anthropic if sync else anthropic.AsyncAnthropic
-        return cls(api_key=api_key) if api_key else cls()
+
+def _subscription_config():
+    sub = _subscription()
+    if sub is None:
+        return None
+    try:
+        return sub.get_config()
+    except Exception as exc:
+        logger.debug("subscription config unreadable: %s", exc)
+        return None
+
+
+def _subscription_usable() -> bool:
+    cfg = _subscription_config()
+    return bool(cfg is not None and cfg.usable)
+
+
+class UploadError(RuntimeError):
+    """An upload problem whose message is safe to show the user as is."""
 
 
 router = APIRouter(prefix="/api/bpm-analyzer", tags=["bpm-analyzer"])
@@ -61,25 +70,38 @@ router = APIRouter(prefix="/api/bpm-analyzer", tags=["bpm-analyzer"])
 APP_SLUG = "bpm-analyzer"
 AGENT_SLUG = "bpm-process-analyst"
 MAX_PAGES = 20  # cap so a 200-page PDF doesn't blow the context window
+MAX_TEXT_CHARS = 200_000
 RENDER_DPI = 144  # diagram detail vs payload size sweet spot
+# a thread whose last turn is the user's and older than this is treated as stalled
+ANALYSIS_STALE_SECONDS = 15 * 60
+
+_UNREADABLE_PDF = "This PDF could not be read, it may be damaged or password protected"
 
 
 def _render_pdf_pages(
     pdf_bytes: bytes, max_pages: int = MAX_PAGES
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Render up to `max_pages` of a PDF to (base64 PNG + text).
 
-    Returns: [{"page": 1, "image_b64": "...", "text": "...", "width":, "height":}]
+    Returns: [{"page": 1, "image_b64": "...", "text": "...", "width":, "height":, "total_pages":}]
     """
     try:
         import fitz  # PyMuPDF
     except ImportError as e:
         raise RuntimeError(f"PyMuPDF not installed in this image: {e}") from e
 
-    out: list[dict[str, str]] = []
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    out: list[dict[str, Any]] = []
     try:
-        n = min(doc.page_count, max_pages)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        raise UploadError(_UNREADABLE_PDF) from e
+    try:
+        if getattr(doc, "needs_pass", False):
+            raise UploadError(
+                "This PDF is password protected. Remove the password and upload it again"
+            )
+        total = doc.page_count
+        n = min(total, max_pages)
         zoom = RENDER_DPI / 72.0
         mat = fitz.Matrix(zoom, zoom)
         for i in range(n):
@@ -93,6 +115,7 @@ def _render_pdf_pages(
                     "text": (page.get_text("text") or "").strip()[:4000],
                     "width": pix.width,
                     "height": pix.height,
+                    "total_pages": total,
                 }
             )
     finally:
@@ -131,7 +154,7 @@ def _process_upload(
     if ct in ("application/pdf", "application/x-pdf") or fn.endswith(".pdf"):
         pages = _render_pdf_pages(file_bytes)
         if not pages:
-            raise RuntimeError("PDF has no readable pages")
+            raise UploadError("This PDF has no pages to read")
         return (
             [
                 {
@@ -141,6 +164,7 @@ def _process_upload(
                     "text": p["text"],
                     "width": p["width"],
                     "height": p["height"],
+                    "total_pages": p.get("total_pages") or len(pages),
                     "filename": name,
                 }
                 for p in pages
@@ -229,39 +253,119 @@ def _process_upload(
         try:
             text = _extract_docx_text(file_bytes)
         except Exception as e:
-            raise RuntimeError(f"Could not parse DOCX: {e}") from e
+            raise UploadError(_UNREADABLE_DOCX) from e
         if not text.strip():
-            raise RuntimeError("DOCX appears to be empty")
-        return (
-            [
-                {
-                    "type": "text_doc",
-                    "text": text[:200000],
-                    "filename": name,
-                    "doc_kind": "docx",
-                }
-            ],
-            "",
-        )
+            raise UploadError("This DOCX has no text in it")
+        return ([_text_attachment(text, name, "docx")], "")
 
     # Plain text / markdown / csv.
     if ct.startswith("text/") or fn.endswith((".txt", ".md", ".csv")):
         text = file_bytes.decode("utf-8", errors="replace")
         if not text.strip():
-            raise RuntimeError("Text file is empty")
-        return (
-            [
-                {
-                    "type": "text_doc",
-                    "text": text[:200000],
-                    "filename": name,
-                    "doc_kind": (fn.rsplit(".", 1)[-1] if "." in fn else "txt"),
-                }
-            ],
-            "",
-        )
+            raise UploadError("This text file is empty")
+        kind = fn.rsplit(".", 1)[-1] if "." in fn else "txt"
+        return ([_text_attachment(text, name, kind)], "")
 
-    raise RuntimeError(f"Unsupported file type: {ct or fn}")
+    raise UploadError(
+        "This file type is not supported. Upload a PDF, image, audio, video, DOCX or plain-text file"
+    )
+
+
+_UNREADABLE_DOCX = (
+    "This DOCX could not be read, it may be damaged or not a real Word file"
+)
+
+
+def _text_attachment(text: str, name: str, kind: str) -> dict[str, Any]:
+    att: dict[str, Any] = {
+        "type": "text_doc",
+        "text": text[:MAX_TEXT_CHARS],
+        "filename": name,
+        "doc_kind": kind,
+    }
+    if len(text) > MAX_TEXT_CHARS:
+        att["truncated"] = True
+        att["original_chars"] = len(text)
+    return att
+
+
+_UPLOAD_TYPES = ("pdf_page", "image", "audio", "video", "text_doc")
+
+
+def _upload_files(attachments: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    return [
+        a
+        for a in attachments or []
+        if isinstance(a, dict) and a.get("type") in _UPLOAD_TYPES
+    ]
+
+
+def _upload_label(attachments: list[dict[str, Any]] | None) -> str | None:
+    """What the user's upload turn shows instead of the model instruction."""
+    files = _upload_files(attachments)
+    if not files:
+        return None
+    first = files[0]
+    name = first.get("filename") or "file"
+    if first.get("type") == "pdf_page":
+        n = len(files)
+        total = int(first.get("total_pages") or n)
+        if total > n:
+            return f"Uploaded {name} (first {n} of {total} pages)"
+        return f"Uploaded {name} ({n} page{'s' if n != 1 else ''})"
+    if first.get("type") == "text_doc" and first.get("truncated"):
+        return (
+            f"Uploaded {name} (first {len(first.get('text') or ''):,} of "
+            f"{int(first.get('original_chars') or 0):,} characters)"
+        )
+    return f"Uploaded {name}"
+
+
+def _upload_notices(attachments: list[dict[str, Any]] | None) -> list[str]:
+    """Plain-language notes about anything the analysis did not see."""
+    files = _upload_files(attachments)
+    if not files:
+        return []
+    first = files[0]
+    out: list[str] = []
+    if first.get("type") == "pdf_page":
+        total = int(first.get("total_pages") or len(files))
+        if total > len(files):
+            out.append(
+                f"{first.get('filename') or 'This PDF'} has {total} pages. "
+                f"Only the first {len(files)} were analyzed."
+            )
+    for a in files:
+        if a.get("type") == "text_doc" and a.get("truncated"):
+            out.append(
+                f"{a.get('filename') or 'This document'} is "
+                f"{int(a.get('original_chars') or 0):,} characters long. "
+                f"Only the first {MAX_TEXT_CHARS:,} were analyzed."
+            )
+    return out
+
+
+def _friendly_upload_error(exc: Exception) -> str:
+    """Map a parser failure onto something a person can act on."""
+    if isinstance(exc, UploadError):
+        return str(exc)
+    text = str(exc).lower()
+    if any(
+        m in text
+        for m in (
+            "failed to open stream",
+            "cannot open broken document",
+            "format error",
+            "no objects found",
+            "password",
+        )
+    ):
+        return _UNREADABLE_PDF
+    if "zip" in text or "document.xml" in text:
+        return _UNREADABLE_DOCX
+    if "pymupdf" in text:
+        return "PDF reading is not available on this server. Ask an admin to check the API image"
+    return "This file could not be read. Check that it opens on your computer and try again"
 
 
 def _parse_agent_specs(raw: str) -> dict[str, Any] | None:
@@ -407,12 +511,47 @@ def _opening_for(primary_type: str) -> str:
     )
 
 
-def _serialize_thread(c: Conversation) -> dict[str, Any]:
-    return {
+def _thread_state(
+    last_role: str | None,
+    last_content: str | None,
+    last_at: datetime | None,
+    now: datetime | None = None,
+) -> str:
+    """analyzing while a reply is outstanding, failed when the last reply was an error."""
+    if not last_role:
+        return "empty"
+    if last_role == "user":
+        now = now or datetime.now(timezone.utc)
+        if last_at is not None and last_at.tzinfo is None:
+            last_at = last_at.replace(tzinfo=timezone.utc)
+        if last_at is None or (now - last_at).total_seconds() < ANALYSIS_STALE_SECONDS:
+            return "analyzing"
+        return "stalled"
+    if (last_content or "").startswith("[error]"):
+        return "failed"
+    return "ready"
+
+
+def _is_report(m: Message) -> bool:
+    return (
+        m.role == "assistant"
+        and bool((m.content or "").strip())
+        and not (m.content or "").startswith("[error]")
+    )
+
+
+def _serialize_thread(
+    c: Conversation,
+    *,
+    status: str | None = None,
+    has_report: bool | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
         "id": str(c.id),
         "title": c.title,
         "agent_slug": c.agent_slug,
         "app_slug": c.app_slug,
+        "model_used": c.model_used,
         "message_count": c.message_count,
         "last_message_preview": c.last_message_preview,
         "total_cost": float(c.total_cost or 0.0),
@@ -420,6 +559,39 @@ def _serialize_thread(c: Conversation) -> dict[str, Any]:
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
     }
+    if status is not None:
+        out["status"] = status
+    if has_report is not None:
+        out["has_report"] = has_report
+    return out
+
+
+def _route_record(meta: dict[str, Any]) -> dict[str, Any]:
+    """How a reply was served, kept on the assistant message so a reload still shows it."""
+    return {
+        "type": "route",
+        "provider": meta.get("provider"),
+        "requested_model": meta.get("requested_model"),
+        "served_model": meta.get("model"),
+        "fallback_from": meta.get("fallback_from"),
+        "fallback_reason": meta.get("fallback_reason"),
+        "route_note": meta.get("route_note"),
+    }
+
+
+def _route_of(m: Message) -> dict[str, Any] | None:
+    for a in m.attachments or []:
+        if isinstance(a, dict) and a.get("type") == "route":
+            return {k: v for k, v in a.items() if k != "type"}
+    return None
+
+
+def _display_content(m: Message) -> str:
+    if m.role == "user":
+        label = _upload_label(m.attachments)
+        if label:
+            return label
+    return m.content or ""
 
 
 def _serialize_message(
@@ -428,7 +600,7 @@ def _serialize_message(
     out = {
         "id": str(m.id),
         "role": m.role,
-        "content": m.content,
+        "content": _display_content(m),
         "model_used": m.model_used,
         "input_tokens": m.input_tokens,
         "output_tokens": m.output_tokens,
@@ -436,9 +608,29 @@ def _serialize_message(
         "duration_ms": m.duration_ms,
         "created_at": m.created_at.isoformat() if m.created_at else None,
     }
+    if m.role == "assistant":
+        out["route"] = _route_of(m)
     if include_attachments:
         out["attachments"] = m.attachments
     return out
+
+
+def _plain_preview(text: str, limit: int = 200) -> str:
+    """Sidebar preview without markdown syntax."""
+    import re
+
+    t = text or ""
+    t = re.sub(r"```[\s\S]*?```", " ", t)
+    t = re.sub(r"`([^`]*)`", r"\1", t)
+    t = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+", "", t, flags=re.M)
+    t = re.sub(r"^\s*\|?[\s:|-]+\|?\s*$", " ", t, flags=re.M)
+    t = t.replace("|", " ")
+    t = re.sub(r"(\*\*|__|~~)(\S.*?)\1", r"\2", t)
+    t = re.sub(r"(?<![\w*])\*(\S[^*]*?)\*(?!\w)", r"\1", t)
+    t = re.sub(r"(?<!\w)_(\S[^_]*?)_(?!\w)", r"\1", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[:limit]
 
 
 async def _get_agent(db: AsyncSession) -> Agent | None:
@@ -541,6 +733,18 @@ def _attachments_to_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, 
     return blocks
 
 
+def _append_turn(msgs: list[dict[str, Any]], role: str, text: str) -> None:
+    """Append a turn, merging into the previous one when the role repeats."""
+    if msgs and msgs[-1]["role"] == role:
+        prev = msgs[-1]["content"]
+        if isinstance(prev, list):
+            prev.append({"type": "text", "text": text})
+        else:
+            msgs[-1]["content"] = f"{prev}\n\n{text}" if prev else text
+        return
+    msgs.append({"role": role, "content": text})
+
+
 def _build_anthropic_messages(
     attachments: list[dict[str, Any]],
     history_turns: list[Message],
@@ -552,20 +756,23 @@ def _build_anthropic_messages(
 
     user_turns = [m for m in history_turns if m.role == "user"]
     if user_turns:
-        first_content.append({"type": "text", "text": user_turns[0].content})
+        first_text = user_turns[0].content
+        files = _upload_files(getattr(user_turns[0], "attachments", None))
+        if files:
+            first_text = _opening_for(files[0].get("type") or "")
+        first_content.append({"type": "text", "text": first_text})
         msgs.append({"role": "user", "content": first_content})
         in_first = True
         for m in history_turns:
             if in_first and m.role == "user":
                 in_first = False
                 continue
-            msgs.append(
-                {
-                    "role": m.role,
-                    "content": m.content if m.role == "user" else (m.content or ""),
-                }
-            )
-        msgs.append({"role": "user", "content": new_user_question})
+            # failed replies are not part of the conversation the model sees
+            if m.role == "assistant" and (m.content or "").startswith("[error]"):
+                continue
+            _append_turn(msgs, m.role, m.content or "")
+        if new_user_question:
+            _append_turn(msgs, "user", new_user_question)
     else:
         first_content.append({"type": "text", "text": new_user_question})
         msgs.append({"role": "user", "content": first_content})
@@ -605,7 +812,8 @@ def default_vision_model() -> str:
             os.environ.get("GOOGLE_API_KEY", "").strip()
             or os.environ.get("GEMINI_API_KEY", "").strip()
         ),
-        "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+        "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+        or _subscription_usable(),
         "openai": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
     }
     for candidate in DEFAULT_VISION_MODELS:
@@ -630,8 +838,21 @@ def _provider_for(model: str) -> str:
     raise RuntimeError(f"Unsupported model for vision dispatch: {model}")
 
 
+def _baseline_price(model: str) -> dict[str, float]:
+    """Per-1M pricing from the shipped baseline for models the local table lacks."""
+    try:
+        from pricing_baseline import BASELINE  # type: ignore
+
+        for row in BASELINE:
+            if row[0] == model:
+                return {"in": float(row[2]), "out": float(row[3])}
+    except Exception as exc:
+        logger.debug("pricing baseline unavailable: %s", exc)
+    return {"in": 0.0, "out": 0.0}
+
+
 def _cost_for(model: str, in_tok: int, out_tok: int) -> float:
-    p = MODEL_PRICING.get(model, {"in": 0.0, "out": 0.0})
+    p = MODEL_PRICING.get(model) or _baseline_price(model)
     return round((in_tok / 1_000_000) * p["in"] + (out_tok / 1_000_000) * p["out"], 6)
 
 
@@ -641,12 +862,27 @@ async def _run_anthropic(
     messages: list[dict[str, Any]],
     model: str,
     force_json: bool = False,
+    use_subscription: bool = False,
 ) -> tuple[str, dict[str, Any]]:
-    """Call Anthropic Messages API."""
+    """Call Anthropic Messages API on the subscription or an API key."""
+    import anthropic
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY not configured on this pod")
+    if use_subscription:
+        sub = _subscription()
+        if sub is None:
+            raise RuntimeError(
+                "Claude subscription helper is not available on this pod"
+            )
+        client, on_subscription = sub.build_async_client()
+        if not on_subscription:
+            raise RuntimeError(
+                "Claude subscription is not usable (token missing, revoked or switched off)"
+            )
+    else:
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY not configured on this pod")
+        client = anthropic.AsyncAnthropic(api_key=api_key)
     safe: list[dict[str, Any]] = []
     for m in messages:
         c = m.get("content")
@@ -656,7 +892,6 @@ async def _run_anthropic(
     if force_json:
         safe.append({"role": "assistant", "content": "{"})
     started = datetime.now(timezone.utc)
-    client = _anthropic_client(api_key)
     resp = await client.messages.create(
         model=model,
         max_tokens=8000,
@@ -671,10 +906,11 @@ async def _run_anthropic(
     in_tok = resp.usage.input_tokens or 0
     out_tok = resp.usage.output_tokens or 0
     return text, {
-        "model": resp.model,
+        "model": resp.model or model,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
-        "cost": _cost_for(model, in_tok, out_tok),
+        # the plan already paid for subscription tokens
+        "cost": 0.0 if use_subscription else _cost_for(model, in_tok, out_tok),
         "duration_ms": elapsed_ms,
     }
 
@@ -824,6 +1060,91 @@ async def _run_openai(
     }
 
 
+def _needs_google(messages: list[dict[str, Any]]) -> bool:
+    """Audio and video only reach Gemini, every other provider drops them."""
+    for m in messages or []:
+        c = m.get("content")
+        if isinstance(c, list) and any(
+            isinstance(b, dict) and b.get("type") in ("audio", "video") for b in c
+        ):
+            return True
+    return False
+
+
+def _first_google_model() -> str:
+    return next(m for m in DEFAULT_VISION_MODELS if _provider_for(m) == "google")
+
+
+async def _first_route(
+    model: str, messages: list[dict[str, Any]]
+) -> tuple[str, str, str | None]:
+    """(provider, model, note) for the first attempt, same rule as LLMRouter.candidate_chain."""
+    if _needs_google(messages):
+        target = model if _provider_for(model) == "google" else _first_google_model()
+        note = None
+        if target != model:
+            note = "Audio and video can only be read by Gemini"
+        return "google", target, note
+    sub = _subscription()
+    cfg = None
+    if sub is not None:
+        try:
+            import asyncio
+
+            # the first read may hit Postgres, keep it off the event loop
+            cfg = await asyncio.to_thread(sub.get_config)
+        except Exception as exc:
+            logger.debug("subscription config unreadable: %s", exc)
+            cfg = None
+        is_claude = (model or "").lower().startswith("claude")
+        if cfg is not None and cfg.usable and (cfg.exclusive or is_claude):
+            return SUBSCRIPTION, sub.effective_model(model), None
+    native = _provider_for(model)
+    if not _provider_configured(native):
+        # no credential for the requested model, use one that has one and say so
+        if cfg is not None and cfg.usable:
+            mapped = sub.map_model(model, cfg)
+            return (
+                SUBSCRIPTION,
+                mapped,
+                f"No credential is configured for {model}, so the Claude subscription answered as {mapped}",
+            )
+        nxt = _next_provider_model([native], model)
+        if nxt:
+            return (
+                nxt[0],
+                nxt[1],
+                f"No credential is configured for {model}, so {nxt[1]} answered instead",
+            )
+    return native, model, None
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(m in text for m in ("429", "rate limit", "rate_limit", "overloaded"))
+
+
+def _short_reason(exc: Exception) -> str:
+    text = str(exc).lower()
+    if _is_rate_limited(exc):
+        return "rate limited"
+    if any(m in text for m in ("quota", "credit balance", "resource_exhausted")):
+        return "out of quota"
+    if any(
+        m in text
+        for m in (
+            "401",
+            "403",
+            "authentication",
+            "api key",
+            "unauthenticated",
+            "revoked",
+        )
+    ):
+        return "credential rejected"
+    return str(exc)[:160]
+
+
 async def _run_vision_model(
     *,
     system_prompt: str,
@@ -831,29 +1152,60 @@ async def _run_vision_model(
     model: str,
     force_json: bool = False,
 ) -> tuple[str, dict[str, Any]]:
-    """Provider-route based on model name. `force_json` activates each"""
+    """Route to the subscription or a provider key, falling back only on outages.
+
+    meta carries requested_model, provider and, when a fallback answered,
+    fallback_from and fallback_reason so the caller can say so.
+    """
+    import asyncio
+
+    provider, attempt_model, note = await _first_route(model, messages)
+    google_only = _needs_google(messages)
     tried: list[str] = []
-    last: Exception | None = None
-    candidate: str | None = model
-    while candidate:
-        try:
-            return await _dispatch_vision(
-                system_prompt=system_prompt,
-                messages=messages,
-                model=candidate,
-                force_json=force_json,
-            )
-        except Exception as exc:
-            last = exc
-            tried.append(candidate)
-            if not _is_provider_outage(exc):
-                raise
-            candidate = _next_provider_model(tried)
-            if candidate:
-                logger.warning(
-                    "%s unusable (%s) — falling back to %s", tried[-1], exc, candidate
+    reasons: list[str] = []
+    while True:
+        attempts = 3 if not tried else 1
+        exc: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                text, meta = await _dispatch_vision(
+                    system_prompt=system_prompt,
+                    messages=messages,
+                    model=attempt_model,
+                    force_json=force_json,
+                    provider=provider,
                 )
-    raise last if last else RuntimeError("No vision provider is configured")
+            except Exception as e:
+                exc = e
+                if attempt < attempts - 1 and _is_rate_limited(e):
+                    await asyncio.sleep(2**attempt)
+                    continue
+                break
+            meta["requested_model"] = model
+            meta["provider"] = provider
+            if tried:
+                meta["fallback_from"] = tried[0]
+                meta["fallback_reason"] = reasons[0]
+            if note:
+                meta["route_note"] = note
+            return text, meta
+        assert exc is not None
+        tried.append(provider)
+        reasons.append(_short_reason(exc))
+        if not _is_provider_outage(exc):
+            raise exc
+        nxt = _next_provider_model(tried, model, google_only=google_only)
+        if not nxt:
+            raise exc
+        logger.warning(
+            "%s:%s unusable (%s), falling back to %s:%s",
+            provider,
+            attempt_model,
+            exc,
+            nxt[0],
+            nxt[1],
+        )
+        provider, attempt_model = nxt
 
 
 # A key that is present but rejected, or a workspace over its rate limit, looks
@@ -889,6 +1241,8 @@ def _is_provider_outage(exc: Exception) -> bool:
 
 
 def _provider_configured(provider: str) -> bool:
+    if provider == SUBSCRIPTION:
+        return _subscription_usable()
     if provider == "anthropic":
         return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
     if provider == "openai":
@@ -901,22 +1255,32 @@ def _provider_configured(provider: str) -> bool:
     return False
 
 
-def _next_provider_model(tried: list[str]) -> str | None:
-    """Best configured model on a provider we have not tried yet."""
-    spent = set()
-    for m in tried:
-        try:
-            spent.add(_provider_for(m))
-        except RuntimeError:
-            continue
+def _next_provider_model(
+    tried: list[str], requested: str = "", *, google_only: bool = False
+) -> tuple[str, str] | None:
+    """Next (provider, model) with a credential we have not tried yet."""
+    spent = set(tried)
+    try:
+        native = _provider_for(requested) if requested else None
+    except RuntimeError:
+        native = None
+    if (
+        native
+        and native not in spent
+        and _provider_configured(native)
+        and (not google_only or native == "google")
+    ):
+        return native, requested
     for cand in DEFAULT_VISION_MODELS:
         try:
             provider = _provider_for(cand)
         except RuntimeError:
             continue
+        if google_only and provider != "google":
+            continue
         if provider in spent or not _provider_configured(provider):
             continue
-        return cand
+        return provider, cand
     return None
 
 
@@ -926,14 +1290,16 @@ async def _dispatch_vision(
     messages: list[dict[str, Any]],
     model: str,
     force_json: bool = False,
+    provider: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    provider = _provider_for(model)
-    if provider == "anthropic":
+    provider = provider or _provider_for(model)
+    if provider in ("anthropic", SUBSCRIPTION):
         return await _run_anthropic(
             system_prompt=system_prompt,
             messages=messages,
             model=model,
             force_json=force_json,
+            use_subscription=provider == SUBSCRIPTION,
         )
     if provider == "google":
         return await _run_gemini(
@@ -975,6 +1341,119 @@ async def list_vision_models(
     )
 
 
+async def _owned_thread(
+    db: AsyncSession, thread_id: str, user: User
+) -> tuple[Conversation | None, JSONResponse | None]:
+    """The caller's own BPM thread. Threads are private to the user who uploaded."""
+    try:
+        cid = uuid.UUID(thread_id)
+    except ValueError:
+        return None, error("Invalid thread id", 400)
+    conv = (
+        await db.execute(
+            select(Conversation).where(
+                Conversation.id == cid,
+                Conversation.tenant_id == user.tenant_id,
+                Conversation.user_id == user.id,
+                Conversation.app_slug == APP_SLUG,
+            )
+        )
+    ).scalar_one_or_none()
+    if conv is None:
+        return None, error("Thread not found", 404)
+    return conv, None
+
+
+async def _thread_messages(db: AsyncSession, conv_id: uuid.UUID) -> list[Message]:
+    return list(
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv_id)
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _source_attachments(history: list[Message]) -> list[dict[str, Any]]:
+    for m in history:
+        if m.role == "user" and m.attachments:
+            files = _upload_files(m.attachments)
+            if files:
+                return files
+    return []
+
+
+def _state_of(history: list[Message]) -> str:
+    if not history:
+        return "empty"
+    last = history[-1]
+    return _thread_state(last.role, last.content, last.created_at)
+
+
+def _model_error_text(exc: Exception) -> str:
+    reason = _short_reason(exc)
+    if reason == "rate limited":
+        return "The model is rate limited right now. Try again in a minute or pick another model."
+    if reason == "out of quota":
+        return "The model provider is out of quota. Pick another model or ask an admin to top it up."
+    if reason == "credential rejected":
+        return "The model provider rejected its credential. Ask an admin to check Admin, LLM Settings."
+    return f"The analysis failed: {str(exc)[:300]}"
+
+
+async def _record_failure(db: AsyncSession, conv: Conversation, exc: Exception) -> str:
+    text = _model_error_text(exc)
+    db.add(
+        Message(
+            id=uuid.uuid4(),
+            conversation_id=conv.id,
+            role="assistant",
+            content=f"[error] {text}",
+        )
+    )
+    conv.message_count = (conv.message_count or 0) + 1
+    conv.last_message_preview = text[:200]
+    conv.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return text
+
+
+async def _record_reply(
+    db: AsyncSession, conv: Conversation, text: str, meta: dict[str, Any]
+) -> Message:
+    asst = Message(
+        id=uuid.uuid4(),
+        conversation_id=conv.id,
+        role="assistant",
+        content=text,
+        model_used=meta.get("model"),
+        input_tokens=meta.get("input_tokens", 0),
+        output_tokens=meta.get("output_tokens", 0),
+        cost=meta.get("cost", 0.0),
+        duration_ms=meta.get("duration_ms"),
+        attachments=[_route_record(meta)],
+    )
+    db.add(asst)
+    conv.message_count = (conv.message_count or 0) + 1
+    conv.last_message_preview = _plain_preview(text)
+    conv.total_tokens = (
+        (conv.total_tokens or 0)
+        + int(meta.get("input_tokens") or 0)
+        + int(meta.get("output_tokens") or 0)
+    )
+    conv.total_cost = float(conv.total_cost or 0.0) + float(meta.get("cost") or 0.0)
+    # the thread keeps the model the user asked for, the reply records who served it
+    conv.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(conv)
+    await db.refresh(asst)
+    return asst
+
+
 @router.post("/upload")
 async def upload_pdf(
     request: Request,
@@ -987,9 +1466,9 @@ async def upload_pdf(
     """Upload a process artifact and kick off the multimodal analysis."""
     raw = await file.read()
     if not raw:
-        return error("Empty file", 400)
+        return error("The file is empty", 400)
     if len(raw) > 50 * 1024 * 1024:
-        return error("Upload exceeds 50 MB limit", 413)
+        return error("The file is larger than 50 MB. Trim it and upload again", 413)
 
     try:
         attachments, required_provider = _process_upload(
@@ -998,10 +1477,12 @@ async def upload_pdf(
             file.filename or "",
         )
     except Exception as e:
-        logger.exception("BPM upload processing failed")
-        return error(f"Could not process upload: {e}", 415)
+        if not isinstance(e, UploadError):
+            logger.exception("BPM upload processing failed")
+        msg = _friendly_upload_error(e)
+        return error(msg, 415 if "not supported" in msg else 422)
     if not attachments:
-        return error("Upload produced no attachments", 422)
+        return error("Nothing readable was found in this file", 422)
 
     agent = await _get_agent(db)
     if not agent:
@@ -1042,20 +1523,22 @@ async def upload_pdf(
     await db.flush()
 
     primary_type = attachments[0].get("type") if attachments else "pdf_page"
-    opening = _opening_for(primary_type)
+    label = _upload_label(attachments) or f"Uploaded {file.filename or 'file'}"
 
+    # committed before the model call so a reload mid-analysis finds the thread analyzing
     user_msg = Message(
         id=uuid.uuid4(),
         conversation_id=conv.id,
         role="user",
-        content=opening,
+        content=label,
         attachments=attachments,
     )
     db.add(user_msg)
     conv.message_count = 1
-    conv.last_message_preview = opening
+    conv.last_message_preview = label
     await db.commit()
     await db.refresh(conv)
+    notices = _upload_notices(attachments)
 
     try:
         anthro_msgs = _build_anthropic_messages(
@@ -1074,52 +1557,19 @@ async def upload_pdf(
         )
     except Exception as e:
         logger.exception("BPM analyzer initial call failed")
-        await db.execute(
-            select(Conversation).where(Conversation.id == conv.id)  # ensure attached
-        )
-        err_msg = Message(
-            id=uuid.uuid4(),
-            conversation_id=conv.id,
-            role="assistant",
-            content=f"[error] {e}",
-        )
-        db.add(err_msg)
-        conv.message_count += 1
-        conv.last_message_preview = "[error]"
-        await db.commit()
-        return error(f"Analysis failed: {e}", 502)
+        msg = await _record_failure(db, conv, e)
+        return error(msg, 502, details={"thread_id": str(conv.id)})
 
-    asst = Message(
-        id=uuid.uuid4(),
-        conversation_id=conv.id,
-        role="assistant",
-        content=text,
-        model_used=meta["model"],
-        input_tokens=meta["input_tokens"],
-        output_tokens=meta["output_tokens"],
-        cost=meta["cost"],
-        duration_ms=meta["duration_ms"],
-    )
-    db.add(asst)
-    conv.message_count = 2
-    conv.last_message_preview = text[:200]
-    conv.total_tokens = (
-        (conv.total_tokens or 0) + meta["input_tokens"] + meta["output_tokens"]
-    )
-    conv.total_cost = float(conv.total_cost or 0.0) + meta["cost"]
-    conv.model_used = meta["model"]
-    conv.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(conv)
-    await db.refresh(asst)
+    asst = await _record_reply(db, conv, text, meta)
 
     return success(
         {
-            "thread": _serialize_thread(conv),
+            "thread": _serialize_thread(conv, status="ready", has_report=True),
             "user_message": _serialize_message(user_msg),
             "assistant_message": _serialize_message(asst),
             "attachments_count": len(attachments),
             "primary_type": primary_type,
+            "notices": notices,
         }
     )
 
@@ -1133,17 +1583,9 @@ async def chat_turn(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Append a follow-up question on an existing BPM analysis thread."""
-    try:
-        conv_uuid = uuid.UUID(thread_id)
-    except ValueError:
-        return error("Invalid thread id", 400)
-    conv = (
-        await db.execute(select(Conversation).where(Conversation.id == conv_uuid))
-    ).scalar_one_or_none()
-    if not conv:
-        return error("Thread not found", 404)
-    if conv.tenant_id != user.tenant_id:
-        return error("Forbidden", 403)
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
 
     content = (body.get("content") or "").strip()
     if not content:
@@ -1153,25 +1595,12 @@ async def chat_turn(
     if not agent:
         return error(f"Agent {AGENT_SLUG} not seeded", 503)
 
-    history = (
-        (
-            await db.execute(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.created_at)
-            )
+    history = await _thread_messages(db, conv.id)
+    if _state_of(history) == "analyzing":
+        return error(
+            "The analyst is still answering the last message on this thread", 409
         )
-        .scalars()
-        .all()
-    )
-    # Pull the multimodal attachments off the first user turn (PDF
-    # pages, images, audio/video, or extracted text — any modality the
-    # upload route accepts).
-    attachments: list[dict[str, Any]] = []
-    for m in history:
-        if m.role == "user" and m.attachments:
-            attachments = [a for a in m.attachments if isinstance(a, dict)]
-            break
+    attachments = _source_attachments(history)
     if not attachments:
         return error(
             "No source artifact found on this thread — re-upload the file", 400
@@ -1189,23 +1618,11 @@ async def chat_turn(
     conv.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
-    history2 = (
-        (
-            await db.execute(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
     try:
         anthro_msgs = _build_anthropic_messages(
-            attachments, history_turns=history2[:-1], new_user_question=content
+            attachments, history_turns=history, new_user_question=content
         )
-        # Use the model the thread was opened with; fall back to the agent default
+        # the model the thread was opened with, else the agent default
         chosen_model = (
             conv.model_used
             or (agent.model_config_ or {}).get("model")
@@ -1218,49 +1635,42 @@ async def chat_turn(
         )
     except Exception as e:
         logger.exception("BPM analyzer turn failed")
-        err = Message(
-            id=uuid.uuid4(),
-            conversation_id=conv.id,
-            role="assistant",
-            content=f"[error] {e}",
-        )
-        db.add(err)
-        conv.message_count += 1
-        conv.last_message_preview = "[error]"
-        await db.commit()
-        return error(f"Turn failed: {e}", 502)
+        msg = await _record_failure(db, conv, e)
+        return error(msg, 502, details={"thread_id": str(conv.id)})
 
-    asst = Message(
-        id=uuid.uuid4(),
-        conversation_id=conv.id,
-        role="assistant",
-        content=text,
-        model_used=meta["model"],
-        input_tokens=meta["input_tokens"],
-        output_tokens=meta["output_tokens"],
-        cost=meta["cost"],
-        duration_ms=meta["duration_ms"],
-    )
-    db.add(asst)
-    conv.message_count += 1
-    conv.last_message_preview = text[:200]
-    conv.total_tokens = (
-        (conv.total_tokens or 0) + meta["input_tokens"] + meta["output_tokens"]
-    )
-    conv.total_cost = float(conv.total_cost or 0.0) + meta["cost"]
-    conv.model_used = meta["model"]
-    conv.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(asst)
-    await db.refresh(conv)
+    asst = await _record_reply(db, conv, text, meta)
 
     return success(
         {
-            "thread": _serialize_thread(conv),
+            "thread": _serialize_thread(conv, status="ready", has_report=True),
             "user_message": _serialize_message(user_msg),
             "assistant_message": _serialize_message(asst),
         }
     )
+
+
+async def _last_turns(
+    db: AsyncSession, ids: list[uuid.UUID]
+) -> dict[uuid.UUID, tuple[str, str, datetime | None]]:
+    """Latest (role, content head, created_at) per thread in one query."""
+    if not ids:
+        return {}
+    from sqlalchemy import func
+
+    rows = (
+        await db.execute(
+            select(
+                Message.conversation_id,
+                Message.role,
+                func.substr(Message.content, 1, 16),
+                Message.created_at,
+            )
+            .where(Message.conversation_id.in_(ids))
+            .order_by(Message.conversation_id, desc(Message.created_at))
+            .distinct(Message.conversation_id)
+        )
+    ).all()
+    return {r[0]: (r[1], r[2] or "", r[3]) for r in rows}
 
 
 @router.get("/threads")
@@ -1273,12 +1683,18 @@ async def list_threads(
     q = (
         select(Conversation)
         .where(Conversation.tenant_id == user.tenant_id)
+        .where(Conversation.user_id == user.id)
         .where(Conversation.app_slug == APP_SLUG)
         .order_by(desc(Conversation.updated_at))
         .limit(min(max(limit, 1), 100))
     )
     rows = (await db.execute(q)).scalars().all()
-    return success({"threads": [_serialize_thread(c) for c in rows]})
+    last = await _last_turns(db, [c.id for c in rows])
+    out = []
+    for c in rows:
+        role, head, at = last.get(c.id, (None, None, None))
+        out.append(_serialize_thread(c, status=_thread_state(role, head, at)))
+    return success({"threads": out})
 
 
 @router.get("/threads/{thread_id}")
@@ -1287,32 +1703,20 @@ async def get_thread(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    try:
-        cid = uuid.UUID(thread_id)
-    except ValueError:
-        return error("Invalid thread id", 400)
-    conv = (
-        await db.execute(select(Conversation).where(Conversation.id == cid))
-    ).scalar_one_or_none()
-    if not conv or conv.tenant_id != user.tenant_id:
-        return error("Thread not found", 404)
-    msgs = (
-        (
-            await db.execute(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
+    msgs = await _thread_messages(db, conv.id)
     return success(
         {
-            "thread": _serialize_thread(conv),
-            # Don't ship attachments back — they're huge base64 PNGs and the
-            # UI doesn't need them. Backend re-loads them on every turn.
+            "thread": _serialize_thread(
+                conv,
+                status=_state_of(msgs),
+                has_report=any(_is_report(m) for m in msgs),
+            ),
+            # attachments stay server side, they are large base64 payloads
             "messages": [_serialize_message(m) for m in msgs],
+            "notices": _upload_notices(_source_attachments(msgs)),
         }
     )
 
@@ -1326,36 +1730,18 @@ async def suggest_agents(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Ask the BPM analyst to emit a STRUCTURED list of agent specs ready"""
-    try:
-        cid = uuid.UUID(thread_id)
-    except ValueError:
-        return error("Invalid thread id", 400)
-    conv = (
-        await db.execute(select(Conversation).where(Conversation.id == cid))
-    ).scalar_one_or_none()
-    if not conv or conv.tenant_id != user.tenant_id:
-        return error("Thread not found", 404)
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
 
     agent = await _get_agent(db)
     if not agent:
         return error(f"Agent {AGENT_SLUG} not seeded", 503)
 
-    history = (
-        (
-            await db.execute(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    attachments: list[dict[str, Any]] = []
-    for m in history:
-        if m.role == "user" and m.attachments:
-            attachments = [a for a in m.attachments if isinstance(a, dict)]
-            break
+    history = await _thread_messages(db, conv.id)
+    if not any(_is_report(m) for m in history):
+        return error("There is no report on this thread yet", 409)
+    attachments = _source_attachments(history)
     if not attachments:
         return error("No source artifact on this thread", 400)
 
@@ -1488,59 +1874,63 @@ async def suggest_agents(
             "model": meta.get("model") or model,
             "cost": meta.get("cost", 0.0),
             "duration_ms": meta.get("duration_ms", 0),
+            "route": _route_record(meta),
         }
     )
 
 
-@router.post("/threads/{thread_id}/build-and-test")
-async def build_and_test_agent(
-    thread_id: str,
-    body: dict,
-    request: Request,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """End-to-end orchestration for ONE suggested agent."""
-    try:
-        cid = uuid.UUID(thread_id)
-    except ValueError:
-        return error("Invalid thread id", 400)
-    conv = (
-        await db.execute(select(Conversation).where(Conversation.id == cid))
-    ).scalar_one_or_none()
-    if not conv or conv.tenant_id != user.tenant_id:
-        return error("Thread not found", 404)
+def _parse_synth(synth_text: str) -> dict[str, Any] | None:
+    """Pull {description, input} out of the analyst's reply, tolerating fences and smart quotes."""
+    import json
+    import re as _re
 
-    spec = body.get("spec") or {}
-    if not spec.get("name") or not spec.get("system_prompt"):
-        return error("spec.name and spec.system_prompt are required", 400)
-
-    # Pull attachments off the thread for grounded synthetic data —
-    # any modality (PDF, image, audio, video, text doc) is fine here.
-    history = (
-        (
-            await db.execute(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.created_at)
-            )
-        )
-        .scalars()
-        .all()
+    wrapped = _parse_agent_specs(
+        '{"agents":[' + (synth_text or "").strip().lstrip("[").rstrip("]") + "]}"
     )
-    attachments: list[dict[str, Any]] = []
-    for m in history:
-        if m.role == "user" and m.attachments:
-            attachments = [a for a in m.attachments if isinstance(a, dict)]
-            break
+    if wrapped and wrapped.get("agents"):
+        cand = wrapped["agents"][0]
+        if isinstance(cand, dict) and cand.get("input"):
+            return cand
+    cleaned = (synth_text or "").strip()
+    mm = _re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", cleaned)
+    if mm:
+        cleaned = mm.group(1).strip()
+    cleaned = (
+        cleaned.replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+    )
+    cleaned = _re.sub(r",(\s*[}\]])", r"\1", cleaned)
+    cleaned = _re.sub(r"/\*[\s\S]*?\*/", "", cleaned)
+    for chunk in (cleaned, cleaned[cleaned.find("{") : cleaned.rfind("}") + 1]):
+        try:
+            obj = json.loads(chunk)
+        except Exception:
+            continue
+        if isinstance(obj, dict) and obj.get("input"):
+            return obj
+    return None
 
+
+_GENERIC_SYNTH = {
+    "description": "Generic smoke test (synthetic data generator failed — re-run for grounded input)",
+    "input": "Hello, this is a smoke-test message. Respond per your system prompt.",
+}
+
+
+async def _synthesize_input(
+    db: AsyncSession, conv: Conversation, spec: dict[str, Any]
+) -> dict[str, Any]:
+    """One realistic test input for the agent, grounded in the uploaded artifact."""
+    history = await _thread_messages(db, conv.id)
+    attachments = _source_attachments(history)
     bpm_agent = await _get_agent(db)
-    bpm_model = (
-        (bpm_agent.model_config_ or {}).get("model")
-        if bpm_agent
-        else default_vision_model()
+    model = (
+        conv.model_used
+        or ((bpm_agent.model_config_ or {}).get("model") if bpm_agent else None)
+        or default_vision_model()
     )
-
     synth_prompt = (
         f"For the agent below, generate ONE realistic synthetic test "
         f"input grounded in the BPM diagram you analyzed. Output ONLY a "
@@ -1553,7 +1943,7 @@ async def build_and_test_agent(
         f"Make the input realistic — names, dates, amounts, document refs that "
         f"a real upstream step in this BPM would hand over. First char must be `{{`."
     )
-    synth_input: dict[str, Any] | None = None
+    synth: dict[str, Any] | None = None
     try:
         if attachments and bpm_agent:
             anthro_msgs = _build_anthropic_messages(
@@ -1562,62 +1952,27 @@ async def build_and_test_agent(
             synth_text, _ = await _run_vision_model(
                 system_prompt=bpm_agent.system_prompt or "",
                 messages=anthro_msgs,
-                model=bpm_model or default_vision_model(),
+                model=model,
                 force_json=True,
             )
-            # Reuse the robust parser so smart quotes / fences / comments
-            # / trailing commas don't break synthetic-input extraction.
-            wrapped = _parse_agent_specs(
-                '{"agents":['
-                + (synth_text or "").strip().lstrip("[").rstrip("]")
-                + "]}"
-            )
-            if wrapped and wrapped.get("agents"):
-                cand = wrapped["agents"][0]
-                if isinstance(cand, dict) and cand.get("input"):
-                    synth_input = cand
-            if not synth_input:
-                # Fall back to a direct parse — the synth shape is a
-                # plain object {description, input}, not the {agents:[…]}
-                # shape `_parse_agent_specs` requires.
-                import json
-                import re as _re
-
-                cleaned = (synth_text or "").strip()
-                mm = _re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", cleaned)
-                if mm:
-                    cleaned = mm.group(1).strip()
-                cleaned = (
-                    cleaned.replace("“", '"')
-                    .replace("”", '"')
-                    .replace("‘", "'")
-                    .replace("’", "'")
-                )
-                cleaned = _re.sub(r",(\s*[}\]])", r"\1", cleaned)
-                cleaned = _re.sub(r"/\*[\s\S]*?\*/", "", cleaned)
-                try:
-                    synth_input = json.loads(cleaned)
-                except Exception:
-                    s, e = cleaned.find("{"), cleaned.rfind("}")
-                    if s != -1 and e > s:
-                        try:
-                            synth_input = json.loads(cleaned[s : e + 1])
-                        except Exception:
-                            synth_input = None
+            synth = _parse_synth(synth_text)
     except Exception as e:
         logger.warning("Synthetic data generation failed: %s", e)
+    if not synth or not synth.get("input"):
+        return dict(_GENERIC_SYNTH)
+    return {
+        "description": str(synth.get("description") or ""),
+        "input": str(synth.get("input")),
+    }
 
-    if not synth_input or not synth_input.get("input"):
-        synth_input = {
-            "description": "Generic smoke test (synthetic data generator failed — re-run for grounded input)",
-            "input": "Hello, this is a smoke-test message. Respond per your system prompt.",
-        }
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
+async def _create_agent_from_spec(
+    db: AsyncSession, user: User, spec: dict[str, Any]
+) -> Any:
     from models.agent import Agent as AgentModel, AgentStatus, AgentType  # type: ignore
 
-    base_slug = (spec.get("slug") or spec.get("name") or "").strip().lower().replace(
-        " ", "-"
+    base_slug = (
+        (spec.get("slug") or spec.get("name") or "").strip().lower().replace(" ", "-")
     ) or "untitled-agent"
     slug = base_slug
     suffix = 0
@@ -1654,62 +2009,157 @@ async def build_and_test_agent(
     db.add(new_agent)
     await db.commit()
     await db.refresh(new_agent)
+    return new_agent
+
+
+def _agent_summary(agent: Any) -> dict[str, Any]:
+    return {
+        "id": str(agent.id),
+        "slug": agent.slug,
+        "name": agent.name,
+        "status": (
+            agent.status.value if hasattr(agent.status, "value") else str(agent.status)
+        ),
+        "model": (agent.model_config_ or {}).get("model"),
+        "tools": (agent.model_config_ or {}).get("tools"),
+    }
+
+
+async def _smoke_test(
+    request: Request, user: User, db: AsyncSession, agent_id: str, message: str
+) -> dict[str, Any]:
+    """Run the agent in process through the execute route, as the signed-in user."""
+    import json
 
     try:
-        from abenix_sdk import Abenix  # type: ignore
-    except ImportError:
-        sys.path.insert(
-            0, str(Path(__file__).resolve().parents[4] / "packages" / "sdk" / "python")
-        )
-        from abenix_sdk import Abenix  # type: ignore
-
-    api_key = os.environ.get("ABENIX_PLATFORM_API_KEY") or os.environ.get(
-        "ABENIX_API_KEY", ""
-    )
-    api_base = os.environ.get("ABENIX_INTERNAL_URL", "http://localhost:8000")
-
-    test_result: dict[str, Any] = {"ok": False}
-    if not api_key:
-        test_result = {
+        from app.routers import agents as agents_router
+        from app.schemas.agents import ExecuteRequest
+    except Exception as exc:  # pragma: no cover - import-environment dependent
+        logger.warning("Smoke test unavailable: %s", exc)
+        return {
             "ok": False,
-            "error": "ABENIX_API_KEY not set on this pod — agent created but smoke test skipped",
+            "skipped": True,
+            "error": "The smoke test could not run on this server. Use Run a test to try the agent yourself",
         }
-    else:
-        try:
-            async with Abenix(
-                api_key=api_key, base_url=api_base, timeout=180.0
-            ) as forge:
-                exec_result = await forge.execute(
-                    new_agent.slug, str(synth_input["input"])
-                )
-            test_result = {
-                "ok": True,
-                "output": (exec_result.output or "")[:4000],
-                "model": exec_result.model,
-                "input_tokens": getattr(exec_result, "input_tokens", 0),
-                "output_tokens": getattr(exec_result, "output_tokens", 0),
-                "cost": float(exec_result.cost or 0.0),
-                "duration_ms": int(exec_result.duration_ms or 0),
-                "tool_calls": len(exec_result.tool_calls or []),
-            }
-        except Exception as e:
-            logger.exception("Smoke-test execution failed")
-            test_result = {"ok": False, "error": str(e)[:500]}
 
+    body = ExecuteRequest(
+        message=message, stream=False, wait=True, wait_timeout_seconds=180
+    )
+    try:
+        resp = await agents_router.execute_agent(agent_id, body, request, user, db)
+    except Exception as exc:
+        logger.exception("Smoke-test execution failed")
+        return {"ok": False, "error": str(exc)[:500]}
+    try:
+        payload = json.loads(bytes(resp.body))
+    except Exception:
+        return {
+            "ok": False,
+            "error": f"The execute call answered {getattr(resp, 'status_code', '?')}",
+        }
+    data = payload.get("data") or {}
+    err = payload.get("error") or {}
+    if not data:
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        return {"ok": False, "error": (msg or "Execution failed")[:500]}
+    output = data.get("output")
+    if output is not None and not isinstance(output, str):
+        output = json.dumps(output, indent=2, default=str)
+    output = output or data.get("output_text") or ""
+    failed = str(data.get("status") or "").lower() == "failed"
+    calls = data.get("tool_calls")
+    return {
+        "ok": not failed,
+        "error": (
+            str(data.get("error") or "Execution failed")[:500] if failed else None
+        ),
+        "execution_id": data.get("execution_id"),
+        "output": output[:4000],
+        "model": data.get("model"),
+        "input_tokens": data.get("input_tokens", 0),
+        "output_tokens": data.get("output_tokens", 0),
+        "cost": float(data.get("cost") or 0.0),
+        "duration_ms": int(data.get("duration_ms") or 0),
+        "tool_calls": len(calls) if isinstance(calls, list) else 0,
+    }
+
+
+def _valid_spec(spec: dict[str, Any]) -> str | None:
+    if (
+        not (spec.get("name") or "").strip()
+        or not (spec.get("system_prompt") or "").strip()
+    ):
+        return "spec.name and spec.system_prompt are required"
+    return None
+
+
+@router.post("/threads/{thread_id}/synthetic-input")
+async def synthetic_input(
+    thread_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """A grounded test input for one suggested agent."""
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
+    spec = (body or {}).get("spec") or {}
+    bad = _valid_spec(spec)
+    if bad:
+        return error(bad, 400)
+    return success({"synthetic_input": await _synthesize_input(db, conv, spec)})
+
+
+@router.post("/threads/{thread_id}/smoke-test")
+async def smoke_test_agent(
+    thread_id: str,
+    body: dict,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Run a freshly built agent once with a test input, as the caller."""
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
+    agent_id = str((body or {}).get("agent_id") or "").strip()
+    message = str((body or {}).get("input") or "").strip()
+    if not agent_id or not message:
+        return error("agent_id and input are required", 400)
+    return success(
+        {"test_result": await _smoke_test(request, user, db, agent_id, message)}
+    )
+
+
+@router.post("/threads/{thread_id}/build-and-test")
+async def build_and_test_agent(
+    thread_id: str,
+    body: dict,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """End-to-end orchestration for ONE suggested agent."""
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
+
+    spec = body.get("spec") or {}
+    bad = _valid_spec(spec)
+    if bad:
+        return error(bad, 400)
+
+    synth_input = await _synthesize_input(db, conv, spec)
+    new_agent = await _create_agent_from_spec(db, user, spec)
+    # read before the execute route commits and expires the row
+    summary = _agent_summary(new_agent)
+    test_result = await _smoke_test(
+        request, user, db, summary["id"], str(synth_input["input"])
+    )
     return success(
         {
-            "agent": {
-                "id": str(new_agent.id),
-                "slug": new_agent.slug,
-                "name": new_agent.name,
-                "status": (
-                    new_agent.status.value
-                    if hasattr(new_agent.status, "value")
-                    else str(new_agent.status)
-                ),
-                "model": (new_agent.model_config_ or {}).get("model"),
-                "tools": (new_agent.model_config_ or {}).get("tools"),
-            },
+            "agent": summary,
             "synthetic_input": synth_input,
             "test_result": test_result,
         }
@@ -1724,76 +2174,14 @@ async def create_suggested_agent(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Create one of the suggested agents. Body is a single spec from"""
-    try:
-        cid = uuid.UUID(thread_id)
-    except ValueError:
-        return error("Invalid thread id", 400)
-    conv = (
-        await db.execute(select(Conversation).where(Conversation.id == cid))
-    ).scalar_one_or_none()
-    if not conv or conv.tenant_id != user.tenant_id:
-        return error("Thread not found", 404)
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "db"))
-    from models.agent import Agent as AgentModel, AgentStatus, AgentType  # type: ignore
-
-    name = (body.get("name") or "").strip()
-    if not name:
+    """Create one of the suggested agents. Body is a single spec from suggest-agents."""
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
+    if not (body.get("name") or "").strip():
         return error("name is required", 400)
-    slug = (body.get("slug") or "").strip().lower().replace(" ", "-")
-    if not slug:
-        return error("slug is required", 400)
-
-    # De-dupe slug
-    suffix = 0
-    base_slug = slug
-    while True:
-        existing = (
-            await db.execute(select(AgentModel).where(AgentModel.slug == slug))
-        ).scalar_one_or_none()
-        if not existing:
-            break
-        suffix += 1
-        slug = f"{base_slug}-{suffix}"
-
-    new_agent = AgentModel(
-        id=uuid.uuid4(),
-        tenant_id=user.tenant_id,
-        creator_id=user.id,
-        name=name[:200],
-        slug=slug,
-        description=(body.get("description") or "")[:1000],
-        system_prompt=body.get("system_prompt") or "",
-        agent_type=AgentType.CUSTOM if hasattr(AgentType, "CUSTOM") else AgentType.OOB,
-        status=AgentStatus.DRAFT,
-        category=(body.get("category") or "other")[:50],
-        version="1.0.0",
-        is_published=False,
-        model_config_={
-            "model": body.get("model") or default_vision_model(),
-            "temperature": 0.2,
-            "max_iterations": 12,
-            "max_tokens": 4000,
-            "tools": body.get("tools") or [],
-        },
-    )
-    db.add(new_agent)
-    await db.commit()
-    await db.refresh(new_agent)
-
-    return success(
-        {
-            "id": str(new_agent.id),
-            "slug": new_agent.slug,
-            "name": new_agent.name,
-            "status": (
-                new_agent.status.value
-                if hasattr(new_agent.status, "value")
-                else str(new_agent.status)
-            ),
-        }
-    )
+    new_agent = await _create_agent_from_spec(db, user, body)
+    return success(_agent_summary(new_agent))
 
 
 _PDF_CSS = """
@@ -1854,17 +2242,21 @@ def _md_to_html(md: str) -> str:
 
     def render_inline(s: str) -> str:
         s = html_lib.escape(s)
-        # Inline code first so its contents aren't reinterpreted.
-        s = re.sub(r"`([^`]+?)`", r"<code>\1</code>", s)
-        # Bold then italic. The negative lookbehind/ahead on italics
-        # keeps `**bold**` from being mis-detected.
+        # code spans go behind placeholders so emphasis never reaches inside them
+        codes: list[str] = []
+
+        def _stash(m: re.Match) -> str:
+            codes.append(f"<code>{m.group(1)}</code>")
+            return f"\x00{len(codes) - 1}\x00"
+
+        s = re.sub(r"`([^`]+?)`", _stash, s)
         s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
-        s = re.sub(r"__(.+?)__", r"<b>\1</b>", s)
+        s = re.sub(r"(?<!\w)__(.+?)__(?!\w)", r"<b>\1</b>", s)
         s = re.sub(r"(?<!\*)\*([^*\n]+?)\*(?!\*)", r"<i>\1</i>", s)
-        s = re.sub(r"(?<!_)_([^_\n]+?)_(?!_)", r"<i>\1</i>", s)
+        s = re.sub(r"(?<![\w_])_([^_\n]+?)_(?![\w_])", r"<i>\1</i>", s)
         s = re.sub(r"~~(.+?)~~", r"<s>\1</s>", s)
         s = re.sub(r"\[([^\]]+?)\]\(([^)]+?)\)", r'<a href="\2">\1</a>', s)
-        return s
+        return re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m.group(1))], s)
 
     out: list[str] = []
     in_list: str | None = None
@@ -1886,12 +2278,19 @@ def _md_to_html(md: str) -> str:
             in_table = False
             table_rows = []
             return
+        header, body = table_rows[0], table_rows[1:]
+        if not body and not any(c.strip() for c in header):
+            in_table = False
+            table_rows = []
+            return
         out.append("<table>")
-        out.append("<tr>")
-        for c in table_rows[0]:
-            out.append(f"<th>{render_inline(c)}</th>")
-        out.append("</tr>")
-        for row in table_rows[1:]:
+        # an all-blank header row renders as an empty shaded stripe, so drop it
+        if any(c.strip() for c in header):
+            out.append("<tr>")
+            for c in header:
+                out.append(f"<th>{render_inline(c)}</th>")
+            out.append("</tr>")
+        for row in body:
             out.append("<tr>")
             for c in row:
                 out.append(f"<td>{render_inline(c)}</td>")
@@ -2022,28 +2421,13 @@ async def export_thread_pdf(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Render the full BPM thread as a beautifully formatted PDF."""
-    try:
-        cid = uuid.UUID(thread_id)
-    except ValueError:
-        return error("Invalid thread id", 400)
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
 
-    conv = (
-        await db.execute(select(Conversation).where(Conversation.id == cid))
-    ).scalar_one_or_none()
-    if not conv or conv.tenant_id != user.tenant_id:
-        return error("Thread not found", 404)
-
-    msgs = (
-        (
-            await db.execute(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    msgs = await _thread_messages(db, conv.id)
+    if not any(_is_report(m) for m in msgs):
+        return error("There is no report on this thread yet", 409)
 
     import html as html_lib
 
@@ -2072,11 +2456,16 @@ async def export_thread_pdf(
     for m in msgs:
         if m.role == "user":
             parts.append('<div class="msg-meta">User</div>')
-            parts.append(f'<div class="msg-user">{_md_to_html(m.content or "")}</div>')
+            parts.append(
+                f'<div class="msg-user">{_md_to_html(_display_content(m))}</div>'
+            )
         else:
             label = "BPM Analyst"
             if m.model_used:
                 label += f" · {html_lib.escape(m.model_used)}"
+            route = _route_of(m) or {}
+            if route.get("fallback_from"):
+                label += " · fallback provider"
             parts.append(f'<div class="msg-meta">{label}</div>')
             parts.append(f'<div class="msg-asst">{_md_to_html(m.content or "")}</div>')
 
@@ -2126,15 +2515,9 @@ async def delete_thread(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    try:
-        cid = uuid.UUID(thread_id)
-    except ValueError:
-        return error("Invalid thread id", 400)
-    conv = (
-        await db.execute(select(Conversation).where(Conversation.id == cid))
-    ).scalar_one_or_none()
-    if not conv or conv.tenant_id != user.tenant_id:
-        return error("Thread not found", 404)
+    conv, err = await _owned_thread(db, thread_id, user)
+    if err is not None:
+        return err
     await db.delete(conv)
     await db.commit()
     return success({"deleted": True})

@@ -63,14 +63,14 @@ export default function CognifyConfigPage() {
 
   if (cfg === null) {
     return (
-      <main className="max-w-5xl mx-auto px-6 py-8 text-slate-300">
+      <main className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8 text-slate-300">
         <p>Loading…</p>
       </main>
     );
   }
 
   return (
-    <main className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+    <main className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8 space-y-8">
       <header>
         <h1 className="text-3xl font-semibold text-white">Cognify (knowledge graph)</h1>
         <p className="text-slate-400 mt-2 max-w-3xl">

@@ -29,7 +29,7 @@ Always open, can't be collapsed.
 |---|---|---|---|
 | `/dashboard` | Dashboard | `feature:view_dashboard` | Live stats from `/api/analytics/live-stats`, per-user usage, API health and the getting-started checklist |
 | `/agents` | My Agents | `feature:create_agents` | Agent and pipeline cards with My, Prebuilt and Marketplace tabs, search, category filter, sort and paging |
-| `/chat` | AI Chat | `feature:use_chat` | Conversations with any agent. `?id=` selects a conversation. Conversations can be shared |
+| `/chat` | AI Chat | `feature:use_chat` | Conversations with any agent, picked from a searchable list of every agent and defaulting to Code Assistant. Each turn sends the thread id so the agent remembers the conversation, also after a reload. The paperclip adds text files (up to 20,000 characters) to the message. `?id=` selects a conversation. Delete asks first. Below `md` the conversation list is a drawer. Conversations can be shared |
 | `/alerts` | Alerts | `feature:view_alerts` | Failures grouped by structured failure code so bursts stand out, plus live stats |
 
 ### BUILD
@@ -41,11 +41,11 @@ Always open, can't be collapsed.
 | `/decisions` | Decisions | `cap:decisions.view` | Decision models (business rules). See [2.5 pages](#abenix-25-pages) |
 | `/sources` | Source Watch | none | Watched pages, PDFs, data files and feeds. See [2.5 pages](#abenix-25-pages) |
 | `/code-runner` | Code Runner | `feature:use_code_runner` | Upload a zip or git repo, analyse it and expose it as the `code_asset` tool. Test, version and restore |
-| `/ml-models` | ML Models | `feature:use_ml_models` | Model registry. Upload, activate, deploy (local or k8s), predict, invocations |
+| `/ml-models` | ML Models | `feature:use_ml_models` | Model registry. How-this-works panel, sample model, upload with load check and versions, test inference, use in agent, optional deploy (local or k8s), invocations |
 | `/knowledge` | Knowledge Bases | `feature:use_kb` | Knowledge bases with document upload and a detail panel. Links to Knowledge Projects |
-| `/persona` | Persona KB | `feature:use_persona` | Ring-fenced items and notes only scope-authorised agents can retrieve, plus voice consent |
-| `/portfolio-schemas` | Portfolio Schemas | `feature:create_pipelines` | Domain schemas for the SchemaPortfolioTool, from scratch or a template |
-| `/bpm-analyzer` | BPM Analyzer | `feature:use_builder` | Upload a process diagram, discuss it in threads, get suggested agents, build and test them, export a PDF |
+| `/persona` | Persona KB | `feature:use_persona` | Your own notes and files, which only your agents can retrieve. View, edit, re-index, the reason an item is not searchable, plus voice consent |
+| `/portfolio-schemas` | Portfolio Schemas | `feature:create_pipelines` | Tables of records that agents query through `portfolio_<domain>`. Try with a sample, or create from a spreadsheet (preview, rename, untick and retype columns, then import). Each schema shows your own rows, example questions and Use in an agent, which opens the builder with the tool and a starter prompt. Add rows replaces or appends. Writing a schema by hand or from a template is the advanced path, checked on save with problems listed under the JSON editor |
+| `/bpm-analyzer` | BPM Analyzer | `feature:use_builder` | Upload a process diagram or SOP (or try the bundled sample), discuss it in private threads, get suggested agents, build and test them, export a PDF. `?thread=<id>` opens a thread |
 | `/atlas` | Atlas | `feature:use_kb` | Ontology canvas. Nodes, edges, extraction from documents, starter imports, KB binding and export |
 
 ### RUN & TEST
@@ -259,25 +259,28 @@ What each one does:
 
 ```mermaid
 flowchart LR
-  P[/ml-models page/] --> L[Left rail: upload form + list]
-  P --> R[Right rail: detail]
+  P[/ml-models page/] --> HW[How this works panel]
+  P --> L[Left rail: upload form + list]
+  P --> R[Right rail: detail or empty state]
 
-  L --> U[Upload form<br/>+ schema editor]
+  L --> U[Upload form<br/>name, version, inputs + sample button]
   L --> Li[Model list]
 
-  R --> H[Header: name, version, badges,<br/>Use-in-Agent / Edit / Share / Activate / Delete]
-  R --> E[Edit-metadata panel<br/>conditional]
-  R --> D[Deploy panel<br/>local vs k8s + replicas + preset]
-  R --> I[Invocations table]
+  R --> H[Header: name, version, badges,<br/>Use-in-Agent / Edit / Share / Activate / Delete<br/>error reason when the file did not load]
+  R --> E[Edit-details panel<br/>conditional]
   R --> T[Test inference]
-  R --> S[Schemas display]
+  R --> UA[Use it in an agent]
+  R --> D[Deploy panel, optional<br/>local vs k8s + replicas + preset]
+  R --> I[Invocations table]
+  R --> S[Input and output JSON]
 
   P -.-> Sh[ResourceShareDialog modal]
+  P -.-> C[ConfirmModal on delete]
 ```
 
-Most CRUD pages follow this two-column shape:
+Most CRUD pages follow this two-column shape, stacked to one column below `lg`:
 - Left rail: list + the create form.
-- Right rail: the selected item's detail, broken into cards.
+- Right rail: the selected item's detail broken into cards, or an empty state with a first step.
 - Modal: share dialog.
 
 `/agents` uses a card grid in place of the left-rail list, but the detail and share patterns repeat.

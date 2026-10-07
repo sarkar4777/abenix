@@ -349,11 +349,18 @@ async def sweep_stale_executions() -> None:
         # notification glitch cannot roll back the sweep.
         try:
             from models.notification import Notification, NotificationType
+            from app.core.notifications import user_wants_notification
             from app.core.ws_manager import ws_manager
 
+            muted: set = set()
             async with async_session() as db:
                 for ex_id, uid, tid, agent_id, created in stale:
                     if not uid:
+                        continue
+                    if not await user_wants_notification(
+                        db, uid, NotificationType.EXECUTION_FAILED
+                    ):
+                        muted.add(uid)
                         continue
                     n = Notification(
                         tenant_id=tid,
@@ -377,7 +384,7 @@ async def sweep_stale_executions() -> None:
                 await db.commit()
             # WS fan-out to any users online
             for ex_id, uid, _, agent_id, _ in stale:
-                if not uid:
+                if not uid or uid in muted:
                     continue
                 try:
                     await ws_manager.send_to_user(

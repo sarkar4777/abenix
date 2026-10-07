@@ -64,6 +64,7 @@ export function connectToAgentStream(
   message: string,
   callbacks: StreamCallbacks,
   context?: Record<string, unknown>,
+  conversationId?: string,
 ): AbortController {
   const controller = new AbortController();
   const token = localStorage.getItem('access_token');
@@ -76,7 +77,13 @@ export function connectToAgentStream(
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(context && Object.keys(context).length ? { message, stream: true, context } : { message, stream: true }),
+        body: JSON.stringify({
+          message,
+          stream: true,
+          ...(context && Object.keys(context).length ? { context } : {}),
+          // the server loads this thread's earlier turns as the agent's memory
+          ...(conversationId ? { conversation_id: conversationId } : {}),
+        }),
         signal: controller.signal,
       });
 
@@ -96,6 +103,7 @@ export function connectToAgentStream(
       let buffer = '';
       // an event line and its data line can land in different chunks
       let currentEvent = '';
+      let finished = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -121,9 +129,11 @@ export function connectToAgentStream(
                 callbacks.onToolResult(data as ToolResultData);
                 break;
               case 'done':
+                finished = true;
                 callbacks.onDone(data as DoneData);
                 break;
               case 'error':
+                finished = true;
                 callbacks.onError(data.message);
                 break;
               case 'moderation':
@@ -143,6 +153,7 @@ export function connectToAgentStream(
           }
         }
       }
+      if (!finished) callbacks.onError('The connection closed before the reply finished. Try sending again.');
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       callbacks.onError(err instanceof Error ? err.message : 'Stream failed');

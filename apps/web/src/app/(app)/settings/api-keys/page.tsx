@@ -7,6 +7,7 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 import { useApi } from '@/hooks/useApi';
 import { apiFetch } from '@/lib/api-client';
 import { toastSuccess, toastError } from '@/stores/toastStore';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 
 interface ApiKeyData {
   id: string;
@@ -31,6 +32,7 @@ export default function ApiKeysPage() {
   const [newKey, setNewKey] = useState<ApiKeyData | null>(null);
   const [copied, setCopied] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<ApiKeyData | null>(null);
 
   const handleCreate = async () => {
     if (!newKeyName.trim()) return;
@@ -48,23 +50,22 @@ export default function ApiKeysPage() {
         mutateKeys();
         toastSuccess('API key created');
       }
-    } catch {
-      toastError('Failed to create API key');
+    } catch (e) {
+      toastError(e instanceof Error && e.message ? e.message : 'Could not create the key. Try again.');
     } finally {
       setCreating(false);
     }
   };
 
-  const handleRevoke = async (keyId: string, name?: string) => {
-    // revoking breaks every client using the key at once
-    if (!window.confirm(`Revoke ${name ? `"${name}"` : 'this key'}? Anything using it stops working immediately.`)) return;
+  const handleRevoke = async (keyId: string) => {
+    setConfirmRevoke(null);
     setRevoking(keyId);
     try {
       await apiFetch(`/api/api-keys/${keyId}`, { method: 'DELETE' });
       mutateKeys();
       toastSuccess('API key revoked');
-    } catch {
-      toastError('Failed to revoke API key');
+    } catch (e) {
+      toastError(e instanceof Error && e.message ? e.message : 'Could not revoke the key. Try again.');
     } finally {
       setRevoking(null);
     }
@@ -118,11 +119,11 @@ export default function ApiKeysPage() {
       transition={{ duration: 0.4 }}
       className="space-y-6 max-w-2xl"
     >
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-white">API Keys</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Manage API access to Abenix
+            Keys let your scripts and apps call the Abenix API as you. Send one in the X-API-Key header.
           </p>
         </div>
         <button
@@ -144,9 +145,14 @@ export default function ApiKeysPage() {
             className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4"
           >
             <div className="flex items-start justify-between mb-2">
-              <p className="text-sm text-emerald-400 font-medium">
-                Key created — copy it now, it won&apos;t be shown again
-              </p>
+              <div>
+                <p className="text-sm text-emerald-400 font-medium">
+                  Key created. Copy it now, it will not be shown again.
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Abenix keeps only a fingerprint of the key. If you lose it, revoke it and generate a new one.
+                </p>
+              </div>
               <button
                 onClick={() => setNewKey(null)}
                 aria-label="Dismiss"
@@ -183,10 +189,13 @@ export default function ApiKeysPage() {
             exit={{ opacity: 0, height: 0 }}
             className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4"
           >
-            <p className="text-sm text-white font-medium mb-3">
+            <p className="text-sm text-white font-medium">
               Create new API key
             </p>
-            <div className="flex items-center gap-3">
+            <p className="text-xs text-slate-500 mt-0.5 mb-3">
+              Name it after where it will be used, so you know what breaks if you revoke it. The full key is shown once, right after you create it.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
               <input
                 type="text"
                 value={newKeyName}
@@ -194,7 +203,7 @@ export default function ApiKeysPage() {
                 placeholder="Key name (e.g. Production)"
                 aria-label="Key name"
                 data-testid="apikey-name"
-                className="flex-1 px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none transition-colors"
+                className="flex-1 min-w-[12rem] px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none transition-colors"
                 onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
               />
               <button
@@ -243,7 +252,7 @@ export default function ApiKeysPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-white">{apiKey.name}</p>
                 <p className="text-xs text-slate-500 font-mono mt-0.5">
-                  {apiKey.key_prefix}
+                  {apiKey.key_prefix}…
                 </p>
                 <p className="text-xs text-slate-600 mt-0.5">
                   Created {formatDate(apiKey.created_at)}
@@ -252,7 +261,7 @@ export default function ApiKeysPage() {
                 </p>
               </div>
               <button
-                onClick={() => handleRevoke(apiKey.id, apiKey.name)}
+                onClick={() => setConfirmRevoke(apiKey)}
                 disabled={revoking === apiKey.id}
                 aria-label="Revoke key"
                 title="Revoke key"
@@ -269,6 +278,15 @@ export default function ApiKeysPage() {
           ))
         )}
       </div>
+      <ConfirmModal
+        open={!!confirmRevoke}
+        onClose={() => setConfirmRevoke(null)}
+        onConfirm={() => confirmRevoke && handleRevoke(confirmRevoke.id)}
+        title={`Revoke ${confirmRevoke?.name ? `"${confirmRevoke.name}"` : 'this key'}?`}
+        description="Anything using this key stops working at once. This cannot be undone, you would need to generate a new key and update those apps."
+        confirmLabel="Revoke key"
+        variant="danger"
+      />
     </motion.div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api-client';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 
 interface Receipt {
   id: string;
@@ -21,9 +22,11 @@ export default function GDPRPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [last, setLast] = useState<Record<string, { status: string; affected?: number }> | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   async function purge() {
     if (!userId.trim()) return;
+    setConfirming(false);
     setBusy(true);
     setError(null);
     setLast(null);
@@ -35,7 +38,7 @@ export default function GDPRPage() {
       if (r.data) setLast(r.data.receipt);
       await refresh();
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -56,12 +59,12 @@ export default function GDPRPage() {
   }, [userId]);
 
   return (
-    <main className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+    <main className="max-w-5xl mx-auto sm:px-6 py-2 sm:py-8 space-y-6">
       <header>
-        <h1 className="text-3xl font-semibold text-white">GDPR — right to erasure</h1>
+        <h1 className="text-3xl font-semibold text-white">GDPR erasure</h1>
         <p className="text-slate-400 mt-2 max-w-3xl">
-          Cascade-delete one user's data across Postgres, Pinecone, Neo4j, blob storage,
-          and trajectory memory. Every store-level attempt is logged for audit.
+          Permanently erase one person&apos;s data from every store the platform uses: the database, vector and graph
+          stores, uploaded files and agent memory. Each step is logged so you can show the request was carried out.
         </p>
       </header>
 
@@ -78,11 +81,11 @@ export default function GDPRPage() {
         </label>
         <div className="flex gap-2">
           <button
-            onClick={purge}
+            onClick={() => setConfirming(true)}
             disabled={busy || !userId.trim()}
             className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
           >
-            {busy ? 'Purging…' : 'Execute purge'}
+            {busy ? 'Erasing…' : 'Erase this person’s data'}
           </button>
           <button
             onClick={refresh}
@@ -92,8 +95,17 @@ export default function GDPRPage() {
             Refresh receipts
           </button>
         </div>
-        {error && <p className="text-red-400 text-xs">{error}</p>}
+        {error && <p className="text-red-400 text-xs" role="alert">{error}</p>}
       </section>
+      <ConfirmModal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={purge}
+        title="Erase this person's data for good?"
+        description={`Everything stored for user ${userId.trim()} is deleted from every store. This cannot be undone. Only the erasure receipts below are kept.`}
+        confirmLabel="Erase data"
+        variant="danger"
+      />
 
       {last !== null && (
         <section className="rounded-xl border border-emerald-700/40 bg-emerald-950/30 p-5">

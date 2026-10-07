@@ -1196,12 +1196,12 @@ export const TOOL_DOCS: Record<string, ToolDoc> = {
   persona_rag: {
     category: "Meetings",
     name: "Persona RAG",
-    description: "Retrieve from the user's persona-scoped knowledge. Use this when the agent needs to answer AS the user (their meeting notes, action items, personal context). The agent can only access scopes explicitly authorized for the current meeting; any request for an unauthorized scope is denied. Returns text chunks with source citations \u00e2\u20ac\u201d never unfiltered persona data.",
+    description: "Retrieve from the executing user's own persona knowledge. Use this when the agent needs to answer AS the user (their notes, files, meeting context). Only the user's own items are ever searched. Inside a meeting only the scopes authorized for that meeting are allowed, and any other scope is denied. Returns text chunks with source citations.",
     parameters: [
       { name: "query", type: "string", required: true, description: "What you're looking for, phrased as a question or topic." },
-      { name: "scope", type: "string", required: false, description: "Persona scope to query. Must be in the meeting's pre-authorized scope list (or in the default 'self' scope). Unknown / unauthorized scopes return an empty result with a 'scope_denied' flag.", default: "self" },
+      { name: "scope", type: "string", required: false, description: "Persona scope to query, for example 'self' or 'client:acme'. In a meeting it must be one of the meeting's authorized scopes, otherwise the result carries 'scope_denied'.", default: "self" },
       { name: "top_k", type: "integer", required: false, description: "", default: 5, minimum: 1, maximum: 15 },
-      { name: "meeting_id", type: "string", required: false, description: "Optional \u00e2\u20ac\u201d if set, the request must fit within this meeting's authorized scopes." },
+      { name: "meeting_id", type: "string", required: false, description: "Optional. The meeting this lookup is for. A meeting bound to this run is enforced whether or not this is set." },
     ],
   },
   phmsa_lookup: {

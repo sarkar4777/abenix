@@ -65,6 +65,7 @@ async def _notify_execution_failure(
     try:
         from models.notification import Notification, NotificationType
         from app.core.deps import async_session
+        from app.core.notifications import user_wants_notification
         from app.core.ws_manager import ws_manager
 
         title = "Agent run failed"
@@ -78,6 +79,10 @@ async def _notify_execution_failure(
             "meeting_id": meeting_id,
         }
         async with async_session() as db:
+            if not await user_wants_notification(
+                db, user_id, NotificationType.EXECUTION_FAILED
+            ):
+                return
             n = Notification(
                 tenant_id=tenant_id,
                 user_id=user_id,

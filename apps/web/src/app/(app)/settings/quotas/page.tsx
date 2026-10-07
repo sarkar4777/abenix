@@ -67,7 +67,7 @@ export default function QuotasPage() {
           Token Quotas & Usage
         </h1>
         <p className="text-sm text-slate-400 mt-1">
-          Allocate monthly token budgets and cost limits per team member. Null = unlimited.
+          Monthly token and cost limits for each team member. Leave a limit blank for no limit.
         </p>
       </div>
 
@@ -205,7 +205,7 @@ export default function QuotasPage() {
       <div className="bg-slate-900/40 border border-slate-700/30 rounded-lg p-3">
         <p className="text-[10px] text-slate-500">
           <AlertTriangle className="w-3 h-3 inline mr-1 text-amber-400" />
-          Quotas reset automatically on the 1st of each month. Set to empty/blank for unlimited access. Users who exceed their quota will receive a 429 error on their next execution attempt.
+          Quotas reset automatically on the 1st of each month. Leave a field blank for no limit. Someone who goes over their limit cannot start new runs until the next reset.
         </p>
       </div>
     </div>

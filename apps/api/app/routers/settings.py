@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
 import sys
+import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +48,65 @@ async def get_profile(
     return success(_user_profile(user))
 
 
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+# Magic bytes per accepted picture type, SVG is left out on purpose
+_AVATAR_TYPES = {
+    "png": ("image/png", (b"\x89PNG\r\n\x1a\n",)),
+    "jpg": ("image/jpeg", (b"\xff\xd8\xff",)),
+    "gif": ("image/gif", (b"GIF87a", b"GIF89a")),
+    "webp": ("image/webp", (b"RIFF",)),
+}
+_AVATAR_PATH = re.compile(
+    r"^/api/settings/avatars/([0-9a-f-]{36})/([0-9a-f]{32})\.(png|jpg|gif|webp)$"
+)
+_URL_BAD_CHARS = re.compile(r"[\s<>\"'`]")
+
+
+def avatar_kind(head: bytes) -> str | None:
+    for ext, (_, sigs) in _AVATAR_TYPES.items():
+        if any(head.startswith(sig) for sig in sigs):
+            if ext == "webp" and head[8:12] != b"WEBP":
+                continue
+            return ext
+    return None
+
+
+def check_avatar_url(raw: str | None, user_id: str) -> tuple[str | None, str | None]:
+    """Returns (value to store, error). Empty means clear the picture."""
+    value = (raw or "").strip()
+    if not value:
+        return None, None
+    if len(value) > 500:
+        return None, "The picture link is too long. Use one under 500 characters."
+    m = _AVATAR_PATH.match(value)
+    if m:
+        if m.group(1) != user_id:
+            return None, "That picture belongs to another account. Upload your own."
+        return value, None
+    parsed = urlparse(value)
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.netloc
+        or _URL_BAD_CHARS.search(value)
+    ):
+        return None, "Enter a full picture link that starts with https://"
+    return value, None
+
+
+async def _drop_uploaded_avatar(url: str | None) -> None:
+    m = _AVATAR_PATH.match(url or "")
+    if not m:
+        return
+    try:
+        from app.core.object_storage import get_object_storage
+
+        await get_object_storage().delete(
+            f"avatars/{m.group(1)}/{m.group(2)}.{m.group(3)}"
+        )
+    except Exception:
+        pass
+
+
 @router.put("/profile")
 async def update_profile(
     body: UpdateProfileRequest,
@@ -52,24 +114,116 @@ async def update_profile(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    if body.full_name is not None:
-        user.full_name = body.full_name
-    if body.avatar_url is not None:
-        user.avatar_url = body.avatar_url
+    sent = body.model_fields_set
+    details: dict = {}
+    if "full_name" in sent:
+        name = (body.full_name or "").strip()
+        if not name:
+            return error("Enter your name.", 400, details={"field": "full_name"})
+        if len(name) > 255:
+            return error(
+                "Your name is too long. Use 255 characters or fewer.",
+                400,
+                details={"field": "full_name"},
+            )
+        user.full_name = name
+        details["full_name"] = name
+    old_avatar = user.avatar_url
+    if "avatar_url" in sent:
+        url, problem = check_avatar_url(body.avatar_url, str(user.id))
+        if problem:
+            return error(problem, 400, details={"field": "avatar_url"})
+        user.avatar_url = url
+        details["avatar_url"] = url or "(removed)"
 
     log = ActivityLog(
         tenant_id=user.tenant_id,
         user_id=user.id,
         action="profile.updated",
-        details=body.model_dump(exclude_none=True),
+        details=details,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
     db.add(log)
     await db.commit()
     await db.refresh(user)
+    if old_avatar != user.avatar_url:
+        await _drop_uploaded_avatar(old_avatar)
 
     return success(_user_profile(user))
+
+
+@router.post("/avatar")
+async def upload_avatar(
+    request: Request,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    data = await file.read(AVATAR_MAX_BYTES + 1)
+    if not data:
+        return error("That file is empty. Pick a picture to upload.", 400)
+    if len(data) > AVATAR_MAX_BYTES:
+        return error("That picture is larger than 2 MB. Pick a smaller one.", 413)
+    ext = avatar_kind(data[:16])
+    if ext is None:
+        return error("Only PNG, JPEG, GIF or WebP pictures can be uploaded.", 415)
+    from app.core.object_storage import get_object_storage
+
+    name = f"{uuid.uuid4().hex}.{ext}"
+    try:
+        await get_object_storage().put(
+            f"avatars/{user.id}/{name}", data, content_type=_AVATAR_TYPES[ext][0]
+        )
+    except Exception:
+        return error("The picture could not be stored. Try again in a minute.", 503)
+
+    old_avatar = user.avatar_url
+    user.avatar_url = f"/api/settings/avatars/{user.id}/{name}"
+    db.add(
+        ActivityLog(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            action="profile.updated",
+            details={"avatar_url": "(uploaded picture)"},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    )
+    await db.commit()
+    await db.refresh(user)
+    if old_avatar != user.avatar_url:
+        await _drop_uploaded_avatar(old_avatar)
+    return success(_user_profile(user))
+
+
+# Public so <img> tags can load it, the random file name is the only handle
+@router.get("/avatars/{owner_id}/{filename}")
+async def get_avatar(owner_id: str, filename: str) -> Response:
+    m = _AVATAR_PATH.match(f"/api/settings/avatars/{owner_id}/{filename}")
+    if not m:
+        return Response(status_code=404)
+    from app.core.object_storage import get_object_storage
+
+    stream = get_object_storage().get_stream(f"avatars/{owner_id}/{filename}")
+    try:
+        first = await stream.__anext__()
+    except Exception:
+        return Response(status_code=404)
+
+    async def body():
+        yield first
+        async for chunk in stream:
+            yield chunk
+
+    return StreamingResponse(
+        body(),
+        media_type=_AVATAR_TYPES[m.group(3)][0],
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+        },
+    )
 
 
 @router.post("/password")
@@ -100,21 +254,47 @@ async def change_password(
     return success({"message": "Password updated successfully"})
 
 
+NOTIFICATION_DEFAULTS = {
+    "execution_complete": True,
+    "execution_failed": True,
+    "billing_alerts": True,
+    "team_updates": True,
+}
+
+
+async def _notification_view(user: User, db: AsyncSession) -> dict:
+    from app.core.notifications import email_channel_available, tenant_slack_webhook
+
+    prefs = user.notification_settings or {}
+    out: dict = {
+        k: prefs.get(k, v) is not False for k, v in NOTIFICATION_DEFAULTS.items()
+    }
+    channels = prefs.get("channels") or {}
+    out["channels"] = {
+        "slack": channels.get("slack") is not False,
+        "email": channels.get("email") is not False,
+    }
+    slack_ready = False
+    try:
+        t = (
+            await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+        ).scalar_one_or_none()
+        slack_ready = bool(tenant_slack_webhook(t))
+    except Exception:
+        slack_ready = False
+    out["delivery"] = {
+        "slack_available": slack_ready,
+        "email_available": email_channel_available(),
+    }
+    return out
+
+
 @router.get("/notifications")
 async def get_notifications(
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    defaults = {
-        "execution_complete": True,
-        "execution_failed": True,
-        "weekly_report": False,
-        "billing_alerts": True,
-        "team_updates": True,
-        "marketing": False,
-    }
-    prefs = user.notification_settings or {}
-    merged = {**defaults, **prefs}
-    return success(merged)
+    return success(await _notification_view(user, db))
 
 
 @router.put("/notifications")
@@ -123,9 +303,24 @@ async def update_notifications(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    user.notification_settings = body.model_dump()
+    prefs = dict(user.notification_settings or {})
+    for key in NOTIFICATION_DEFAULTS:
+        value = getattr(body, key)
+        if value is not None:
+            prefs[key] = value
+    if body.channels is not None:
+        channels = dict(prefs.get("channels") or {})
+        for ch in ("slack", "email"):
+            value = getattr(body.channels, ch)
+            if value is not None:
+                channels[ch] = value
+        prefs["channels"] = channels
+    # Toggles that never had a sender
+    for dead in ("weekly_report", "marketing"):
+        prefs.pop(dead, None)
+    user.notification_settings = prefs
     await db.commit()
-    return success(body.model_dump())
+    return success(await _notification_view(user, db))
 
 
 _AUDIT_NOISE_KEYS = {

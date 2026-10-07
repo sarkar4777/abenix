@@ -244,6 +244,9 @@ export default function BuilderPage() {
   const presetAssetId = searchParams.get('asset_id');
   const presetAtlas = searchParams.get('atlas');
   const presetKb = searchParams.get('kb');
+  const presetName = searchParams.get('name');
+  const presetPrompt = searchParams.get('prompt');
+  const presetPersonaScope = searchParams.get('persona_scope');
   const isMobile = useIsMobile();
 
   const [agentId, setAgentId] = useState<string | null>(agentParam);
@@ -390,6 +393,39 @@ export default function BuilderPage() {
         setLoading(false);
         return;
       }
+      // any other tool id, e.g. portfolio_<domain> from the Portfolio Schemas page
+      if (presetTool && /^[a-z][a-z0-9_]*$/.test(presetTool) && presetTool !== 'ml_model' && presetTool !== 'code_asset') {
+        const forcedModel = _forcedModelFromLocalStorage();
+        const presetConfig: AgentConfig = {
+          ...DEFAULT_CONFIG,
+          ...(forcedModel ? { model: forcedModel } : {}),
+          ...(presetName ? { name: presetName.slice(0, 100) } : {}),
+          ...(presetPrompt ? { system_prompt: presetPrompt.slice(0, 4000) } : {}),
+        };
+        // Persona KB's "Use in an agent" pins the scope the user was looking at
+        if (presetTool === 'persona_rag') {
+          const scope = (presetPersonaScope || 'self').slice(0, 100);
+          presetConfig.name = presetConfig.name || 'My persona assistant';
+          presetConfig.system_prompt = presetConfig.system_prompt ||
+            `You answer as me, from my own persona knowledge. Before answering anything about me, call persona_rag with scope '${scope}'. Answer only from what it returns and cite the source. If it returns nothing, say you do not have that in my persona knowledge.`;
+          presetConfig.tool_config = {
+            ...(presetConfig.tool_config || {}),
+            persona_rag: {
+              usage_instructions: `Always pass scope '${scope}'. Answer only from what it returns and cite the source.`,
+              parameter_defaults: { scope },
+              max_calls: 0,
+              require_approval: false,
+            },
+          };
+        }
+        setConfig(presetConfig);
+        setSelectedTools([presetTool]);
+        setNodes(buildInitialNodes(presetConfig, [presetTool]));
+        setEdges(buildInitialEdges([presetTool]));
+        setDirty(true);
+        setLoading(false);
+        return;
+      }
       if (presetAtlas || presetKb) {
         const forcedModel = _forcedModelFromLocalStorage();
         const tools = [
@@ -488,7 +524,7 @@ export default function BuilderPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [agentParam, presetTool, presetModelName, presetAssetId, presetAtlas, presetKb, setNodes, setEdges, buildInitialNodes, buildInitialEdges]);
+  }, [agentParam, presetTool, presetModelName, presetAssetId, presetAtlas, presetKb, presetName, presetPrompt, presetPersonaScope, setNodes, setEdges, buildInitialNodes, buildInitialEdges]);
 
   // Update agent config & reflect in nodes
   const updateConfig = useCallback(

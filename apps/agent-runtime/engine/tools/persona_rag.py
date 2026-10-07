@@ -1,9 +1,10 @@
-"""Persona-scoped retrieval."""
+"""Persona-scoped retrieval from the executing user's own persona items."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
 from engine import credentials
@@ -11,6 +12,21 @@ from engine.tools.base import BaseTool, ConfigField, ToolResult
 from engine.tools import _meeting_session as sessmod
 
 logger = logging.getLogger(__name__)
+
+
+def _db_url() -> str:
+    url = os.environ.get("DATABASE_URL") or os.environ.get("ASYNC_DATABASE_URL") or ""
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+def _error(message: str, **meta: Any) -> ToolResult:
+    return ToolResult(
+        content=json.dumps({"error": message, **meta}),
+        is_error=True,
+        metadata={"persona_error": True, **meta},
+    )
 
 
 class PersonaRagTool(BaseTool):
@@ -23,32 +39,19 @@ class PersonaRagTool(BaseTool):
             kind="secret",
             required=False,
             group="OpenAI",
+            description=(
+                "Semantic embeddings for persona search. Without it persona items "
+                "are indexed with the built-in lexical embedder."
+            ),
             signup_url="https://platform.openai.com/api-keys",
-        ),
-        ConfigField(
-            "PINECONE_API_KEY",
-            label="API key",
-            kind="secret",
-            required=False,
-            group="Pinecone",
-            signup_url="https://app.pinecone.io",
-        ),
-        ConfigField(
-            "PINECONE_INDEX_NAME",
-            label="Index name",
-            kind="string",
-            required=False,
-            group="Pinecone",
-            default="agentforge-knowledge",
         ),
     )
     description = (
-        "Retrieve from the user's persona-scoped knowledge. Use this when "
-        "the agent needs to answer AS the user (their meeting notes, "
-        "action items, personal context). The agent can only access scopes "
-        "explicitly authorized for the current meeting; any request for an "
-        "unauthorized scope is denied. Returns text chunks with source "
-        "citations â€” never unfiltered persona data."
+        "Retrieve from the executing user's own persona knowledge. Use this when "
+        "the agent needs to answer AS the user (their notes, files, meeting "
+        "context). Only the user's own items are ever searched. Inside a meeting "
+        "only the scopes authorized for that meeting are allowed, and any other "
+        "scope is denied. Returns text chunks with source citations."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -61,10 +64,9 @@ class PersonaRagTool(BaseTool):
             "scope": {
                 "type": "string",
                 "description": (
-                    "Persona scope to query. Must be in the meeting's "
-                    "pre-authorized scope list (or in the default 'self' scope). "
-                    "Unknown / unauthorized scopes return an empty result with a "
-                    "'scope_denied' flag."
+                    "Persona scope to query, for example 'self' or 'client:acme'. "
+                    "In a meeting it must be one of the meeting's authorized "
+                    "scopes, otherwise the result carries 'scope_denied'."
                 ),
                 "default": "self",
             },
@@ -72,8 +74,8 @@ class PersonaRagTool(BaseTool):
             "meeting_id": {
                 "type": "string",
                 "description": (
-                    "Optional â€” if set, the request must fit within this meeting's "
-                    "authorized scopes."
+                    "Optional. The meeting this lookup is for. A meeting bound to "
+                    "this run is enforced whether or not this is set."
                 ),
             },
         },
@@ -89,24 +91,44 @@ class PersonaRagTool(BaseTool):
         execution_id: str = "",
     ):
         self.kb_ids = kb_ids or []
-        self.tenant_id = tenant_id
-        self.user_id = user_id
+        self.tenant_id = str(tenant_id or "")
+        self.user_id = str(user_id or "")
         self.execution_id = execution_id
 
     async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        try:
+            return await self._run(arguments)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("persona_rag failed")
+            return _error(
+                f"persona search is unavailable right now ({str(e)[:200] or type(e).__name__}). "
+                "Tell the user their persona knowledge could not be searched."
+            )
+
+    async def _run(self, arguments: dict[str, Any]) -> ToolResult:
         query = (arguments.get("query") or "").strip()
         if not query:
             return ToolResult(content="query is required", is_error=True)
-
-        scope = (arguments.get("scope") or "self").strip()
-        top_k = int(arguments.get("top_k", 5))
+        scope = (arguments.get("scope") or "self").strip() or "self"
+        try:
+            top_k = max(1, min(15, int(arguments.get("top_k", 5))))
+        except (TypeError, ValueError):
+            top_k = 5
         meeting_id = (arguments.get("meeting_id") or "").strip()
 
-        # Scope check â€” must be in the meeting's authorized list if meeting_id provided
-        if meeting_id:
-            sess = sessmod.get(self.execution_id)
-            allowed = (sess.persona_scopes if sess else []) or []
-            # 'self' is implicit for anyone with tenant access
+        sess = sessmod.get(self.execution_id) if self.execution_id else None
+        owner = self.user_id or (str(sess.user_id) if sess and sess.user_id else "")
+        if not owner or not self.tenant_id:
+            return _error(
+                "persona search needs the executing user, and this run has none. "
+                "Persona knowledge is only searchable in a run started by a signed-in user."
+            )
+        if sess and sess.user_id and str(sess.user_id) != owner:
+            return _error("this meeting belongs to another user", scope_denied=True)
+
+        # a meeting bound to this run limits scopes, with or without meeting_id
+        if sess is not None or meeting_id:
+            allowed = list((sess.persona_scopes if sess else []) or [])
             if scope != "self" and scope not in allowed:
                 return ToolResult(
                     content=json.dumps(
@@ -116,7 +138,7 @@ class PersonaRagTool(BaseTool):
                             "allowed_scopes": ["self", *allowed],
                             "hint": (
                                 "This meeting is not authorized to query that persona "
-                                "scope. Authorize it in /meetings/<id>/authorize."
+                                "scope. Authorize it on the meeting page."
                             ),
                         }
                     ),
@@ -124,120 +146,40 @@ class PersonaRagTool(BaseTool):
                     metadata={"scope_denied": True},
                 )
 
-        results = await _persona_vector_search(
-            query=query,
-            kb_ids=self.kb_ids,
+        db_url = _db_url()
+        if not db_url:
+            return _error("persona search has no database configured (DATABASE_URL)")
+
+        import persona_vectors as pv
+        from engine.db_pool import shared_engine
+
+        results, notes = await pv.search(
+            shared_engine(db_url),
             tenant_id=self.tenant_id,
-            user_id=self.user_id,
+            user_id=owner,
             scope=scope,
+            query=query,
             top_k=top_k,
+            openai_key=credentials.get("OPENAI_API_KEY"),
         )
-        return ToolResult(
-            content=json.dumps(
+        payload: dict[str, Any] = {
+            "scope": scope,
+            "query": query,
+            "results": [
                 {
-                    "scope": scope,
-                    "query": query,
-                    "results": [
-                        {
-                            "text": r["text"][:2000],
-                            "score": r["score"],
-                            "source": r.get("source", ""),
-                            "doc_id": r.get("doc_id", ""),
-                        }
-                        for r in results
-                    ],
-                    "count": len(results),
+                    "text": r["text"][:2000],
+                    "score": round(r["score"], 4),
+                    "source": r.get("source") or r.get("title") or "",
+                    "title": r.get("title", ""),
+                    "doc_id": r.get("doc_id", ""),
                 }
-            ),
+                for r in results
+            ],
+            "count": len(results),
+        }
+        if notes:
+            payload["warnings"] = notes
+        return ToolResult(
+            content=json.dumps(payload),
             metadata={"count": len(results), "scope": scope},
         )
-
-
-async def _persona_vector_search(
-    *,
-    query: str,
-    kb_ids: list[str],
-    tenant_id: str,
-    user_id: str,
-    scope: str,
-    top_k: int,
-) -> list[dict[str, Any]]:
-    """Pinecone query with hard metadata filter â€” tenant + user + persona scope."""
-    try:
-        from openai import AsyncOpenAI
-        from pinecone import Pinecone
-    except ImportError:
-        return []
-    api_key = credentials.get("OPENAI_API_KEY").strip()
-    pinecone_key = credentials.get("PINECONE_API_KEY").strip()
-    index_name = credentials.get("PINECONE_INDEX_NAME", default="agentforge-knowledge")
-    if not (api_key and pinecone_key):
-        return []
-
-    client = AsyncOpenAI(api_key=api_key)
-    try:
-        emb = await client.embeddings.create(
-            model="text-embedding-3-small", input=query
-        )
-        vec = emb.data[0].embedding
-    except Exception as e:
-        logger.warning("persona_rag: embed failed: %s", e)
-        return []
-
-    pc = Pinecone(api_key=pinecone_key)
-    index = pc.Index(index_name)
-
-    # Hard filter â€” if Pinecone doesn't receive all required fields the
-    # chunk cannot match, which is exactly what we want for ring-fencing.
-    flt: dict[str, Any] = {
-        "persona_scope": {"$eq": scope},
-        "tenant_id": {"$eq": tenant_id},
-    }
-    if scope == "self":
-        flt["user_id"] = {"$eq": user_id}
-
-    results: list[dict[str, Any]] = []
-    # Persona namespace per tenant so a mis-filter still can't cross tenants.
-    namespace = f"persona:{tenant_id}"
-    try:
-        resp = index.query(
-            namespace=namespace,
-            vector=vec,
-            top_k=top_k,
-            include_metadata=True,
-            filter=flt,
-        )
-    except Exception as e:
-        logger.warning("persona_rag: pinecone query failed: %s", e)
-        return []
-
-    matches = getattr(resp, "matches", None) or (
-        resp.get("matches", []) if isinstance(resp, dict) else []
-    )
-    for m in matches:
-        meta = (
-            getattr(m, "metadata", None)
-            or (m.get("metadata", {}) if isinstance(m, dict) else {})
-            or {}
-        )
-        # Defense-in-depth: re-verify the filter held (Pinecone bugs have
-        # returned mis-filtered results before in certain index versions).
-        if meta.get("tenant_id") != tenant_id:
-            continue
-        if meta.get("persona_scope") != scope:
-            continue
-        if scope == "self" and meta.get("user_id") != user_id:
-            continue
-        score = getattr(m, "score", None) or (
-            m.get("score", 0.0) if isinstance(m, dict) else 0.0
-        )
-        results.append(
-            {
-                "text": meta.get("text", "") or "",
-                "score": float(score),
-                "source": meta.get("filename", ""),
-                "doc_id": meta.get("doc_id", ""),
-            }
-        )
-    results.sort(key=lambda r: r["score"], reverse=True)
-    return results

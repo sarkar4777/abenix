@@ -107,15 +107,16 @@ async def test_update_notifications(client: AsyncClient):
         "/api/settings/notifications",
         json={
             "execution_complete": False,
-            "weekly_report": True,
-            "marketing": False,
+            "channels": {"slack": False},
         },
         headers=_auth(token),
     )
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["execution_complete"] is False
-    assert data["weekly_report"] is True
+    assert data["execution_failed"] is True
+    assert data["channels"] == {"slack": False, "email": True}
+    assert "weekly_report" not in data
 
 
 @pytest.mark.asyncio

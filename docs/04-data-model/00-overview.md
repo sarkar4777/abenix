@@ -176,6 +176,7 @@ Grouped by area. The source column is the model file under `packages/db/models/`
 | `model_availability` | `llm_pricing.py` | Health status per model | [07](07-tools-and-operations.md) |
 | `model_availability_events` | raw SQL in migration `a8b9c0d1e2f3` | Status transitions per model, no ORM model | [07](07-tools-and-operations.md) |
 | `portfolio_schemas` | `portfolio_schema.py` | Dynamic record schemas for the portfolio tool | [07](07-tools-and-operations.md) |
+| `pf_<tenant>_<domain>` | none, made at runtime | Rows imported from a spreadsheet for one portfolio schema, scoped by `owner_id` | [07](07-tools-and-operations.md) |
 | `archive_runs` | `archive.py` | One archive or restore run per table and tenant | [07](07-tools-and-operations.md) |
 | `retention_policies` | `archive.py` | Retention days per tenant and table | [07](07-tools-and-operations.md) |
 
@@ -206,6 +207,7 @@ Grouped by area. The source column is the model file under `packages/db/models/`
 | `atlas_edges` | `atlas.py` | Bi-temporal edges | [03](03-knowledge.md) |
 | `atlas_snapshots` | `atlas.py` | Point-in-time copies for the time slider | [03](03-knowledge.md) |
 | `persona_items` | `meeting.py` | Persona-scoped data, soft delete and encryption columns | [03](03-knowledge.md) |
+| `persona_chunks` | `persona_chunk.py` | Embedded chunks of persona items, searched only by their owner | [03](03-knowledge.md) |
 | `gdpr_purge_log` | `gdpr_purge_log.py` | One row per store per erasure attempt | [03](03-knowledge.md) |
 | `meetings` | `meeting.py` | Meeting sessions an agent joins | this page |
 | `meeting_deferrals` | `meeting.py` | Questions the meeting bot deferred to its user | this page |

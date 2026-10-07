@@ -1,11 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle, Bell, ChevronDown, ChevronRight, ExternalLink,
   RefreshCw, Activity,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { fetchAllAgents } from '@/lib/fetch-all-agents';
+import { LLM_AUTH_FOR_USERS, adviceCode } from '@/components/alerts/failureAdvice';
 
 const GRAFANA_URL = (process.env.NEXT_PUBLIC_GRAFANA_URL || 'http://localhost:3010').replace(/\/$/, '');
 
@@ -80,6 +83,7 @@ const CODE_DESCRIPTIONS: Record<string, string> = {
   STALE_SWEEP: 'Execution was stuck in RUNNING; sweeper marked it FAILED. Owning pod likely crashed.',
   INFRA_CRASH: 'Connection refused / reset / disconnect. Usually a downstream service is down.',
   LLM_AUTH_ERROR: 'The LLM provider rejected the credential. A rotated Claude subscription token is the usual cause: run scripts/sync-claude-subscription.sh, or update the provider key under Admin -> Tool Configuration.',
+  CONFIG_UNKNOWN_MODEL: 'The agent names a model the platform does not know. Pick a model from the list in the agent settings.',
   INFRA_AUTH_ERROR: '401/403 against an internal service (k8s API, S3, etc.). Check service-account RBAC.',
   MODERATION_BLOCKED: 'Tenant moderation policy blocked the request or response. Check /moderation for policy + recent events.',
   KILL_SWITCH: 'A kill switch stopped the agent, pipeline, tool or model. Resume it under Admin, Risk and Controls.',
@@ -106,6 +110,7 @@ const CODE_SEVERITY: Record<string, 'high' | 'med' | 'low'> = {
   MODERATION_BLOCKED: 'med',
   KILL_SWITCH: 'med',
   MODEL_NOT_ALLOWED: 'low',
+  CONFIG_UNKNOWN_MODEL: 'med',
   UNKNOWN_ERROR: 'med',
 };
 
@@ -114,6 +119,13 @@ const SEV_STYLES: Record<string, string> = {
   med:  'bg-amber-500/10 border-amber-500/40 text-amber-300',
   low:  'bg-slate-500/10 border-slate-500/40 text-slate-300',
 };
+
+function describeCode(code: string, isAdmin: boolean): string {
+  if (code === 'LLM_AUTH_ERROR' && !isAdmin) return LLM_AUTH_FOR_USERS;
+  return CODE_DESCRIPTIONS[code] || 'No description for this cause yet. Open it to see a sample error.';
+}
+
+interface AgentRow { id: string; name?: string }
 
 function relTime(iso: string | null): string {
   if (!iso) return '—';
@@ -131,8 +143,18 @@ export default function AlertsPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const { data: stats, mutate: refreshStats } =
     useApi<LiveStats>('/api/analytics/live-stats');
-  const { data: groups, mutate: refreshGroups } =
+  const { data: groups, error: groupsError, isLoading: groupsLoading, mutate: refreshGroups } =
     useApi<FailureGroup[]>(`/api/analytics/failures?hours=${hours}`);
+  const [agentNames, setAgentNames] = useState<Record<string, string> | null>(null);
+  const needNames = (groups || []).some(g => g.agent_ids.length > 0);
+  useEffect(() => {
+    if (!needNames || agentNames) return;
+    const ctl = new AbortController();
+    fetchAllAgents<AgentRow>({ signal: ctl.signal })
+      .then(({ agents }) => setAgentNames(Object.fromEntries(agents.map(a => [a.id, a.name || '']))))
+      .catch(() => { if (!ctl.signal.aborted) setAgentNames({}); });
+    return () => ctl.abort();
+  }, [needNames, agentNames]);
   const { data: perms } = useApi<Permissions>('/api/me/permissions', { dedupingInterval: 60_000 });
   const isAdmin = Boolean(perms?.is_admin);
   // Only admins may read /api/admin/alerts, a null key skips the fetch.
@@ -146,27 +168,29 @@ export default function AlertsPage() {
   const totalFailures = (groups || []).reduce((s, g) => s + g.count, 0);
   const failureRate = stats && stats.today_executions > 0
     ? Math.round(100 * stats.today_failed / stats.today_executions)
-    : 0;
+    : stats ? 0 : null;
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] p-6">
+    <div className="min-h-screen bg-[#0B0F19] p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 shrink-0 rounded-xl bg-red-500/10 flex items-center justify-center">
               <AlertTriangle className="w-5 h-5 text-red-400" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-white">Alerts</h1>
               <p className="text-sm text-slate-400">
-                Failures grouped by structured code so you can spot bursts and
-                fix root causes instead of acknowledging one-by-one.
+                Failed runs grouped by cause so you can spot bursts and fix the
+                root cause once. Click a cause to see a sample error and the
+                agents it hit.
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <select
+              aria-label="Time window"
               value={hours}
               onChange={e => setHours(parseInt(e.target.value))}
               className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
@@ -178,6 +202,7 @@ export default function AlertsPage() {
               <option value="168">Last week</option>
             </select>
             <button
+              type="button"
               onClick={() => { refreshStats(); refreshGroups(); refreshPlatform(); }}
               className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5"
             >
@@ -187,28 +212,28 @@ export default function AlertsPage() {
         </div>
 
         {/* Summary cards */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <SummaryCard
             label={`Failures (${hours}h)`}
-            value={String(totalFailures)}
-            tone={totalFailures > 0 ? 'red' : 'green'}
+            value={groups ? String(totalFailures) : '\u2014'}
+            tone={!groups ? 'slate' : totalFailures > 0 ? 'red' : 'green'}
             icon={<AlertTriangle className="w-4 h-4" />}
           />
           <SummaryCard
             label="Active runs"
-            value={String(stats?.active_executions ?? 0)}
+            value={stats ? String(stats.active_executions) : '\u2014'}
             tone={stats && stats.active_executions > 50 ? 'amber' : 'slate'}
             icon={<Activity className="w-4 h-4" />}
           />
           <SummaryCard
             label="Failure rate today"
-            value={`${failureRate}%`}
-            tone={failureRate > 20 ? 'red' : failureRate > 5 ? 'amber' : 'green'}
+            value={failureRate === null ? '\u2014' : `${failureRate}%`}
+            tone={failureRate === null ? 'slate' : failureRate > 20 ? 'red' : failureRate > 5 ? 'amber' : 'green'}
             icon={<Bell className="w-4 h-4" />}
           />
           <SummaryCard
-            label="Distinct codes"
-            value={String((groups || []).length)}
+            label="Distinct causes"
+            value={groups ? String(groups.length) : '\u2014'}
             tone="slate"
             icon={<Bell className="w-4 h-4" />}
           />
@@ -217,14 +242,14 @@ export default function AlertsPage() {
         {/* Platform alerts (admin only) */}
         {isAdmin && (
           <section className="space-y-2" data-testid="platform-alerts">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-sm font-semibold text-white">Platform alerts</h2>
                 <p className="text-xs text-slate-500">
                   Prometheus rules routed through Alertmanager. Admins get these in-app and on Slack as they fire and resolve.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {platform && (
                   <span
                     data-testid="platform-alerts-source"
@@ -276,7 +301,7 @@ export default function AlertsPage() {
                       <p className="text-xs text-slate-400 mt-0.5">{a.summary || a.description}</p>
                     )}
                   </div>
-                  <div className="text-right shrink-0 text-[11px] text-slate-400">
+                  <div className="sm:text-right shrink-0 text-[11px] text-slate-400">
                     <div>since {relTime(a.active_since)}</div>
                     {a.ends_at && <div>resolves {relTime(a.ends_at)}</div>}
                     {a.runbook && (
@@ -293,33 +318,51 @@ export default function AlertsPage() {
 
         {/* Failure groups */}
         <div className="space-y-2">
-          {(!groups || groups.length === 0) && (
-            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-12 text-center">
+          {groupsError && !groups && (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200 flex flex-wrap items-center justify-between gap-2">
+              <span>Failures could not be loaded: {groupsError}</span>
+              <button type="button" onClick={() => refreshGroups()} className="text-xs underline">Try again</button>
+            </div>
+          )}
+          {groupsLoading && !groups && (
+            <div className="space-y-2" aria-busy="true">
+              {[0, 1, 2].map(i => <div key={i} className="h-16 rounded-xl bg-slate-800/40 animate-pulse" />)}
+            </div>
+          )}
+          {groups && groups.length === 0 && (
+            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-8 sm:p-12 text-center">
               <Bell className="w-10 h-10 text-emerald-400/50 mx-auto mb-3" />
-              <p className="text-sm text-slate-300">No failures in the last {hours} hour{hours === 1 ? '' : 's'}.</p>
-              <p className="text-xs text-slate-500 mt-1">Your platform is healthy. <a href={GRAFANA_URL} target="_blank" rel="noopener" className="text-cyan-400 hover:underline">Open Grafana</a> for the full picture.</p>
+              <p className="text-sm text-slate-300">No failed runs in the {hours === 1 ? 'last hour' : `last ${hours} hours`}.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                When a run fails it shows up here grouped by cause. Pick a longer window above to look further back.
+                {isAdmin && <> <a href={GRAFANA_URL} target="_blank" rel="noopener" className="text-cyan-400 hover:underline">Open Grafana</a> for the full picture.</>}
+              </p>
             </div>
           )}
 
           {(groups || []).map(g => {
-            const sev = CODE_SEVERITY[g.failure_code] || 'med';
+            const code = adviceCode(g);
+            const sev = CODE_SEVERITY[code] || 'med';
             const isOpen = expanded === g.failure_code;
             return (
               <div key={g.failure_code} className={`rounded-xl border ${SEV_STYLES[sev]} overflow-hidden`}>
                 <button
+                  type="button"
+                  aria-expanded={isOpen}
                   onClick={() => setExpanded(isOpen ? null : g.failure_code)}
                   className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/5 transition-colors"
                 >
                   {isOpen ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm font-semibold">{g.failure_code}</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-sm font-semibold break-all">{g.failure_code}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 uppercase tracking-wider">
                         {sev}
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {CODE_DESCRIPTIONS[g.failure_code] || 'No description.'}
+                      {code !== g.failure_code && 'The sample error is an AI model sign-in failure. '}
+                      {describeCode(code, isAdmin)}
                     </p>
                   </div>
                   <div className="text-right shrink-0">
@@ -336,12 +379,25 @@ export default function AlertsPage() {
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase mb-1">Affected agents ({g.agent_ids.length})</p>
                       <div className="flex flex-wrap gap-1.5">
-                        {g.agent_ids.slice(0, 8).map(aid => (
-                          <a key={aid} href={`/agents/${aid}`}
-                             className="text-[11px] font-mono px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 inline-flex items-center gap-1">
-                            {aid.slice(0, 8)} <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
-                        ))}
+                        {g.agent_ids.slice(0, 8).map(aid => {
+                          if (!agentNames) {
+                            return <span key={aid} className="h-6 w-24 rounded bg-slate-800 animate-pulse" aria-label="Loading agent name" />;
+                          }
+                          const name = agentNames[aid];
+                          if (name === undefined) {
+                            return (
+                              <span key={aid} title={`Agent ${aid}`} className="text-[11px] px-2 py-1 rounded bg-slate-800/60 text-slate-500">
+                                An agent not shared with you
+                              </span>
+                            );
+                          }
+                          return (
+                            <Link key={aid} href={`/agents/${aid}`} title={aid}
+                               className="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 inline-flex items-center gap-1">
+                              {name || 'Untitled agent'} <ExternalLink className="w-2.5 h-2.5" />
+                            </Link>
+                          );
+                        })}
                         {g.agent_ids.length > 8 && (
                           <span className="text-[11px] text-slate-500 px-2 py-1">+{g.agent_ids.length - 8} more</span>
                         )}
@@ -354,13 +410,14 @@ export default function AlertsPage() {
           })}
         </div>
 
-        {/* Footer note */}
-        <div className="text-xs text-slate-500 text-center py-4">
-          Real-time metrics + 60 days of history at{' '}
-          <a href={`${GRAFANA_URL}/d/abenix-overview`} target="_blank" rel="noopener" className="text-cyan-400 hover:underline">
-            Grafana → Abenix Operations
-          </a>
-        </div>
+        {isAdmin && (
+          <div className="text-xs text-slate-500 text-center py-4">
+            Real-time metrics and 60 days of history at{' '}
+            <a href={`${GRAFANA_URL}/d/abenix-overview`} target="_blank" rel="noopener" className="text-cyan-400 hover:underline">
+              Grafana → Abenix Operations
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -377,12 +434,12 @@ function SummaryCard({ label, value, tone, icon }: {
     slate:  'bg-slate-700/20 border-slate-600/40 text-slate-300',
   }[tone];
   return (
-    <div className={`rounded-xl border ${toneStyles} p-4`}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs uppercase tracking-wider opacity-70">{label}</span>
-        {icon}
+    <div className={`rounded-xl border ${toneStyles} p-3 sm:p-4 min-w-0`}>
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <span className="text-[11px] sm:text-xs uppercase tracking-wider opacity-70 min-w-0">{label}</span>
+        <span className="shrink-0">{icon}</span>
       </div>
-      <div className="text-3xl font-bold tabular-nums">{value}</div>
+      <div className="text-2xl sm:text-3xl font-bold tabular-nums">{value}</div>
     </div>
   );
 }

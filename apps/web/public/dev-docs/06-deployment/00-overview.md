@@ -150,7 +150,9 @@ packages/db/seeds/seed_code_assets.py
 packages/db/seeds/seed_backfill_agent_shares.py
 ```
 
-Each is idempotent. `seed_kb.py` chunks and embeds the sample documents itself,
+Each is idempotent. `seed_portfolio_schemas.py` reads its template from
+`apps/api/app/core/portfolio_templates/energy_contracts.json` and exits non-zero
+when that file is missing. `seed_kb.py` chunks and embeds the sample documents itself,
 using the built-in local embedder when no OpenAI or Azure key is configured.
 
 ---

@@ -21,18 +21,65 @@ from app.core.ws_manager import ws_manager
 logger = logging.getLogger(__name__)
 
 
-def _settings_allows(prefs: dict | None, type_key: str, channel_key: str) -> bool:
+# Types not listed (approvals, system alerts) always deliver
+PREF_FOR_TYPE: dict[str, str] = {
+    "execution_complete": "execution_complete",
+    "execution_failed": "execution_failed",
+    "usage_warning": "billing_alerts",
+    "agent_shared": "team_updates",
+    "share_revoked": "team_updates",
+    "agent_comment": "team_updates",
+    "agent_modified": "team_updates",
+    "new_subscriber": "team_updates",
+}
+
+
+def pref_key_for(notif_type: Any) -> str | None:
+    return PREF_FOR_TYPE.get(str(getattr(notif_type, "value", notif_type) or ""))
+
+
+def _settings_allows(prefs: dict | None, type_key: Any, channel_key: str) -> bool:
     """Check user's notification_settings against (type, channel)."""
     if not prefs:
         return True
-    # Type-level opt-out
-    if type_key in prefs and prefs[type_key] is False:
+    pref = pref_key_for(type_key)
+    if pref and prefs.get(pref) is False:
         return False
     # Channel-level opt-out (only enforced for outbound channels)
     if channel_key:
         ch = (prefs.get("channels") or {}).get(channel_key)
         if ch is False:
             return False
+    return True
+
+
+async def user_wants_notification(
+    db: AsyncSession, user_id: uuid.UUID, notif_type: Any
+) -> bool:
+    """For producers that write Notification rows or WS events directly."""
+    if not pref_key_for(notif_type):
+        return True
+    try:
+        from sqlalchemy import select
+        from models.user import User
+
+        res = await db.execute(
+            select(User.notification_settings).where(User.id == user_id)
+        )
+        prefs = res.scalar_one_or_none()
+    except Exception as e:
+        logger.debug("notification prefs load failed: %s", e)
+        return True
+    return _settings_allows(prefs if isinstance(prefs, dict) else None, notif_type, "")
+
+
+def email_channel_available() -> bool:
+    if not os.environ.get("SMTP_HOST", "").strip():
+        return False
+    try:
+        import aiosmtplib  # type: ignore  # noqa: F401
+    except ImportError:
+        return False
     return True
 
 
@@ -148,8 +195,33 @@ async def create_notification(
     link: str | None = None,
     metadata: dict | None = None,
     push: bool = True,
-) -> Notification:
-    """Persist a notification, push it via WS, and fan out to Slack /"""
+) -> Notification | None:
+    """Persist, push and fan out a notification, None when the user turned its type off."""
+    # Load the user + tenant config so we know who to notify and where.
+    prefs: dict | None = None
+    user_email: str = ""
+    slack_webhook: str = ""
+    try:
+        from sqlalchemy import select
+        from models.user import User
+        from models.tenant import Tenant
+
+        u_res = await db.execute(select(User).where(User.id == user_id))
+        user = u_res.scalar_one_or_none()
+        if user:
+            prefs = getattr(user, "notification_settings", None) or None
+            user_email = (user.email or "").strip()
+        if push:
+            t_res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+            tenant = t_res.scalar_one_or_none()
+            # Tenant traffic never falls back to the operator channel
+            slack_webhook = tenant_slack_webhook(tenant)
+    except Exception as e:
+        logger.debug("notification context load failed: %s", e)
+
+    if not _settings_allows(prefs, type_key=type, channel_key=""):
+        return None
+
     notification = Notification(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -168,40 +240,15 @@ async def create_notification(
     if not push:
         return notification
 
-    # Load the user + tenant config so we know who to notify and where.
-    # Done in this function (not deferred) so the side effects happen on
-    # the same async tick — predictable in tests.
-    prefs: dict | None = None
-    user_email: str = ""
-    slack_webhook: str = ""
     try:
-        from sqlalchemy import select
-        from models.user import User
-        from models.tenant import Tenant
-
-        u_res = await db.execute(select(User).where(User.id == user_id))
-        user = u_res.scalar_one_or_none()
-        if user:
-            prefs = getattr(user, "notification_settings", None) or None
-            user_email = (user.email or "").strip()
-        t_res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
-        tenant = t_res.scalar_one_or_none()
-        # Tenant traffic never falls back to the operator channel
-        slack_webhook = tenant_slack_webhook(tenant)
+        await ws_manager.send_to_user(
+            user_id,
+            "notification",
+            _serialize_notification(notification),
+        )
+        _emit_notif_metric("ws", severity)
     except Exception as e:
-        logger.debug("notification context load failed: %s", e)
-
-    # WS push — always (real-time bell). Subject to type opt-out only.
-    if _settings_allows(prefs, type_key=type, channel_key=""):
-        try:
-            await ws_manager.send_to_user(
-                user_id,
-                "notification",
-                _serialize_notification(notification),
-            )
-            _emit_notif_metric("ws", severity)
-        except Exception as e:
-            logger.debug("ws push failed: %s", e)
+        logger.debug("ws push failed: %s", e)
 
     # Slack — outbound, gated on tenant having a webhook + user opt-in.
     if slack_webhook and _settings_allows(prefs, type_key=type, channel_key="slack"):
@@ -317,6 +364,8 @@ async def notify_platform_alert(
                 metadata=metadata,
                 push=False,
             )
+            if n is None:
+                continue
             written += 1
             tenant_ids.add(admin.tenant_id)
             try:

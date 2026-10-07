@@ -8,6 +8,11 @@
 - Pipelines get a description under Pipeline Settings, shown on their chat page and in the agent list.
 - `e2e/uat_platform_journeys_ui.spec.ts` runs seven end user journeys through the screens only: self sign-up, two person approval of a high tier decision, grounded knowledge base answers, human approval of agent actions, webhook and scheduled triggers, a moderation block, and the builder's daily budget.
 - Every page shows a banner while no AI model provider is connected, so a fresh install says what to do before the first agent run fails. Admins get links to add an Anthropic, OpenAI, Google or Azure key or to use a Claude subscription, everyone else is told to ask an admin. It goes away within a couple of minutes of a key being added.
+- Portfolio schemas import CSV and Excel files into rows you own, with a preview, column mapping and a one-click energy trading sample
+- Portfolio tools appear in the builder palette and run for any agent, scoped to the user running it
+- Persona knowledge stores its vectors in the database with owner filtering, shows indexing status and errors per item, can reindex, and opens a ready persona agent from "Use in an agent"
+- ML Models has a sample iris model, a "How this works" panel and suggested versions
+- Profile pictures can be uploaded and removed in Settings
 
 ### Changed
 
@@ -46,6 +51,19 @@
 - The status bar at the bottom of every page showed made-up numbers: a git branch, "2 workers", "0 processing" and "247 completed" were fixed text. It now shows whether the API answers, runs in progress and runs today from the platform, and failures today when there are any.
 - The no-model banner clears within about 40 seconds of a key or subscription being added, and at once when the user comes back to the tab. The provider check was cached for a minute and the banner rechecked once a minute.
 - A Claude subscription token with subscription mode switched off no longer counts as a connected model. The provider check now follows the runtime's rule, so the no-model banner and the model picker match what a run can actually use.
+- AI Chat remembers the conversation. Execute takes a `conversation_id` and sends the thread's earlier turns to the agent, inline, queued and on the runtime pod
+- AI Chat lists every agent with search, defaults to Code Assistant, reads attached text files into the message, asks before deleting a chat and works at phone width
+- Non-streaming inline execute no longer fails on the `require_tools` argument
+- ML Models refuses a file that will not load instead of marking it ready, and predict, deploy and activate say why a model is not ready
+- ML Models detail panel updates at once after an action, deploy no longer creates duplicates, and a wrong feature count names the inputs expected
+- Every API prediction is recorded in the model's invocations
+- BPM Analyzer uses the configured model or subscription, keeps threads private to their owner, restores a thread from its link and has a sample process
+- Persona search only returns the caller's own items, and GDPR erase removes persona chunks and content
+- Notification preferences are honoured for every notification the platform sends
+- Settings has a section menu on phones and every page explains itself
+- Atlas, Tools, Alerts and Sources pages explain what they show, list counts and expand rows in place
+- Tool descriptions in the catalogue are no longer cut at 400 characters
+- File downloads keep their real name in the browser
 
 ## v2.5.2 — 2026-10-03
 

@@ -47,6 +47,7 @@ export default function MeetingDetailPage() {
   const [newAllow, setNewAllow] = useState('');
   const [newDefer, setNewDefer] = useState('');
   const [newPersona, setNewPersona] = useState('');
+  const [knownScopes, setKnownScopes] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
   const [deferralAnswers, setDeferralAnswers] = useState<Record<string, string>>({});
   const [injectSpeaker, setInjectSpeaker] = useState('test-participant');
@@ -75,6 +76,11 @@ export default function MeetingDetailPage() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!editingScope) return;
+    apiFetch<string[]>('/api/persona/scopes', { silent: true }).then(r => setKnownScopes(r.data || []));
+  }, [editingScope]);
 
   // SSE — subscribe to live events while meeting is LIVE
   useEffect(() => {
@@ -446,6 +452,8 @@ export default function MeetingDetailPage() {
               newValue={newPersona}
               setNewValue={setNewPersona}
               color="cyan"
+              suggestions={knownScopes}
+              hint="Pick one of your Persona KB scopes or type a new one."
             />
             <button
               onClick={saveScope}
@@ -636,7 +644,7 @@ function CopyRow({
 }
 
 function ChipEditor({
-  label, items, setItems, placeholder, newValue, setNewValue, color,
+  label, items, setItems, placeholder, newValue, setNewValue, color, suggestions, hint,
 }: {
   label: string;
   items: string[];
@@ -645,6 +653,8 @@ function ChipEditor({
   newValue: string;
   setNewValue: (v: string) => void;
   color: 'emerald' | 'amber' | 'cyan';
+  suggestions?: string[];
+  hint?: string;
 }) {
   const ring = {
     emerald: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
@@ -657,6 +667,8 @@ function ChipEditor({
     if (!items.includes(v)) setItems([...items, v]);
     setNewValue('');
   };
+  const offered = (suggestions || []).filter(s => !items.includes(s));
+  const listId = suggestions ? `chip-suggest-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}` : undefined;
   return (
     <div className="space-y-1">
       <p className="text-[11px] text-slate-400">{label}</p>
@@ -670,14 +682,34 @@ function ChipEditor({
           </span>
         ))}
       </div>
+      {offered.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] text-slate-500">Your scopes:</span>
+          {offered.map(s => (
+            <button
+              key={s}
+              onClick={() => setItems([...items, s])}
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] border border-dashed border-slate-700 text-slate-400 hover:text-white break-all"
+            >
+              <Plus className="w-3 h-3 shrink-0" />{s}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex gap-1">
         <input
           value={newValue}
           onChange={e => setNewValue(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), add())}
           placeholder={placeholder}
-          className="flex-1 px-2 py-1 bg-slate-800/60 border border-slate-700/50 rounded text-xs text-white placeholder-slate-500"
+          list={listId}
+          className="flex-1 min-w-0 px-2 py-1 bg-slate-800/60 border border-slate-700/50 rounded text-xs text-white placeholder-slate-500"
         />
+        {listId && (
+          <datalist id={listId}>
+            {offered.map(s => <option key={s} value={s} />)}
+          </datalist>
+        )}
         <button
           onClick={add}
           className="px-2 py-1 text-xs rounded border border-slate-700/50 text-slate-300 hover:bg-slate-800/70"
@@ -685,6 +717,7 @@ function ChipEditor({
           <Plus className="w-3 h-3" />
         </button>
       </div>
+      {hint && <p className="text-[10px] text-slate-500">{hint}</p>}
     </div>
   );
 }

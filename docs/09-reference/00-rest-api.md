@@ -61,6 +61,8 @@
 | `GET` | `/api/settings/limits` | signed in | Execution budgets as the runtime will apply them |
 | `GET` | `/api/settings/profile` | signed in | Your profile |
 | `PUT` | `/api/settings/profile` | signed in | Update your profile |
+| `POST` | `/api/settings/avatar` | signed in | Upload a profile picture (PNG, JPEG, GIF or WebP, up to 2 MB). Clear it by sending `avatar_url: null` to the profile |
+| `GET` | `/api/settings/avatars/{owner_id}/{filename}` | public | Serve an uploaded profile picture |
 | `POST` | `/api/settings/password` | signed in | Change your password |
 | `GET` | `/api/settings/notifications` | signed in | Your notification preferences |
 | `PUT` | `/api/settings/notifications` | signed in | Update notification preferences |
@@ -153,7 +155,7 @@ Keys start with `af_` and go in `X-API-Key`. Roles and scopes are in [01-archite
 | `POST` | `/api/agents/{agent_id}/review` | admin role | Approve or reject an agent submitted for review |
 | `POST` | `/api/agents/{agent_id}/validate-smart` | signed in | Run the layered AI Validate stack on a saved agent |
 | `GET` | `/api/agents/{agent_id}/preview-validation` | signed in | Which model the agent would run on right now |
-| `POST` | `/api/agents/{agent_id_or_slug}/execute` | signed in | Run by id or slug. Body `{message, context, stream, wait, wait_mode, wait_timeout_seconds}`. For a pipeline agent, declared `input_variables` defaults fill in under the caller's `context`. An `Idempotency-Key` header dedupes non-streaming calls. 429 `BUDGET_EXCEEDED` when the agent is over `daily_cost_limit` or `daily_budget_usd` |
+| `POST` | `/api/agents/{agent_id_or_slug}/execute` | signed in | Run by id or slug. Body `{message, context, conversation_id, stream, wait, wait_mode, wait_timeout_seconds}`. `conversation_id` (a thread the caller owns) sends that thread's earlier turns to the agent as memory, 404 when the thread is not theirs. For a pipeline agent, declared `input_variables` defaults fill in under the caller's `context`. An `Idempotency-Key` header dedupes non-streaming calls. 429 `BUDGET_EXCEEDED` when the agent is over `daily_cost_limit` or `daily_budget_usd` |
 | `GET` | `/api/agents/{agent_id}/memories` | signed in | Stored memories of an agent |
 | `DELETE` | `/api/agents/{agent_id}/memories/{memory_id}` | signed in | Delete one memory |
 | `DELETE` | `/api/agents/{agent_id}/memories` | signed in | Delete all memories of an agent |
@@ -560,19 +562,20 @@ Agent-facing tools (`atlas_describe`, `atlas_query`, `atlas_traverse`, `atlas_se
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `POST` | `/api/ml-models` | signed in | Upload a model file with metadata (multipart) |
+| `POST` | `/api/ml-models` | signed in | Upload a model file with metadata (multipart). The file is loaded first. `422 MODEL_LOAD_FAILED` with the reason when it does not load, `409 VERSION_EXISTS` with `next_version` for a taken version. A blank version gets the next free one |
+| `POST` | `/api/ml-models/samples/{sample_id}` | signed in | Register a sample model shipped with Abenix (`iris`) for the caller. Returns the caller's existing copy on a repeat call |
 | `GET` | `/api/ml-models` | signed in | List models visible to the caller. `scope=tenant` needs admin |
 | `GET` | `/api/ml-models/{model_id}` | signed in | Detail with deployments |
 | `PUT` | `/api/ml-models/{model_id}` | signed in | Update description, `input_schema`, `output_schema` and tags |
 | `DELETE` | `/api/ml-models/{model_id}` | signed in | Delete a model and its file |
-| `POST` | `/api/ml-models/{model_id}/deploy` | signed in | Deploy in-process or as a k8s pod. Body `{deployment_type, replicas, resource_preset}`. A k8s deploy needs the admin or owner role |
-| `POST` | `/api/ml-models/{model_id}/predict` | signed in | Run inference |
+| `POST` | `/api/ml-models/{model_id}/deploy` | signed in | Deploy in-process or as a k8s pod. Body `{deployment_type, replicas, resource_preset}`. A k8s deploy needs the admin or owner role. Idempotent per model and target, a live match is returned with `already_deployed: true`. `409 MODEL_NOT_READY` for a model in error |
+| `POST` | `/api/ml-models/{model_id}/predict` | signed in | Run inference, no deploy needed. `422 INVALID_INPUT` with a plain message for a wrong feature count or bad values. Each call is recorded in `ml_model_invocations` |
 | `DELETE` | `/api/ml-models/{model_id}/undeploy` | signed in | Tear down the deployment |
 | `GET` | `/api/ml-models/{model_id}/fetch` | model-scoped token | Model file for a runtime pod that does not share the API's volume |
 | `GET` | `/api/ml-models/{model_id}/download` | signed in | Download the model file |
 | `GET` | `/api/ml-models/versions/{model_name}` | signed in | Versions by name |
-| `POST` | `/api/ml-models/{model_id}/activate` | signed in | Make this the active version |
-| `POST` | `/api/ml-models/{model_id}/deactivate` | signed in | Deactivate this version |
+| `POST` | `/api/ml-models/{model_id}/activate` | signed in | Make this the active version and return it. `409` for a model in error |
+| `POST` | `/api/ml-models/{model_id}/deactivate` | signed in | Deactivate this version and return it |
 | `GET` | `/api/ml-models/check/{model_name}` | signed in | Whether a model is ready and deployed, used by pipeline validation |
 
 ---
@@ -707,11 +710,15 @@ Call history for code assets, ML models and knowledge collections.
 | `GET` | `/api/meetings/{meeting_id}/stream` | signed in | SSE of the live transcript and decisions |
 | `GET` | `/api/meetings/{meeting_id}/deferrals` | signed in | Questions the bot deferred to you |
 | `POST` | `/api/meetings/{meeting_id}/deferrals/{deferral_id}/answer` | signed in | Answer a deferred question |
-| `GET` | `/api/persona/items` | signed in | Your persona items |
+| `GET` | `/api/persona/status` | signed in | Whether the persona store is ready, pgvector present and which embedder new items get |
+| `GET` | `/api/persona/items` | signed in | Your persona items, each with `status` and `last_error` |
 | `GET` | `/api/persona/scopes` | signed in | Persona scopes |
-| `DELETE` | `/api/persona/items/{item_id}` | signed in | Delete an item |
-| `POST` | `/api/persona/notes` | signed in | Add a note |
-| `POST` | `/api/persona/upload` | signed in | Upload a file to your persona |
+| `GET` | `/api/persona/items/{item_id}` | signed in | One item with its text |
+| `PATCH` | `/api/persona/items/{item_id}` | signed in | Edit `title`, `text` (not for files) or `persona_scope`. Re-indexes the item |
+| `POST` | `/api/persona/items/{item_id}/reindex` | signed in | Index the item again, for one that failed |
+| `DELETE` | `/api/persona/items/{item_id}` | signed in | Delete an item and its chunks |
+| `POST` | `/api/persona/notes` | signed in | Add a note. When indexing fails the item is still saved and the reply carries `warning: "Saved but not searchable yet: <reason>"` |
+| `POST` | `/api/persona/upload` | signed in | Upload a .txt, .md or .pdf of up to 10 MB to your persona. Same `warning` as notes |
 | `GET` | `/api/persona/voice` | signed in | Your voice clone state |
 | `POST` | `/api/persona/voice/consent` | signed in | Record voice clone consent, separate from the upload |
 | `POST` | `/api/persona/voice/revoke` | signed in | Revoke consent and delete the voice at the provider |
@@ -826,11 +833,16 @@ Invoke runs a published agent, or one the key's user may execute, and answers 40
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/portfolio-schemas` | signed in | Portfolio schemas of the tenant |
-| `POST` | `/api/portfolio-schemas` | signed in | Create a schema |
+| `POST` | `/api/portfolio-schemas` | signed in | Create a schema. 422 `INVALID_PORTFOLIO_SCHEMA` with `details.problems` when the schema is malformed or names missing tables or columns |
 | `GET` | `/api/portfolio-schemas/{schema_id}` | signed in | One schema |
-| `PUT` | `/api/portfolio-schemas/{schema_id}` | signed in | Update |
-| `DELETE` | `/api/portfolio-schemas/{schema_id}` | signed in | Delete |
-| `GET` | `/api/portfolio-schemas/templates/list` | public | Starter schema templates |
+| `PUT` | `/api/portfolio-schemas/{schema_id}` | signed in | Update label, description, record nouns, `schema_json` (validated as on create) and `is_active`. The domain name never changes |
+| `DELETE` | `/api/portfolio-schemas/{schema_id}` | signed in | Delete. 409 `PORTFOLIO_SCHEMA_IN_USE` with `details.agents` while agents list `portfolio_<domain>` in their tools, `?force=true` deletes anyway. `?drop_table=true` also drops the `pf_` table a spreadsheet import made, and refuses (400 `PORTFOLIO_TABLE_NOT_OURS`, 409 `PORTFOLIO_TABLE_SHARED`) for any other table |
+| `GET` | `/api/portfolio-schemas/{schema_id}/rows` | signed in | The caller's own rows in a spreadsheet-made table, `?limit=` up to 100, with `total` |
+| `GET` | `/api/portfolio-schemas/import/capabilities` | signed in | Accepted formats (`csv`, plus `xlsx` when `openpyxl` is installed) and the row, size and column limits |
+| `POST` | `/api/portfolio-schemas/import/preview` | signed in | Multipart `file`, optional `domain_name`. Suggested column names, types, samples and the first rows. Nothing is saved |
+| `POST` | `/api/portfolio-schemas/import` | signed in | Multipart `file` and `plan` (JSON with `domain_name`, `label`, `record_noun`, `record_noun_plural`, `title_column`, `columns`, `mode` of `create`, `replace` or `append`). Creates or fills the `pf_` table and saves the schema. Returns rows imported, replaced and skipped with reasons |
+| `POST` | `/api/portfolio-schemas/import/sample` | signed in | Creates the Energy trading book from the bundled sample, owned by the caller. Again replaces the caller's sample rows |
+| `GET` | `/api/portfolio-schemas/templates/list` | public | Starter schema templates. Examples only, they must be pointed at your own tables before they save |
 
 ---
 
@@ -866,15 +878,21 @@ Invoke runs a published agent, or one the key's user may execute, and answers 40
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/bpm-analyzer/models` | signed in | Vision-capable models for the picker |
-| `POST` | `/api/bpm-analyzer/upload` | signed in | Upload a process artifact and start the analysis |
-| `POST` | `/api/bpm-analyzer/chat/{thread_id}/turn` | signed in | Follow-up question on a thread |
-| `GET` | `/api/bpm-analyzer/threads` | signed in | Threads |
-| `GET` | `/api/bpm-analyzer/threads/{thread_id}` | signed in | One thread |
-| `POST` | `/api/bpm-analyzer/threads/{thread_id}/suggest-agents` | signed in | Structured list of agent specs from the analysis |
-| `POST` | `/api/bpm-analyzer/threads/{thread_id}/build-and-test` | signed in | Build and test one suggested agent |
-| `POST` | `/api/bpm-analyzer/threads/{thread_id}/create-agent` | signed in | Create one suggested agent from its spec |
-| `POST` | `/api/bpm-analyzer/threads/{thread_id}/export-pdf` | signed in | Thread as a PDF |
-| `DELETE` | `/api/bpm-analyzer/threads/{thread_id}` | signed in | Delete a thread |
+| `POST` | `/api/bpm-analyzer/upload` | signed in | Upload a process artifact and start the analysis. The thread is saved before the model call, so a reload finds it with `status: analyzing`. Returns `notices` when a PDF went past 20 pages or a text past 200,000 characters |
+| `POST` | `/api/bpm-analyzer/chat/{thread_id}/turn` | owner | Follow-up question on a thread. 409 while the previous reply is still being written |
+| `GET` | `/api/bpm-analyzer/threads` | signed in | The caller's own threads with `status` (`analyzing`, `ready`, `failed`, `stalled`) |
+| `GET` | `/api/bpm-analyzer/threads/{thread_id}` | owner | One thread with `status`, `has_report`, `notices` and messages. Each reply carries `route`: the provider that served it and, when a fallback answered, `fallback_from` and `fallback_reason` |
+| `POST` | `/api/bpm-analyzer/threads/{thread_id}/suggest-agents` | owner | Structured list of agent specs from the analysis. 409 until a report exists |
+| `POST` | `/api/bpm-analyzer/threads/{thread_id}/synthetic-input` | owner | One grounded test input for a suggested agent |
+| `POST` | `/api/bpm-analyzer/threads/{thread_id}/create-agent` | owner | Create one suggested agent from its spec as a draft |
+| `POST` | `/api/bpm-analyzer/threads/{thread_id}/smoke-test` | owner | Run a draft agent once with `{agent_id, input}`, in process as the caller, through the same path as `/api/agents/{id}/execute` |
+| `POST` | `/api/bpm-analyzer/threads/{thread_id}/build-and-test` | owner | The three steps above in one call |
+| `POST` | `/api/bpm-analyzer/threads/{thread_id}/export-pdf` | owner | Thread as a PDF. 409 until a report exists |
+| `DELETE` | `/api/bpm-analyzer/threads/{thread_id}` | owner | Delete a thread |
+
+BPM threads are private to the user who uploaded them, admins included. Another user's thread answers 404.
+
+Model routing follows the agent runtime. With a usable Claude subscription, every request in exclusive mode and every Claude request otherwise runs on the subscription at no per-token cost. A provider is only swapped when the chosen model has no credential or on an outage (rejected credential, rate limit, quota), and the reply says so. Audio and video always go to Gemini.
 
 ---
 

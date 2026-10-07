@@ -21,12 +21,14 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   logout: () => void;
+  updateUser: (patch: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   logout: () => {},
+  updateUser: () => {},
 });
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -72,8 +74,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = '/';
   }, []);
 
+  // lets settings pages push saved fields to the sidebar and status bar without a reload
+  const updateUser = useCallback((patch: Partial<User>) => {
+    setUser((u) => (u ? { ...u, ...patch } : u));
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, logout }}>
+    <AuthContext.Provider value={{ user, loading, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

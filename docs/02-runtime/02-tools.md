@@ -479,7 +479,7 @@ Read watched sources and their changes. See [17-source-watch](17-source-watch.md
 | `meeting_listen` | Transcribe a bounded window of meeting audio | | `OPENAI_API_KEY` |
 | `meeting_post_chat` | Post to the meeting chat | medium | |
 | `meeting_speak` | Speak text into the meeting | medium | `ELEVENLABS_API_KEY`, `OPENAI_API_KEY` |
-| `persona_rag` | Retrieve from the user's persona-scoped knowledge | | `OPENAI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX_NAME` |
+| `persona_rag` | Retrieve from the executing user's own persona items, filtered on tenant, owner and scope | | `OPENAI_API_KEY` |
 | `scope_gate` | Check a meeting question against the allowed topics | | |
 
 ### Multimodal

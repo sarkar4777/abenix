@@ -106,6 +106,10 @@ async def check_limit(
 
     usage_pct = today_count / daily_limit * 100
     if user_id and usage_pct >= 80:
+        from app.core.notifications import user_wants_notification
+
+        if not await user_wants_notification(db, user_id, "usage_warning"):
+            return True, ""
         await ws_manager.send_to_user(
             user_id,
             "usage_warning",

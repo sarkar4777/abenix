@@ -5,7 +5,10 @@ const permsState: { perms: { capabilities: string[] } | undefined; loading: bool
   loading: false,
 };
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/settings/profile' }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/settings/profile',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+}));
 vi.mock('next/link', () => ({
   default: ({ href, children, prefetch: _p, ...rest }: any) => (
     <a href={href} {...rest}>
