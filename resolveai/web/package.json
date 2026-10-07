@@ -40,7 +40,7 @@
     "semver": "^7.7.2",
     "next": {
       "postcss": "^8.5.23",
-      "sharp": "^0.35.4"
+      "sharp": "^0.35.5"
     },
     "@eslint/eslintrc": {
       "minimatch": "^3.1.5"
